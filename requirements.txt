@@ -1,0 +1,5 @@
+# Runtime — the CDP driver (the parser and --dry-run need nothing but stdlib)
+playwright>=1.40
+
+# Development — golden parser tests
+pytest>=8
