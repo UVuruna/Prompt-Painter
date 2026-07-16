@@ -1,0 +1,7 @@
+# Generated images and run state
+out/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
