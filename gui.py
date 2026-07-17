@@ -1,71 +1,79 @@
 """PromptPainter GUI — the owner's front door.
 
-A small tkinter window over the same engine the CLI uses: pick the
-sheet, pick the output folder, tick Gemini / ChatGPT / both, choose
-the background mode, open the automation Chrome (log in once — the
-profile persists), check the sheet, start. Both sites run in
-PARALLEL, one thread and one tab each; the log pane interleaves
-them with [site] prefixes.
+A small tkinter window over the same engine the CLI uses: queue one
+or MORE sheet `.md` files, pick the output folder, tick Gemini /
+ChatGPT / both, choose each site's background, open the automation
+Chrome (log in once — the profile persists), check, start. Both
+sites run in PARALLEL, one thread and one tab each; each site works
+through the sheet queue IN ORDER, finishing folder after folder, so
+a quota stop on one site never costs finished work — progress and
+the report live beside the images and every run resumes.
 
-Output is TWO-PHASE: generation stages every image under
-``<out>/_staging/<site>/``, and when the run ends a review window
-shows them — only the owner's Approve moves an image to its final
-``<out>/<site>/<drop-path>``; Reject deletes it and clears its
-progress mark so the next run regenerates it (usually after the
-prompt was reworked in the sheet).
+Images save DIRECTLY to ``<out>/<site>/<drop-path>`` (no approval
+step); an optional per-sheet report txt logs timestamps, per-image
+generation times, resolutions, extra actions and totals.
 """
 
 from __future__ import annotations
 
 import queue
 import threading
+import time
 import tkinter as tk
 from dataclasses import replace
+from datetime import datetime
+from functools import partial
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from painter.config import (
-    BACKGROUND_MODES,
+    BACKGROUND_CHOICES,
     CDP_URL,
     DEFAULT_OUT_DIR,
     SITES,
     TIMING,
-    background_suffix,
+    prompt_suffix,
 )
-from painter.review import approve, reject, staged_images, staging_root
-from painter.sheet_parser import SheetError, parse_sheet
-
-THUMB_PX = 160
+from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
 
 class PainterGui:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("PromptPainter")
-        root.minsize(760, 500)
+        root.minsize(780, 540)
 
         self._q: queue.Queue = queue.Queue()
         self._stop = threading.Event()
         self._workers: list[threading.Thread] = []
+        self._sheets: list[Path] = []
 
         pad = {"padx": 6, "pady": 3}
         frame = ttk.Frame(root)
         frame.pack(fill="both", expand=True, **pad)
 
-        # --- paths -----------------------------------------------------
-        self.sheet_var = tk.StringVar()
-        self.out_var = tk.StringVar(value=str(DEFAULT_OUT_DIR))
-
+        # --- the sheet queue -------------------------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", **pad)
-        ttk.Label(row, text="Sheet (.md):", width=12).pack(side="left")
-        ttk.Entry(row, textvariable=self.sheet_var).pack(
-            side="left", fill="x", expand=True
+        ttk.Label(row, text="Sheets (.md):", width=12).pack(
+            side="left", anchor="n"
         )
-        ttk.Button(row, text="Browse...", command=self._pick_sheet).pack(
-            side="left", padx=4
+        self.sheet_list = tk.Listbox(row, height=5, activestyle="none")
+        self.sheet_list.pack(side="left", fill="x", expand=True)
+        col = ttk.Frame(row)
+        col.pack(side="left", padx=4, anchor="n")
+        ttk.Button(col, text="Add...", command=self._add_sheets).pack(
+            fill="x"
+        )
+        ttk.Button(col, text="Remove", command=self._remove_sheet).pack(
+            fill="x", pady=2
+        )
+        ttk.Button(col, text="Clear", command=self._clear_sheets).pack(
+            fill="x"
         )
 
+        # --- output -----------------------------------------------------
+        self.out_var = tk.StringVar(value=str(DEFAULT_OUT_DIR))
         row = ttk.Frame(frame)
         row.pack(fill="x", **pad)
         ttk.Label(row, text="Output:", width=12).pack(side="left")
@@ -76,33 +84,39 @@ class PainterGui:
             side="left", padx=4
         )
 
-        # --- options ---------------------------------------------------
+        # --- options ----------------------------------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", **pad)
         self.site_vars = {
             key: tk.BooleanVar(value=True) for key in sorted(SITES)
         }
         ttk.Label(row, text="Sites:", width=12).pack(side="left")
+        self.background_vars: dict[str, tk.StringVar] = {}
         for key in sorted(SITES):
             ttk.Checkbutton(
                 row, text=SITES[key].name, variable=self.site_vars[key]
-            ).pack(side="left", padx=2)
+            ).pack(side="left", padx=(2, 0))
+            var = tk.StringVar(value=SITES[key].default_background)
+            self.background_vars[key] = var
+            ttk.Combobox(
+                row,
+                textvariable=var,
+                values=list(BACKGROUND_CHOICES),
+                state="readonly",
+                width=11,
+            ).pack(side="left", padx=(2, 10))
 
-        ttk.Label(row, text="Background:").pack(side="left", padx=(14, 2))
-        self.background_var = tk.StringVar(value="auto")
-        ttk.Combobox(
-            row,
-            textvariable=self.background_var,
-            values=list(BACKGROUND_MODES),
-            state="readonly",
-            width=11,
-        ).pack(side="left")
-
+        row = ttk.Frame(frame)
+        row.pack(fill="x", **pad)
+        ttk.Label(row, text="", width=12).pack(side="left")
         self.bgfix_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             row, text="Background fix", variable=self.bgfix_var
+        ).pack(side="left")
+        self.report_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            row, text="Write report txt", variable=self.report_var
         ).pack(side="left", padx=14)
-
         ttk.Label(row, text="Pause:").pack(side="left", padx=(8, 2))
         self.pause_var = tk.StringVar(
             value=f"{TIMING.pause_between_prompts_s:.0f}"
@@ -112,7 +126,7 @@ class PainterGui:
         ).pack(side="left")
         ttk.Label(row, text="s").pack(side="left")
 
-        # --- buttons ---------------------------------------------------
+        # --- buttons ----------------------------------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", **pad)
         self.btn_chrome = ttk.Button(
@@ -120,7 +134,7 @@ class PainterGui:
         )
         self.btn_chrome.pack(side="left", padx=2)
         self.btn_check = ttk.Button(
-            row, text="Check sheet", command=self._check_sheet
+            row, text="Check sheets", command=self._check_sheets
         )
         self.btn_check.pack(side="left", padx=2)
         self.btn_start = ttk.Button(row, text="Start", command=self._start)
@@ -129,14 +143,10 @@ class PainterGui:
             row, text="Stop", command=self._request_stop, state="disabled"
         )
         self.btn_stop.pack(side="left", padx=2)
-        self.btn_review = ttk.Button(
-            row, text="Review staged", command=self._open_review
-        )
-        self.btn_review.pack(side="left", padx=14)
 
-        # --- log -------------------------------------------------------
+        # --- log --------------------------------------------------------
         self.log_box = scrolledtext.ScrolledText(
-            frame, height=18, state="disabled", font=("Consolas", 9)
+            frame, height=16, state="disabled", font=("Consolas", 9)
         )
         self.log_box.pack(fill="both", expand=True, **pad)
 
@@ -150,17 +160,30 @@ class PainterGui:
     # --- helpers --------------------------------------------------------
 
     def _log(self, line: str) -> None:
+        stamp = datetime.now().strftime("%H:%M:%S")
         self.log_box.configure(state="normal")
-        self.log_box.insert("end", line + "\n")
+        self.log_box.insert("end", f"[{stamp}] {line}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
-    def _pick_sheet(self) -> None:
-        path = filedialog.askopenfilename(
-            title="Prompt sheet", filetypes=[("Markdown", "*.md")]
+    def _add_sheets(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="Prompt sheets", filetypes=[("Markdown", "*.md")]
         )
-        if path:
-            self.sheet_var.set(path)
+        for raw in paths:
+            path = Path(raw)
+            if path not in self._sheets:
+                self._sheets.append(path)
+                self.sheet_list.insert("end", path.name)
+
+    def _remove_sheet(self) -> None:
+        for index in reversed(self.sheet_list.curselection()):
+            self.sheet_list.delete(index)
+            del self._sheets[index]
+
+    def _clear_sheets(self) -> None:
+        self.sheet_list.delete(0, "end")
+        self._sheets.clear()
 
     def _pick_out(self) -> None:
         path = filedialog.askdirectory(title="Output folder")
@@ -171,39 +194,37 @@ class PainterGui:
         return [k for k, v in self.site_vars.items() if v.get()]
 
     def _out_base(self) -> Path:
-        return Path(self.out_var.get().strip() or str(DEFAULT_OUT_DIR)).resolve()
+        return Path(
+            self.out_var.get().strip() or str(DEFAULT_OUT_DIR)
+        ).resolve()
 
-    def _parse_checked(self):
-        """Parse + report the sheet; None when it must not run."""
-        raw = self.sheet_var.get().strip()
-        if not raw:
-            messagebox.showerror("PromptPainter", "Pick a sheet .md first.")
-            return None
-        try:
-            sheet = parse_sheet(Path(raw))
-        except (SheetError, OSError) as exc:
-            messagebox.showerror("PromptPainter", str(exc))
-            return None
-        self._log(f"THEME: {sheet.theme}")
-        self._log(
-            f"  {len(sheet.items)} to generate,"
-            f" {len(sheet.skipped)} skipped,"
-            f" {len(sheet.problems)} problem(s)"
-        )
-        for it in sheet.items:
-            self._log(f"  GEN  L{it.line:<4} {it.drop_path}")
-        for sk in sheet.skipped:
-            self._log(f"  SKIP L{sk.line:<4} {sk.title} — {sk.reason}")
-        for pr in sheet.problems:
-            self._log(f"  PROBLEM L{pr.line}: {pr.message}")
-        if sheet.problems:
-            messagebox.showerror(
-                "PromptPainter",
-                "The sheet violates the contract — fix the sheet first"
-                " (problems are listed in the log).",
+    def _parse_all(self) -> list[Sheet]:
+        """Parse every queued sheet; broken ones are reported and
+        dropped from the run (the fix belongs in the sheet)."""
+        good: list[Sheet] = []
+        for path in self._sheets:
+            try:
+                sheet = parse_sheet(path)
+            except (SheetError, OSError) as exc:
+                self._log(f"SHEET SKIPPED: {exc}")
+                continue
+            if sheet.problems:
+                for pr in sheet.problems:
+                    self._log(
+                        f"  PROBLEM {path.name} L{pr.line}: {pr.message}"
+                    )
+                self._log(
+                    f"SHEET SKIPPED (contract problems): {path.name} —"
+                    " fix the sheet and rerun"
+                )
+                continue
+            self._log(
+                f"OK {path.name}: {sheet.theme} —"
+                f" {len(sheet.items)} to generate,"
+                f" {len(sheet.skipped)} skipped"
             )
-            return None
-        return sheet
+            good.append(sheet)
+        return good
 
     # --- actions --------------------------------------------------------
 
@@ -235,26 +256,35 @@ class PainterGui:
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _check_sheet(self) -> None:
-        self._parse_checked()
+    def _check_sheets(self) -> None:
+        if not self._sheets:
+            messagebox.showerror("PromptPainter", "Add sheet .md files first.")
+            return
+        self._parse_all()
 
     def _start(self) -> None:
-        sheet = self._parse_checked()
-        if sheet is None:
+        if not self._sheets:
+            messagebox.showerror("PromptPainter", "Add sheet .md files first.")
+            return
+        sheets = self._parse_all()
+        if not sheets:
+            messagebox.showerror(
+                "PromptPainter", "No usable sheets in the queue."
+            )
             return
         sites = self._selected_sites()
         if not sites:
             messagebox.showerror("PromptPainter", "Tick at least one site.")
             return
         out_base = self._out_base()
-
-        if sheet.source.resolve().is_relative_to(out_base):
-            messagebox.showerror(
-                "PromptPainter",
-                "The sheet lives inside the output folder — sources"
-                " are READ ONLY; pick another output folder.",
-            )
-            return
+        for sheet in sheets:
+            if sheet.source.resolve().is_relative_to(out_base):
+                messagebox.showerror(
+                    "PromptPainter",
+                    f"{sheet.source.name} lives inside the output folder"
+                    " — sources are READ ONLY; pick another output.",
+                )
+                return
 
         post_save = None
         if self.bgfix_var.get():
@@ -291,10 +321,12 @@ class PainterGui:
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.status_var.set("running: " + ", ".join(sites))
-        mode = self.background_var.get()
+        backgrounds = {
+            key: self.background_vars[key].get() for key in sites
+        }
         self._log(
-            f"=== START {', '.join(sites)} -> {out_base}"
-            f" (background: {mode}) ==="
+            f"=== START {', '.join(sites)} | {len(sheets)} sheet(s)"
+            f" -> {out_base} | backgrounds: {backgrounds} ==="
         )
 
         for key in sites:
@@ -302,44 +334,74 @@ class PainterGui:
                 target=self._drive_site,
                 args=(
                     key,
-                    sheet,
-                    staging_root(out_base, key),
+                    list(sheets),
+                    out_base / key,
                     timing,
                     post_save,
-                    background_suffix(mode, SITES[key]),
+                    partial(prompt_suffix, key, backgrounds[key]),
+                    self.report_var.get(),
                 ),
                 daemon=True,
             )
             self._workers.append(worker)
             worker.start()
 
-    def _drive_site(self, key, sheet, out_root, timing, post_save, suffix):
-        """One site's whole run — its own thread, driver and log prefix."""
+    def _drive_site(
+        self, key, sheets, out_root, timing, post_save, suffix, report
+    ) -> None:
+        """One site's whole run — the sheet queue in order, one thread."""
         from painter.driver import DriverError, SiteDriver, TerminalState
         from painter.runner import run_sheet
 
         log = lambda msg: self._q.put(f"[{key}] {msg}")
         driver = SiteDriver(SITES[key], timing, CDP_URL)
+        t_site = time.monotonic()
+        done_sheets = 0
         try:
             title = driver.attach()
             log(f"attached to {title!r} — SUPERVISED, watch the window")
-            generated = run_sheet(
-                sheet,
-                driver,
-                out_root,
-                timing,
-                log=log,
-                should_stop=self._stop.is_set,
-                post_save=post_save,
-                prompt_suffix=suffix,
+            for n, sheet in enumerate(sheets, start=1):
+                if self._stop.is_set():
+                    log("stopped on request — remaining sheets not started")
+                    break
+                log(f"--- sheet {n}/{len(sheets)}: {sheet.source.name} ---")
+                try:
+                    generated = run_sheet(
+                        sheet,
+                        driver,
+                        out_root,
+                        timing,
+                        log=log,
+                        should_stop=self._stop.is_set,
+                        post_save=post_save,
+                        prompt_suffix=suffix,
+                        report=report,
+                    )
+                    done_sheets += 1
+                    log(
+                        f"sheet done: {generated} image(s) into"
+                        f" {out_root}"
+                    )
+                except TerminalState as exc:
+                    log(f"TERMINAL STATE (quota/refusal): {exc}")
+                    log(
+                        "site stopped — finished work is saved; start"
+                        " again later to resume the remaining sheets"
+                    )
+                    break
+                except DriverError as exc:
+                    log(f"DRIVER ERROR: {exc}")
+                    log(
+                        "site stopped — progress saved; fix the cause"
+                        " and start again to resume"
+                    )
+                    break
+            log(
+                f"finished {done_sheets}/{len(sheets)} sheet(s) in"
+                f" {(time.monotonic() - t_site) / 60:.1f} min"
             )
-            log(f"done: {generated} image(s) staged in {out_root}")
-        except TerminalState as exc:
-            log(f"TERMINAL STATE: {exc}")
-            log("run stopped; progress saved — start again later to resume")
         except DriverError as exc:
             log(f"DRIVER ERROR: {exc}")
-            log("progress saved — fix the cause and start again to resume")
         except Exception as exc:  # surfaced, never swallowed
             log(f"UNEXPECTED ERROR: {type(exc).__name__}: {exc}")
         finally:
@@ -349,18 +411,6 @@ class PainterGui:
     def _request_stop(self) -> None:
         self._stop.set()
         self.status_var.set("stopping after the current item ...")
-
-    # --- phase two: review ----------------------------------------------
-
-    def _open_review(self) -> None:
-        out_base = self._out_base()
-        staged = staged_images(out_base, tuple(sorted(SITES)))
-        if not staged:
-            messagebox.showinfo(
-                "PromptPainter", f"Nothing staged under {out_base}."
-            )
-            return
-        ReviewWindow(self.root, out_base, staged, self._log)
 
     # --- queue pump -----------------------------------------------------
 
@@ -377,114 +427,11 @@ class PainterGui:
                             self.btn_start.configure(state="normal")
                             self.btn_stop.configure(state="disabled")
                             self.status_var.set("idle")
-                            self._open_review_if_staged()
                 else:
                     self._log(str(msg))
         except queue.Empty:
             pass
         self.root.after(120, self._drain_queue)
-
-    def _open_review_if_staged(self) -> None:
-        out_base = self._out_base()
-        staged = staged_images(out_base, tuple(sorted(SITES)))
-        if staged:
-            self._log(f"{len(staged)} image(s) staged — opening review")
-            ReviewWindow(self.root, out_base, staged, self._log)
-
-
-class ReviewWindow(tk.Toplevel):
-    """Phase two: thumbnails of staged images, Approve / Reject each."""
-
-    def __init__(self, master, out_base: Path, staged, log):
-        super().__init__(master)
-        self.title(f"Review staged — {len(staged)} image(s)")
-        self.minsize(560, 420)
-        self._out_base = out_base
-        self._log = log
-        self._thumbs = []  # keep PhotoImage references alive
-
-        bar = ttk.Frame(self)
-        bar.pack(fill="x", padx=6, pady=4)
-        ttk.Button(
-            bar, text="Approve ALL remaining", command=self._approve_all
-        ).pack(side="left")
-        ttk.Button(bar, text="Close", command=self.destroy).pack(side="right")
-
-        canvas = tk.Canvas(self, highlightthickness=0)
-        scroll = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        self._list = ttk.Frame(canvas)
-        self._list.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
-        )
-        canvas.create_window((0, 0), window=self._list, anchor="nw")
-        canvas.configure(yscrollcommand=scroll.set)
-        canvas.pack(side="left", fill="both", expand=True, padx=6, pady=4)
-        scroll.pack(side="right", fill="y")
-
-        self._rows: dict[object, ttk.Frame] = {}
-        for item in staged:
-            self._add_row(item)
-
-    def _add_row(self, item) -> None:
-        row = ttk.Frame(self._list)
-        row.pack(fill="x", pady=3)
-        self._rows[item] = row
-
-        thumb = self._thumbnail(item.path)
-        if thumb is not None:
-            self._thumbs.append(thumb)
-            ttk.Label(row, image=thumb).pack(side="left", padx=4)
-        else:
-            ttk.Label(row, text="(no preview)").pack(side="left", padx=4)
-
-        ttk.Label(
-            row, text=f"[{item.site}] {item.drop_path}", anchor="w"
-        ).pack(side="left", fill="x", expand=True, padx=6)
-        ttk.Button(
-            row, text="Approve", command=lambda: self._approve(item)
-        ).pack(side="left", padx=2)
-        ttk.Button(
-            row, text="Reject", command=lambda: self._reject(item)
-        ).pack(side="left", padx=2)
-
-    def _thumbnail(self, path: Path):
-        try:
-            from PIL import Image, ImageTk
-
-            with Image.open(path) as img:
-                img.thumbnail((THUMB_PX, THUMB_PX))
-                return ImageTk.PhotoImage(img, master=self)
-        except Exception:
-            return None  # no preview; Approve/Reject still work
-
-    def _drop_row(self, item) -> None:
-        self._rows.pop(item).destroy()
-        if not self._rows:
-            self.destroy()
-
-    def _approve(self, item) -> None:
-        dest = approve(self._out_base, item)
-        self._log(f"[{item.site}] APPROVED -> {dest}")
-        self._drop_row(item)
-
-    def _reject(self, item) -> None:
-        if not messagebox.askyesno(
-            "Reject image",
-            f"Delete {item.drop_path} ({item.site})?\n"
-            "The next run will regenerate it.",
-            parent=self,
-        ):
-            return
-        reject(self._out_base, item)
-        self._log(f"[{item.site}] REJECTED {item.drop_path} — will regenerate")
-        self._drop_row(item)
-
-    def _approve_all(self) -> None:
-        for item in list(self._rows):
-            dest = approve(self._out_base, item)
-            self._log(f"[{item.site}] APPROVED -> {dest}")
-            self._drop_row(item)
 
 
 def main() -> None:

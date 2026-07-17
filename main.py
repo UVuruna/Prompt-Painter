@@ -1,11 +1,12 @@
 """PromptPainter — the single entry point.
 
-No arguments -> opens the GUI (the usual way in). With a sheet
-argument -> the CLI, driving ONE site per invocation.
+No arguments -> opens the GUI (the usual way in). With sheet
+arguments -> the CLI, driving ONE site through the given sheets in
+order.
 
 Usage:
     python main.py
-    python main.py "path/to/theme_prompts.md" --site gemini
+    python main.py sheet1.md sheet2.md --site gemini
     python main.py "path/to/theme_prompts.md" --dry-run
 """
 
@@ -14,15 +15,16 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from painter.config import (
-    BACKGROUND_MODES,
+    BACKGROUND_CHOICES,
     CDP_URL,
     DEFAULT_OUT_DIR,
     SITES,
     TIMING,
-    background_suffix,
+    prompt_suffix,
 )
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
@@ -31,15 +33,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="PromptPainter",
         description=(
-            "Reads a prompt-sheet .md and drives the logged-in"
+            "Reads prompt-sheet .md files and drives the logged-in"
             " Gemini/ChatGPT tab over CDP — supervised, paced, resumable."
         ),
     )
     p.add_argument(
-        "sheet",
+        "sheets",
         type=Path,
-        nargs="?",
-        help="the prompt-sheet .md file (omit everything to open the GUI)",
+        nargs="*",
+        help="prompt-sheet .md files (omit everything to open the GUI)",
     )
     p.add_argument(
         "--site",
@@ -51,26 +53,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_OUT_DIR,
         help=(
-            "output base; generation stages at <out>/_staging/<site>/,"
-            " approval moves images to <out>/<site>/<drop-path>"
+            "output base; images save at <out>/<site>/<drop-path>"
             f" (default: {DEFAULT_OUT_DIR})"
         ),
     )
     p.add_argument(
         "--background",
-        choices=BACKGROUND_MODES,
-        default="auto",
+        choices=BACKGROUND_CHOICES,
+        default=None,
         help=(
-            "background suffix appended to every prompt — auto ="
-            " transparent on ChatGPT, white on Gemini (default: auto)"
-        ),
-    )
-    p.add_argument(
-        "--approve-all",
-        action="store_true",
-        help=(
-            "skip the review phase: move every staged image of this run"
-            " straight to the final folder"
+            "background rule appended to every prompt (default: the"
+            " site's own — transparent on ChatGPT, white on Gemini)"
         ),
     )
     p.add_argument(
@@ -86,17 +79,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-bgfix",
         action="store_true",
-        help="skip the background tool after each saved image",
+        help="skip the background remover after each saved image",
+    )
+    p.add_argument(
+        "--no-report",
+        action="store_true",
+        help="do not write the per-sheet report txt",
     )
     p.add_argument(
         "--dry-run",
         action="store_true",
-        help="parse and report the sheet only — no browser needed",
+        help="parse and report the sheets only — no browser needed",
     )
     return p
 
 
-def report(sheet: Sheet) -> None:
+def report_sheet(sheet: Sheet) -> None:
     print(f"THEME: {sheet.theme}")
     print(
         f"  {len(sheet.items)} to generate, {len(sheet.skipped)} skipped,"
@@ -113,42 +111,51 @@ def report(sheet: Sheet) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
-    if args.sheet is None:
+    if not args.sheets:
         import gui
 
         gui.main()
         return 0
 
-    try:
-        sheet = parse_sheet(args.sheet)
-    except (SheetError, OSError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+    sheets: list[Sheet] = []
+    broken = 0
+    for path in args.sheets:
+        try:
+            sheet = parse_sheet(path)
+        except (SheetError, OSError) as exc:
+            print(f"SHEET SKIPPED: {exc}", file=sys.stderr)
+            broken += 1
+            continue
+        report_sheet(sheet)
+        if sheet.problems:
+            print(
+                f"SHEET SKIPPED (contract problems): {path.name} — fix"
+                " the sheet and rerun.",
+                file=sys.stderr,
+            )
+            broken += 1
+            continue
+        sheets.append(sheet)
 
-    report(sheet)
-    if sheet.problems:
-        print(
-            "\nThe sheet violates the contract — fix the sheet, then rerun.",
-            file=sys.stderr,
-        )
-        return 2
     if args.dry_run:
-        return 0
+        return 2 if broken else 0
+    if not sheets:
+        print("ERROR: no usable sheets.", file=sys.stderr)
+        return 2
     if not args.site:
         print("ERROR: --site is required (or use --dry-run)", file=sys.stderr)
         return 2
 
-    from painter.review import approve, staged_images, staging_root
-
     out_base = args.out.resolve()
-    out_root = staging_root(out_base, args.site)
-    if sheet.source.resolve().is_relative_to(out_base):
-        print(
-            "ERROR: the sheet lives inside the output folder — sources"
-            " are READ ONLY; pick another output folder.",
-            file=sys.stderr,
-        )
-        return 2
+    out_root = out_base / args.site
+    for sheet in sheets:
+        if sheet.source.resolve().is_relative_to(out_base):
+            print(
+                f"ERROR: {sheet.source.name} lives inside the output"
+                " folder — sources are READ ONLY; pick another output.",
+                file=sys.stderr,
+            )
+            return 2
 
     post_save = None
     if not args.no_bgfix:
@@ -168,14 +175,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.pause is None
         else replace(TIMING, pause_between_prompts_s=args.pause)
     )
-    suffix = background_suffix(args.background, SITES[args.site])
+    site = SITES[args.site]
+    background = args.background or site.default_background
+    suffix = partial(prompt_suffix, args.site, background)
 
     # imported lazily so --dry-run works without playwright installed
     from painter.chrome import ChromeError, ensure_chrome
     from painter.driver import DriverError, SiteDriver, TerminalState
     from painter.runner import run_sheet
 
-    site = SITES[args.site]
     try:
         state = ensure_chrome((site.url,), args.cdp)
     except ChromeError as exc:
@@ -193,34 +201,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nAttaching over CDP at {args.cdp} ...")
         title = driver.attach()
         print(f"Attached to {title!r}. SUPERVISED RUN — watch the window.")
-        generated = run_sheet(
-            sheet,
-            driver,
-            out_root,
-            timing,
-            post_save=post_save,
-            prompt_suffix=suffix,
+        total = 0
+        for n, sheet in enumerate(sheets, start=1):
+            print(f"\n--- sheet {n}/{len(sheets)}: {sheet.source.name} ---")
+            total += run_sheet(
+                sheet,
+                driver,
+                out_root,
+                timing,
+                post_save=post_save,
+                prompt_suffix=suffix,
+                report=not args.no_report,
+            )
+        print(
+            f"\nDone: {total} image(s) across {len(sheets)} sheet(s)"
+            f" into {out_root}"
         )
-        staged = staged_images(out_base, (args.site,))
-        if args.approve_all:
-            for item in staged:
-                approve(out_base, item)
-            print(
-                f"\nDone: {generated} image(s) generated,"
-                f" {len(staged)} approved into {out_base / args.site}"
-            )
-        else:
-            print(
-                f"\nDone: {generated} image(s) generated;"
-                f" {len(staged)} await review in {out_root}\n"
-                "Review them in the GUI ('Review staged') or rerun with"
-                " --approve-all."
-            )
-        return 0
+        return 2 if broken else 0
     except TerminalState as exc:
         print(
             f"\nTERMINAL STATE: {exc}\n"
-            "Run stopped; progress is saved — rerun later to resume.",
+            "Run stopped; finished work is saved — rerun later to resume.",
             file=sys.stderr,
         )
         return 3
