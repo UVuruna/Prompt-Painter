@@ -34,6 +34,12 @@ from painter.config import IMAGE_EXTENSIONS, SKIP_MARKER_PATTERN
 
 _BOLD_SPAN = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 _ARROW_PATH = re.compile(r"→\s*`([^`\n]+)`")
+_BACKTICK_TOKEN = re.compile(r"`([^`\n]+)`")
+# the whole paragraph is "**Name** — `file.png`" (dash optional)
+_STRICT_BOLD_TOKEN = re.compile(
+    r"\*\*.+?\*\*\s*(?:[—–-]{1,3}\s*)?`[^`\n]+`\s*\.?", re.DOTALL
+)
+_PAREN_TOKEN = re.compile(r"\s*\((?:[^()`]*`[^`]*`)+[^()]*\)")
 _SKIP_MARKER = re.compile(SKIP_MARKER_PATTERN, re.IGNORECASE)
 _WS = re.compile(r"\s+")
 
@@ -94,27 +100,85 @@ def parse_sheet(path: Path) -> Sheet:
     skipped: list[SkippedItem] = []
     problems: list[Problem] = []
 
-    # entry awaiting its prompt block: (title, drop_path, line, advice)
-    pending: tuple[str, str, int, str | None] | None = None
+    # entry awaiting its prompt block:
+    # (title, drop_path, line, advice, legacy)
+    # legacy entries (heading/bold-token forms) are best-effort: they
+    # pair only with an IMMEDIATELY following fence and never raise
+    # problems — the strict arrow contract keeps the loud failures
+    pending: tuple[str, str, int, str | None, bool] | None = None
     # active advice from a marked section heading or note;
     # cleared by the next heading
     poison: str | None = None
+    # legacy sheets: a section heading carrying one backticked
+    # directory token (`assets/zodiac/astrology/sign/`) — bare bold
+    # entries below it drop into <last-segment>/<Name>.png
+    section_dir: str | None = None
 
     def flush_pending(why: str) -> None:
         nonlocal pending
         if pending is not None:
-            title, _, at, advice = pending
+            title, _, at, advice, legacy = pending
             if advice is not None:
                 # a marked entry with no prompt block — retired; listed,
                 # never a contract violation
                 skipped.append(SkippedItem(title, advice, at))
-            else:
+            elif not legacy:
                 problems.append(
                     Problem(
                         f'entry "{title}" has no prompt block ({why})', at
                     )
                 )
+            # unpaired LEGACY mentions (reuse pointers etc.) drop silently
             pending = None
+
+    def register_entry(
+        title: str, drop: str, at: int, advice: str | None, legacy: bool
+    ) -> None:
+        """Validate a drop path and set the entry pending.
+
+        Legacy-form entries never raise problems: an invalid or
+        duplicate path there is a reuse pointer, not an entry.
+        """
+        nonlocal pending
+        drop_parts = PurePosixPath(drop)
+        if drop_parts.is_absolute() or ".." in drop_parts.parts:
+            if not legacy:
+                problems.append(
+                    Problem(
+                        f'entry "{title}": drop path escapes the out'
+                        f" folder: {drop}",
+                        at,
+                    )
+                )
+            return
+        if drop_parts.suffix.lower() not in IMAGE_EXTENSIONS:
+            if not legacy:
+                problems.append(
+                    Problem(
+                        f'entry "{title}": the entry does not name an'
+                        f" image file: {drop}",
+                        at,
+                    )
+                )
+            return
+        if any(item.drop_path == drop for item in items):
+            if not legacy:
+                problems.append(
+                    Problem(
+                        f'entry "{title}": duplicate drop path {drop} —'
+                        " an earlier entry already writes it",
+                        at,
+                    )
+                )
+            return
+        pending = (title, drop, at, advice, legacy)
+
+    def png_tokens_of(text: str) -> list[str]:
+        return [
+            t.strip()
+            for t in _BACKTICK_TOKEN.findall(text)
+            if PurePosixPath(t.strip()).suffix.lower() in IMAGE_EXTENSIONS
+        ]
 
     i = 0
     while i < n:
@@ -133,7 +197,7 @@ def parse_sheet(path: Path) -> Sheet:
                 )
             i += 1
             if pending is not None:
-                title, drop, at, advice = pending
+                title, drop, at, advice, _legacy = pending
                 items.append(
                     PromptItem(title, drop, "\n".join(block), at, advice)
                 )
@@ -145,7 +209,36 @@ def parse_sheet(path: Path) -> Sheet:
             heading = raw.lstrip("#").strip()
             if theme is None and raw.startswith("# "):
                 theme = heading
-            poison = heading if _SKIP_MARKER.search(heading) else None
+                i += 1
+                continue
+            heading_pngs = png_tokens_of(heading)
+            if len(heading_pngs) == 1 and not raw.startswith("# "):
+                # legacy heading entry: "### Sun (`sun.png`)" — the
+                # heading itself carries the output filename
+                title = _WS.sub(
+                    " ", _PAREN_TOKEN.sub("", heading)
+                ).strip(" -—")
+                advice = (
+                    heading if _SKIP_MARKER.search(heading) else poison
+                )
+                register_entry(
+                    title or heading, heading_pngs[0], i + 1, advice,
+                    legacy=True,
+                )
+            else:
+                # a section heading: may advise (skip marker) and may
+                # set the drop dir for bare bold entries below
+                poison = (
+                    heading if _SKIP_MARKER.search(heading) else None
+                )
+                dirs = [
+                    t.strip()
+                    for t in _BACKTICK_TOKEN.findall(heading)
+                    if t.strip().endswith("/")
+                ]
+                section_dir = (
+                    PurePosixPath(dirs[0]).name if len(dirs) == 1 else None
+                )
             i += 1
             continue
 
@@ -173,6 +266,7 @@ def parse_sheet(path: Path) -> Sheet:
         spans = _BOLD_SPAN.findall(para)
         title = _WS.sub(" ", spans[0]).strip() if spans else ""
         arrow = _ARROW_PATH.search(para)
+        para_pngs = png_tokens_of(para)
         marker_idx = next(
             (k for k, s in enumerate(spans) if _SKIP_MARKER.search(s)), None
         )
@@ -183,55 +277,55 @@ def parse_sheet(path: Path) -> Sheet:
             else None
         )
 
-        if marker_idx is not None and arrow is None:
-            flush_pending("a skip-marked paragraph interrupts it")
-            if marker_idx > 0:
-                # a named entry with NO prompt to load (the REUSE seats)
-                skipped.append(SkippedItem(title, reason, start))
-            else:
-                # a standalone note — advice for the rest of the section
-                poison = reason
-            continue
+        # where does this entry's output path come from?
+        drop: str | None = None
+        legacy = False
+        if arrow is not None and not title.endswith(":"):
+            candidate = arrow.group(1).strip()
+            if (
+                PurePosixPath(candidate).suffix.lower()
+                in IMAGE_EXTENSIONS
+            ):
+                drop = candidate
+            # else: an arrow inside prose ("Drop dirs" pointing at a
+            # folder) — not an entry
+        if drop is None and arrow is None and (
+            len(para_pngs) == 1
+            and not title.endswith(":")
+            and _STRICT_BOLD_TOKEN.fullmatch(para.strip())
+        ):
+            # legacy bold entry — the WHOLE paragraph is
+            # "**Sun** — `sun.png`" (prose mentions never match)
+            drop = para_pngs[0]
+            legacy = True
+        elif (
+            section_dir is not None
+            and marker_idx is None
+            and para.strip() == f"**{spans[0]}**"
+            and "`" not in spans[0]
+            and len(title) < 40
+        ):
+            # legacy bare bold entry under a dir-carrying section:
+            # "**Aries**" below "## SIGN look (`.../sign/`)"
+            drop = f"{section_dir}/{title}.png"
+            legacy = True
 
-        if arrow is None:
-            continue  # bold prose (**Register:**, **Drop paths:**, ...)
-
-        drop = arrow.group(1).strip()
-        drop_parts = PurePosixPath(drop)
-        if drop_parts.is_absolute() or ".." in drop_parts.parts:
-            problems.append(
-                Problem(
-                    f'entry "{title}": drop path escapes the out'
-                    f" folder: {drop}",
-                    start,
-                )
-            )
-            continue
-        if drop_parts.suffix.lower() not in IMAGE_EXTENSIONS:
-            problems.append(
-                Problem(
-                    f'entry "{title}": arrow line does not name an'
-                    f" image file: {drop}",
-                    start,
-                )
-            )
-            continue
+        if drop is None:
+            if marker_idx is not None:
+                flush_pending("a skip-marked paragraph interrupts it")
+                if marker_idx > 0:
+                    # a named entry with NO prompt to load (REUSE seats)
+                    skipped.append(SkippedItem(title, reason, start))
+                else:
+                    # a standalone note — advice for the section's rest
+                    poison = reason
+            continue  # else: bold prose (**Register:**, **Drop paths:**)
 
         flush_pending("the next entry starts")
 
-        if any(item.drop_path == drop for item in items):
-            problems.append(
-                Problem(
-                    f'entry "{title}": duplicate drop path {drop} —'
-                    " an earlier entry already writes it",
-                    start,
-                )
-            )
-            continue
-
         # the entry's own marker outranks the section's advice; either
         # way the prompt LOADS — advice only unticks it by default
-        pending = (title, drop, start, reason or poison)
+        register_entry(title, drop, start, reason or poison, legacy)
 
     flush_pending("the sheet ends")
 

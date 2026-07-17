@@ -224,5 +224,21 @@ def test_bad_paths_reported():
     sheet = parse_sheet(FIXTURES_DIR / "bad_paths.md")
     assert sheet.items == ()
     messages = " | ".join(p.message for p in sheet.problems)
+    # an escaping path on a real (arrow) entry stays LOUD
     assert "../outside/Escape.png" in messages
-    assert "fixture/readme.txt" in messages
+    # an arrow at a non-image target is prose (drop-dir pointers in
+    # the weekday sheets), silently ignored — no item, no problem
+    assert "fixture/readme.txt" not in messages
+
+
+def test_legacy_forms_parse():
+    sheet = parse_sheet(FIXTURES_DIR / "legacy.md")
+    assert [p.message for p in sheet.problems] == []
+    assert [(i.title, i.drop_path) for i in sheet.items] == [
+        ("Sun — Ancient of Days", "ancient_of_days.png"),
+        ("Moon", "moon.png"),
+        ("Aries", "sign/Aries.png"),
+    ]
+    assert sheet.items[0].prompt == "heading-form prompt"
+    assert sheet.items[1].prompt == "bold-token prompt"
+    assert sheet.items[2].prompt == "bare-bold prompt"
