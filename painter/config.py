@@ -31,9 +31,12 @@ CHROME_LAUNCH_TIMEOUT_S = 30.0
 
 # --- Output ----------------------------------------------------------
 
-# Images land at <out>/<site>/<drop-path>; per-site sidecar state at
-# <out>/<site>/<sheet-stem>.progress.json
+# Phase one: generation writes to <out>/_staging/<site>/<drop-path>;
+# phase two: the owner reviews and approval moves each image to
+# <out>/<site>/<drop-path>. Per-site sidecar state lives beside the
+# staged images: <out>/_staging/<site>/<sheet-stem>.progress.json
 DEFAULT_OUT_DIR = PROJECT_ROOT / "out"
+STAGING_DIRNAME = "_staging"
 PROGRESS_SUFFIX = ".progress.json"
 
 # --- The sheet contract ----------------------------------------------
@@ -47,14 +50,36 @@ SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
 
 # --- Background fix (owner workflow step 5) --------------------------
 
-# The DOMY Watch background tool: per saved image it auto-detects —
+# painter/bg_remove.py runs over every saved image and auto-detects —
 # already-transparent images are skipped, white backgrounds (Gemini)
 # are cleared, ambiguous ones are reported and left untouched.
-BG_TOOL_PY = (
-    PROJECT_ROOT.parent / "DOMY Watch" / "tools" / "bg_remove.py"
-)
-BG_TOOL_ARGS = ("--in-place", "--crop")
-BG_TOOL_TIMEOUT_S = 120.0
+BG_FIX_CROP = True  # autocrop to the visible subject after clearing
+
+
+# --- Background prompt suffixes (GUI-selectable) ---------------------
+
+# Appended to every prompt. The GUI picks the mode: 'auto' uses each
+# site's default below (ChatGPT can do real transparency, Gemini
+# cannot — white is what the background fix then clears).
+BACKGROUND_SUFFIXES = {
+    "transparent": (
+        "\n\nIMPORTANT: render on a fully TRANSPARENT background"
+        " (PNG with alpha channel, no backdrop of any kind)."
+    ),
+    "white": (
+        "\n\nIMPORTANT: render the artwork on a PLAIN PURE WHITE"
+        " background — flat white, no gradients, no vignette, no"
+        " backdrop scenery."
+    ),
+    "none": "",
+}
+BACKGROUND_MODES = ("auto", "transparent", "white", "none")
+
+
+def background_suffix(mode: str, site: "SiteConfig") -> str:
+    """The prompt suffix for a chosen background mode on one site."""
+    key = site.default_background if mode == "auto" else mode
+    return BACKGROUND_SUFFIXES[key]
 
 
 # --- Timing ----------------------------------------------------------
@@ -94,10 +119,8 @@ class SiteConfig:
     url: str
     # substring of the tab URL used to find the already-open tab
     url_fragment: str
-    # appended to every prompt (owner 2026-07-17): ChatGPT is asked
-    # for a TRANSPARENT background, Gemini for a flat WHITE one that
-    # the background tool then clears
-    prompt_suffix: str
+    # the BACKGROUND_SUFFIXES key used when the mode is 'auto'
+    default_background: str
     # the contenteditable prompt box
     prompt_box: tuple[str, ...]
     # the idle send button
@@ -118,10 +141,7 @@ SITES = {
         name="ChatGPT",
         url="https://chatgpt.com/",
         url_fragment="chatgpt.com",
-        prompt_suffix=(
-            "\n\nIMPORTANT: render on a fully TRANSPARENT background"
-            " (PNG with alpha channel, no backdrop of any kind)."
-        ),
+        default_background="transparent",
         prompt_box=(
             "#prompt-textarea",
             "div.ProseMirror[contenteditable='true']",
@@ -158,11 +178,7 @@ SITES = {
         name="Gemini",
         url="https://gemini.google.com/app",
         url_fragment="gemini.google.com",
-        prompt_suffix=(
-            "\n\nIMPORTANT: render the artwork on a PLAIN PURE WHITE"
-            " background — flat white, no gradients, no vignette, no"
-            " backdrop scenery."
-        ),
+        default_background="white",
         prompt_box=(
             "rich-textarea div[contenteditable='true']",
             "div.ql-editor[contenteditable='true']",

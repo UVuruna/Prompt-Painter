@@ -1,5 +1,10 @@
 # Runtime — the CDP driver (the parser and --dry-run need nothing but stdlib)
 playwright>=1.40
 
-# Development — golden parser tests
+# Runtime — the background fix (painter/bg_remove.py) and review thumbnails
+numpy>=1.26
+scipy>=1.11
+pillow>=10
+
+# Development — the offline test suite
 pytest>=8
