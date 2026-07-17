@@ -210,7 +210,13 @@ class SiteDriver:
         t = self._timing
         deadline = time.monotonic() + t.image_ready_timeout_s
         while True:
-            img = self._last_result_image()
+            try:
+                img = self._last_result_image()
+            except SelectorRot:
+                # the response container can be TRANSIENTLY absent
+                # (route transition, list virtualization) — keep
+                # polling; the deadline below stays the loud stop
+                img = None
             if img is not None:
                 break
             self._check_markers()
