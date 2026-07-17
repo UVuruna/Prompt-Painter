@@ -15,7 +15,7 @@ from painter.driver import ItemRefused
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
-FAST = replace(TIMING, pause_between_prompts_s=0.0)
+FAST = replace(TIMING, pause_min_s=0.0, pause_max_s=0.0)
 
 # a real 1x1 PNG so sniff_format and the report see PNG bytes
 PNG_1PX = bytes.fromhex(
@@ -155,6 +155,41 @@ def test_refusal_skips_the_item_and_the_run_continues(tmp_path):
     driver2 = FakeDriver(SITES["gemini"])
     assert run_sheet(sheet, driver2, out, FAST) == 1
     assert "prompt 1" in driver2.submitted[0]
+
+
+def test_advised_items_sit_out_unless_ticked(tmp_path):
+    source = tmp_path / "adv_prompts.md"
+    source.write_text("# Advice Theme\n", encoding="utf-8")
+    sheet = Sheet(
+        "Advice Theme",
+        source,
+        (
+            PromptItem("Normal", "adv/normal.png", "p0", 1),
+            PromptItem(
+                "Optional", "adv/optional.png", "p1", 2,
+                advice="Not yet approved — do not generate.",
+            ),
+        ),
+        (),
+        (),
+    )
+    out = tmp_path / "out" / "gemini"
+
+    # default run: the advised item sits out, loudly
+    driver = FakeDriver(SITES["gemini"])
+    logs: list[str] = []
+    assert run_sheet(sheet, driver, out, FAST, log=logs.append) == 1
+    assert not (out / "adv" / "optional.png").exists()
+    assert any("NOT RUN (sheet advice)" in line for line in logs)
+    report = (out / "adv_prompts_report.txt").read_text(encoding="utf-8")
+    assert "advice, not ticked" in report
+
+    # explicitly ticked: it generates like any other item
+    driver2 = FakeDriver(SITES["gemini"])
+    assert run_sheet(
+        sheet, driver2, out, FAST, only={"adv/optional.png"}
+    ) == 1
+    assert (out / "adv" / "optional.png").exists()
 
 
 def test_only_filter_drives_just_the_ticked_items(tmp_path):

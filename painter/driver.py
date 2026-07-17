@@ -161,16 +161,29 @@ class SiteDriver:
         send.click()
 
     def await_done(self, log: Log = print) -> None:
-        """Watch the done edge: the busy signal appears, then goes."""
+        """Watch the done edge: the busy signal appears, then goes.
+
+        A submit does not always take (the send button can be
+        momentarily blocked) — while the busy signal is missing, the
+        send is retried every ``send_retry_after_s`` before the loud
+        give-up at the hard timeout.
+        """
         t = self._timing
         start = time.monotonic()
 
         deadline = start + t.busy_appear_timeout_s
+        next_retry = start + t.send_retry_after_s
         while self._query(self.site.busy_signal) is None:
-            if time.monotonic() > deadline:
+            now = time.monotonic()
+            if now > deadline:
                 self._raise_no_image(
                     "the busy signal never appeared after submit"
+                    " (send retried)"
                 )
+            if now >= next_retry:
+                log("    send did not take — retrying (click + Enter)")
+                self._retry_send()
+                next_retry = time.monotonic() + t.send_retry_after_s
             time.sleep(t.poll_interval_s)
 
         deadline = time.monotonic() + t.generation_timeout_s
@@ -208,6 +221,23 @@ class SiteDriver:
             time.sleep(t.poll_interval_s)
         b64 = img.evaluate(_FETCH_IMAGE_JS)
         return base64.b64decode(b64)
+
+    def _retry_send(self) -> None:
+        """Second chance for a submit that did not take: click the send
+        button again if present, then Enter in the prompt box (both
+        sites send on Enter). Harmless when the text already went —
+        Enter on an empty box does nothing."""
+        send = self._query(self.site.send_button)
+        if send is not None:
+            try:
+                send.click()
+            except Exception:
+                pass  # a blocked click here is fine — the await loop
+                # times out loudly if nothing ever takes
+        box = self._query(self.site.prompt_box)
+        if box is not None:
+            box.click()
+            self.page.keyboard.press("Enter")
 
     # --- DOM plumbing ---------------------------------------------------
 

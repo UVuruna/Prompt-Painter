@@ -14,6 +14,7 @@ report, background fixes) — sheets are READ ONLY by construction.
 from __future__ import annotations
 
 import json
+import random
 import struct
 import time
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from typing import Callable
 
 from painter.config import PROGRESS_SUFFIX, REPORT_SUFFIX, Timing
 from painter.driver import ItemRefused, SiteDriver, sniff_format
-from painter.sheet_parser import Sheet
+from painter.sheet_parser import Sheet, SkippedItem
 
 Log = Callable[[str], None]
 # GUI stop button etc.; checked between items and during the pause
@@ -50,13 +51,15 @@ def _fmt_s(seconds: float) -> str:
     return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
 
 
-def _pause(timing: Timing, should_stop: ShouldStop | None) -> None:
-    """The polite pause between prompts, interruptible by Stop."""
-    pause_end = time.monotonic() + timing.pause_between_prompts_s
+def _pause(timing: Timing, should_stop: ShouldStop | None, log: Log) -> None:
+    """A random polite pause between prompts, interruptible by Stop."""
+    wait = random.uniform(timing.pause_min_s, timing.pause_max_s)
+    log(f"    pause {wait:.2f}s (paced run)")
+    pause_end = time.monotonic() + wait
     while time.monotonic() < pause_end:
         if should_stop is not None and should_stop():
             break
-        time.sleep(min(0.5, timing.pause_between_prompts_s))
+        time.sleep(0.5)
 
 
 class Progress:
@@ -203,7 +206,9 @@ def run_sheet(
             f"  RESUME: {already}/{len(sheet.items)} already done per"
             f" {progress.path.name}"
         )
+    report_skips = list(sheet.skipped)
     if only is not None:
+        # the owner's ticks decide everything — advice included
         selected = [it for it in queue if it.drop_path in only]
         if len(selected) != len(queue):
             log(
@@ -211,8 +216,21 @@ def run_sheet(
                 " item(s) ticked for this run"
             )
         queue = selected
+    else:
+        # no explicit selection: sheet-advised items sit out by default
+        for it in (adv := [it for it in queue if it.advice]):
+            log(f"  NOT RUN (sheet advice): {it.title} — {it.advice}")
+            report_skips.append(
+                SkippedItem(it.title, f"advice, not ticked: {it.advice}", it.line)
+            )
+        if adv:
+            log(
+                "  (tick them in 'Select images...' to generate them"
+                " anyway)"
+            )
+            queue = [it for it in queue if not it.advice]
     if run_report is not None:
-        run_report.start(len(queue), len(sheet.items), sheet.skipped)
+        run_report.start(len(queue), len(sheet.items), tuple(report_skips))
 
     start = time.monotonic()
     total = len(queue)
@@ -251,7 +269,7 @@ def run_sheet(
                 if run_report is not None:
                     run_report.refused(item.drop_path, str(exc))
                 if idx < total:
-                    _pause(timing, should_stop)
+                    _pause(timing, should_stop, log)
                 continue
             gen_s = time.monotonic() - t_item
 
@@ -293,11 +311,7 @@ def run_sheet(
             log(f"    saved {dest} ({len(data):,} bytes)")
 
             if idx < total:
-                log(
-                    f"    pause {timing.pause_between_prompts_s:.0f}s"
-                    " (paced run)"
-                )
-                _pause(timing, should_stop)
+                _pause(timing, should_stop, log)
     except BaseException as exc:
         stopped_why = f"aborted: {type(exc).__name__}"
         raise

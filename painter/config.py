@@ -142,7 +142,10 @@ class Timing:
     # poll instead of failing on a one-shot snapshot
     selector_timeout_s: float = 10.0
     # submit clicked -> the busy signal (stop button) must appear
-    busy_appear_timeout_s: float = 20.0
+    busy_appear_timeout_s: float = 30.0
+    # no busy signal after this long -> click send / press Enter again
+    # (the send button is sometimes momentarily blocked)
+    send_retry_after_s: float = 5.0
     # busy signal seen -> its disappearance (the done edge), hard cap
     generation_timeout_s: float = 420.0
     # done edge -> a real (non-placeholder) result <img> src
@@ -151,8 +154,11 @@ class Timing:
     poll_interval_s: float = 0.5
     # "still generating..." log cadence during long waits
     progress_log_interval_s: float = 15.0
-    # polite pause between prompts (image quotas are real)
-    pause_between_prompts_s: float = 45.0
+    # polite pause between prompts (image quotas are real): a RANDOM
+    # duration drawn uniformly from [min, max], fractional seconds
+    # included (e.g. 12.56s) — less robotic pacing
+    pause_min_s: float = 30.0
+    pause_max_s: float = 75.0
 
 
 TIMING = Timing()
