@@ -649,17 +649,31 @@ class SelectWindow(tk.Toplevel):
                         cb.state(["disabled"])
                     cb.pack(side="left")
                 suffix = ""
-                if any(item.drop_path in done[k][src] for k in site_keys):
-                    suffix += "   (done: " + ", ".join(
-                        SITES[k].name
-                        for k in site_keys
-                        if item.drop_path in done[k][src]
-                    ) + ")"
+                done_sites = [
+                    k for k in site_keys if item.drop_path in done[k][src]
+                ]
+                if done_sites:
+                    suffix += "   ✔ done: " + ", ".join(
+                        SITES[k].name for k in done_sites
+                    )
                 if item.advice:
                     suffix += f"   ⚠ {item.advice[:70]}"
-                ttk.Label(row, text=item.drop_path + suffix).pack(
-                    side="left", padx=8
-                )
+                # color by state: green = done everywhere, red =
+                # superseded, orange = other advice, default = pending
+                if len(done_sites) == len(site_keys):
+                    color = "#2e7d32"
+                elif item.advice and "supersed" in item.advice.lower():
+                    color = "#c62828"
+                elif item.advice:
+                    color = "#b26a00"
+                elif done_sites:
+                    color = "#558b2f"
+                else:
+                    color = ""
+                style = {"foreground": color} if color else {}
+                ttk.Label(
+                    row, text=item.drop_path + suffix, **style
+                ).pack(side="left", padx=8)
 
     def _toggle_sheet(self, site: str, sheet: Sheet) -> None:
         src = str(sheet.source)
