@@ -1,25 +1,26 @@
-"""The run loop — queue, done-edge, save, fix, resume, pace.
+"""The run loop — queue, done-edge, save, fix, report, resume, pace.
 
-Per pending item: paste (prompt + the chosen background suffix) ->
-submit -> await the done edge -> extract bytes -> save under the
-sheet's own drop path -> background fix -> mark done in the sidecar
-``.progress.json`` -> pause -> next. A crash or a quota stop costs
-nothing: the next run resumes past every marked item.
+Per pending item: paste (prompt + the site's rule suffix) -> submit
+-> await the done edge -> extract bytes -> save DIRECTLY under
+``<out_root>/<drop-path>`` -> background fix -> report line -> mark
+done in the sidecar ``.progress.json`` -> pause -> next. A crash or
+a quota stop costs nothing: the next run resumes past every marked
+item, and the report keeps every finished line.
 
-The loop only ever writes under ``out_root`` (the images, the
-progress sidecar, the background fixes) — the sheet and its folder
-are READ ONLY by construction.
+The loop only ever writes under ``out_root`` (images, progress,
+report, background fixes) — sheets are READ ONLY by construction.
 """
 
 from __future__ import annotations
 
 import json
+import struct
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from painter.config import PROGRESS_SUFFIX, Timing
+from painter.config import PROGRESS_SUFFIX, REPORT_SUFFIX, Timing
 from painter.driver import SiteDriver, sniff_format
 from painter.sheet_parser import Sheet
 
@@ -28,6 +29,25 @@ Log = Callable[[str], None]
 ShouldStop = Callable[[], bool]
 # background fix: (saved file) -> action string; exceptions are logged
 PostSave = Callable[[Path], str]
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _png_size(data: bytes) -> str:
+    """WxH from a PNG header (all saved images are PNG), else '?'."""
+    if len(data) >= 24 and data.startswith(_PNG_MAGIC):
+        width, height = struct.unpack(">II", data[16:24])
+        return f"{width}x{height}"
+    return "?"
+
+
+def _now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _fmt_s(seconds: float) -> str:
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
 
 
 class Progress:
@@ -54,6 +74,71 @@ class Progress:
         tmp.replace(self.path)
 
 
+class RunReport:
+    """``<out_root>/<sheet-stem>_report.txt`` — appended per run.
+
+    Written INCREMENTALLY (header, then a line per image, then the
+    summary) so an interrupted run keeps every finished line.
+    """
+
+    def __init__(self, path: Path, theme: str, site_name: str):
+        self.path = path
+        self._theme = theme
+        self._site = site_name
+        self._gen_times: list[float] = []
+        self._extra_times: list[float] = []
+
+    def _append(self, text: str) -> None:
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+
+    def start(self, pending: int, total: int) -> None:
+        self._append("=" * 68)
+        self._append(f"{self._theme}  [{self._site}]")
+        self._append(f"Run started:  {_now()}  ({pending}/{total} pending)")
+        self._append("-" * 68)
+
+    def item(
+        self,
+        drop_path: str,
+        gen_s: float,
+        extra_s: float,
+        orig_res: str,
+        final_res: str,
+        actions: list[str],
+    ) -> None:
+        self._gen_times.append(gen_s)
+        self._extra_times.append(extra_s)
+        note = f"  [{', '.join(actions)}]" if actions else ""
+        resolution = (
+            f"{orig_res} -> {final_res}"
+            if final_res not in ("", orig_res)
+            else orig_res
+        )
+        self._append(
+            f"{_now()}  {drop_path:<44} gen {gen_s:6.1f}s"
+            f"  {resolution}{note}"
+        )
+
+    def finish(self, generated: int, wall_s: float, stopped_why: str) -> None:
+        self._append("-" * 68)
+        if self._gen_times:
+            avg = sum(self._gen_times) / len(self._gen_times)
+            self._append(
+                f"Images: {generated}  |  average generation:"
+                f" {_fmt_s(avg)}/image"
+            )
+            self._append(
+                "Total generation + processing:"
+                f" {_fmt_s(sum(self._gen_times) + sum(self._extra_times))}"
+                f"  (wall clock incl. pauses: {_fmt_s(wall_s)})"
+            )
+        else:
+            self._append("Images: 0")
+        self._append(f"Run finished: {_now()}  ({stopped_why})")
+        self._append("")
+
+
 def run_sheet(
     sheet: Sheet,
     driver: SiteDriver,
@@ -62,7 +147,8 @@ def run_sheet(
     log: Log = print,
     should_stop: ShouldStop | None = None,
     post_save: PostSave | None = None,
-    prompt_suffix: str = "",
+    prompt_suffix: str | Callable[[str], str] = "",
+    report: bool = True,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -71,6 +157,15 @@ def run_sheet(
     """
     out_root.mkdir(parents=True, exist_ok=True)
     progress = Progress(out_root / (sheet.source.stem + PROGRESS_SUFFIX))
+    run_report = (
+        RunReport(
+            out_root / (sheet.source.stem + REPORT_SUFFIX),
+            sheet.theme,
+            driver.site.name,
+        )
+        if report
+        else None
+    )
 
     for sk in sheet.skipped:
         log(f"  SKIP {sk.title} — {sk.reason}")
@@ -82,52 +177,97 @@ def run_sheet(
             f"  RESUME: {already}/{len(sheet.items)} already done per"
             f" {progress.path.name}"
         )
+    if run_report is not None:
+        run_report.start(len(queue), len(sheet.items))
 
     start = time.monotonic()
     total = len(queue)
     generated = 0
     fix_failures = 0
-    for idx, item in enumerate(queue, start=1):
-        if should_stop is not None and should_stop():
-            log(f"  STOPPED on request — {generated}/{total} done this run")
-            break
-        elapsed = time.monotonic() - start
-        log(f"[{elapsed:7.1f}s] ({idx}/{total}) {item.title}")
-        driver.submit_prompt(item.prompt + prompt_suffix)
-        driver.await_done(log)
-        data = driver.extract_image()
+    stopped_why = "all pending items done"
+    try:
+        for idx, item in enumerate(queue, start=1):
+            if should_stop is not None and should_stop():
+                stopped_why = "stopped on request"
+                log(f"  STOPPED on request — {generated}/{total} this run")
+                break
+            elapsed = time.monotonic() - start
+            log(f"[{elapsed:7.1f}s] ({idx}/{total}) {item.title}")
 
-        dest = out_root / item.drop_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(data)
-        fmt = sniff_format(data)
-        if fmt != dest.suffix.lstrip(".").lower():
-            log(
-                f"    WARNING: bytes look like {fmt or 'an unknown format'},"
-                f" saved as {dest.suffix} because the sheet names the file"
+            t_item = time.monotonic()
+            # the suffix may depend on the prompt itself (Gemini's
+            # aspect law: lancets portrait, badges square)
+            suffix = (
+                prompt_suffix(item.prompt)
+                if callable(prompt_suffix)
+                else prompt_suffix
             )
-        if post_save is not None:
-            try:
-                action = post_save(dest)
-                log(f"    bgfix: {action}")
-            except Exception as exc:
-                fix_failures += 1
-                log(f"    BGFIX FAILED (image kept as saved): {exc}")
-        progress.mark_done(item.drop_path, dest)
-        generated += 1
-        log(f"    saved {dest} ({len(data):,} bytes)")
+            driver.submit_prompt(item.prompt + suffix)
+            driver.await_done(log)
+            data = driver.extract_image()
+            gen_s = time.monotonic() - t_item
 
-        if idx < total:
-            log(f"    pause {timing.pause_between_prompts_s:.0f}s (paced run)")
-            pause_end = time.monotonic() + timing.pause_between_prompts_s
-            while time.monotonic() < pause_end:
-                if should_stop is not None and should_stop():
-                    break
-                time.sleep(min(0.5, timing.pause_between_prompts_s))
+            dest = out_root / item.drop_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+            orig_res = _png_size(data)
+            fmt = sniff_format(data)
+            if fmt != dest.suffix.lstrip(".").lower():
+                log(
+                    f"    WARNING: bytes look like"
+                    f" {fmt or 'an unknown format'}, saved as"
+                    f" {dest.suffix} because the sheet names the file"
+                )
+
+            actions: list[str] = []
+            extra_s = 0.0
+            final_res = orig_res
+            if post_save is not None:
+                t_fix = time.monotonic()
+                try:
+                    action = post_save(dest)
+                    actions.append(f"REMOVE BG: {action}")
+                    log(f"    bgfix: {action}")
+                except Exception as exc:
+                    fix_failures += 1
+                    actions.append("REMOVE BG: FAILED")
+                    log(f"    BGFIX FAILED (image kept as saved): {exc}")
+                extra_s = time.monotonic() - t_fix
+                final_res = _png_size(dest.read_bytes())
+
+            if run_report is not None:
+                run_report.item(
+                    item.drop_path, gen_s, extra_s, orig_res, final_res,
+                    actions,
+                )
+            progress.mark_done(item.drop_path, dest)
+            generated += 1
+            log(f"    saved {dest} ({len(data):,} bytes)")
+
+            if idx < total:
+                log(
+                    f"    pause {timing.pause_between_prompts_s:.0f}s"
+                    " (paced run)"
+                )
+                pause_end = (
+                    time.monotonic() + timing.pause_between_prompts_s
+                )
+                while time.monotonic() < pause_end:
+                    if should_stop is not None and should_stop():
+                        break
+                    time.sleep(min(0.5, timing.pause_between_prompts_s))
+    except BaseException as exc:
+        stopped_why = f"aborted: {type(exc).__name__}"
+        raise
+    finally:
+        if run_report is not None:
+            run_report.finish(
+                generated, time.monotonic() - start, stopped_why
+            )
 
     if fix_failures:
         log(
             f"  NOTE: background fix failed on {fix_failures} image(s) —"
-            " rerun the DOMY tool over the output folder later"
+            " rerun painter/bg_remove.py over the output folder later"
         )
     return generated

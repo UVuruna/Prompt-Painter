@@ -5,6 +5,7 @@ of fallbacks tried in order, and when none match the driver FAILS
 LOUDLY (root Rule #1) instead of guessing.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,13 +32,13 @@ CHROME_LAUNCH_TIMEOUT_S = 30.0
 
 # --- Output ----------------------------------------------------------
 
-# Phase one: generation writes to <out>/_staging/<site>/<drop-path>;
-# phase two: the owner reviews and approval moves each image to
-# <out>/<site>/<drop-path>. Per-site sidecar state lives beside the
-# staged images: <out>/_staging/<site>/<sheet-stem>.progress.json
+# Images save DIRECTLY to <out>/<site>/<drop-path> (owner
+# 2026-07-17: no approval step). Per-site sidecar state and the run
+# report live beside them: <out>/<site>/<sheet-stem>.progress.json
+# and <out>/<site>/<sheet-stem>_report.txt
 DEFAULT_OUT_DIR = PROJECT_ROOT / "out"
-STAGING_DIRNAME = "_staging"
 PROGRESS_SUFFIX = ".progress.json"
+REPORT_SUFFIX = "_report.txt"
 
 # --- The sheet contract ----------------------------------------------
 
@@ -56,30 +57,78 @@ SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
 BG_FIX_CROP = True  # autocrop to the visible subject after clearing
 
 
-# --- Background prompt suffixes (GUI-selectable) ---------------------
+# --- Prompt rules appended per site (owner 2026-07-17) ---------------
 
-# Appended to every prompt. The GUI picks the mode: 'auto' uses each
-# site's default below (ChatGPT can do real transparency, Gemini
-# cannot — white is what the background fix then clears).
-BACKGROUND_SUFFIXES = {
+# The GUI shows ONE background dropdown PER SITE; the default
+# selection is the site's default_background (ChatGPT transparent —
+# it can do real alpha; Gemini white — the background fix clears it).
+BACKGROUND_CHOICES = ("transparent", "white", "none")
+
+_BACKGROUND_RULE = {
     "transparent": (
-        "\n\nIMPORTANT: render on a fully TRANSPARENT background"
-        " (PNG with alpha channel, no backdrop of any kind)."
+        "render on a fully TRANSPARENT background (PNG with alpha"
+        " channel, no backdrop of any kind)"
     ),
     "white": (
-        "\n\nIMPORTANT: render the artwork on a PLAIN PURE WHITE"
-        " background — flat white, no gradients, no vignette, no"
-        " backdrop scenery."
+        "render on a PLAIN PURE WHITE background — flat white, no"
+        " gradients, no vignette, no backdrop scenery"
     ),
-    "none": "",
+    "none": None,
 }
-BACKGROUND_MODES = ("auto", "transparent", "white", "none")
+
+# Extra laws forced into EVERY prompt of a site. Gemini's weaker
+# model drifts (wrong ratios, glossy reflections under the subject —
+# the rondel_Dawn / rondel_Shield case), so it gets hard rules.
+SITE_PROMPT_RULES = {
+    "chatgpt": (),
+    "gemini": (
+        "absolutely NO reflections — no mirror effect, no glossy"
+        " floor, no reflective surface under or around the subject",
+    ),
+}
+
+# Gemini's aspect-ratio law DEPENDS ON THE IMAGE (owner 2026-07-17):
+# most plates are badges/rondels/medallions -> a perfect square, but
+# the church-window lancets are clearly taller than wide. The rule is
+# picked from the PROMPT TEXT itself — first pattern that matches
+# wins; the default is the square.
+GEMINI_ASPECT_RULES = (
+    (
+        re.compile(r"\bTALL\b|\blancet\b", re.IGNORECASE),
+        "ASPECT RATIO tall PORTRAIT — the image must be clearly"
+        " TALLER than it is wide (around 2:3), matching the tall"
+        " window shape described; never landscape, never square",
+    ),
+)
+GEMINI_ASPECT_DEFAULT = (
+    "ASPECT RATIO exactly 1:1 — a perfect square image"
+)
 
 
-def background_suffix(mode: str, site: "SiteConfig") -> str:
-    """The prompt suffix for a chosen background mode on one site."""
-    key = site.default_background if mode == "auto" else mode
-    return BACKGROUND_SUFFIXES[key]
+def _gemini_aspect_rule(prompt_text: str) -> str:
+    for pattern, rule in GEMINI_ASPECT_RULES:
+        if pattern.search(prompt_text):
+            return rule
+    return GEMINI_ASPECT_DEFAULT
+
+
+def prompt_suffix(site_key: str, background: str, prompt_text: str = "") -> str:
+    """The rule block appended to one prompt of one site."""
+    rules = []
+    if site_key == "gemini":
+        rules.append(_gemini_aspect_rule(prompt_text))
+    bg_rule = _BACKGROUND_RULE[background]
+    if bg_rule:
+        rules.append(bg_rule)
+    rules.extend(SITE_PROMPT_RULES[site_key])
+    if not rules:
+        return ""
+    if len(rules) == 1:
+        return f"\n\nIMPORTANT: {rules[0]}."
+    numbered = " ".join(
+        f"{n}) {rule}." for n, rule in enumerate(rules, start=1)
+    )
+    return f"\n\nIMPORTANT — follow ALL rules strictly: {numbered}"
 
 
 # --- Timing ----------------------------------------------------------

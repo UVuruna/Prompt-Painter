@@ -1,20 +1,21 @@
 """Offline tests for the run loop — a fake driver, a temp out folder.
 
-Covers what needs no browser: the background suffix, the
-out/<drop-path> layout, resume via the progress sidecar, the stop
-flag, and the loud-but-not-fatal background-fix hook.
+Covers what needs no browser: the per-site rule suffix, the
+out/<drop-path> layout, the report txt, resume via the progress
+sidecar, the stop flag, and the loud-but-not-fatal background-fix
+hook.
 """
 
 from dataclasses import replace
 from pathlib import Path
 
-from painter.config import SITES, TIMING, background_suffix
+from painter.config import SITES, TIMING, prompt_suffix
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
 FAST = replace(TIMING, pause_between_prompts_s=0.0)
 
-# a real 1x1 PNG so sniff_format sees PNG bytes
+# a real 1x1 PNG so sniff_format and the report see PNG bytes
 PNG_1PX = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
     "0000000d4944415478da63fcffff3f030005fe02fea72d994800000000"
@@ -50,25 +51,64 @@ def make_sheet(tmp_path: Path, n: int = 2) -> Sheet:
     return Sheet("Fake Theme", source, items, skipped, ())
 
 
-def test_suffix_layout_progress_and_resume(tmp_path):
+def test_prompt_suffix_rules():
+    gemini_white = prompt_suffix("gemini", "white")
+    # the owner's three laws for Gemini, forced into every prompt
+    assert "PURE WHITE" in gemini_white
+    assert "1:1" in gemini_white
+    assert "NO reflections" in gemini_white
+
+    chatgpt_default = prompt_suffix("chatgpt", "transparent")
+    assert "TRANSPARENT" in chatgpt_default
+    assert "1:1" not in chatgpt_default  # laws are Gemini-only
+
+    assert prompt_suffix("chatgpt", "none") == ""
+    # Gemini keeps its laws even with no background rule
+    assert "1:1" in prompt_suffix("gemini", "none")
+
+
+def test_gemini_aspect_depends_on_the_prompt():
+    lancet = prompt_suffix(
+        "gemini",
+        "white",
+        "TALL pointed-arch lancet stained-glass window, night-window"
+        " register ...",
+    )
+    assert "PORTRAIT" in lancet
+    assert "1:1" not in lancet
+
+    rondel = prompt_suffix(
+        "gemini", "white", "SMALL round stained-glass rondel ..."
+    )
+    assert "1:1" in rondel
+    assert "PORTRAIT" not in rondel
+
+
+def test_suffix_layout_report_and_resume(tmp_path):
     sheet = make_sheet(tmp_path)
     out = tmp_path / "out" / "gemini"
     driver = FakeDriver(SITES["gemini"])
     logs: list[str] = []
-    suffix = background_suffix("auto", SITES["gemini"])
+    suffix = prompt_suffix("gemini", "white")
 
     generated = run_sheet(
         sheet, driver, out, FAST, log=logs.append, prompt_suffix=suffix
     )
     assert generated == 2
-    # Gemini's auto background is flat white, appended to every prompt
-    assert "PURE WHITE" in suffix
     assert driver.submitted[0] == "prompt 0" + suffix
-    # the drop path IS the out path
+    # the drop path IS the out path — saved directly, no staging
     assert (out / "fake" / "img_0.png").read_bytes() == PNG_1PX
     assert (out / "fake_prompts.progress.json").exists()
     # skipped entries are logged, never driven
     assert any("Old Seat" in line for line in logs)
+
+    # the report: header, one line per image with resolution, summary
+    report = (out / "fake_prompts_report.txt").read_text(encoding="utf-8")
+    assert "Fake Theme  [Gemini]" in report
+    assert report.count("fake/img_") == 2
+    assert "1x1" in report  # the PNG's parsed resolution
+    assert "average generation" in report
+    assert "Run finished" in report
 
     # resume: a second run drives nothing
     driver2 = FakeDriver(SITES["gemini"])
@@ -76,11 +116,11 @@ def test_suffix_layout_progress_and_resume(tmp_path):
     assert driver2.submitted == []
 
 
-def test_background_modes():
-    assert background_suffix("auto", SITES["chatgpt"]) != ""
-    assert "TRANSPARENT" in background_suffix("auto", SITES["chatgpt"])
-    assert background_suffix("none", SITES["gemini"]) == ""
-    assert "PURE WHITE" in background_suffix("white", SITES["chatgpt"])
+def test_no_report_flag(tmp_path):
+    sheet = make_sheet(tmp_path)
+    out = tmp_path / "out" / "chatgpt"
+    run_sheet(sheet, FakeDriver(SITES["chatgpt"]), out, FAST, report=False)
+    assert not (out / "fake_prompts_report.txt").exists()
 
 
 def test_stop_flag_stops_between_items(tmp_path):
@@ -98,6 +138,8 @@ def test_stop_flag_stops_between_items(tmp_path):
     )
     assert generated == 1
     assert len(driver.submitted) == 1
+    report = (out / "fake_prompts_report.txt").read_text(encoding="utf-8")
+    assert "stopped on request" in report
 
 
 def test_bgfix_hook_runs_and_failure_is_loud_not_fatal(tmp_path):
@@ -121,3 +163,7 @@ def test_bgfix_hook_runs_and_failure_is_loud_not_fatal(tmp_path):
     assert any("bgfix: white" in line for line in logs)
     assert any("BGFIX FAILED" in line for line in logs)
     assert any("failed on 1 image(s)" in line for line in logs)
+    # the report names the extra action per image
+    report = (out / "fake_prompts_report.txt").read_text(encoding="utf-8")
+    assert "REMOVE BG: white" in report
+    assert "REMOVE BG: FAILED" in report
