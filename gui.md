@@ -38,7 +38,10 @@ sheets, press Start, go ride a bike.
   output folder) show disabled; sheet-ADVISED items (REUSE /
   not-approved sections) show unticked with the ⚠ reason — tick
   them to generate them anyway. Without any explicit ticks, a run
-  skips advised items by default.
+  skips advised items by default. Rows are COLOR-CODED: green =
+  done on both sites (olive = done on one), red = SUPERSEDED
+  advice, orange = other advice (not approved / REUSE), default =
+  pending.
 - **BG removal only...** — standalone background removal, in
   place, over any existing folder (confirmation first;
   already-transparent and unclear images are skipped untouched).

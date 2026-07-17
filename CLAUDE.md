@@ -114,6 +114,16 @@ Per theme `.md` file:
    listed — there is nothing to load.
 5. A heading the parser cannot pair with a prompt is REPORTED
    loudly (the fix belongs in the sheet, not in parser leniency).
+6. The parser ALSO reads the pre-convention legacy forms
+   (2026-07-17), best-effort and never loud: heading entries
+   (`### Name (\`file.png\`)`), whole-paragraph bold tokens
+   (`**Sun** — \`sun.png\``), and bare bold names under a section
+   heading that carries a backticked drop dir (the astrology
+   sheet). Legacy oddities — reuse pointers with duplicate or
+   escaping paths, unpaired mentions — are silently ignored so old
+   sheets never block a batch. Sheets whose entries carry NO
+   filenames at all (intelligences, mood, sin, virtue, instrument,
+   season_trinity) still need the filenames added in the sheet.
 
 ## The DOM States (keep in ONE config block, with fallbacks)
 

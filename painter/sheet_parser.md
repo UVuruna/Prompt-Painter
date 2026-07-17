@@ -16,6 +16,24 @@ leniency.
    carries `→ \`drop/path.png\`` — headings and paths may wrap
    across lines, plain text may sit between the bold span and the
    arrow, and the heading itself may contain single backticks.
+   An arrow whose target is not an image file, or whose bold title
+   ends with `:`, is prose (the weekday "Drop dirs" pointers).
+
+## The legacy forms it also reads (best-effort, never loud)
+
+The pre-convention sheets carry three older entry shapes; all
+three LOAD, but their oddities (unpaired mentions, duplicate or
+escaping paths — the REUSE pointers) are silently ignored instead
+of reported, so old sheets never block a batch:
+
+- **Heading entry** — `### Sun — Ancient of Days (\`file.png\`)`:
+  a `##`/`###` heading carrying exactly ONE backticked image name
+  (bible2, bible_theme, planet_art, planets ...).
+- **Bold token** — `**Sun** — \`sun.png\``: the whole paragraph is
+  the bold name plus one backticked image name (planet_signs).
+- **Bare bold under a dir section** — `**Aries**` alone below
+  `## SIGN look (\`assets/zodiac/astrology/sign/\`)`: the drop
+  path becomes `sign/Aries.png` (astrology).
 3. The FIRST fenced code block after the entry is the prompt,
    byte-identical.
 4. Skip markers (`REUSE`, `SUPERSEDED`, `DO NOT GENERATE` —
