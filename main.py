@@ -90,6 +90,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not write the per-sheet report txt",
     )
     p.add_argument(
+        "--safer-retry",
+        action="store_true",
+        help=(
+            "on a SAFETY refusal, retry the item ONCE with an"
+            " allegory-framing preamble before giving up"
+        ),
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="parse and report the sheets only — no browser needed",
@@ -219,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
                 post_save=post_save,
                 prompt_suffix=suffix,
                 report=not args.no_report,
+                safer_retry=args.safer_retry,
             )
         print(
             f"\nDone: {total} image(s) across {len(sheets)} sheet(s)"
