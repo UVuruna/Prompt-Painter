@@ -22,10 +22,10 @@ consumer: DOMY Watch prompt sheets.
 
 ```
 📁 PromptPainter/
-  🐍 gui.py             ← the front door (tkinter)
-  📝 gui.md
-  🐍 main.py            ← single-site CLI
+  🐍 main.py            ← THE entry point (no args: GUI; sheet: CLI)
   📝 main.md
+  🐍 gui.py             ← the tkinter window (main.py opens it)
+  📝 gui.md
   ⚙️ requirements.txt   ← playwright, numpy/scipy/pillow, pytest
   📁 assets/
     🖼️ logo.svg
@@ -64,8 +64,8 @@ consumer: DOMY Watch prompt sheets.
 ```bash
 pip install -r requirements.txt
 
-# the front door
-python gui.py
+# the front door — no arguments opens the GUI
+python main.py
 ```
 
 In the window: pick the sheet and the output folder, tick Gemini /

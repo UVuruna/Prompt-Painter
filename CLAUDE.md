@@ -39,8 +39,9 @@ is the binding spec.
 
 ## The Workflow (owner 2026-07-17 — supersedes where it differs)
 
-1. The owner starts the **GUI** (`python gui.py`) — the usual front
-   door; the CLI (`python main.py`) stays for single-site runs.
+1. The owner starts the app with **`python main.py`** — no
+   arguments opens the GUI (the usual front door); a sheet
+   argument runs the single-site CLI instead.
 2. He picks the sheet `.md` and the OUTPUT folder.
 3. He picks the sites: **Gemini, ChatGPT, or BOTH IN PARALLEL** —
    one window and one thread per site, each at its own pace (this

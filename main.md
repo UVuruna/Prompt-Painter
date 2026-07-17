@@ -1,21 +1,25 @@
-# Main (CLI)
+# Main (Entry Point)
 
 **Script:** [Main (script)](main.py)
 
 ## Purpose
-The single-site command-line entry point ([GUI](gui.md) is the
-usual front door): parse the sheet, print the full report, refuse
-contract-violating sheets, guarantee a debuggable Chrome, and hand
-off to the run loop.
+THE way into the application. With no arguments it opens the
+[GUI](gui.md); with a sheet argument it is the single-site CLI:
+parse the sheet, print the full report, refuse contract-violating
+sheets, guarantee a debuggable Chrome, and hand off to the run
+loop.
 
 ## Usage
 
 ```bash
+# the front door — opens the GUI
+python main.py
+
 # validate a sheet offline (no browser, no playwright needed)
 python main.py "path/to/theme_prompts.md" --dry-run
 
-# the supervised run; if no debuggable Chrome answers, the tool
-# opens the automation Chrome itself (log in once, rerun)
+# the supervised single-site run; if no debuggable Chrome answers,
+# the tool opens the automation Chrome itself (log in once, rerun)
 python main.py "path/to/theme_prompts.md" --site gemini
 ```
 

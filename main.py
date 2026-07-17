@@ -1,9 +1,10 @@
-"""PromptPainter CLI — supervised image generation from a prompt sheet.
+"""PromptPainter — the single entry point.
 
-The GUI (`python gui.py`) is the usual way in; this CLI drives ONE
-site per invocation.
+No arguments -> opens the GUI (the usual way in). With a sheet
+argument -> the CLI, driving ONE site per invocation.
 
 Usage:
+    python main.py
     python main.py "path/to/theme_prompts.md" --site gemini
     python main.py "path/to/theme_prompts.md" --dry-run
 """
@@ -34,7 +35,12 @@ def build_parser() -> argparse.ArgumentParser:
             " Gemini/ChatGPT tab over CDP — supervised, paced, resumable."
         ),
     )
-    p.add_argument("sheet", type=Path, help="the prompt-sheet .md file")
+    p.add_argument(
+        "sheet",
+        type=Path,
+        nargs="?",
+        help="the prompt-sheet .md file (omit everything to open the GUI)",
+    )
     p.add_argument(
         "--site",
         choices=sorted(SITES),
@@ -106,6 +112,12 @@ def report(sheet: Sheet) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.sheet is None:
+        import gui
+
+        gui.main()
+        return 0
 
     try:
         sheet = parse_sheet(args.sheet)
