@@ -1,6 +1,12 @@
 # Generated images and run state
 out/
 
+# The owner's private material shown to agents (never committed)
+UV/
+
+# The dedicated Chrome automation profile (logged-in sessions)
+chrome-profile/
+
 # Python
 __pycache__/
 *.pyc
