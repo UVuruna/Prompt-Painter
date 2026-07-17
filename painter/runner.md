@@ -35,22 +35,26 @@ silently restarts a run.
 The per-sheet report `<out_root>/<sheet-stem>_report.txt`,
 APPENDED per run and written INCREMENTALLY (header → a line per
 image → summary), so an interrupted run keeps every finished line.
-Per image: completion timestamp, **generate** seconds (SEND →
-image), **process** seconds (image → saved+fixed), original →
-final resolution (PNG header parse, stdlib only), final file size,
-extra actions (`REMOVE BG: <action>`). Summary: image count,
-average generation AND average processing per image, total
-generate + process, wall clock incl. pauses, run start/finish
-timestamps and why the run ended.
+Per image: completion timestamp, **gen** seconds (AI: SEND →
+image), **ours** seconds (save + bgfix + pause), original → final
+resolution (PNG header parse, stdlib only), final file size, extra
+actions (`REMOVE BG: <action>`). Summary: image count, average
+generation (AI) AND average our-time per image, their total, wall
+clock, run start/finish timestamps and why the run ended.
 
-## The two timings (owner 2026-07-17)
+## The two timings (owner 2026-07-17 — "sve se računa")
 
-- **generate** `gen_s = t_image − t_send` — pure AI time from the
-  SEND click to the image appearing (excludes the input
-  hesitation, which is timed inside `submit_prompt`).
-- **process** `proc_s = t_saved − t_image` — our side: writing the
-  file plus the background fix. (The paced pause between prompts is
-  a separate, configured value, not folded into this average.)
+Every image's wall time splits cleanly into two, and they sum:
+
+- **AI generate** `gen_s = t_image − t_send` — from the SEND click
+  to the image appearing.
+- **our time** `over_s` — everything WE do until the next SEND:
+  writing the file, the background fix, AND the paced pause. Timed
+  as `now − t_image` after the pause (the last image has no pause).
+
+The image is counted the instant it is saved (an `item_progress`
+event) so the dashboard never stalls; the `item_done` event with
+`over_s` follows once the pause has elapsed.
 
 ## Functions
 
@@ -58,9 +62,10 @@ timestamps and why the run ended.
   post_save, prompt_suffix, report, only, on_event, safer_retry)
   -> int` — `on_event` receives structured progress dicts:
   `sheet_start` (sheet, pending, total), `item_start` (title, idx,
-  of), `item_retry`, `item_done` (title, drop_path, gen_s, proc_s,
-  orig_res, final_res, size), `item_refused`, `sheet_done`
-  (generated) — the GUI dashboard is built from these. Logs the
+  of), `item_retry`, `item_progress` (idx, of, gen_s — the live
+  count), `item_done` (title, drop_path, gen_s, over_s, orig_res,
+  final_res, size), `item_refused`, `sheet_done` (generated) — the
+  GUI dashboard is built from these. Logs the
   sheet's skipped entries, filters the queue through `Progress`,
   drives every pending item, appends `prompt_suffix` (the caller
   resolves the per-site rules), runs the `post_save` background fix

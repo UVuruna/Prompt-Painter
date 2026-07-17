@@ -12,10 +12,13 @@ the dashboard and the selection list.
 
 ## The window
 
-- **Themes** — a QUEUE of one or more prompt-sheet `.md` files
-  (each file is one THEME; Add / Remove / Clear). Each site works
-  through the queue in order, closing theme after theme; broken
-  sheets are reported and dropped from the run, never half-driven.
+- **Collections** — a QUEUE of one or more prompt `.md` files (each
+  file is one COLLECTION — a set of images to make: a theme, an icon
+  set, a landscape series …; Add / Remove / Clear). Each site works
+  through the queue in order, closing collection after collection;
+  broken files are reported and dropped, never half-driven. Two
+  queued files that share a filename are refused (their progress and
+  report would collide).
 - **Output** — the folder; images save DIRECTLY to
   `<out>/<site>/<drop-path>` (no approval step).
 - **Sites** — Gemini / ChatGPT checkboxes; both ticked = both run
@@ -30,8 +33,9 @@ the dashboard and the selection list.
   start/finish timestamps, per-image generate + process times,
   original → final resolution, file size, extra actions (REMOVE
   BG), averages and totals.
-- **Safer retry on refusal** — opt-in: on a SAFETY refusal, re-send
-  the item ONCE with an allegory-framing preamble before giving up.
+- **Safer retry on refusal** — ON by default: on a SAFETY refusal,
+  re-send the item ONCE with an allegory-framing preamble before
+  giving up (then it just moves on — rework the prompt later).
 - **Open Chrome (login)** — launches the automation Chrome
   (dedicated `chrome-profile/`; log in once, sessions persist).
 - **Check sheets** — parses the whole queue into the log.
@@ -69,17 +73,17 @@ Two scrollable columns, one `DashPanel` per site, fed ONLY by the
 runner's structured events (never by log-parsing):
 
 - **Task** — a whole-run progress bar and `done / total
-  (themes-done/themes)` across every queued theme (pre-counted at
-  Start by `_plan`, which mirrors the runner's queue rule).
-- **Theme / Image** — the current theme, the current image, and a
-  per-theme progress bar.
-- **Stats table** — two columns, `This theme` and `Task`, over
-  Done, Refused, **Generate avg** (SEND → image), **Process avg**
-  (image → saved), Tempo (/h) and ETA. Title/value pairs, not one
-  crammed line.
-- **Completed themes** — a collapsible `Expander` per finished
-  theme: `done/total · time · MB · folders`, expanding to every
-  file with its generate/process times, resolution and size.
+  (done/collections)` across every queued collection (pre-counted
+  at Start by `_plan`, which mirrors the runner's queue rule).
+- **File / Image** — the current collection file, the current
+  image, and a per-collection progress bar.
+- **Stats table** — two columns, `This one` and `Whole run`, over
+  Done, Refused, **AI generate avg** (SEND → image), **Our time
+  avg** (save + bgfix + pause — "sve se računa"), Tempo (/h) and
+  ETA. Title/value pairs, not one crammed line.
+- **Completed collections** — a collapsible `Expander` per finished
+  collection: `done/total · time · MB · folders`, expanding to
+  every file with its AI/our times, resolution and size.
 
 ## Threading
 One worker thread per site; each creates its own Playwright
