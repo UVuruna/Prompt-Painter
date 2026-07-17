@@ -17,7 +17,6 @@ of finished themes) and the detailed **Log**.
 from __future__ import annotations
 
 import json
-import os
 import queue
 import threading
 import time
@@ -256,18 +255,23 @@ class DashPanel(ttk.Frame):
         # column headers + both scrollbars
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, pady=(2, 0))
-        cols = ("gen", "our", "res", "size")
-        self.tree = ttk.Treeview(wrap, columns=cols, height=7)
-        self.tree.heading("#0", text="Collection / file")
-        self.tree.column("#0", width=240, minwidth=150, stretch=True)
-        for cid, txt, w in (
-            ("gen", "AI", 60),
-            ("our", "Ours", 60),
-            ("res", "Resolution", 110),
-            ("size", "Size", 74),
+        # three levels: collection > folder > image. Aggregate rows
+        # (collection, folder) fill Done/Time/Size; image rows fill
+        # AI/Ours/Res/Size. Everything stays column-aligned.
+        cols = ("done", "ai", "our", "res", "time", "size")
+        self.tree = ttk.Treeview(wrap, columns=cols, height=8)
+        self.tree.heading("#0", text="Name")
+        self.tree.column("#0", width=230, minwidth=140, stretch=True)
+        for cid, txt, w, anc in (
+            ("done", "Done", 56, "center"),
+            ("ai", "AI", 52, "e"),
+            ("our", "Ours", 52, "e"),
+            ("res", "Res", 100, "center"),
+            ("time", "Time", 64, "e"),
+            ("size", "Size", 72, "e"),
         ):
             self.tree.heading(cid, text=txt)
-            self.tree.column(cid, width=w, minwidth=w, anchor="e",
+            self.tree.column(cid, width=w, minwidth=w, anchor=anc,
                              stretch=False)
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(
@@ -316,8 +320,11 @@ class DashPanel(ttk.Frame):
         self._theme_folders: set[str] = set()
         self._t_theme = time.monotonic()
         # the collection's live row appears on its first image (lazily,
-        # so fully-resumed collections never add an empty row)
+        # so fully-resumed collections never add an empty row); folders
+        # nest under it, images under their folder
         self._tree_item: str | None = None
+        self._folder_nodes: dict[str, str] = {}  # folder -> tree row id
+        self._folder_stats: dict[str, dict] = {}  # folder -> agg dict
         self._child_ids: dict[str, str] = {}  # drop_path -> tree row id
 
     # --- events (main thread, via the queue pump) ----------------------
@@ -336,42 +343,54 @@ class DashPanel(ttk.Frame):
             )
         elif kind == "item_progress":
             # the image is saved — count it live AND add it to the table
-            # now (its our-time fills in after the pause, at item_done)
+            # under its FOLDER now (our-time fills in at item_done)
             self._theme_done += 1
             self._task_done += 1
             self._theme_gen.append(event["gen_s"])
             self._task_gen.append(event["gen_s"])
             self._theme_bytes += event["size"]
-            self._theme_folders.add(
-                PurePosixPath(event["drop_path"]).parent.as_posix()
-            )
-            parent = self._ensure_parent()
+            drop = event["drop_path"]
+            folder = self._folder_of(drop)
+            self._theme_folders.add(folder)
+            fnode = self._ensure_folder(folder)
+            st = self._folder_stats[folder]
+            st["done"] += 1
+            st["size"] += event["size"]
             res = event["orig_res"]
             if event["final_res"] not in ("", event["orig_res"]):
                 res = f"{event['orig_res']}→{event['final_res']}"
             child = self.tree.insert(
-                parent, "end", text=event["drop_path"],
+                fnode, "end", text=PurePosixPath(drop).name,
                 values=(
-                    f"{event['gen_s']:.0f}s", "…", res,
+                    "", f"{event['gen_s']:.0f}s", "…", res, "",
                     fmt_size(event["size"]),
                 ),
             )
-            self._child_ids[event["drop_path"]] = child
+            self._child_ids[drop] = child
+            self._update_folder(folder)
             self._update_parent()
         elif kind == "item_done":
-            # our-time (incl. pause) known now — fill the child's column
-            self._theme_over.append(event["over_s"])
-            self._task_over.append(event["over_s"])
-            child = self._child_ids.get(event["drop_path"])
+            # our-time known now — fill the image's column + folder time
+            over = event["over_s"]
+            self._theme_over.append(over)
+            self._task_over.append(over)
+            drop = event["drop_path"]
+            child = self._child_ids.get(drop)
             if child is not None:
-                self.tree.set(child, "our", f"{event['over_s']:.0f}s")
+                self.tree.set(child, "our", f"{over:.0f}s")
+            folder = self._folder_of(drop)
+            st = self._folder_stats.get(folder)
+            if st is not None:
+                st["time"] += event["gen_s"] + over
+                self._update_folder(folder)
         elif kind == "item_refused":
             self._theme_refused += 1
             self._task_refused += 1
-            parent = self._ensure_parent()
+            drop = event.get("drop_path", "")
+            fnode = self._ensure_folder(self._folder_of(drop))
             self.tree.insert(
-                parent, "end", text=f"REFUSED: {event.get('drop_path', '')}",
-                values=("", "", "refused", ""),
+                fnode, "end", text=PurePosixPath(drop).name or "refused",
+                values=("", "", "", "REFUSED", "", ""),
             )
             self._update_parent()
         elif kind == "item_retry":
@@ -381,38 +400,65 @@ class DashPanel(ttk.Frame):
             self.image_var.set("—")
         self._refresh()
 
-    def _parent_summary(self, running: bool) -> str:
-        wall = time.monotonic() - self._t_theme
-        tail = "  ·  running…" if running else ""
-        return (
-            f"{self._theme_name}   {self._theme_done}/{self._theme_pending}"
-            f"  ·  {fmt_duration(wall)}  ·  {fmt_size(self._theme_bytes)}"
-            f"  ·  {len(self._theme_folders)} folder(s){tail}"
-        )
+    @staticmethod
+    def _folder_of(drop_path: str) -> str:
+        folder = PurePosixPath(drop_path).parent.as_posix()
+        return "(root)" if folder in (".", "") else folder
 
     def _ensure_parent(self) -> str:
-        """The collection's row in the table — created (open) the first
-        time an image of it lands, so a running collection shows live."""
+        """The collection's row — created (open) the first time an image
+        of it lands, so a running collection shows live."""
         if self._tree_item is None:
+            name = f"{self._theme_name}   · running…"
             self._tree_item = self.tree.insert(
-                "", "end", text=self._parent_summary(running=True), open=True
+                "", "end", text=name, open=True,
+                values=self._parent_values(),
             )
         return self._tree_item
 
+    def _ensure_folder(self, folder: str) -> str:
+        node = self._folder_nodes.get(folder)
+        if node is None:
+            parent = self._ensure_parent()
+            self._folder_stats[folder] = {"done": 0, "size": 0, "time": 0.0}
+            node = self.tree.insert(
+                parent, "end", text=folder, open=True,
+                values=("0", "", "", "", "", fmt_size(0)),
+            )
+            self._folder_nodes[folder] = node
+        return node
+
+    def _parent_values(self) -> tuple:
+        wall = time.monotonic() - self._t_theme
+        return (
+            f"{self._theme_done}/{self._theme_pending}", "", "", "",
+            fmt_duration(wall), fmt_size(self._theme_bytes),
+        )
+
     def _update_parent(self) -> None:
         if self._tree_item is not None:
+            self.tree.item(self._tree_item, values=self._parent_values())
+
+    def _update_folder(self, folder: str) -> None:
+        node = self._folder_nodes.get(folder)
+        st = self._folder_stats.get(folder)
+        if node is not None and st is not None:
             self.tree.item(
-                self._tree_item, text=self._parent_summary(running=True)
+                node,
+                values=(
+                    str(st["done"]), "", "", "",
+                    fmt_duration(st["time"]), fmt_size(st["size"]),
+                ),
             )
 
     def _finalize_theme(self) -> None:
         if self._tree_item is None:
             return  # nothing ran this collection (fully resumed / skipped)
         self._task_themes_done += 1
-        # collapse the finished collection and stamp its final summary
+        # stamp the final summary and collapse the finished collection
         self.tree.item(
-            self._tree_item, text=self._parent_summary(running=False),
-            open=False,
+            self._tree_item, text=self._theme_name,
+            values=self._parent_values(), open=False,
         )
 
     def _refresh(self) -> None:
@@ -630,9 +676,11 @@ class PainterGui:
     def _open_instructions(self) -> None:
         path = Path(__file__).resolve().parent / "instructions.md"
         try:
-            os.startfile(path)  # the OS default .md viewer
+            text = path.read_text(encoding="utf-8")
         except OSError as exc:
-            messagebox.showerror("PromptPainter", f"Cannot open {path}: {exc}")
+            messagebox.showerror("PromptPainter", f"Cannot read {path}: {exc}")
+            return
+        InstructionsWindow(self.root, text)
 
     # --- helpers -------------------------------------------------------
 
@@ -1263,6 +1311,115 @@ class SelectWindow(tk.Toplevel):
         for state, toggle in self._sections:
             if state["open"]:
                 toggle()
+
+
+class InstructionsWindow(tk.Toplevel):
+    """A readable, selectable in-app viewer for instructions.md — for
+    people who do not want a code editor. Light Markdown formatting
+    (headings, code, bullets, bold) plus a one-click 'Copy for AI'."""
+
+    def __init__(self, master, raw_markdown: str):
+        super().__init__(master)
+        self.title("How to write a prompt sheet")
+        self.minsize(720, 560)
+        self._raw = raw_markdown
+
+        bar = ttk.Frame(self, padding=6)
+        bar.pack(fill="x")
+        ttk.Label(
+            bar,
+            text="Give this to whoever (a person or an AI) writes the"
+            " next prompt file.",
+            style="Muted.TLabel",
+        ).pack(side="left")
+        ttk.Button(
+            bar, text="Copy all (for AI)", command=self._copy_all
+        ).pack(side="right")
+        ttk.Button(bar, text="Close", command=self.destroy).pack(
+            side="right", padx=4
+        )
+
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.txt = tk.Text(
+            wrap, wrap="word", font=("Segoe UI", 10), padx=12, pady=10,
+            spacing1=2, spacing3=2, background="white", relief="flat",
+            cursor="arrow",
+        )
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.txt.yview)
+        self.txt.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        self.txt.pack(side="left", fill="both", expand=True)
+
+        self._configure_tags()
+        self._render(raw_markdown)
+        # read-only, but fully selectable and Ctrl+C / Ctrl+A copyable
+        self.txt.bind("<Key>", self._readonly_keys)
+
+    def _configure_tags(self) -> None:
+        self.txt.tag_configure("h1", font=("Segoe UI", 15, "bold"),
+                               spacing1=10, spacing3=6)
+        self.txt.tag_configure("h2", font=("Segoe UI", 12, "bold"),
+                               spacing1=8, spacing3=4)
+        self.txt.tag_configure("h3", font=("Segoe UI", 11, "bold"),
+                               spacing1=6, spacing3=3)
+        self.txt.tag_configure(
+            "code", font=("Consolas", 9), background="#f2f2f2",
+            lmargin1=16, lmargin2=16,
+        )
+        self.txt.tag_configure("bold", font=("Segoe UI", 10, "bold"))
+        self.txt.tag_configure("bullet", lmargin1=16, lmargin2=30)
+
+    def _render(self, md: str) -> None:
+        self.txt.configure(state="normal")
+        in_code = False
+        for line in md.split("\n"):
+            if line.startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code:
+                self.txt.insert("end", line + "\n", "code")
+                continue
+            if line.startswith("### "):
+                self.txt.insert("end", line[4:] + "\n", "h3")
+            elif line.startswith("## "):
+                self.txt.insert("end", line[3:] + "\n", "h2")
+            elif line.startswith("# "):
+                self.txt.insert("end", line[2:] + "\n", "h1")
+            elif line.lstrip().startswith(("- ", "* ")):
+                self._insert_inline("• " + line.lstrip()[2:] + "\n", "bullet")
+            else:
+                self._insert_inline(line + "\n", None)
+        self.txt.configure(state="disabled")
+
+    def _insert_inline(self, text: str, base_tag) -> None:
+        """Insert a line, turning **bold** spans into the bold tag."""
+        parts = text.split("**")
+        for i, part in enumerate(parts):
+            tags = [t for t in (base_tag,) if t]
+            if i % 2 == 1:  # inside a **...** pair
+                tags.append("bold")
+            self.txt.insert("end", part, tuple(tags))
+
+    def _readonly_keys(self, event):
+        # allow copy/select-all and navigation; block edits
+        if event.state & 0x4 and event.keysym.lower() in ("c", "a"):
+            return
+        if event.keysym in (
+            "Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next",
+        ):
+            return
+        return "break"
+
+    def _copy_all(self) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(self._raw)
+        messagebox.showinfo(
+            "PromptPainter",
+            "The full instructions were copied — paste them to your AI"
+            " (or into a document).",
+            parent=self,
+        )
 
 
 def main() -> None:

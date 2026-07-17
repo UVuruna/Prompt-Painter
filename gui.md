@@ -59,8 +59,10 @@ and a `ttk.Treeview` is the dashboard's finished-collection table.
   pause between prompts (fractional seconds) and the human-like
   hesitation between UI steps (click → paste → send, default
   0.2–0.6 s — never instant).
-- **Instructions** — opens the sheet-authoring guide
-  (`instructions.md`) for whoever writes the next sheet.
+- **Instructions** — opens an IN-APP viewer of the sheet-authoring
+  guide (`instructions.md`) — light Markdown formatting, selectable
+  read-only text, and a **Copy all (for AI)** button — so a
+  non-programmer never needs a code editor.
 - **Two views** (tabs): the **Dashboard** and the **Log
   (detailed)** (timestamped `[HH:MM:SS]`, both sites interleaved
   with `[gemini]` / `[chatgpt]` prefixes). A SAFETY refusal skips
@@ -81,13 +83,16 @@ runner's structured events (never by log-parsing):
   Done, Refused, **AI generate avg** (SEND → image), **Our time
   avg** (save + bgfix + pause — "sve se računa"), Tempo (/h) and
   ETA. Title/value pairs, not one crammed line.
-- **Collections (running + done)** — a `ttk.Treeview` TABLE with
-  column headers (Collection/file · AI · Ours · Resolution · Size)
-  and both scrollbars. Each collection is a collapsible parent row
-  (`done/total · time · MB · folders`); the RUNNING one appears live
-  and open, its images streaming in as they save (the `Ours` column
-  fills in after each image's pause), then it collapses and stamps
-  `running…` off when done.
+- **Collections (running + done)** — a `ttk.Treeview` TABLE, three
+  levels deep, column headers (Name · Done · AI · Ours · Res · Time
+  · Size), both scrollbars, everything column-aligned:
+  1. **Collection** — `Done` (done/total), `Time` (wall), `Size`.
+  2. **Folder** (the drop-path directory) — `Done` (count in that
+     folder), `Time`, `Size`, same columns as the collection.
+  3. **Image** — `AI` (generate), `Ours` (fills after its pause),
+     `Res`, `Size`.
+  The RUNNING collection appears live and open, images streaming in
+  under their folder as they save; it collapses when done.
 
 ## Threading
 One worker thread per site; each creates its own Playwright
