@@ -194,17 +194,31 @@ SITES = {
         url="https://gemini.google.com/app",
         url_fragment="gemini.google.com",
         default_background="white",
+        # Verified against the live DOM by the owner, 2026-07-17
+        # (UV/Gemini screenshots): the prompt box is <rich-textarea>
+        # holding div.ql-editor[contenteditable] ("Ask Gemini");
+        # send and stop share ONE container, <div data-test-id=
+        # "send-button-container"> > <gem-icon-button> — typing makes
+        # it visible as aria-label="Send message", generating turns
+        # it into class "stop" / aria-label="Stop response" with
+        # mat-icon "stop". A response is <model-response>; the image
+        # sits under generated-image > single-image >
+        # button.image-button as <img class="image animate loaded"
+        # alt=", AI generated" src="blob:https://gemini.google.com/...">.
         prompt_box=(
+            "rich-textarea div.ql-editor[contenteditable='true']",
             "rich-textarea div[contenteditable='true']",
             "div.ql-editor[contenteditable='true']",
         ),
         send_button=(
+            'div[data-test-id="send-button-container"] button',
+            'button[aria-label*="Send message" i]',
             'button[aria-label*="Send" i]',
-            "button.send-button",
         ),
         busy_signal=(
+            'button[aria-label*="Stop response" i]',
+            "gem-icon-button.stop button",
             'button[aria-label*="Stop" i]',
-            "button.send-button.stop",
             'mat-icon[data-mat-icon-name="stop"]',
         ),
         response_container=(
@@ -214,6 +228,8 @@ SITES = {
         result_image=(
             "generated-image img",
             "single-image img",
+            "button.image-button img",
+            'img[alt*="AI generated" i]',
             'img[src^="blob:"]',
             'img[src^="data:image"]',
         ),

@@ -115,11 +115,20 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
   `backend-api/estuary/content` signed URL (fetched in-page, with
   session cookies). Refusal/quota banner: not yet captured — the
   driver reports the response text loudly when no image appears.
-- **Gemini:** prompt box the `rich-textarea` contenteditable; send
-  `button[aria-label*="Send"]` (aria-disabled toggles; a stop state
-  shows while running); result = the last `model-response`'s
-  generated `img`. Quota/refusal banners are TERMINAL states —
-  report and stop the item, never blind-retry.
+- **Gemini** (verified against the live DOM by the owner,
+  2026-07-17): prompt box `rich-textarea` >
+  `div.ql-editor[contenteditable]` ("Ask Gemini"). Send and stop
+  share ONE container — `div[data-test-id="send-button-container"]`
+  > `gem-icon-button`: typing makes it visible with
+  `aria-label="Send message"`; WHILE GENERATING it becomes class
+  `stop` / `aria-label="Stop response"` (mat-icon `stop`) — that
+  state's disappearance is the "done" edge. A response is
+  `<model-response>`; the image sits under `generated-image` >
+  `single-image` > `button.image-button` as an `img` with
+  `alt=", AI generated"` and a `blob:` src (fetched in-page).
+  Quota/refusal banners are TERMINAL states — report and stop the
+  item, never blind-retry (banner DOM not yet captured; the driver
+  quotes the response text loudly when no image appears).
 
 ## The Run Loop
 
