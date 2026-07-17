@@ -133,6 +133,24 @@ class PainterGui:
         ).pack(side="left")
         ttk.Label(row, text="s (random)").pack(side="left")
 
+        ttk.Label(row, text="Action delay:").pack(side="left", padx=(14, 2))
+        self.act_min_var = tk.StringVar(
+            value=f"{TIMING.action_delay_min_s:.1f}"
+        )
+        self.act_max_var = tk.StringVar(
+            value=f"{TIMING.action_delay_max_s:.1f}"
+        )
+        ttk.Spinbox(
+            row, from_=0, to=5, increment=0.1, width=4,
+            textvariable=self.act_min_var,
+        ).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left")
+        ttk.Spinbox(
+            row, from_=0, to=5, increment=0.1, width=4,
+            textvariable=self.act_max_var,
+        ).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left")
+
         # --- buttons ----------------------------------------------------
         row = ttk.Frame(frame)
         row.pack(fill="x", **pad)
@@ -157,12 +175,29 @@ class PainterGui:
         ttk.Button(
             row, text="BG removal only...", command=self._bg_remove_only
         ).pack(side="left", padx=14)
+        ttk.Button(
+            row, text="Instructions", command=self._open_instructions
+        ).pack(side="left", padx=2)
 
-        # --- log --------------------------------------------------------
+        # --- the two views: Dashboard + Log -----------------------------
+        notebook = ttk.Notebook(frame)
+        notebook.pack(fill="both", expand=True, **pad)
+
+        dash_tab = ttk.Frame(notebook)
+        notebook.add(dash_tab, text="Dashboard")
+        self.dash = {
+            key: DashPanel(dash_tab, SITES[key].name)
+            for key in sorted(SITES)
+        }
+        for panel in self.dash.values():
+            panel.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+
+        log_tab = ttk.Frame(notebook)
+        notebook.add(log_tab, text="Log (detailed)")
         self.log_box = scrolledtext.ScrolledText(
-            frame, height=16, state="disabled", font=("Consolas", 9)
+            log_tab, height=16, state="disabled", font=("Consolas", 9)
         )
-        self.log_box.pack(fill="both", expand=True, **pad)
+        self.log_box.pack(fill="both", expand=True)
 
         self.status_var = tk.StringVar(value="idle")
         ttk.Label(frame, textvariable=self.status_var, anchor="w").pack(
@@ -170,6 +205,16 @@ class PainterGui:
         )
 
         root.after(120, self._drain_queue)
+
+    def _open_instructions(self) -> None:
+        """Open the sheet-authoring instructions (root instructions.md)."""
+        import os
+
+        path = Path(__file__).resolve().parent / "instructions.md"
+        try:
+            os.startfile(path)  # the OS default .md viewer
+        except OSError as exc:
+            messagebox.showerror("PromptPainter", f"Cannot open {path}: {exc}")
 
     # --- helpers --------------------------------------------------------
 
@@ -395,16 +440,22 @@ class PainterGui:
         try:
             pause_min = float(self.pause_min_var.get())
             pause_max = float(self.pause_max_var.get())
+            act_min = float(self.act_min_var.get())
+            act_max = float(self.act_max_var.get())
         except ValueError:
-            messagebox.showerror("PromptPainter", "Pause must be numbers.")
+            messagebox.showerror("PromptPainter", "Pause/delay must be numbers.")
             return
-        if pause_min > pause_max:
+        if pause_min > pause_max or act_min > act_max:
             messagebox.showerror(
-                "PromptPainter", "Pause FROM must be <= pause TO."
+                "PromptPainter", "FROM must be <= TO (pause and delay)."
             )
             return
         timing = replace(
-            TIMING, pause_min_s=pause_min, pause_max_s=pause_max
+            TIMING,
+            pause_min_s=pause_min,
+            pause_max_s=pause_max,
+            action_delay_min_s=act_min,
+            action_delay_max_s=act_max,
         )
 
         from painter.chrome import cdp_alive
@@ -422,6 +473,8 @@ class PainterGui:
         self.btn_start.configure(state="disabled")
         self.btn_stop.configure(state="normal")
         self.status_var.set("running: " + ", ".join(sites))
+        for key, panel in self.dash.items():
+            panel.reset(active=key in sites)
         backgrounds = {
             key: self.background_vars[key].get() for key in sites
         }
@@ -476,6 +529,7 @@ class PainterGui:
         from painter.runner import run_sheet
 
         log = lambda msg: self._q.put(f"[{key}] {msg}")
+        events = lambda ev: self._q.put(("__event__", key, ev))
         driver = SiteDriver(SITES[key], timing, CDP_URL)
         t_site = time.monotonic()
         done_sheets = 0
@@ -499,6 +553,7 @@ class PainterGui:
                         prompt_suffix=suffix,
                         report=report,
                         only=selection.get(str(sheet.source)),
+                        on_event=events,
                     )
                     done_sheets += 1
                     log(
@@ -544,6 +599,8 @@ class PainterGui:
                 if isinstance(msg, tuple):
                     if msg[0] == "__status__":
                         self.status_var.set(msg[1])
+                    elif msg[0] == "__event__":
+                        self.dash[msg[1]].handle(msg[2])
                     elif msg[0] == "__worker_done__":
                         self._log(f"[{msg[1]}] worker finished")
                         if all(not w.is_alive() for w in self._workers):
@@ -555,6 +612,93 @@ class PainterGui:
         except queue.Empty:
             pass
         self.root.after(120, self._drain_queue)
+
+
+class DashPanel(ttk.LabelFrame):
+    """The plain-user view of one site: progress, tempo, refusals.
+
+    Fed by the runner's structured events — no log reading needed.
+    """
+
+    def __init__(self, master, title: str):
+        super().__init__(master, text=title)
+        self.sheet_var = tk.StringVar(value="—")
+        self.item_var = tk.StringVar(value="—")
+        self.stats_var = tk.StringVar(value="idle")
+
+        ttk.Label(self, text="Sheet:", width=8).grid(
+            row=0, column=0, sticky="w", padx=6, pady=(8, 2)
+        )
+        ttk.Label(self, textvariable=self.sheet_var).grid(
+            row=0, column=1, sticky="w", pady=(8, 2)
+        )
+        ttk.Label(self, text="Image:", width=8).grid(
+            row=1, column=0, sticky="w", padx=6, pady=2
+        )
+        ttk.Label(self, textvariable=self.item_var).grid(
+            row=1, column=1, sticky="w", pady=2
+        )
+        self.bar = ttk.Progressbar(self, maximum=1, value=0)
+        self.bar.grid(
+            row=2, column=0, columnspan=2, sticky="we", padx=6, pady=8
+        )
+        ttk.Label(
+            self, textvariable=self.stats_var, font=("Segoe UI", 10, "bold")
+        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=6, pady=2)
+        self.columnconfigure(1, weight=1)
+        self.reset(active=False)
+
+    def reset(self, active: bool = True) -> None:
+        self._done = 0
+        self._refused = 0
+        self._total = 0
+        self._gen_times: list[float] = []
+        self._t0 = time.monotonic()
+        self.sheet_var.set("—")
+        self.item_var.set("—")
+        self.bar.configure(maximum=1, value=0)
+        self.stats_var.set("running ..." if active else "idle")
+
+    def handle(self, event: dict) -> None:
+        kind = event["type"]
+        if kind == "sheet_start":
+            self._total += event["pending"]
+            self.sheet_var.set(
+                f"{event['sheet']}  ({event['pending']} pending)"
+            )
+        elif kind == "item_start":
+            self.item_var.set(
+                f"({event['idx']}/{event['of']}) {event['title'][:52]}"
+            )
+        elif kind == "item_done":
+            self._done += 1
+            self._gen_times.append(event["gen_s"])
+        elif kind == "item_refused":
+            self._refused += 1
+        elif kind == "sheet_done":
+            self.item_var.set("—")
+        self._refresh()
+
+    def _refresh(self) -> None:
+        self.bar.configure(
+            maximum=max(self._total, 1), value=self._done + self._refused
+        )
+        remaining = max(self._total - self._done - self._refused, 0)
+        parts = [
+            f"Done {self._done}/{self._total}",
+            f"Left {remaining}",
+            f"Refused {self._refused}",
+        ]
+        if self._gen_times:
+            avg = sum(self._gen_times) / len(self._gen_times)
+            parts.append(f"Avg {avg:.0f}s/img")
+            elapsed = time.monotonic() - self._t0
+            if self._done and elapsed > 0:
+                tempo = self._done / (elapsed / 3600)
+                parts.append(f"Tempo {tempo:.0f}/h")
+                eta_min = remaining * (elapsed / self._done) / 60
+                parts.append(f"ETA ~{eta_min:.0f} min")
+        self.stats_var.set("   ".join(parts))
 
 
 class SelectWindow(tk.Toplevel):
