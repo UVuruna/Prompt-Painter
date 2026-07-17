@@ -1,6 +1,6 @@
 """Offline tests for the run loop — a fake driver, a temp out folder.
 
-Covers what needs no browser: the per-site background suffix, the
+Covers what needs no browser: the background suffix, the
 out/<drop-path> layout, resume via the progress sidecar, the stop
 flag, and the loud-but-not-fatal background-fix hook.
 """
@@ -8,7 +8,7 @@ flag, and the loud-but-not-fatal background-fix hook.
 from dataclasses import replace
 from pathlib import Path
 
-from painter.config import SITES, TIMING
+from painter.config import SITES, TIMING, background_suffix
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
@@ -55,11 +55,15 @@ def test_suffix_layout_progress_and_resume(tmp_path):
     out = tmp_path / "out" / "gemini"
     driver = FakeDriver(SITES["gemini"])
     logs: list[str] = []
+    suffix = background_suffix("auto", SITES["gemini"])
 
-    generated = run_sheet(sheet, driver, out, FAST, log=logs.append)
+    generated = run_sheet(
+        sheet, driver, out, FAST, log=logs.append, prompt_suffix=suffix
+    )
     assert generated == 2
-    # per-site background suffix appended to every submitted prompt
-    assert driver.submitted[0] == "prompt 0" + SITES["gemini"].prompt_suffix
+    # Gemini's auto background is flat white, appended to every prompt
+    assert "PURE WHITE" in suffix
+    assert driver.submitted[0] == "prompt 0" + suffix
     # the drop path IS the out path
     assert (out / "fake" / "img_0.png").read_bytes() == PNG_1PX
     assert (out / "fake_prompts.progress.json").exists()
@@ -70,6 +74,13 @@ def test_suffix_layout_progress_and_resume(tmp_path):
     driver2 = FakeDriver(SITES["gemini"])
     assert run_sheet(sheet, driver2, out, FAST) == 0
     assert driver2.submitted == []
+
+
+def test_background_modes():
+    assert background_suffix("auto", SITES["chatgpt"]) != ""
+    assert "TRANSPARENT" in background_suffix("auto", SITES["chatgpt"])
+    assert background_suffix("none", SITES["gemini"]) == ""
+    assert "PURE WHITE" in background_suffix("white", SITES["chatgpt"])
 
 
 def test_stop_flag_stops_between_items(tmp_path):

@@ -15,7 +15,14 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from painter.config import CDP_URL, DEFAULT_OUT_DIR, SITES, TIMING
+from painter.config import (
+    BACKGROUND_MODES,
+    CDP_URL,
+    DEFAULT_OUT_DIR,
+    SITES,
+    TIMING,
+    background_suffix,
+)
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
 
@@ -38,8 +45,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_OUT_DIR,
         help=(
-            "output root; images land at <out>/<site>/<drop-path>"
+            "output base; generation stages at <out>/_staging/<site>/,"
+            " approval moves images to <out>/<site>/<drop-path>"
             f" (default: {DEFAULT_OUT_DIR})"
+        ),
+    )
+    p.add_argument(
+        "--background",
+        choices=BACKGROUND_MODES,
+        default="auto",
+        help=(
+            "background suffix appended to every prompt — auto ="
+            " transparent on ChatGPT, white on Gemini (default: auto)"
+        ),
+    )
+    p.add_argument(
+        "--approve-all",
+        action="store_true",
+        help=(
+            "skip the review phase: move every staged image of this run"
+            " straight to the final folder"
         ),
     )
     p.add_argument(
@@ -55,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--no-bgfix",
         action="store_true",
-        help="skip the DOMY background tool after each saved image",
+        help="skip the background tool after each saved image",
     )
     p.add_argument(
         "--dry-run",
@@ -101,8 +126,11 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --site is required (or use --dry-run)", file=sys.stderr)
         return 2
 
-    out_root = args.out.resolve() / args.site
-    if sheet.source.resolve().is_relative_to(out_root):
+    from painter.review import approve, staged_images, staging_root
+
+    out_base = args.out.resolve()
+    out_root = staging_root(out_base, args.site)
+    if sheet.source.resolve().is_relative_to(out_base):
         print(
             "ERROR: the sheet lives inside the output folder — sources"
             " are READ ONLY; pick another output folder.",
@@ -128,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.pause is None
         else replace(TIMING, pause_between_prompts_s=args.pause)
     )
+    suffix = background_suffix(args.background, SITES[args.site])
 
     # imported lazily so --dry-run works without playwright installed
     from painter.chrome import ChromeError, ensure_chrome
@@ -152,8 +181,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nAttaching over CDP at {args.cdp} ...")
         title = driver.attach()
         print(f"Attached to {title!r}. SUPERVISED RUN — watch the window.")
-        generated = run_sheet(sheet, driver, out_root, timing, post_save=post_save)
-        print(f"\nDone: {generated} image(s) generated into {out_root}")
+        generated = run_sheet(
+            sheet,
+            driver,
+            out_root,
+            timing,
+            post_save=post_save,
+            prompt_suffix=suffix,
+        )
+        staged = staged_images(out_base, (args.site,))
+        if args.approve_all:
+            for item in staged:
+                approve(out_base, item)
+            print(
+                f"\nDone: {generated} image(s) generated,"
+                f" {len(staged)} approved into {out_base / args.site}"
+            )
+        else:
+            print(
+                f"\nDone: {generated} image(s) generated;"
+                f" {len(staged)} await review in {out_root}\n"
+                "Review them in the GUI ('Review staged') or rerun with"
+                " --approve-all."
+            )
         return 0
     except TerminalState as exc:
         print(

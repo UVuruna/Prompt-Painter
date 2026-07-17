@@ -1,6 +1,6 @@
 """The run loop — queue, done-edge, save, fix, resume, pace.
 
-Per pending item: paste (prompt + the site's background suffix) ->
+Per pending item: paste (prompt + the chosen background suffix) ->
 submit -> await the done edge -> extract bytes -> save under the
 sheet's own drop path -> background fix -> mark done in the sidecar
 ``.progress.json`` -> pause -> next. A crash or a quota stop costs
@@ -62,6 +62,7 @@ def run_sheet(
     log: Log = print,
     should_stop: ShouldStop | None = None,
     post_save: PostSave | None = None,
+    prompt_suffix: str = "",
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -92,7 +93,7 @@ def run_sheet(
             break
         elapsed = time.monotonic() - start
         log(f"[{elapsed:7.1f}s] ({idx}/{total}) {item.title}")
-        driver.submit_prompt(item.prompt + driver.site.prompt_suffix)
+        driver.submit_prompt(item.prompt + prompt_suffix)
         driver.await_done(log)
         data = driver.extract_image()
 
