@@ -234,6 +234,11 @@ class PainterGui:
                 f" {len(sheet.items)} to generate,"
                 f" {len(sheet.skipped)} skipped"
             )
+            for sk in sheet.skipped:
+                self._log(
+                    f"    SKIP (the sheet says so, L{sk.line})"
+                    f" {sk.title} — {sk.reason}"
+                )
             good.append(sheet)
         return good
 

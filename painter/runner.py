@@ -102,10 +102,15 @@ class RunReport:
         with self.path.open("a", encoding="utf-8") as fh:
             fh.write(text + "\n")
 
-    def start(self, pending: int, total: int) -> None:
+    def start(self, pending: int, total: int, skipped=()) -> None:
         self._append("=" * 68)
         self._append(f"{self._theme}  [{self._site}]")
         self._append(f"Run started:  {_now()}  ({pending}/{total} pending)")
+        for sk in skipped:
+            self._append(
+                f"SKIPPED by the sheet (L{sk.line}): {sk.title} —"
+                f" {sk.reason}"
+            )
         self._append("-" * 68)
 
     def item(
@@ -207,7 +212,7 @@ def run_sheet(
             )
         queue = selected
     if run_report is not None:
-        run_report.start(len(queue), len(sheet.items))
+        run_report.start(len(queue), len(sheet.items), sheet.skipped)
 
     start = time.monotonic()
     total = len(queue)
