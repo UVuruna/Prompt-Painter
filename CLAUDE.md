@@ -100,11 +100,21 @@ Per theme `.md` file:
 Selectors rot with every reskin — when none match, FAIL LOUDLY
 (root Rule #1), never guess.
 
-- **ChatGPT:** prompt box `#prompt-textarea` (contenteditable);
-  send `button[data-testid="send-button"]`; WHILE GENERATING it is
-  replaced by `data-testid="stop-button"` — the stop button's
-  disappearance is the "done" edge; result = the last `article`
-  turn's `img` nodes (wait until a real src, not a placeholder).
+- **ChatGPT** (verified against the live DOM by the owner,
+  2026-07-17): prompt box `#prompt-textarea` (ProseMirror
+  contenteditable). The composer button keeps the stable id
+  `#composer-submit-button` and MORPHS by state: empty box =
+  "Start Voice", text entered = `data-testid="send-button"`
+  (`aria-label="Send prompt"`), WHILE GENERATING =
+  `data-testid="stop-button"` (`aria-label="Stop answering"`) —
+  the stop state's disappearance is the "done" edge. A response
+  turn is `section[data-turn="assistant"]`
+  (`data-testid="conversation-turn-N"`); the generated image sits
+  in `div[id^="image-"]` (class `group/imagegen-image`) as
+  `img[alt^="Generated image"]` whose `src` is an https
+  `backend-api/estuary/content` signed URL (fetched in-page, with
+  session cookies). Refusal/quota banner: not yet captured — the
+  driver reports the response text loudly when no image appears.
 - **Gemini:** prompt box the `rich-textarea` contenteditable; send
   `button[aria-label*="Send"]` (aria-disabled toggles; a stop state
   shows while running); result = the last `model-response`'s

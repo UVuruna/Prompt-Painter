@@ -142,27 +142,42 @@ SITES = {
         url="https://chatgpt.com/",
         url_fragment="chatgpt.com",
         default_background="transparent",
+        # Verified against the live DOM by the owner, 2026-07-17
+        # (UV/ screenshots): the composer button keeps the stable id
+        # #composer-submit-button and morphs by state — empty box =
+        # "Start Voice", text = data-testid="send-button" /
+        # aria-label="Send prompt", GENERATING = data-testid=
+        # "stop-button" / aria-label="Stop answering". A response
+        # turn is <section data-turn="assistant" data-testid=
+        # "conversation-turn-N">; the generated image sits in
+        # <div id="image-<uuid>" class="group/imagegen-image"> as
+        # <img alt="Generated image: ..." src="https://chatgpt.com/
+        # backend-api/estuary/content?id=...&sig=...">.
         prompt_box=(
             "#prompt-textarea",
             "div.ProseMirror[contenteditable='true']",
         ),
         send_button=(
             'button[data-testid="send-button"]',
+            "#composer-submit-button",
             'button[aria-label*="Send" i]',
         ),
         busy_signal=(
             'button[data-testid="stop-button"]',
-            'button[aria-label*="Stop" i]',
+            'button[aria-label*="Stop answering" i]',
         ),
         response_container=(
+            'section[data-turn="assistant"]',
+            '[data-testid^="conversation-turn"][data-turn="assistant"]',
             'article[data-testid^="conversation-turn"]',
             "article",
         ),
         result_image=(
-            'img[alt*="Generated" i]',
+            'div[id^="image-"] img',
+            'img[alt*="Generated image" i]',
+            'img[src*="/backend-api/"]',
             'img[src^="blob:"]',
             'img[src^="data:image"]',
-            'img[src*="oaiusercontent"]',
         ),
         refusal_text_markers=(
             "can't create",
