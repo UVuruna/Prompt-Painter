@@ -251,7 +251,14 @@ SITES = {
             "cannot create",
             "can't generate",
             "cannot generate",
-            "content policy",
+            # live capture 2026-07-17: "We're so sorry, but the prompt
+            # may violate our content policies. If you think we got it
+            # wrong, please retry or edit your prompt." — "content
+            # polic" catches both policy and policies
+            "content polic",
+            "may violate",
+            "violate our",
+            "retry or edit your prompt",
             "unable to create",
             "not able to create",
         ),
