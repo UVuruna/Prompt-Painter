@@ -19,9 +19,15 @@ python main.py "path/to/theme_prompts.md" --dry-run
 python main.py "path/to/theme_prompts.md" --site gemini
 ```
 
-Options: `--site {chatgpt,gemini}`, `--out DIR` (images land at
-`<out>/<site>/<drop-path>`), `--pause SECONDS`, `--cdp URL`,
-`--no-bgfix` (skip the DOMY background tool), `--dry-run`.
+Options: `--site {chatgpt,gemini}`, `--out DIR` (generation stages
+at `<out>/_staging/<site>/`; approval moves images to
+`<out>/<site>/<drop-path>`), `--background {auto,transparent,
+white,none}`, `--approve-all` (skip the review phase for this
+run), `--pause SECONDS`, `--cdp URL`, `--no-bgfix` (skip the
+background remover), `--dry-run`.
+
+Without `--approve-all` the run ends with the images STAGED; review
+them in the GUI ("Review staged") or rerun with `--approve-all`.
 
 ## Exit codes
 
@@ -41,5 +47,5 @@ Options: `--site {chatgpt,gemini}`, `--out DIR` (images land at
   [CDP Driver](painter/driver.md),
   [Postprocess](painter/postprocess.md) — imported lazily, so
   `--dry-run` works without playwright
-- [Run Loop](painter/runner.md)
+- [Run Loop](painter/runner.md), [Review](painter/review.md)
 - [Config](painter/config.md)

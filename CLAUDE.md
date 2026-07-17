@@ -51,21 +51,30 @@ is the binding spec.
    so it launches with the project's own profile folder
    (`chrome-profile/`, gitignored) — the owner logs in there ONCE;
    sessions persist across runs.
-5. Every prompt gets the site's **background suffix** appended
-   (config): ChatGPT is asked for a fully TRANSPARENT background,
-   Gemini for a flat PURE WHITE one.
-6. After every save, the **background fix** runs (DOMY Watch
-   `tools/bg_remove.py`, subprocess): it auto-detects per file —
-   already-transparent skipped, white cleared, ambiguous reported
-   and left untouched. Failures are loud but never kill the run.
-7. Output layout: **`<out>/<site>/<drop-path>`** (e.g.
-   `out/gemini/trinity/Jesus_Advocate.png`) — the arrow line's own
-   path IS the theme folder; the per-site split keeps parallel runs
-   collision-free and matches DOMY's per-source asset trees.
+5. Every prompt gets a **background suffix** appended — a GUI
+   choice (`auto` / `transparent` / `white` / `none`; suffix texts
+   in config): `auto` asks ChatGPT for a fully TRANSPARENT
+   background and Gemini for flat PURE WHITE.
+6. After every save, the **background fix** runs —
+   `painter/bg_remove.py`, IN-HOUSE (moved from DOMY Watch tools,
+   owner 2026-07-17: no part of this program lives in another
+   project). It auto-detects per file — already-transparent
+   skipped, white cleared + autocropped, ambiguous reported and
+   left untouched. Failures are loud but never kill the run.
+7. Output is **TWO-PHASE** (owner 2026-07-17): generation stages
+   every image at `<out>/_staging/<site>/<drop-path>`; when the run
+   ends, the review window shows them and ONLY the owner's Approve
+   moves an image to its final **`<out>/<site>/<drop-path>`**
+   (e.g. `out/gemini/trinity/Jesus_Advocate.png`). Reject deletes
+   the staged image and clears its progress mark, so the next run
+   regenerates it (usually after the prompt was reworked in the
+   sheet). The arrow line's own path IS the theme folder; the
+   per-site split keeps parallel runs collision-free and matches
+   DOMY's per-source asset trees.
 8. **Sources are READ ONLY.** The tool writes ONLY under the chosen
-   output folder (images, progress sidecar, background fixes) and
-   never touches the sheet's folder. The `UV/` folder is the
-   owner's private material — gitignored, never committed, read
+   output folder (staging, images, progress sidecars, background
+   fixes) and never touches the sheet's folder. The `UV/` folder is
+   the owner's private material — gitignored, never committed, read
    only when he points at it.
 
 ## The Sheet Contract (the input format)
@@ -110,6 +119,9 @@ submit → await the done-edge (hard timeout) → extract bytes → save
 → pause → next. Progress logging per item (elapsed, done/total —
 root Rule #10). At the end the owner reviews quality; unsatisfying
 prompts get reworked in the sheet.
+
+**GitHub:** [UVuruna/Prompt-Painter](https://github.com/UVuruna/Prompt-Painter)
+(`origin`, branch `main`).
 
 ## Build Order (steps 1–3 built 2026-07-17; GUI layer the same day)
 

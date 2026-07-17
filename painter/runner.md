@@ -33,13 +33,16 @@ silently restarts a run.
 ## Functions
 
 - `run_sheet(sheet, driver, out_root, timing, log, should_stop,
-  post_save) -> int` — logs the sheet's skipped entries, filters
-  the queue through `Progress`, drives every pending item with
-  per-item progress lines (elapsed, n/total, saved bytes), appends
-  the site's background suffix to each prompt, runs the
-  `post_save` background fix (failures loud, counted, never
-  fatal), warns when saved bytes are not PNG, paces between
-  prompts, and honors `should_stop` between items and during the
-  pause (a graceful stop — the current item always completes).
-  Returns how many images this run generated. Terminal/driver
-  errors propagate to the caller — progress stays saved.
+  post_save, prompt_suffix) -> int` — logs the sheet's skipped
+  entries, filters the queue through `Progress`, drives every
+  pending item with per-item progress lines (elapsed, n/total,
+  saved bytes), appends `prompt_suffix` (the caller resolves the
+  background mode) to each prompt, runs the `post_save` background
+  fix (failures loud, counted, never fatal), warns when saved
+  bytes are not PNG, paces between prompts, and honors
+  `should_stop` between items and during the pause (a graceful
+  stop — the current item always completes). The callers pass a
+  STAGING folder as `out_root` — approval into the final folder is
+  [Review](review.md)'s job. Returns how many images this run
+  generated. Terminal/driver errors propagate to the caller —
+  progress stays saved.
