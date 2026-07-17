@@ -29,10 +29,11 @@ is the binding spec.
   browser extension, NO OCR, NO virtual mice (extension = plan B if
   a site blocks CDP; MouseMux = plan C of last resort).
 - **No Download clicks:** when the response `<img>` appears, read
-  the image BYTES from the DOM (fetch its `blob:`/`data:` src
-  inside `page.evaluate`, return base64) and save the file
-  DIRECTLY under the sheet's filename — the tool names files
-  itself; there is no rename/move step.
+  the image BYTES from the DOM inside `page.evaluate` —
+  CANVAS-FIRST (`drawImage` + `toDataURL`, since Gemini's CSP
+  blocks `fetch()` of `blob:` srcs; always yields real PNG),
+  `fetch()` as fallback — and save the file DIRECTLY under the
+  sheet's filename; there is no rename/move step.
 - **Supervised runs:** the owner watches the windows, at least
   until the tool has proven itself; paced (configurable pause
   between prompts).

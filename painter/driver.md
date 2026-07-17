@@ -20,8 +20,15 @@ handed back for the runner to save under the sheet's own name.
    must appear, then disappear, under the hard generation timeout;
    long waits log progress at the configured cadence.
 3. `extract_image() -> bytes` — the last loaded, non-placeholder
-   `<img>` of the last response turn; its `src` (`blob:`/`data:`/
-   `https:`) is fetched in-page and returned as bytes.
+   `<img>` of the last response turn, read in-page CANVAS-FIRST
+   (`drawImage` + `toDataURL`): site CSP (Gemini) blocks `fetch()`
+   of `blob:` srcs, while a canvas needs no request and always
+   yields real PNG bytes; `fetch()` stays as the fallback.
+
+All required-element lookups poll up to the selector timeout before
+failing loudly — SPAs morph elements a beat after input events (the
+ChatGPT composer button turns into its send state only once the
+pasted text lands).
 
 ## Failure taxonomy (all loud, root Rule #1)
 

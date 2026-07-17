@@ -54,8 +54,9 @@ match.
 ## Classes
 
 ### Timing
-All waits and paces in seconds: busy-appear timeout, the
-generation hard timeout, image-ready timeout, poll step,
+All waits and paces in seconds: the selector timeout (required
+elements poll instead of one-shot lookups), busy-appear timeout,
+the generation hard timeout, image-ready timeout, poll step,
 progress-log cadence, and the polite pause between prompts.
 
 ### SiteConfig

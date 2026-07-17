@@ -42,19 +42,33 @@ class GenerationTimeout(DriverError):
     """The done edge never came within the hard timeout."""
 
 
-# Runs on the <img> element inside the page: fetch its src (blob:,
-# data: or https:) and hand the bytes back as base64.
+# Runs on the <img> element inside the page. Canvas first: site CSP
+# (Gemini's connect-src) blocks fetch() of blob: URLs, while drawing
+# the already-loaded <img> onto a canvas needs no request at all —
+# and always yields real PNG bytes. fetch() stays as the fallback
+# for images a canvas cannot read (cross-origin without CORS).
 _FETCH_IMAGE_JS = """
 async (el) => {
-  const resp = await fetch(el.src);
-  if (!resp.ok) throw new Error(`fetch ${el.src}: HTTP ${resp.status}`);
-  const blob = await resp.blob();
-  return await new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result.split(',', 2)[1]);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
+  const errors = [];
+  try {
+    const c = document.createElement('canvas');
+    c.width = el.naturalWidth;
+    c.height = el.naturalHeight;
+    c.getContext('2d').drawImage(el, 0, 0);
+    return c.toDataURL('image/png').split(',', 2)[1];
+  } catch (e) { errors.push(`canvas: ${e}`); }
+  try {
+    const resp = await fetch(el.src);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const blob = await resp.blob();
+    return await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(',', 2)[1]);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+  } catch (e) { errors.push(`fetch ${el.src}: ${e}`); }
+  throw new Error(errors.join(' | '));
 }
 """
 
@@ -197,13 +211,25 @@ class SiteDriver:
         return None
 
     def _require(self, selectors: tuple[str, ...], what: str) -> Locator:
-        loc = self._query(selectors)
-        if loc is None:
-            raise SelectorRot(
-                f"{self.site.name}: no selector for {what} matched —"
-                f" tried: {', '.join(selectors)}"
-            )
-        return loc
+        """Wait for any fallback selector to match; loud after timeout.
+
+        Sites are async SPAs — elements morph a beat after input
+        events (the ChatGPT composer button turns into its send
+        state only once the pasted text lands), so a one-shot query
+        would fail on honest timing.
+        """
+        deadline = time.monotonic() + self._timing.selector_timeout_s
+        while True:
+            loc = self._query(selectors)
+            if loc is not None:
+                return loc
+            if time.monotonic() > deadline:
+                raise SelectorRot(
+                    f"{self.site.name}: no selector for {what} matched"
+                    f" within {self._timing.selector_timeout_s:.0f}s —"
+                    f" tried: {', '.join(selectors)}"
+                )
+            time.sleep(self._timing.poll_interval_s)
 
     def _last_response(self) -> Locator:
         for sel in self.site.response_container:

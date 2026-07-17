@@ -88,6 +88,10 @@ def background_suffix(mode: str, site: "SiteConfig") -> str:
 class Timing:
     """All waits and paces, in seconds."""
 
+    # a required element (prompt box, send button) must appear;
+    # SPAs morph elements a beat after input events, so lookups
+    # poll instead of failing on a one-shot snapshot
+    selector_timeout_s: float = 10.0
     # submit clicked -> the busy signal (stop button) must appear
     busy_appear_timeout_s: float = 20.0
     # busy signal seen -> its disappearance (the done edge), hard cap
