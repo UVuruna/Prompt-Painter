@@ -1,5 +1,8 @@
 """PromptPainter CLI — supervised image generation from a prompt sheet.
 
+The GUI (`python gui.py`) is the usual way in; this CLI drives ONE
+site per invocation.
+
 Usage:
     python main.py "path/to/theme_prompts.md" --site gemini
     python main.py "path/to/theme_prompts.md" --dry-run
@@ -20,22 +23,24 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="PromptPainter",
         description=(
-            "Reads a prompt-sheet .md and drives the already-open,"
-            " logged-in Gemini/ChatGPT tab over CDP — supervised, paced,"
-            " resumable."
+            "Reads a prompt-sheet .md and drives the logged-in"
+            " Gemini/ChatGPT tab over CDP — supervised, paced, resumable."
         ),
     )
     p.add_argument("sheet", type=Path, help="the prompt-sheet .md file")
     p.add_argument(
         "--site",
         choices=sorted(SITES),
-        help="which open tab to drive (required unless --dry-run)",
+        help="which site to drive (required unless --dry-run)",
     )
     p.add_argument(
         "--out",
         type=Path,
-        default=Path(DEFAULT_OUT_DIR),
-        help=f"output root (default: {DEFAULT_OUT_DIR}/)",
+        default=DEFAULT_OUT_DIR,
+        help=(
+            "output root; images land at <out>/<site>/<drop-path>"
+            f" (default: {DEFAULT_OUT_DIR})"
+        ),
     )
     p.add_argument(
         "--pause",
@@ -47,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument("--cdp", default=CDP_URL, help=f"CDP URL (default: {CDP_URL})")
+    p.add_argument(
+        "--no-bgfix",
+        action="store_true",
+        help="skip the DOMY background tool after each saved image",
+    )
     p.add_argument(
         "--dry-run",
         action="store_true",
@@ -91,6 +101,28 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --site is required (or use --dry-run)", file=sys.stderr)
         return 2
 
+    out_root = args.out.resolve() / args.site
+    if sheet.source.resolve().is_relative_to(out_root):
+        print(
+            "ERROR: the sheet lives inside the output folder — sources"
+            " are READ ONLY; pick another output folder.",
+            file=sys.stderr,
+        )
+        return 2
+
+    post_save = None
+    if not args.no_bgfix:
+        from painter.postprocess import deps_error, fix_background
+
+        problem = deps_error()
+        if problem:
+            print(
+                f"ERROR: {problem}\n(or rerun with --no-bgfix)",
+                file=sys.stderr,
+            )
+            return 2
+        post_save = fix_background
+
     timing = (
         TIMING
         if args.pause is None
@@ -98,16 +130,30 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # imported lazily so --dry-run works without playwright installed
+    from painter.chrome import ChromeError, ensure_chrome
     from painter.driver import DriverError, SiteDriver, TerminalState
     from painter.runner import run_sheet
 
-    driver = SiteDriver(SITES[args.site], timing, args.cdp)
+    site = SITES[args.site]
+    try:
+        state = ensure_chrome((site.url,), args.cdp)
+    except ChromeError as exc:
+        print(f"CHROME ERROR: {exc}", file=sys.stderr)
+        return 1
+    if state == "launched":
+        print(
+            "Chrome opened with the PromptPainter profile — log in on the"
+            f" {site.name} tab if needed, then rerun this command."
+        )
+        return 0
+
+    driver = SiteDriver(site, timing, args.cdp)
     try:
         print(f"\nAttaching over CDP at {args.cdp} ...")
         title = driver.attach()
         print(f"Attached to {title!r}. SUPERVISED RUN — watch the window.")
-        generated = run_sheet(sheet, driver, args.out, timing)
-        print(f"\nDone: {generated} image(s) generated into {args.out}\\")
+        generated = run_sheet(sheet, driver, out_root, timing, post_save=post_save)
+        print(f"\nDone: {generated} image(s) generated into {out_root}")
         return 0
     except TerminalState as exc:
         print(
