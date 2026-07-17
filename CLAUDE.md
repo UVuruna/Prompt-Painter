@@ -128,9 +128,10 @@ Per theme `.md` file:
    heading that carries a backticked drop dir (the astrology
    sheet). Legacy oddities — reuse pointers with duplicate or
    escaping paths, unpaired mentions — are silently ignored so old
-   sheets never block a batch. Sheets whose entries carry NO
-   filenames at all (intelligences, mood, sin, virtue, instrument,
-   season_trinity) still need the filenames added in the sheet.
+   sheets never block a batch. The six sheets whose entries once
+   carried NO filenames at all (intelligences, mood, sin, virtue,
+   instrument, season_trinity) had the arrow-path added to every
+   entry, 2026-07-17 — all six now `--dry-run` clean, 0 problems.
 
 ## The DOM States (keep in ONE config block, with fallbacks)
 
