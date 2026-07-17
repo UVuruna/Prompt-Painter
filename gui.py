@@ -182,18 +182,18 @@ class Expander(ttk.Frame):
 _METRICS = [
     ("done", "Done"),
     ("refused", "Refused"),
-    ("gen", "Generate avg"),
-    ("proc", "Process avg"),
+    ("gen", "AI generate avg"),
+    ("over", "Our time avg"),
     ("tempo", "Tempo"),
     ("eta", "ETA"),
 ]
 
 
-def _scope_stats(done, refused, gen_times, proc_times, total, elapsed):
-    """Display strings for one scope (a theme or the whole task)."""
+def _scope_stats(done, refused, gen_times, over_times, total, elapsed):
+    """Display strings for one scope (a collection or the whole task)."""
     remaining = max(total - done - refused, 0)
     gen = f"{sum(gen_times) / len(gen_times):.0f} s" if gen_times else "—"
-    proc = f"{sum(proc_times) / len(proc_times):.1f} s" if proc_times else "—"
+    over = f"{sum(over_times) / len(over_times):.0f} s" if over_times else "—"
     if done and elapsed > 0:
         tempo = f"{done / (elapsed / 3600):.0f} /h"
         eta = (
@@ -208,7 +208,7 @@ def _scope_stats(done, refused, gen_times, proc_times, total, elapsed):
         "done": f"{done}/{total}" if total else str(done),
         "refused": str(refused),
         "gen": gen,
-        "proc": proc,
+        "over": over,
         "tempo": tempo,
         "eta": eta,
     }
@@ -242,7 +242,7 @@ class DashPanel(ttk.Frame):
         # current theme + image + its own bar
         cur = ttk.Frame(self)
         cur.pack(fill="x")
-        ttk.Label(cur, text="Theme:", width=7).grid(row=0, column=0, sticky="w")
+        ttk.Label(cur, text="File:", width=7).grid(row=0, column=0, sticky="w")
         self.theme_name_var = tk.StringVar(value="—")
         ttk.Label(cur, textvariable=self.theme_name_var).grid(
             row=0, column=1, sticky="w"
@@ -262,10 +262,10 @@ class DashPanel(ttk.Frame):
         grid = ttk.Frame(self)
         grid.pack(fill="x", pady=(2, 6))
         ttk.Label(grid, text="", width=14).grid(row=0, column=0)
-        ttk.Label(grid, text="This theme", style="Head.TLabel", width=11).grid(
-            row=0, column=1, sticky="e"
-        )
-        ttk.Label(grid, text="Task", style="Head.TLabel", width=11).grid(
+        ttk.Label(
+            grid, text="This one", style="Head.TLabel", width=11
+        ).grid(row=0, column=1, sticky="e")
+        ttk.Label(grid, text="Whole run", style="Head.TLabel", width=11).grid(
             row=0, column=2, sticky="e"
         )
         self.cells: dict[tuple[str, str], tk.StringVar] = {}
@@ -280,7 +280,7 @@ class DashPanel(ttk.Frame):
         grid.columnconfigure(0, weight=1)
 
         ttk.Separator(self).pack(fill="x", pady=4)
-        ttk.Label(self, text="Completed themes", style="Head.TLabel").pack(
+        ttk.Label(self, text="Completed collections", style="Head.TLabel").pack(
             anchor="w"
         )
         self.completed = ttk.Frame(self)
@@ -300,7 +300,7 @@ class DashPanel(ttk.Frame):
         self._task_refused = 0
         self._task_themes_done = 0
         self._task_gen: list[float] = []
-        self._task_proc: list[float] = []
+        self._task_over: list[float] = []
         self._t_task = now
         self._new_theme("—", 0)
         for child in self.completed.winfo_children():
@@ -318,7 +318,7 @@ class DashPanel(ttk.Frame):
         self._theme_done = 0
         self._theme_refused = 0
         self._theme_gen: list[float] = []
-        self._theme_proc: list[float] = []
+        self._theme_over: list[float] = []
         self._theme_bytes = 0
         self._theme_folders: set[str] = set()
         self._theme_rows: list[dict] = []
@@ -338,13 +338,16 @@ class DashPanel(ttk.Frame):
             self.image_var.set(
                 f"({event['idx']}/{event['of']}) {event['title'][:50]}"
             )
-        elif kind == "item_done":
+        elif kind == "item_progress":
+            # the image is saved — count it live (before its paced pause)
             self._theme_done += 1
             self._task_done += 1
             self._theme_gen.append(event["gen_s"])
             self._task_gen.append(event["gen_s"])
-            self._theme_proc.append(event["proc_s"])
-            self._task_proc.append(event["proc_s"])
+        elif kind == "item_done":
+            # our-time (incl. pause) is now known — record it + the row
+            self._theme_over.append(event["over_s"])
+            self._task_over.append(event["over_s"])
             self._theme_bytes += event["size"]
             self._theme_folders.add(
                 PurePosixPath(event["drop_path"]).parent.as_posix()
@@ -379,8 +382,8 @@ class DashPanel(ttk.Frame):
             ttk.Label(
                 exp.body,
                 text=(
-                    f"{row['drop_path']}    gen {row['gen_s']:.0f}s /"
-                    f" proc {row['proc_s']:.1f}s    {res}"
+                    f"{row['drop_path']}    AI {row['gen_s']:.0f}s /"
+                    f" ours {row['over_s']:.0f}s    {res}"
                     f"    {fmt_size(row['size'])}"
                 ),
                 style="Mono.TLabel",
@@ -406,15 +409,15 @@ class DashPanel(ttk.Frame):
         )
         self.task_prog_var.set(
             f"{self._task_done + self._task_refused} / {self._task_total}"
-            f"   ({self._task_themes_done}/{self._task_themes} themes)"
+            f"   ({self._task_themes_done}/{self._task_themes} done)"
         )
         theme = _scope_stats(
             self._theme_done, self._theme_refused, self._theme_gen,
-            self._theme_proc, self._theme_pending, now - self._t_theme,
+            self._theme_over, self._theme_pending, now - self._t_theme,
         )
         task = _scope_stats(
             self._task_done, self._task_refused, self._task_gen,
-            self._task_proc, self._task_total, now - self._t_task,
+            self._task_over, self._task_total, now - self._t_task,
         )
         for key, _label in _METRICS:
             self.cells[("theme", key)].set(theme[key])
@@ -458,7 +461,9 @@ class PainterGui:
     # --- construction --------------------------------------------------
 
     def _build_queue(self, parent) -> None:
-        lf = ttk.Labelframe(parent, text="Themes (prompt-sheet .md files)")
+        lf = ttk.Labelframe(
+            parent, text="Collections (prompt .md files, one image set each)"
+        )
         lf.pack(fill="x", pady=(0, 6))
         self.sheet_list = tk.Listbox(
             lf, height=5, activestyle="none", font=("Consolas", 9)
@@ -518,7 +523,7 @@ class PainterGui:
         ttk.Checkbutton(
             row, text="Report txt", variable=self.report_var
         ).pack(side="left", padx=12)
-        self.safer_var = tk.BooleanVar(value=False)
+        self.safer_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             row, text="Safer retry on refusal", variable=self.safer_var
         ).pack(side="left", padx=12)
@@ -858,7 +863,7 @@ class PainterGui:
         if dupes:
             messagebox.showerror(
                 "PromptPainter",
-                "Two queued themes share a filename: "
+                "Two queued collections share a filename: "
                 + ", ".join(dupes)
                 + ".\nTheir progress/report files would collide — rename"
                 " one before running.",
@@ -998,9 +1003,12 @@ class PainterGui:
             log(f"attached to {title!r} — SUPERVISED, watch the window")
             for n, sheet in enumerate(sheets, start=1):
                 if self._stop.is_set():
-                    log("stopped on request — remaining themes not started")
+                    log("stopped on request — remaining collections not run")
                     break
-                log(f"--- theme {n}/{len(sheets)}: {sheet.source.name} ---")
+                log(
+                    f"--- collection {n}/{len(sheets)}:"
+                    f" {sheet.source.name} ---"
+                )
                 try:
                     generated = run_sheet(
                         sheet, driver, out_root, timing,
@@ -1014,12 +1022,12 @@ class PainterGui:
                         safer_retry=safer,
                     )
                     done_sheets += 1
-                    log(f"theme done: {generated} image(s) into {out_root}")
+                    log(f"collection done: {generated} image(s) into {out_root}")
                 except TerminalState as exc:
                     log(f"TERMINAL STATE (quota/rate limit): {exc}")
                     log(
                         "site stopped — finished work is saved; start"
-                        " again later to resume the remaining themes"
+                        " again later to resume the remaining collections"
                     )
                     break
                 except DriverError as exc:
@@ -1030,7 +1038,7 @@ class PainterGui:
                     )
                     break
             log(
-                f"finished {done_sheets}/{len(sheets)} theme(s) in"
+                f"finished {done_sheets}/{len(sheets)} collection(s) in"
                 f" {(time.monotonic() - t_site) / 60:.1f} min"
             )
         except Exception as exc:  # surfaced, never swallowed
