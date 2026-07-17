@@ -3,10 +3,12 @@
 **Script:** [CDP Driver (script)](driver.py)
 
 ## Purpose
-Drives the owner's already-open, logged-in site tab. Chrome runs
-once with `--remote-debugging-port=9222`; the driver attaches with
-Playwright's `connect_over_cdp` to the real profile — no extension,
-no OCR, no virtual mice. It never clicks Download: the generated
+Drives the open, logged-in site tab. Chrome runs with
+`--remote-debugging-port=9222` (see
+[Chrome Launcher](chrome.md) for the dedicated automation
+profile); the driver attaches with Playwright's `connect_over_cdp`
+— no extension, no OCR, no virtual mice. It never clicks Download:
+the generated
 image's bytes are fetched from the DOM (inside `page.evaluate`) and
 handed back for the runner to save under the sheet's own name.
 
