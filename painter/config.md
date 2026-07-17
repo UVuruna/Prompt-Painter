@@ -54,13 +54,16 @@ match.
 ## Classes
 
 ### Timing
-All waits and paces in seconds: the selector timeout (required
-elements poll instead of one-shot lookups), busy-appear timeout
-with the send-retry interval (a blocked send button is clicked
-again / Enter pressed until the busy signal shows), the generation
-hard timeout, image-ready timeout, poll step, progress-log cadence,
-and the polite pause between prompts — a RANDOM duration drawn from
-`[pause_min_s, pause_max_s]`, fractional seconds included.
+All waits and paces in seconds: the human-like action delay
+(`action_delay_min/max_s` — a random hesitation between click,
+paste and send, like a person doing Ctrl+V then Enter; GUI-tunable),
+the selector timeout (required elements poll instead of one-shot
+lookups), busy-appear timeout with the send-retry interval (a
+blocked send button is clicked again / Enter pressed until the busy
+signal shows), the generation hard timeout, image-ready timeout,
+poll step, progress-log cadence, and the polite pause between
+prompts — a RANDOM duration drawn from `[pause_min_s, pause_max_s]`,
+fractional seconds included.
 
 ### SiteConfig
 One site's block: `url` (the tab the launcher opens),

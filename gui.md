@@ -47,11 +47,22 @@ sheets, press Start, go ride a bike.
   already-transparent and unclear images are skipped untouched).
 - **Start / Stop** — Stop is graceful: each site finishes its
   current item; everything finished is already saved.
-- **Log** — timestamped (`[HH:MM:SS]`), both sites interleaved
-  with `[gemini]` / `[chatgpt]` prefixes. A SAFETY refusal skips
-  only that image (REFUSED in log + report; a rerun retries it). A
-  quota stop (`TERMINAL STATE`) stops only that site's queue — the
-  other continues; the next Start resumes what remains.
+- **Pause / Action delay** — both are random FROM–TO ranges: the
+  pause between prompts (fractional seconds) and the human-like
+  hesitation between UI steps (click → paste → send, default
+  0.2–0.6 s — never instant).
+- **Instructions** — opens the sheet-authoring guide
+  (`instructions.md`) for whoever writes the next sheet.
+- **Two views** (tabs): the **Dashboard** — one panel per site
+  with the current sheet and image, a progress bar, and the plain
+  numbers (Done/Left/Refused, average per image, tempo per hour,
+  ETA), fed by the runner's structured events; and the **Log
+  (detailed)** — timestamped (`[HH:MM:SS]`), both sites
+  interleaved with `[gemini]` / `[chatgpt]` prefixes. A SAFETY
+  refusal skips only that image (REFUSED in log + report; a rerun
+  retries it). A quota stop (`TERMINAL STATE`) stops only that
+  site's queue — the other continues; the next Start resumes what
+  remains.
 
 ## Threading
 One worker thread per site; each creates its own Playwright

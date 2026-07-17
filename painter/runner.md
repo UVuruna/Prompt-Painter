@@ -44,7 +44,10 @@ run start/finish timestamps and why the run ended.
 ## Functions
 
 - `run_sheet(sheet, driver, out_root, timing, log, should_stop,
-  post_save, prompt_suffix, report, only) -> int` — logs the sheet's
+  post_save, prompt_suffix, report, only, on_event) -> int` —
+  `on_event` receives structured progress dicts (`sheet_start`,
+  `item_start`, `item_done` with `gen_s`, `item_refused`,
+  `sheet_done`) that feed the GUI dashboard. Logs the sheet's
   skipped entries, filters the queue through `Progress`, drives
   every pending item with per-item progress lines, appends
   `prompt_suffix` (the caller resolves the per-site rules) to each

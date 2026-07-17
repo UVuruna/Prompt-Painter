@@ -47,6 +47,9 @@ consumer: DOMY Watch prompt sheets.
 
 ## Documentation
 
+- [Sheet-authoring instructions](instructions.md) — the contract a
+  sheet author (person or agent) follows; also behind the GUI's
+  **Instructions** button
 - [Painter (folder)](painter/___painter.md) — the engine package:
   [Config](painter/config.md), [Sheet Parser](painter/sheet_parser.md),
   [CDP Driver](painter/driver.md), [Run Loop](painter/runner.md),
