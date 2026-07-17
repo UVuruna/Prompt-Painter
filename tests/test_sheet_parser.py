@@ -69,13 +69,13 @@ def test_prompts_are_clean(name):
 # --- trinity: the full (title, path) tuple set ------------------------
 
 TRINITY_ENTRIES = [
-    ("Jesus — the Advocate (blue arm, 04h)", "trinity/Jesus_Advocate.png"),
-    ("The Devil — the Prosecutor (red arm, 20h)", "trinity/Devil_Prosecutor.png"),
-    ("The One — the Judge (gold arm, 12h)", "trinity/One_Judge.png"),
-    ("The Eye of Providence", "trinity/Providence_Eye.png"),
-    ("The Advocate rondel", "trinity/rondel_Advocate.png"),
-    ("The Prosecutor rondel", "trinity/rondel_Prosecutor.png"),
-    ("The Judge rondel", "trinity/rondel_Judge.png"),
+    ("Jesus — the Advocate (blue arm, 04h)", "assets/archetype/trinity/Jesus_Advocate.png"),
+    ("The Devil — the Prosecutor (red arm, 20h)", "assets/archetype/trinity/Devil_Prosecutor.png"),
+    ("The One — the Judge (gold arm, 12h)", "assets/archetype/trinity/One_Judge.png"),
+    ("The Eye of Providence", "assets/archetype/trinity/Providence_Eye.png"),
+    ("The Advocate rondel", "assets/archetype/trinity/rondel_Advocate.png"),
+    ("The Prosecutor rondel", "assets/archetype/trinity/rondel_Prosecutor.png"),
+    ("The Judge rondel", "assets/archetype/trinity/rondel_Judge.png"),
 ]
 
 
@@ -123,7 +123,7 @@ BELL_RONDEL_PROMPT = (
 def test_walks_bell_rondel_prompt_byte_identical():
     sheet = golden("walks_prompts.md")
     assert sheet.items[-1].title == "The Bell rondel"
-    assert sheet.items[-1].drop_path == "walks/rondel_Bell.png"
+    assert sheet.items[-1].drop_path == "assets/archetype/walks/rondel_Bell.png"
     assert sheet.items[-1].prompt == BELL_RONDEL_PROMPT
 
 
@@ -141,10 +141,10 @@ def test_persons_reuse_skipped():
         assert "REUSE" in s.reason
     generated = {i.drop_path for i in sheet.items}
     assert generated == {
-        "persons/One_Love.png",
-        "persons/Michael_Courage.png",
-        "persons/Devil_Hatred.png",
-        "persons/Jesus_Humility.png",
+        "assets/archetype/persons/One_Love.png",
+        "assets/archetype/persons/Michael_Courage.png",
+        "assets/archetype/persons/Devil_Hatred.png",
+        "assets/archetype/persons/Jesus_Humility.png",
     }
 
 
@@ -155,10 +155,10 @@ def test_temperaments_tetramorph_is_advice_not_law():
     normal = [i for i in sheet.items if i.advice is None]
     advised = [i for i in sheet.items if i.advice is not None]
     assert [i.drop_path for i in normal] == [
-        "temperaments/Sanguine.png",
-        "temperaments/Choleric.png",
-        "temperaments/Melancholic.png",
-        "temperaments/Phlegmatic.png",
+        "assets/archetype/temperaments/Sanguine.png",
+        "assets/archetype/temperaments/Choleric.png",
+        "assets/archetype/temperaments/Melancholic.png",
+        "assets/archetype/temperaments/Phlegmatic.png",
     ]
     # the tetramorph rondels LOAD (prompt and all) but carry the
     # sheet's advice — the GUI unticks them by default
@@ -178,14 +178,14 @@ def test_temperaments_tetramorph_is_advice_not_law():
 def test_calendar_wrapped_title_normalized():
     sheet = golden("calendar_prompts.md")
     november = next(
-        i for i in sheet.items if i.drop_path == "calendar/November.png"
+        i for i in sheet.items if i.drop_path == "assets/archetype/calendar/November.png"
     )
     assert november.title == (
         "November (crimson-magenta `#FF0080`) — bare branches, "
         "the last harvest"
     )
     assert [i.drop_path for i in sheet.items] == [
-        f"calendar/{m}.png"
+        f"assets/archetype/calendar/{m}.png"
         for m in (
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November",
@@ -199,8 +199,8 @@ def test_calendar_wrapped_title_normalized():
 def test_life_registers_do_not_collide():
     sheet = golden("life_prompts.md")
     paths = {i.drop_path for i in sheet.items}
-    assert "life/tree/Unborn.png" in paths
-    assert "life/animals/Unborn.png" in paths
+    assert "assets/archetype/life/tree/Unborn.png" in paths
+    assert "assets/archetype/life/animals/Unborn.png" in paths
     assert len(paths) == 16
 
 
@@ -237,7 +237,8 @@ def test_legacy_forms_parse():
     assert [(i.title, i.drop_path) for i in sheet.items] == [
         ("Sun — Ancient of Days", "ancient_of_days.png"),
         ("Moon", "moon.png"),
-        ("Aries", "sign/Aries.png"),
+        # the bare bold picks up the section's FULL declared dir
+        ("Aries", "assets/zodiac/astrology/sign/Aries.png"),
     ]
     assert sheet.items[0].prompt == "heading-form prompt"
     assert sheet.items[1].prompt == "bold-token prompt"

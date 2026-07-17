@@ -33,6 +33,7 @@ from painter.config import (
     DEFAULT_OUT_DIR,
     PROGRESS_SUFFIX,
     SITES,
+    STATE_DIRNAME,
     TIMING,
     fmt_duration,
     fmt_size,
@@ -877,9 +878,10 @@ class PainterGui:
         ).resolve()
 
     def _progress_done(self, site: str, sheet: Sheet) -> set:
-        """Drop paths already generated for one site+theme (per sidecar)."""
+        """Drop paths already generated for one site+collection."""
         progress_file = (
-            self._out_base() / site / (sheet.source.stem + PROGRESS_SUFFIX)
+            self._out_base() / STATE_DIRNAME / site
+            / (sheet.source.stem + PROGRESS_SUFFIX)
         )
         if progress_file.exists():
             return set(
@@ -1186,7 +1188,7 @@ class PainterGui:
                 args=(
                     key,
                     list(sheets),
-                    out_base / key,
+                    out_base,
                     timing,
                     post_save,
                     partial(prompt_suffix, key, backgrounds[key]),
@@ -1200,7 +1202,7 @@ class PainterGui:
             worker.start()
 
     def _drive_site(
-        self, key, sheets, out_root, timing, post_save, suffix, report,
+        self, key, sheets, out_base, timing, post_save, suffix, report,
         selection, safer,
     ) -> None:
         """One site's whole run — the theme queue in order, one thread."""
@@ -1229,7 +1231,7 @@ class PainterGui:
                 )
                 try:
                     generated = run_sheet(
-                        sheet, driver, out_root, timing,
+                        sheet, driver, out_base, key, timing,
                         log=log,
                         should_stop=self._stop.is_set,
                         post_save=post_save,
@@ -1240,7 +1242,7 @@ class PainterGui:
                         safer_retry=safer,
                     )
                     done_sheets += 1
-                    log(f"collection done: {generated} image(s) into {out_root}")
+                    log(f"collection done: {generated} image(s) into {out_base}")
                 except TerminalState as exc:
                     log(f"TERMINAL STATE (quota/rate limit): {exc}")
                     log(

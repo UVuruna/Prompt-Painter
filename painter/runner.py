@@ -25,7 +25,9 @@ from painter.config import (
     PROGRESS_SUFFIX,
     REPORT_SUFFIX,
     SAFER_PREAMBLE,
+    STATE_DIRNAME,
     Timing,
+    dest_for,
     fmt_duration,
     fmt_size,
 )
@@ -179,7 +181,8 @@ class RunReport:
 def run_sheet(
     sheet: Sheet,
     driver: SiteDriver,
-    out_root: Path,
+    out_base: Path,
+    site_key: str,
     timing: Timing,
     log: Log = print,
     should_stop: ShouldStop | None = None,
@@ -192,15 +195,19 @@ def run_sheet(
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
+    Saves land at ``out_base / dest_for(drop, site_key)`` — the
+    assets-mirroring layout. Run state and the report live under
+    ``out_base/_state/<site>/`` so the image tree stays copy-ready.
     The caller has already refused sheets with problems; skipped
     entries are logged here and never driven. ``only`` narrows the
     run to the owner's ticked drop paths (None = everything).
     """
-    out_root.mkdir(parents=True, exist_ok=True)
-    progress = Progress(out_root / (sheet.source.stem + PROGRESS_SUFFIX))
+    state_dir = out_base / STATE_DIRNAME / site_key
+    state_dir.mkdir(parents=True, exist_ok=True)
+    progress = Progress(state_dir / (sheet.source.stem + PROGRESS_SUFFIX))
     run_report = (
         RunReport(
-            out_root / (sheet.source.stem + REPORT_SUFFIX),
+            state_dir / (sheet.source.stem + REPORT_SUFFIX),
             sheet.theme,
             driver.site.name,
         )
@@ -334,7 +341,7 @@ def run_sheet(
             t_image = time.monotonic()
             gen_s = t_image - t_send
 
-            dest = out_root / item.drop_path
+            dest = out_base / dest_for(item.drop_path, site_key)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             orig_res = _png_size(data)

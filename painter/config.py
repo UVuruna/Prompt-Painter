@@ -49,13 +49,27 @@ CHROME_LAUNCH_TIMEOUT_S = 30.0
 
 # --- Output ----------------------------------------------------------
 
-# Images save DIRECTLY to <out>/<site>/<drop-path> (owner
-# 2026-07-17: no approval step). Per-site sidecar state and the run
-# report live beside them: <out>/<site>/<sheet-stem>.progress.json
-# and <out>/<site>/<sheet-stem>_report.txt
+# The out/ folder MIRRORS the DOMY assets/ tree so the owner can copy
+# its whole content straight into assets/ (owner 2026-07-18). Sheets
+# carry site-agnostic FULL drop paths ("assets/emblem/mood/Glory.png");
+# the site is injected after the category:
+#     assets/<category>/<rest>  ->  <out>/<category>/<site>/<rest>
+# Legacy relative drops keep the old layout: <out>/<site>/<drop>.
+# Run state and reports live OUT of the copyable tree, under
+# <out>/_state/<site>/; backup variants land under <out>/EXTRA/.
 DEFAULT_OUT_DIR = PROJECT_ROOT / "out"
+STATE_DIRNAME = "_state"
 PROGRESS_SUFFIX = ".progress.json"
 REPORT_SUFFIX = "_report.txt"
+
+
+def dest_for(drop_path: str, site_key: str) -> str:
+    """The save path (relative to the out base) for one drop path."""
+    parts = drop_path.split("/")
+    if parts[0] == "assets" and len(parts) >= 3:
+        category, rest = parts[1], parts[2:]
+        return "/".join([category, site_key, *rest])
+    return "/".join([site_key, drop_path])
 
 # --- The sheet contract ----------------------------------------------
 
@@ -83,8 +97,9 @@ BACKGROUND_CHOICES = ("transparent", "white", "none")
 
 _BACKGROUND_RULE = {
     "transparent": (
-        "render on a fully TRANSPARENT background (PNG with alpha"
-        " channel, no backdrop of any kind)"
+        "render on a fully TRANSPARENT background — a REAL alpha"
+        " channel in the PNG, no backdrop of any kind; NEVER paint a"
+        " fake gray-and-white checkerboard pattern as the background"
     ),
     "white": (
         "render on a PLAIN PURE WHITE background — flat white, no"
@@ -104,12 +119,13 @@ SITE_PROMPT_RULES = {
     ),
 }
 
-# Gemini's aspect-ratio law DEPENDS ON THE IMAGE (owner 2026-07-17):
-# most plates are badges/rondels/medallions -> a perfect square, but
-# the church-window lancets are clearly taller than wide. The rule is
+# The aspect-ratio law DEPENDS ON THE IMAGE (owner 2026-07-17; since
+# 2026-07-18 sent to BOTH sites — ChatGPT drifts too): most plates
+# are badges/rondels/medallions -> a perfect square, but the
+# church-window lancets are clearly taller than wide. The rule is
 # picked from the PROMPT TEXT itself — first pattern that matches
 # wins; the default is the square.
-GEMINI_ASPECT_RULES = (
+ASPECT_RULES = (
     (
         re.compile(r"\bTALL\b|\blancet\b", re.IGNORECASE),
         "ASPECT RATIO tall PORTRAIT — the image must be clearly"
@@ -117,23 +133,21 @@ GEMINI_ASPECT_RULES = (
         " window shape described; never landscape, never square",
     ),
 )
-GEMINI_ASPECT_DEFAULT = (
+ASPECT_DEFAULT = (
     "ASPECT RATIO exactly 1:1 — a perfect square image"
 )
 
 
-def _gemini_aspect_rule(prompt_text: str) -> str:
-    for pattern, rule in GEMINI_ASPECT_RULES:
+def _aspect_rule(prompt_text: str) -> str:
+    for pattern, rule in ASPECT_RULES:
         if pattern.search(prompt_text):
             return rule
-    return GEMINI_ASPECT_DEFAULT
+    return ASPECT_DEFAULT
 
 
 def prompt_suffix(site_key: str, background: str, prompt_text: str = "") -> str:
     """The rule block appended to one prompt of one site."""
-    rules = []
-    if site_key == "gemini":
-        rules.append(_gemini_aspect_rule(prompt_text))
+    rules = [_aspect_rule(prompt_text)]
     bg_rule = _BACKGROUND_RULE[background]
     if bg_rule:
         rules.append(bg_rule)

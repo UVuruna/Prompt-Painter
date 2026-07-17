@@ -236,8 +236,10 @@ def parse_sheet(path: Path) -> Sheet:
                     for t in _BACKTICK_TOKEN.findall(heading)
                     if t.strip().endswith("/")
                 ]
+                # keep the FULL declared dir (assets/... convention) so
+                # bare bold entries land in the mirrored tree
                 section_dir = (
-                    PurePosixPath(dirs[0]).name if len(dirs) == 1 else None
+                    dirs[0].rstrip("/") if len(dirs) == 1 else None
                 )
             i += 1
             continue

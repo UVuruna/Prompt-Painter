@@ -158,7 +158,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     out_base = args.out.resolve()
-    out_root = out_base / args.site
     for sheet in sheets:
         if sheet.source.resolve().is_relative_to(out_base):
             print(
@@ -222,7 +221,8 @@ def main(argv: list[str] | None = None) -> int:
             total += run_sheet(
                 sheet,
                 driver,
-                out_root,
+                out_base,
+                args.site,
                 timing,
                 post_save=post_save,
                 prompt_suffix=suffix,
@@ -231,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         print(
             f"\nDone: {total} image(s) across {len(sheets)} sheet(s)"
-            f" into {out_root}"
+            f" into {out_base}"
         )
         return 2 if broken else 0
     except TerminalState as exc:
