@@ -30,6 +30,9 @@ Log = Callable[[str], None]
 ShouldStop = Callable[[], bool]
 # background fix: (saved file) -> action string; exceptions are logged
 PostSave = Callable[[Path], str]
+# structured progress events for dashboards: receives dicts like
+# {"type": "item_done", "gen_s": 41.2} — see run_sheet for the types
+OnEvent = Callable[[dict], None]
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
@@ -177,6 +180,7 @@ def run_sheet(
     prompt_suffix: str | Callable[[str], str] = "",
     report: bool = True,
     only: set[str] | None = None,
+    on_event: OnEvent | None = None,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -232,6 +236,19 @@ def run_sheet(
     if run_report is not None:
         run_report.start(len(queue), len(sheet.items), tuple(report_skips))
 
+    def emit(event: dict) -> None:
+        if on_event is not None:
+            on_event(event)
+
+    emit(
+        {
+            "type": "sheet_start",
+            "sheet": sheet.source.name,
+            "pending": len(queue),
+            "total": len(sheet.items),
+        }
+    )
+
     start = time.monotonic()
     total = len(queue)
     generated = 0
@@ -246,6 +263,14 @@ def run_sheet(
                 break
             elapsed = time.monotonic() - start
             log(f"[{elapsed:7.1f}s] ({idx}/{total}) {item.title}")
+            emit(
+                {
+                    "type": "item_start",
+                    "title": item.title,
+                    "idx": idx,
+                    "of": total,
+                }
+            )
 
             t_item = time.monotonic()
             # the suffix may depend on the prompt itself (Gemini's
@@ -268,6 +293,7 @@ def run_sheet(
                 )
                 if run_report is not None:
                     run_report.refused(item.drop_path, str(exc))
+                emit({"type": "item_refused"})
                 if idx < total:
                     _pause(timing, should_stop, log)
                 continue
@@ -309,6 +335,7 @@ def run_sheet(
             progress.mark_done(item.drop_path, dest)
             generated += 1
             log(f"    saved {dest} ({len(data):,} bytes)")
+            emit({"type": "item_done", "gen_s": gen_s})
 
             if idx < total:
                 _pause(timing, should_stop, log)
@@ -320,6 +347,7 @@ def run_sheet(
             run_report.finish(
                 generated, time.monotonic() - start, stopped_why
             )
+        emit({"type": "sheet_done", "generated": generated})
 
     if refused:
         log(

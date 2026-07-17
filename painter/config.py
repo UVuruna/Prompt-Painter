@@ -137,6 +137,11 @@ def prompt_suffix(site_key: str, background: str, prompt_text: str = "") -> str:
 class Timing:
     """All waits and paces, in seconds."""
 
+    # human-like hesitation between UI actions (click box -> paste,
+    # paste -> send ...): a random delay drawn from this range, like
+    # a person doing Ctrl+V and then Enter
+    action_delay_min_s: float = 0.2
+    action_delay_max_s: float = 0.6
     # a required element (prompt box, send button) must appear;
     # SPAs morph elements a beat after input events, so lookups
     # poll instead of failing on a one-shot snapshot

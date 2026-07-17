@@ -16,6 +16,7 @@ reported and stopped, never blind-retried.
 from __future__ import annotations
 
 import base64
+import random
 import time
 from typing import Callable
 
@@ -150,13 +151,26 @@ class SiteDriver:
 
     # --- the per-item protocol -----------------------------------------
 
+    def _hesitate(self) -> None:
+        """A human-like random pause between UI actions (config range)."""
+        time.sleep(
+            random.uniform(
+                self._timing.action_delay_min_s,
+                self._timing.action_delay_max_s,
+            )
+        )
+
     def submit_prompt(self, prompt: str) -> None:
-        """Paste the prompt byte-identical and press send."""
+        """Paste the prompt byte-identical and press send — with a
+        person's rhythm (click ... paste ... send), never instant."""
         box = self._require(self.site.prompt_box, "the prompt box")
         box.click()
+        self._hesitate()
         self.page.keyboard.press("Control+A")
         self.page.keyboard.press("Delete")
+        self._hesitate()
         self.page.keyboard.insert_text(prompt)
+        self._hesitate()
         send = self._require(self.site.send_button, "the send button")
         send.click()
 
