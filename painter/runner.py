@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from painter.config import PROGRESS_SUFFIX, REPORT_SUFFIX, Timing
-from painter.driver import SiteDriver, sniff_format
+from painter.driver import ItemRefused, SiteDriver, sniff_format
 from painter.sheet_parser import Sheet
 
 Log = Callable[[str], None]
@@ -48,6 +48,15 @@ def _now() -> str:
 def _fmt_s(seconds: float) -> str:
     minutes, secs = divmod(int(round(seconds)), 60)
     return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
+def _pause(timing: Timing, should_stop: ShouldStop | None) -> None:
+    """The polite pause between prompts, interruptible by Stop."""
+    pause_end = time.monotonic() + timing.pause_between_prompts_s
+    while time.monotonic() < pause_end:
+        if should_stop is not None and should_stop():
+            break
+        time.sleep(min(0.5, timing.pause_between_prompts_s))
 
 
 class Progress:
@@ -87,6 +96,7 @@ class RunReport:
         self._site = site_name
         self._gen_times: list[float] = []
         self._extra_times: list[float] = []
+        self._refused = 0
 
     def _append(self, text: str) -> None:
         with self.path.open("a", encoding="utf-8") as fh:
@@ -120,8 +130,17 @@ class RunReport:
             f"  {resolution}{note}"
         )
 
+    def refused(self, drop_path: str, reason: str) -> None:
+        self._refused += 1
+        self._append(f"{_now()}  {drop_path:<44} REFUSED — {reason[:120]}")
+
     def finish(self, generated: int, wall_s: float, stopped_why: str) -> None:
         self._append("-" * 68)
+        if self._refused:
+            self._append(
+                f"Refused: {self._refused} image(s) — rework those"
+                " prompts in the sheet (or intervene manually) and rerun"
+            )
         if self._gen_times:
             avg = sum(self._gen_times) / len(self._gen_times)
             self._append(
@@ -149,11 +168,13 @@ def run_sheet(
     post_save: PostSave | None = None,
     prompt_suffix: str | Callable[[str], str] = "",
     report: bool = True,
+    only: set[str] | None = None,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
     The caller has already refused sheets with problems; skipped
-    entries are logged here and never driven.
+    entries are logged here and never driven. ``only`` narrows the
+    run to the owner's ticked drop paths (None = everything).
     """
     out_root.mkdir(parents=True, exist_ok=True)
     progress = Progress(out_root / (sheet.source.stem + PROGRESS_SUFFIX))
@@ -177,12 +198,21 @@ def run_sheet(
             f"  RESUME: {already}/{len(sheet.items)} already done per"
             f" {progress.path.name}"
         )
+    if only is not None:
+        selected = [it for it in queue if it.drop_path in only]
+        if len(selected) != len(queue):
+            log(
+                f"  SELECTION: {len(selected)}/{len(queue)} pending"
+                " item(s) ticked for this run"
+            )
+        queue = selected
     if run_report is not None:
         run_report.start(len(queue), len(sheet.items))
 
     start = time.monotonic()
     total = len(queue)
     generated = 0
+    refused = 0
     fix_failures = 0
     stopped_why = "all pending items done"
     try:
@@ -202,9 +232,22 @@ def run_sheet(
                 if callable(prompt_suffix)
                 else prompt_suffix
             )
-            driver.submit_prompt(item.prompt + suffix)
-            driver.await_done(log)
-            data = driver.extract_image()
+            try:
+                driver.submit_prompt(item.prompt + suffix)
+                driver.await_done(log)
+                data = driver.extract_image()
+            except ItemRefused as exc:
+                refused += 1
+                log(f"    REFUSED — {exc}")
+                log(
+                    "    continuing with the next item; rework the"
+                    " prompt (or intervene manually) and rerun later"
+                )
+                if run_report is not None:
+                    run_report.refused(item.drop_path, str(exc))
+                if idx < total:
+                    _pause(timing, should_stop)
+                continue
             gen_s = time.monotonic() - t_item
 
             dest = out_root / item.drop_path
@@ -249,13 +292,7 @@ def run_sheet(
                     f"    pause {timing.pause_between_prompts_s:.0f}s"
                     " (paced run)"
                 )
-                pause_end = (
-                    time.monotonic() + timing.pause_between_prompts_s
-                )
-                while time.monotonic() < pause_end:
-                    if should_stop is not None and should_stop():
-                        break
-                    time.sleep(min(0.5, timing.pause_between_prompts_s))
+                _pause(timing, should_stop)
     except BaseException as exc:
         stopped_why = f"aborted: {type(exc).__name__}"
         raise
@@ -265,6 +302,11 @@ def run_sheet(
                 generated, time.monotonic() - start, stopped_why
             )
 
+    if refused:
+        log(
+            f"  NOTE: {refused} item(s) REFUSED by the site — listed in"
+            " the report; rework those prompts and rerun"
+        )
     if fix_failures:
         log(
             f"  NOTE: background fix failed on {fix_failures} image(s) —"

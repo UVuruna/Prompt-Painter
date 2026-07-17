@@ -6,10 +6,12 @@ sidecar, the stop flag, and the loud-but-not-fatal background-fix
 hook.
 """
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
 from painter.config import SITES, TIMING, prompt_suffix
+from painter.driver import ItemRefused
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
@@ -121,6 +123,50 @@ def test_no_report_flag(tmp_path):
     out = tmp_path / "out" / "chatgpt"
     run_sheet(sheet, FakeDriver(SITES["chatgpt"]), out, FAST, report=False)
     assert not (out / "fake_prompts_report.txt").exists()
+
+
+def test_refusal_skips_the_item_and_the_run_continues(tmp_path):
+    sheet = make_sheet(tmp_path, n=3)
+    out = tmp_path / "out" / "gemini"
+
+    class RefusingDriver(FakeDriver):
+        def extract_image(self):
+            if "prompt 1" in self.submitted[-1]:
+                raise ItemRefused("Gemini: prompt refused ('unsafe')")
+            return PNG_1PX
+
+    driver = RefusingDriver(SITES["gemini"])
+    logs: list[str] = []
+    generated = run_sheet(sheet, driver, out, FAST, log=logs.append)
+
+    assert generated == 2  # items 0 and 2 made it
+    assert len(driver.submitted) == 3  # the refusal did not stop the run
+    assert not (out / "fake" / "img_1.png").exists()
+    progress = json.loads(
+        (out / "fake_prompts.progress.json").read_text(encoding="utf-8")
+    )["done"]
+    assert "fake/img_1.png" not in progress  # a rerun retries it
+    assert len(progress) == 2
+    report = (out / "fake_prompts_report.txt").read_text(encoding="utf-8")
+    assert "REFUSED" in report
+    assert "Refused: 1" in report
+
+    # the rerun drives ONLY the refused item
+    driver2 = FakeDriver(SITES["gemini"])
+    assert run_sheet(sheet, driver2, out, FAST) == 1
+    assert "prompt 1" in driver2.submitted[0]
+
+
+def test_only_filter_drives_just_the_ticked_items(tmp_path):
+    sheet = make_sheet(tmp_path, n=3)
+    out = tmp_path / "out" / "chatgpt"
+    driver = FakeDriver(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, FAST, only={"fake/img_2.png"}
+    )
+    assert generated == 1
+    assert (out / "fake" / "img_2.png").exists()
+    assert not (out / "fake" / "img_0.png").exists()
 
 
 def test_stop_flag_stops_between_items(tmp_path):

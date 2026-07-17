@@ -184,9 +184,12 @@ class SiteConfig:
     response_container: tuple[str, ...]
     # generated <img> nodes inside the last response container
     result_image: tuple[str, ...]
-    # substrings that mark a no-image response as a TERMINAL
-    # quota/refusal state (report and stop, never blind-retry)
+    # substrings marking a SAFETY refusal of ONE prompt — the item
+    # is reported and skipped, the run continues (owner 2026-07-17)
     refusal_text_markers: tuple[str, ...]
+    # substrings marking a quota/rate limit — TERMINAL for the whole
+    # site: report and stop, never blind-retry
+    quota_text_markers: tuple[str, ...]
 
 
 SITES = {
@@ -238,7 +241,13 @@ SITES = {
             "can't generate",
             "cannot generate",
             "content policy",
+            "unable to create",
+            "not able to create",
+        ),
+        quota_text_markers=(
             "reached your limit",
+            "too many requests",
+            "rate limit",
             "try again later",
         ),
     ),
@@ -291,10 +300,20 @@ SITES = {
             "cannot create",
             "can't generate",
             "cannot generate",
+            "unable to generate",
+            "unsafe",
+            # Gemini answers in the account's language — Serbian too
+            "ne mogu da generi",
+            "ne mogu da kreiram",
+            "bezbednosn",
+        ),
+        quota_text_markers=(
             "quota",
             "limit reached",
+            "too many requests",
+            "rate limit",
             "try again later",
-            "unable to generate",
+            "dostigli ste",
         ),
     ),
 }

@@ -35,7 +35,12 @@ class SelectorRot(DriverError):
 
 
 class TerminalState(DriverError):
-    """Quota or refusal — report and stop the run, never blind-retry."""
+    """Quota/rate limit — stop the whole site, never blind-retry."""
+
+
+class ItemRefused(DriverError):
+    """The site refused THIS prompt (safety) — the runner reports it,
+    skips the item and continues with the rest."""
 
 
 class GenerationTimeout(DriverError):
@@ -183,13 +188,19 @@ class SiteDriver:
             time.sleep(t.poll_interval_s)
 
     def extract_image(self) -> bytes:
-        """Read the generated image's bytes straight from the DOM."""
+        """Read the generated image's bytes straight from the DOM.
+
+        While waiting for a real <img>, the response text is checked
+        every poll — a refusal or quota answer raises immediately
+        instead of burning the whole image timeout.
+        """
         t = self._timing
         deadline = time.monotonic() + t.image_ready_timeout_s
         while True:
             img = self._last_result_image()
             if img is not None:
                 break
+            self._check_markers()
             if time.monotonic() > deadline:
                 self._raise_no_image(
                     "the response holds no loaded generated image"
@@ -256,21 +267,35 @@ class SiteDriver:
                     return img
         return None
 
-    def _raise_no_image(self, situation: str) -> None:
-        """Classify a no-image state: terminal refusal or unknown DOM."""
+    def _response_text(self) -> str:
         try:
-            response_text = self._last_response().inner_text()
+            return self._last_response().inner_text()
         except DriverError:
-            response_text = ""
-        lowered = response_text.lower()
-        for marker in self.site.refusal_text_markers:
+            return ""
+
+    def _check_markers(self) -> None:
+        """Raise on a quota (TerminalState) or refusal (ItemRefused)
+        answer; silent when the response matches neither."""
+        text = self._response_text()
+        lowered = text.lower()
+        for marker in self.site.quota_text_markers:
             if marker in lowered:
                 raise TerminalState(
-                    f"{self.site.name}: refusal/quota response"
-                    f" (matched '{marker}'): {response_text[:300]}"
+                    f"{self.site.name}: quota/rate-limit response"
+                    f" (matched '{marker}'): {text[:300]}"
                 )
+        for marker in self.site.refusal_text_markers:
+            if marker in lowered:
+                raise ItemRefused(
+                    f"{self.site.name}: prompt refused"
+                    f" (matched '{marker}'): {text[:200]}"
+                )
+
+    def _raise_no_image(self, situation: str) -> None:
+        """No image and no recognized marker — an unknown DOM state."""
+        self._check_markers()
         raise DriverError(
             f"{self.site.name}: {situation}, and the response matches no"
-            f" known refusal — DOM state unknown (selector rot?)."
-            f" Response starts: {response_text[:300]!r}"
+            f" known refusal/quota marker — DOM state unknown (selector"
+            f" rot?). Response starts: {self._response_text()[:300]!r}"
         )
