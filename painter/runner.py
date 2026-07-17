@@ -103,7 +103,7 @@ class RunReport:
         self._theme = theme
         self._site = site_name
         self._gen_times: list[float] = []
-        self._proc_times: list[float] = []
+        self._over_times: list[float] = []
         self._refused = 0
 
     def _append(self, text: str) -> None:
@@ -125,14 +125,14 @@ class RunReport:
         self,
         drop_path: str,
         gen_s: float,
-        proc_s: float,
+        over_s: float,
         orig_res: str,
         final_res: str,
         size_bytes: int,
         actions: list[str],
     ) -> None:
         self._gen_times.append(gen_s)
-        self._proc_times.append(proc_s)
+        self._over_times.append(over_s)
         note = f"  [{', '.join(actions)}]" if actions else ""
         resolution = (
             f"{orig_res} -> {final_res}"
@@ -141,7 +141,7 @@ class RunReport:
         )
         self._append(
             f"{_now()}  {drop_path:<44} gen {gen_s:6.1f}s"
-            f"  proc {proc_s:5.1f}s  {resolution:>21}"
+            f"  ours {over_s:6.1f}s  {resolution:>21}"
             f"  {fmt_size(size_bytes):>8}{note}"
         )
 
@@ -159,16 +159,16 @@ class RunReport:
         if self._gen_times:
             n = len(self._gen_times)
             avg_gen = sum(self._gen_times) / n
-            avg_proc = sum(self._proc_times) / n
+            avg_over = sum(self._over_times) / n
             self._append(
-                f"Images: {generated}  |  average generation:"
-                f" {fmt_duration(avg_gen)}/image  |  average processing:"
-                f" {fmt_duration(avg_proc)}/image"
+                f"Images: {generated}  |  average generation (AI):"
+                f" {fmt_duration(avg_gen)}/image  |  average our time"
+                f" (save+bgfix+pause): {fmt_duration(avg_over)}/image"
             )
             self._append(
-                "Total generation + processing:"
-                f" {fmt_duration(sum(self._gen_times) + sum(self._proc_times))}"
-                f"  (wall clock incl. pauses: {fmt_duration(wall_s)})"
+                "Total AI + our time:"
+                f" {fmt_duration(sum(self._gen_times) + sum(self._over_times))}"
+                f"  (wall clock: {fmt_duration(wall_s)})"
             )
         else:
             self._append("Images: 0")
@@ -352,35 +352,47 @@ def run_sheet(
                     actions.append("REMOVE BG: FAILED")
                     log(f"    BGFIX FAILED (image kept as saved): {exc}")
 
-            # processing = image appears -> saved and background-fixed
             saved_bytes = dest.read_bytes()
-            proc_s = time.monotonic() - t_image
             size = len(saved_bytes)
             final_res = _png_size(saved_bytes)
+            progress.mark_done(item.drop_path, dest)  # resume-safe now
+            generated += 1
+            log(f"    saved {dest} ({size:,} bytes)")
+            # count it live right away (dashboard progress + generate avg)
+            emit(
+                {
+                    "type": "item_progress",
+                    "idx": idx,
+                    "of": total,
+                    "gen_s": gen_s,
+                }
+            )
+
+            # OUR time = everything from the image appearing to the next
+            # SEND: save + background fix + the paced pause (owner
+            # 2026-07-17: "sve se računa"). The pause is timed here so it
+            # belongs to this image's overhead; the last image has none.
+            if idx < total:
+                _pause(timing, should_stop, log)
+            over_s = time.monotonic() - t_image
 
             if run_report is not None:
                 run_report.item(
-                    item.drop_path, gen_s, proc_s, orig_res, final_res,
+                    item.drop_path, gen_s, over_s, orig_res, final_res,
                     size, actions,
                 )
-            progress.mark_done(item.drop_path, dest)
-            generated += 1
-            log(f"    saved {dest} ({size:,} bytes)")
             emit(
                 {
                     "type": "item_done",
                     "title": item.title,
                     "drop_path": item.drop_path,
                     "gen_s": gen_s,
-                    "proc_s": proc_s,
+                    "over_s": over_s,
                     "orig_res": orig_res,
                     "final_res": final_res,
                     "size": size,
                 }
             )
-
-            if idx < total:
-                _pause(timing, should_stop, log)
     except BaseException as exc:
         stopped_why = f"aborted: {type(exc).__name__}"
         raise

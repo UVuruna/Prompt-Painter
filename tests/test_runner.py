@@ -110,7 +110,7 @@ def test_suffix_layout_report_and_resume(tmp_path):
     assert report.count("fake/img_") == 2
     assert "1x1" in report  # the PNG's parsed resolution
     assert "average generation" in report
-    assert "average processing" in report  # the second timing
+    assert "average our time" in report  # the second timing (incl. pause)
     assert " B" in report or "KB" in report  # a size column per image
     assert "Run finished" in report
 
@@ -128,10 +128,16 @@ def test_events_carry_both_timings_and_size(tmp_path):
         sheet, FakeDriver(SITES["gemini"]), out, FAST, on_event=events.append
     )
     kinds = [e["type"] for e in events]
-    assert kinds == ["sheet_start", "item_start", "item_done", "sheet_done"]
+    # item_progress counts it live; item_done carries our-time + size
+    assert kinds == [
+        "sheet_start", "item_start", "item_progress", "item_done",
+        "sheet_done",
+    ]
+    prog = next(e for e in events if e["type"] == "item_progress")
+    assert prog["gen_s"] >= 0
     done = next(e for e in events if e["type"] == "item_done")
     assert done["gen_s"] >= 0
-    assert done["proc_s"] >= 0
+    assert done["over_s"] >= 0
     assert done["size"] > 0
     assert done["orig_res"] == "1x1"
     assert done["drop_path"] == "fake/img_0.png"
