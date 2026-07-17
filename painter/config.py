@@ -324,7 +324,13 @@ SITES = {
             "too many requests",
             "rate limit",
             "try again later",
+            # live capture 2026-07-17: "I can create more images as
+            # soon as your limit resets. Check your usage in Settings."
+            "limit resets",
+            "your limit",
+            "check your usage",
             "dostigli ste",
+            "ograničenj",
         ),
     ),
 }
