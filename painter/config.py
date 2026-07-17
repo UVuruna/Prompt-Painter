@@ -6,16 +6,34 @@ LOUDLY (root Rule #1) instead of guessing.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
-# --- CDP attachment -------------------------------------------------
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Chrome must run with: chrome.exe --remote-debugging-port=9222
-CDP_URL = "http://localhost:9222"
+# --- CDP attachment / Chrome launch ----------------------------------
+
+CDP_PORT = 9222
+CDP_URL = f"http://localhost:{CDP_PORT}"
+
+# Where chrome.exe usually lives; the launcher tries these in order.
+CHROME_CANDIDATES = (
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+)
+
+# Chrome 136+ refuses --remote-debugging-port on the DEFAULT profile,
+# so PromptPainter launches Chrome with its own profile folder. The
+# owner logs in ONCE there (Google + OpenAI); sessions persist.
+CHROME_PROFILE_DIR = PROJECT_ROOT / "chrome-profile"
+
+# launch -> the CDP endpoint must answer within this window
+CHROME_LAUNCH_TIMEOUT_S = 30.0
 
 # --- Output ----------------------------------------------------------
 
-DEFAULT_OUT_DIR = "out"
-# Sidecar run state: out/<sheet-stem>.progress.json
+# Images land at <out>/<site>/<drop-path>; per-site sidecar state at
+# <out>/<site>/<sheet-stem>.progress.json
+DEFAULT_OUT_DIR = PROJECT_ROOT / "out"
 PROGRESS_SUFFIX = ".progress.json"
 
 # --- The sheet contract ----------------------------------------------
@@ -26,6 +44,17 @@ IMAGE_EXTENSIONS = (".png",)
 # A bold span matching this marks an entry (or a whole section) as
 # skipped — logged, never generated.
 SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
+
+# --- Background fix (owner workflow step 5) --------------------------
+
+# The DOMY Watch background tool: per saved image it auto-detects —
+# already-transparent images are skipped, white backgrounds (Gemini)
+# are cleared, ambiguous ones are reported and left untouched.
+BG_TOOL_PY = (
+    PROJECT_ROOT.parent / "DOMY Watch" / "tools" / "bg_remove.py"
+)
+BG_TOOL_ARGS = ("--in-place", "--crop")
+BG_TOOL_TIMEOUT_S = 120.0
 
 
 # --- Timing ----------------------------------------------------------
@@ -61,8 +90,14 @@ class SiteConfig:
     """The DOM hooks the driver watches on one site."""
 
     name: str
+    # the tab the launcher opens
+    url: str
     # substring of the tab URL used to find the already-open tab
     url_fragment: str
+    # appended to every prompt (owner 2026-07-17): ChatGPT is asked
+    # for a TRANSPARENT background, Gemini for a flat WHITE one that
+    # the background tool then clears
+    prompt_suffix: str
     # the contenteditable prompt box
     prompt_box: tuple[str, ...]
     # the idle send button
@@ -81,7 +116,12 @@ class SiteConfig:
 SITES = {
     "chatgpt": SiteConfig(
         name="ChatGPT",
+        url="https://chatgpt.com/",
         url_fragment="chatgpt.com",
+        prompt_suffix=(
+            "\n\nIMPORTANT: render on a fully TRANSPARENT background"
+            " (PNG with alpha channel, no backdrop of any kind)."
+        ),
         prompt_box=(
             "#prompt-textarea",
             "div.ProseMirror[contenteditable='true']",
@@ -116,7 +156,13 @@ SITES = {
     ),
     "gemini": SiteConfig(
         name="Gemini",
+        url="https://gemini.google.com/app",
         url_fragment="gemini.google.com",
+        prompt_suffix=(
+            "\n\nIMPORTANT: render the artwork on a PLAIN PURE WHITE"
+            " background — flat white, no gradients, no vignette, no"
+            " backdrop scenery."
+        ),
         prompt_box=(
             "rich-textarea div[contenteditable='true']",
             "div.ql-editor[contenteditable='true']",
