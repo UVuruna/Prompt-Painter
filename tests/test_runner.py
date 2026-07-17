@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from painter.config import SITES, TIMING, prompt_suffix
+from painter.config import SAFER_PREAMBLE, SITES, TIMING, prompt_suffix
 from painter.driver import ItemRefused
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
@@ -110,12 +110,74 @@ def test_suffix_layout_report_and_resume(tmp_path):
     assert report.count("fake/img_") == 2
     assert "1x1" in report  # the PNG's parsed resolution
     assert "average generation" in report
+    assert "average processing" in report  # the second timing
+    assert " B" in report or "KB" in report  # a size column per image
     assert "Run finished" in report
 
     # resume: a second run drives nothing
     driver2 = FakeDriver(SITES["gemini"])
     assert run_sheet(sheet, driver2, out, FAST) == 0
     assert driver2.submitted == []
+
+
+def test_events_carry_both_timings_and_size(tmp_path):
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out" / "gemini"
+    events: list[dict] = []
+    run_sheet(
+        sheet, FakeDriver(SITES["gemini"]), out, FAST, on_event=events.append
+    )
+    kinds = [e["type"] for e in events]
+    assert kinds == ["sheet_start", "item_start", "item_done", "sheet_done"]
+    done = next(e for e in events if e["type"] == "item_done")
+    assert done["gen_s"] >= 0
+    assert done["proc_s"] >= 0
+    assert done["size"] > 0
+    assert done["orig_res"] == "1x1"
+    assert done["drop_path"] == "fake/img_0.png"
+
+
+def test_safer_retry_recovers_then_gives_up(tmp_path):
+    # a driver that refuses unless the SAFER_PREAMBLE is present
+    class PickyDriver(FakeDriver):
+        def extract_image(self):
+            last = self.submitted[-1]
+            if "prompt 0" in last and SAFER_PREAMBLE not in last:
+                raise ItemRefused("refused: unsafe")
+            if "prompt 1" in last:
+                raise ItemRefused("refused: unsafe")  # never recovers
+            return PNG_1PX
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out" / "gemini"
+    logs: list[str] = []
+    driver = PickyDriver(SITES["gemini"])
+    generated = run_sheet(
+        sheet, driver, out, FAST, log=logs.append, safer_retry=True
+    )
+    # item 0 recovered on the safer retry; item 1 refused twice -> skipped
+    assert generated == 1
+    assert (out / "fake" / "img_0.png").exists()
+    assert not (out / "fake" / "img_1.png").exists()
+    assert any("safer retry SUCCEEDED" in line for line in logs)
+    # item 0: original + safer; item 1: original + safer = 4 submits
+    assert len(driver.submitted) == 4
+
+
+def test_no_safer_retry_by_default(tmp_path):
+    class RefuseFirst(FakeDriver):
+        def extract_image(self):
+            if "prompt 0" in self.submitted[-1]:
+                raise ItemRefused("refused: unsafe")
+            return PNG_1PX
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out" / "gemini"
+    driver = RefuseFirst(SITES["gemini"])
+    generated = run_sheet(sheet, driver, out, FAST)  # safer_retry off
+    assert generated == 1
+    # no retry: item 0 submitted once, item 1 once
+    assert len(driver.submitted) == 2
 
 
 def test_no_report_flag(tmp_path):

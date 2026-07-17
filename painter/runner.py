@@ -21,7 +21,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from painter.config import PROGRESS_SUFFIX, REPORT_SUFFIX, Timing
+from painter.config import (
+    PROGRESS_SUFFIX,
+    REPORT_SUFFIX,
+    SAFER_PREAMBLE,
+    Timing,
+    fmt_duration,
+    fmt_size,
+)
 from painter.driver import ItemRefused, SiteDriver, sniff_format
 from painter.sheet_parser import Sheet, SkippedItem
 
@@ -47,11 +54,6 @@ def _png_size(data: bytes) -> str:
 
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def _fmt_s(seconds: float) -> str:
-    minutes, secs = divmod(int(round(seconds)), 60)
-    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
 
 
 def _pause(timing: Timing, should_stop: ShouldStop | None, log: Log) -> None:
@@ -101,7 +103,7 @@ class RunReport:
         self._theme = theme
         self._site = site_name
         self._gen_times: list[float] = []
-        self._extra_times: list[float] = []
+        self._proc_times: list[float] = []
         self._refused = 0
 
     def _append(self, text: str) -> None:
@@ -123,13 +125,14 @@ class RunReport:
         self,
         drop_path: str,
         gen_s: float,
-        extra_s: float,
+        proc_s: float,
         orig_res: str,
         final_res: str,
+        size_bytes: int,
         actions: list[str],
     ) -> None:
         self._gen_times.append(gen_s)
-        self._extra_times.append(extra_s)
+        self._proc_times.append(proc_s)
         note = f"  [{', '.join(actions)}]" if actions else ""
         resolution = (
             f"{orig_res} -> {final_res}"
@@ -138,7 +141,8 @@ class RunReport:
         )
         self._append(
             f"{_now()}  {drop_path:<44} gen {gen_s:6.1f}s"
-            f"  {resolution}{note}"
+            f"  proc {proc_s:5.1f}s  {resolution:>21}"
+            f"  {fmt_size(size_bytes):>8}{note}"
         )
 
     def refused(self, drop_path: str, reason: str) -> None:
@@ -153,15 +157,18 @@ class RunReport:
                 " prompts in the sheet (or intervene manually) and rerun"
             )
         if self._gen_times:
-            avg = sum(self._gen_times) / len(self._gen_times)
+            n = len(self._gen_times)
+            avg_gen = sum(self._gen_times) / n
+            avg_proc = sum(self._proc_times) / n
             self._append(
                 f"Images: {generated}  |  average generation:"
-                f" {_fmt_s(avg)}/image"
+                f" {fmt_duration(avg_gen)}/image  |  average processing:"
+                f" {fmt_duration(avg_proc)}/image"
             )
             self._append(
                 "Total generation + processing:"
-                f" {_fmt_s(sum(self._gen_times) + sum(self._extra_times))}"
-                f"  (wall clock incl. pauses: {_fmt_s(wall_s)})"
+                f" {fmt_duration(sum(self._gen_times) + sum(self._proc_times))}"
+                f"  (wall clock incl. pauses: {fmt_duration(wall_s)})"
             )
         else:
             self._append("Images: 0")
@@ -181,6 +188,7 @@ def run_sheet(
     report: bool = True,
     only: set[str] | None = None,
     on_event: OnEvent | None = None,
+    safer_retry: bool = False,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -240,6 +248,18 @@ def run_sheet(
         if on_event is not None:
             on_event(event)
 
+    def generate_one(text: str) -> tuple[bytes, float]:
+        """Submit one prompt and return (image bytes, send timestamp).
+
+        The send timestamp marks when SEND was pressed, so the caller
+        can time the pure generation (send -> image) apart from the
+        input hesitation inside submit_prompt.
+        """
+        driver.submit_prompt(text)
+        t_send = time.monotonic()
+        driver.await_done(log)
+        return driver.extract_image(), t_send
+
     emit(
         {
             "type": "sheet_start",
@@ -272,7 +292,6 @@ def run_sheet(
                 }
             )
 
-            t_item = time.monotonic()
             # the suffix may depend on the prompt itself (Gemini's
             # aspect law: lancets portrait, badges square)
             suffix = (
@@ -280,24 +299,35 @@ def run_sheet(
                 if callable(prompt_suffix)
                 else prompt_suffix
             )
+            base = item.prompt + suffix
             try:
-                driver.submit_prompt(item.prompt + suffix)
-                driver.await_done(log)
-                data = driver.extract_image()
+                data, t_send = generate_one(base)
             except ItemRefused as exc:
-                refused += 1
-                log(f"    REFUSED — {exc}")
-                log(
-                    "    continuing with the next item; rework the"
-                    " prompt (or intervene manually) and rerun later"
-                )
-                if run_report is not None:
-                    run_report.refused(item.drop_path, str(exc))
-                emit({"type": "item_refused"})
-                if idx < total:
-                    _pause(timing, should_stop, log)
-                continue
-            gen_s = time.monotonic() - t_item
+                reason = str(exc)
+                data = None
+                if safer_retry:
+                    log("    REFUSED — one safer retry (allegory note) ...")
+                    emit({"type": "item_retry"})
+                    try:
+                        data, t_send = generate_one(SAFER_PREAMBLE + base)
+                        log("    safer retry SUCCEEDED")
+                    except ItemRefused as exc2:
+                        reason = str(exc2)
+                if data is None:
+                    refused += 1
+                    log(f"    REFUSED — {reason}")
+                    log(
+                        "    continuing with the next item; rework the"
+                        " prompt (or intervene manually) and rerun later"
+                    )
+                    if run_report is not None:
+                        run_report.refused(item.drop_path, reason)
+                    emit({"type": "item_refused"})
+                    if idx < total:
+                        _pause(timing, should_stop, log)
+                    continue
+            t_image = time.monotonic()
+            gen_s = t_image - t_send
 
             dest = out_root / item.drop_path
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -312,10 +342,7 @@ def run_sheet(
                 )
 
             actions: list[str] = []
-            extra_s = 0.0
-            final_res = orig_res
             if post_save is not None:
-                t_fix = time.monotonic()
                 try:
                     action = post_save(dest)
                     actions.append(f"REMOVE BG: {action}")
@@ -324,18 +351,33 @@ def run_sheet(
                     fix_failures += 1
                     actions.append("REMOVE BG: FAILED")
                     log(f"    BGFIX FAILED (image kept as saved): {exc}")
-                extra_s = time.monotonic() - t_fix
-                final_res = _png_size(dest.read_bytes())
+
+            # processing = image appears -> saved and background-fixed
+            saved_bytes = dest.read_bytes()
+            proc_s = time.monotonic() - t_image
+            size = len(saved_bytes)
+            final_res = _png_size(saved_bytes)
 
             if run_report is not None:
                 run_report.item(
-                    item.drop_path, gen_s, extra_s, orig_res, final_res,
-                    actions,
+                    item.drop_path, gen_s, proc_s, orig_res, final_res,
+                    size, actions,
                 )
             progress.mark_done(item.drop_path, dest)
             generated += 1
-            log(f"    saved {dest} ({len(data):,} bytes)")
-            emit({"type": "item_done", "gen_s": gen_s})
+            log(f"    saved {dest} ({size:,} bytes)")
+            emit(
+                {
+                    "type": "item_done",
+                    "title": item.title,
+                    "drop_path": item.drop_path,
+                    "gen_s": gen_s,
+                    "proc_s": proc_s,
+                    "orig_res": orig_res,
+                    "final_res": final_res,
+                    "size": size,
+                }
+            )
 
             if idx < total:
                 _pause(timing, should_stop, log)
