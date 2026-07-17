@@ -44,13 +44,17 @@ run start/finish timestamps and why the run ended.
 ## Functions
 
 - `run_sheet(sheet, driver, out_root, timing, log, should_stop,
-  post_save, prompt_suffix, report) -> int` — logs the sheet's
+  post_save, prompt_suffix, report, only) -> int` — logs the sheet's
   skipped entries, filters the queue through `Progress`, drives
   every pending item with per-item progress lines, appends
   `prompt_suffix` (the caller resolves the per-site rules) to each
   prompt, runs the `post_save` background fix (failures loud,
   counted, never fatal), warns when saved bytes are not PNG, paces
   between prompts, honors `should_stop` between items and during
-  the pause, and feeds `RunReport` when `report` is on. Returns
-  how many images this run generated. Terminal/driver errors
-  propagate to the caller — progress and report stay saved.
+  the pause, and feeds `RunReport` when `report` is on. `only`
+  narrows the queue to the owner's ticked drop paths. A SAFETY
+  refusal (`ItemRefused`) skips just that item — REFUSED in log and
+  report, not marked done (a rerun retries it) — and the run
+  continues. Returns how many images this run generated.
+  Terminal/driver errors propagate to the caller — progress and
+  report stay saved.

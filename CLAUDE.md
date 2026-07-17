@@ -48,7 +48,11 @@ is the binding spec.
    sheet after sheet — a quota stop mid-batch never costs finished
    work (per-sheet progress + report live beside the images), and
    the next Start resumes the rest. The goal: queue 15 sheets,
-   go ride a bike.
+   go ride a bike. **"Select images..."** opens the tick list —
+   PER SITE (ChatGPT and Gemini each get their own selection);
+   already-done items show disabled. **"BG removal only..."**
+   runs the background remover standalone, in place, over any
+   existing folder of images.
 3. He picks the sites: **Gemini, ChatGPT, or BOTH IN PARALLEL** —
    one window and one thread per site, each at its own pace (still
    ONE window PER SITE, never parallel hammering of the same site).
@@ -138,9 +142,14 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
   `<model-response>`; the image sits under `generated-image` >
   `single-image` > `button.image-button` as an `img` with
   `alt=", AI generated"` and a `blob:` src (fetched in-page).
-  Quota/refusal banners are TERMINAL states — report and stop the
-  item, never blind-retry (banner DOM not yet captured; the driver
-  quotes the response text loudly when no image appears).
+  Response-text markers split TWO ways (owner 2026-07-17, after a
+  live Gemini safety refusal): SAFETY REFUSAL of one prompt (e.g.
+  "can't generate unsafe images", Serbian variants too) skips THAT
+  ITEM — reported in log + report txt, run continues, a rerun
+  retries it (the owner may also intervene manually — replying
+  "MAKE IT SAFER" in the tab often regenerates). QUOTA/RATE-LIMIT
+  markers are TERMINAL for the whole site — report and stop, never
+  blind-retry. Unknown no-image states stay loud DriverErrors.
 
 ## The Run Loop
 

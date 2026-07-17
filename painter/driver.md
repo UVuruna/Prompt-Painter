@@ -34,9 +34,15 @@ pasted text lands).
 
 - `SelectorRot` — no fallback selector matched; the site reskinned,
   fix the config block.
-- `TerminalState` — the response matches a refusal/quota marker:
-  report and stop the run, never blind-retry.
+- `ItemRefused` — the response matches a SAFETY-refusal marker: the
+  runner reports the item and continues with the rest.
+- `TerminalState` — the response matches a quota/rate-limit marker:
+  the whole site stops, never blind-retried.
 - `GenerationTimeout` — no done edge inside the hard cap.
+
+While waiting for the result `<img>`, the response text is checked
+every poll, so refusals raise in seconds instead of burning the
+image timeout.
 - `DriverError` — anything else the config block does not
   recognize, always with the response's opening text quoted.
 

@@ -30,12 +30,21 @@ sheets, press Start, go ride a bike.
 - **Open Chrome (login)** — launches the automation Chrome
   (dedicated `chrome-profile/`; log in once, sessions persist).
 - **Check sheets** — parses the whole queue into the log.
+- **Select images...** — the tick list, PER SITE: every sheet's
+  items with one checkbox column per site (all/none toggles per
+  sheet), so ChatGPT and Gemini can run different image lists.
+  Already-done items (per the site's progress under the current
+  output folder) show disabled.
+- **BG removal only...** — standalone background removal, in
+  place, over any existing folder (confirmation first;
+  already-transparent and unclear images are skipped untouched).
 - **Start / Stop** — Stop is graceful: each site finishes its
   current item; everything finished is already saved.
 - **Log** — timestamped (`[HH:MM:SS]`), both sites interleaved
-  with `[gemini]` / `[chatgpt]` prefixes. A quota stop
-  (`TERMINAL STATE`) stops only that site's queue — the other
-  continues; the next Start resumes what remains.
+  with `[gemini]` / `[chatgpt]` prefixes. A SAFETY refusal skips
+  only that image (REFUSED in log + report; a rerun retries it). A
+  quota stop (`TERMINAL STATE`) stops only that site's queue — the
+  other continues; the next Start resumes what remains.
 
 ## Threading
 One worker thread per site; each creates its own Playwright
