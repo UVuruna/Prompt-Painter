@@ -122,13 +122,16 @@ class PainterGui:
             row, text="Write report txt", variable=self.report_var
         ).pack(side="left", padx=14)
         ttk.Label(row, text="Pause:").pack(side="left", padx=(8, 2))
-        self.pause_var = tk.StringVar(
-            value=f"{TIMING.pause_between_prompts_s:.0f}"
-        )
+        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
+        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
         ttk.Spinbox(
-            row, from_=0, to=600, width=5, textvariable=self.pause_var
+            row, from_=0, to=600, width=5, textvariable=self.pause_min_var
         ).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left")
+        ttk.Label(row, text="–").pack(side="left")
+        ttk.Spinbox(
+            row, from_=0, to=600, width=5, textvariable=self.pause_max_var
+        ).pack(side="left")
+        ttk.Label(row, text="s (random)").pack(side="left")
 
         # --- buttons ----------------------------------------------------
         row = ttk.Frame(frame)
@@ -234,9 +237,15 @@ class PainterGui:
                 f" {len(sheet.items)} to generate,"
                 f" {len(sheet.skipped)} skipped"
             )
+            for it in sheet.items:
+                if it.advice:
+                    self._log(
+                        f"    ADVICE (unticked by default, L{it.line})"
+                        f" {it.title} — {it.advice}"
+                    )
             for sk in sheet.skipped:
                 self._log(
-                    f"    SKIP (the sheet says so, L{sk.line})"
+                    f"    NO PROMPT in the sheet (L{sk.line})"
                     f" {sk.title} — {sk.reason}"
                 )
             good.append(sheet)
@@ -279,11 +288,11 @@ class PainterGui:
         self._parse_all()
 
     def _select_var(
-        self, site: str, source: str, drop: str
+        self, site: str, source: str, drop: str, default: bool = True
     ) -> tk.BooleanVar:
         key = (site, source, drop)
         if key not in self._select_vars:
-            self._select_vars[key] = tk.BooleanVar(value=True)
+            self._select_vars[key] = tk.BooleanVar(value=default)
         return self._select_vars[key]
 
     def _select_images(self) -> None:
@@ -384,11 +393,19 @@ class PainterGui:
             post_save = fix_background
 
         try:
-            pause = float(self.pause_var.get())
+            pause_min = float(self.pause_min_var.get())
+            pause_max = float(self.pause_max_var.get())
         except ValueError:
-            messagebox.showerror("PromptPainter", "Pause must be a number.")
+            messagebox.showerror("PromptPainter", "Pause must be numbers.")
             return
-        timing = replace(TIMING, pause_between_prompts_s=pause)
+        if pause_min > pause_max:
+            messagebox.showerror(
+                "PromptPainter", "Pause FROM must be <= pause TO."
+            )
+            return
+        timing = replace(
+            TIMING, pause_min_s=pause_min, pause_max_s=pause_max
+        )
 
         from painter.chrome import cdp_alive
 
@@ -620,7 +637,10 @@ class SelectWindow(tk.Toplevel):
                 row = ttk.Frame(inner)
                 row.pack(fill="x")
                 for key in site_keys:
-                    var = gui._select_var(key, src, item.drop_path)
+                    var = gui._select_var(
+                        key, src, item.drop_path,
+                        default=item.advice is None,
+                    )
                     is_done = item.drop_path in done[key][src]
                     if is_done:
                         var.set(False)
@@ -628,19 +648,15 @@ class SelectWindow(tk.Toplevel):
                     if is_done:
                         cb.state(["disabled"])
                     cb.pack(side="left")
-                suffix = (
-                    "   (done: "
-                    + ", ".join(
+                suffix = ""
+                if any(item.drop_path in done[k][src] for k in site_keys):
+                    suffix += "   (done: " + ", ".join(
                         SITES[k].name
                         for k in site_keys
                         if item.drop_path in done[k][src]
-                    )
-                    + ")"
-                    if any(
-                        item.drop_path in done[k][src] for k in site_keys
-                    )
-                    else ""
-                )
+                    ) + ")"
+                if item.advice:
+                    suffix += f"   ⚠ {item.advice[:70]}"
                 ttk.Label(row, text=item.drop_path + suffix).pack(
                     side="left", padx=8
                 )

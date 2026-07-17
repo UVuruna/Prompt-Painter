@@ -69,10 +69,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--pause",
         type=float,
+        nargs="+",
         default=None,
+        metavar=("MIN", "MAX"),
         help=(
-            "seconds between prompts (default:"
-            f" {TIMING.pause_between_prompts_s:.0f})"
+            "pause between prompts: one value = fixed, two = a random"
+            " range (default:"
+            f" {TIMING.pause_min_s:.0f}-{TIMING.pause_max_s:.0f}s)"
         ),
     )
     p.add_argument("--cdp", default=CDP_URL, help=f"CDP URL (default: {CDP_URL})")
@@ -170,11 +173,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         post_save = fix_background
 
-    timing = (
-        TIMING
-        if args.pause is None
-        else replace(TIMING, pause_between_prompts_s=args.pause)
-    )
+    if args.pause is None:
+        timing = TIMING
+    else:
+        low = args.pause[0]
+        high = args.pause[-1]
+        if low > high:
+            print("ERROR: --pause MIN must be <= MAX", file=sys.stderr)
+            return 2
+        timing = replace(TIMING, pause_min_s=low, pause_max_s=high)
     site = SITES[args.site]
     background = args.background or site.default_background
     suffix = partial(prompt_suffix, args.site, background)
