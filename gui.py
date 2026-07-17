@@ -1,22 +1,23 @@
 """PromptPainter GUI — the owner's front door.
 
-A small tkinter window over the same engine the CLI uses: queue one
-or MORE sheet `.md` files, pick the output folder, tick Gemini /
-ChatGPT / both, choose each site's background, open the automation
-Chrome (log in once — the profile persists), check, start. Both
-sites run in PARALLEL, one thread and one tab each; each site works
-through the sheet queue IN ORDER, finishing folder after folder, so
-a quota stop on one site never costs finished work — progress and
-the report live beside the images and every run resumes.
+A tkinter window over the same engine the CLI uses: queue one or MORE
+prompt-sheet `.md` files (each file is a THEME), pick the output
+folder, tick Gemini / ChatGPT / both, choose each site's background,
+open the automation Chrome (log in once — the profile persists),
+check, start. Both sites run in PARALLEL, one thread and one tab
+each; each works through the theme queue IN ORDER, so a quota stop on
+one site never costs finished work — progress and the report live
+beside the images and every run resumes.
 
-Images save DIRECTLY to ``<out>/<site>/<drop-path>`` (no approval
-step); an optional per-sheet report txt logs timestamps, per-image
-generation times, resolutions, extra actions and totals.
+Two views (tabs): a **Dashboard** (per-site progress for the current
+theme AND the whole task, two average timings, and a collapsible list
+of finished themes) and the detailed **Log**.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
@@ -24,7 +25,7 @@ import tkinter as tk
 from dataclasses import replace
 from datetime import datetime
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 from painter.config import (
@@ -34,67 +35,466 @@ from painter.config import (
     PROGRESS_SUFFIX,
     SITES,
     TIMING,
+    fmt_duration,
+    fmt_size,
     prompt_suffix,
 )
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
+# accent colours (shared by the dashboard and the selection list)
+C_DONE = "#2e7d32"      # green — finished
+C_DONE_SOFT = "#558b2f"  # olive — partly done
+C_ADVICE = "#b26a00"     # orange — sheet advice (REUSE / not approved)
+C_SUPERSEDED = "#c62828"  # red — superseded
+C_MUTED = "#666666"
+
+
+def setup_style(root: tk.Tk) -> None:
+    """A light, consistent ttk look — Segoe UI, roomy padding, accents."""
+    style = ttk.Style(root)
+    try:
+        style.theme_use("clam")
+    except tk.TclError:
+        pass
+    base = ("Segoe UI", 10)
+    style.configure(".", font=base)
+    style.configure("TButton", padding=(10, 5))
+    style.configure("TLabelframe", padding=8)
+    style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
+    style.configure("Head.TLabel", font=("Segoe UI", 11, "bold"))
+    style.configure("Big.TLabel", font=("Segoe UI", 15, "bold"))
+    style.configure("Value.TLabel", font=("Segoe UI", 10, "bold"))
+    style.configure("Muted.TLabel", foreground=C_MUTED)
+    style.configure("Mono.TLabel", font=("Consolas", 9), foreground=C_MUTED)
+    style.configure(
+        "Expander.TButton", anchor="w", padding=(6, 4),
+        font=("Segoe UI", 10, "bold"),
+    )
+    style.configure(
+        "Task.Horizontal.TProgressbar", troughcolor="#e6e6e6",
+        background=C_DONE,
+    )
+    style.configure(
+        "Theme.Horizontal.TProgressbar", troughcolor="#e6e6e6",
+        background="#1565c0",
+    )
+
+
+class ScrollFrame(ttk.Frame):
+    """A vertically (optionally also horizontally) scrollable frame.
+
+    Add children to ``self.body``. Without horizontal scroll the body
+    is stretched to the canvas width (content wraps, no x scrollbar);
+    with it the body keeps its natural width and a horizontal bar
+    appears.
+    """
+
+    def __init__(self, master, horizontal: bool = False):
+        super().__init__(master)
+        self._stretch = not horizontal
+        self.canvas = tk.Canvas(self, highlightthickness=0)
+        vbar = ttk.Scrollbar(
+            self, orient="vertical", command=self.canvas.yview
+        )
+        self.canvas.configure(yscrollcommand=vbar.set)
+        self.body = ttk.Frame(self.canvas)
+        self._win = self.canvas.create_window(
+            (0, 0), window=self.body, anchor="nw"
+        )
+        self.body.bind("<Configure>", self._on_body)
+        self.canvas.bind("<Configure>", self._on_canvas)
+        vbar.pack(side="right", fill="y")
+        if horizontal:
+            hbar = ttk.Scrollbar(
+                self, orient="horizontal", command=self.canvas.xview
+            )
+            self.canvas.configure(xscrollcommand=hbar.set)
+            hbar.pack(side="bottom", fill="x")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.canvas.bind("<Enter>", self._bind_wheel)
+        self.canvas.bind("<Leave>", self._unbind_wheel)
+        # a global <MouseWheel> binding outlives the widget — drop it
+        # when the canvas is destroyed (e.g. the Select window closes
+        # while the pointer is still over it) so it never fires on a
+        # dead widget
+        self.canvas.bind("<Destroy>", self._unbind_wheel)
+
+    def _on_body(self, _event) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas(self, event) -> None:
+        if self._stretch:
+            self.canvas.itemconfigure(self._win, width=event.width)
+
+    def _bind_wheel(self, _event) -> None:
+        self.canvas.bind_all("<MouseWheel>", self._on_wheel)
+
+    def _unbind_wheel(self, _event) -> None:
+        try:
+            self.canvas.unbind_all("<MouseWheel>")
+        except tk.TclError:
+            pass
+
+    def _on_wheel(self, event) -> None:
+        try:
+            self.canvas.yview_scroll(int(-event.delta / 120), "units")
+        except tk.TclError:
+            # the canvas was destroyed but the global binding lingered
+            self.canvas.unbind_all("<MouseWheel>")
+
+
+class Expander(ttk.Frame):
+    """A one-line header button that shows/hides a body frame below."""
+
+    def __init__(self, master, label: str, opened: bool = False):
+        super().__init__(master)
+        self._label = label
+        self._open = opened
+        self.btn = ttk.Button(
+            self, style="Expander.TButton", command=self.toggle
+        )
+        self.btn.pack(fill="x")
+        self.body = ttk.Frame(self)
+        if opened:
+            self.body.pack(fill="x", padx=(14, 0))
+        self._render()
+
+    def set_label(self, label: str) -> None:
+        self._label = label
+        self._render()
+
+    def _render(self) -> None:
+        self.btn.configure(text=("▼  " if self._open else "▶  ") + self._label)
+
+    def toggle(self) -> None:
+        self._open = not self._open
+        if self._open:
+            self.body.pack(fill="x", padx=(14, 0))
+        else:
+            self.body.forget()
+        self._render()
+
+
+# ---------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------
+
+_METRICS = [
+    ("done", "Done"),
+    ("refused", "Refused"),
+    ("gen", "Generate avg"),
+    ("proc", "Process avg"),
+    ("tempo", "Tempo"),
+    ("eta", "ETA"),
+]
+
+
+def _scope_stats(done, refused, gen_times, proc_times, total, elapsed):
+    """Display strings for one scope (a theme or the whole task)."""
+    remaining = max(total - done - refused, 0)
+    gen = f"{sum(gen_times) / len(gen_times):.0f} s" if gen_times else "—"
+    proc = f"{sum(proc_times) / len(proc_times):.1f} s" if proc_times else "—"
+    if done and elapsed > 0:
+        tempo = f"{done / (elapsed / 3600):.0f} /h"
+        eta = (
+            f"{remaining * (elapsed / done) / 60:.0f} min"
+            if remaining
+            else "done"
+        )
+    else:
+        tempo = "—"
+        eta = "—"
+    return {
+        "done": f"{done}/{total}" if total else str(done),
+        "refused": str(refused),
+        "gen": gen,
+        "proc": proc,
+        "tempo": tempo,
+        "eta": eta,
+    }
+
+
+class DashPanel(ttk.Frame):
+    """One site's live view: current theme, whole-task totals, history.
+
+    Driven only by the runner's structured events (main thread).
+    """
+
+    def __init__(self, master, site_name: str):
+        super().__init__(master, padding=6)
+        self._name = site_name
+
+        ttk.Label(self, text=site_name, style="Big.TLabel").pack(anchor="w")
+
+        # whole-task progress
+        task = ttk.Frame(self)
+        task.pack(fill="x", pady=(6, 2))
+        ttk.Label(task, text="Task", width=7).pack(side="left")
+        self.task_prog_var = tk.StringVar(value="0 / 0")
+        ttk.Label(
+            task, textvariable=self.task_prog_var, style="Value.TLabel"
+        ).pack(side="right")
+        self.task_bar = ttk.Progressbar(
+            self, style="Task.Horizontal.TProgressbar", maximum=1, value=0
+        )
+        self.task_bar.pack(fill="x", pady=(0, 6))
+
+        # current theme + image + its own bar
+        cur = ttk.Frame(self)
+        cur.pack(fill="x")
+        ttk.Label(cur, text="Theme:", width=7).grid(row=0, column=0, sticky="w")
+        self.theme_name_var = tk.StringVar(value="—")
+        ttk.Label(cur, textvariable=self.theme_name_var).grid(
+            row=0, column=1, sticky="w"
+        )
+        ttk.Label(cur, text="Image:", width=7).grid(row=1, column=0, sticky="w")
+        self.image_var = tk.StringVar(value="—")
+        ttk.Label(cur, textvariable=self.image_var).grid(
+            row=1, column=1, sticky="w"
+        )
+        cur.columnconfigure(1, weight=1)
+        self.theme_bar = ttk.Progressbar(
+            self, style="Theme.Horizontal.TProgressbar", maximum=1, value=0
+        )
+        self.theme_bar.pack(fill="x", pady=(2, 6))
+
+        # the two-scope stats table
+        grid = ttk.Frame(self)
+        grid.pack(fill="x", pady=(2, 6))
+        ttk.Label(grid, text="", width=14).grid(row=0, column=0)
+        ttk.Label(grid, text="This theme", style="Head.TLabel", width=11).grid(
+            row=0, column=1, sticky="e"
+        )
+        ttk.Label(grid, text="Task", style="Head.TLabel", width=11).grid(
+            row=0, column=2, sticky="e"
+        )
+        self.cells: dict[tuple[str, str], tk.StringVar] = {}
+        for r, (key, label) in enumerate(_METRICS, start=1):
+            ttk.Label(grid, text=label).grid(row=r, column=0, sticky="w")
+            for c, scope in ((1, "theme"), (2, "task")):
+                var = tk.StringVar(value="—")
+                self.cells[(scope, key)] = var
+                ttk.Label(
+                    grid, textvariable=var, style="Value.TLabel", anchor="e"
+                ).grid(row=r, column=c, sticky="e", padx=4)
+        grid.columnconfigure(0, weight=1)
+
+        ttk.Separator(self).pack(fill="x", pady=4)
+        ttk.Label(self, text="Completed themes", style="Head.TLabel").pack(
+            anchor="w"
+        )
+        self.completed = ttk.Frame(self)
+        self.completed.pack(fill="x")
+
+        self.reset(active=False)
+
+    # --- state ---------------------------------------------------------
+
+    def reset(
+        self, active: bool = True, task_total: int = 0, task_themes: int = 0
+    ) -> None:
+        now = time.monotonic()
+        self._task_total = task_total
+        self._task_themes = task_themes
+        self._task_done = 0
+        self._task_refused = 0
+        self._task_themes_done = 0
+        self._task_gen: list[float] = []
+        self._task_proc: list[float] = []
+        self._t_task = now
+        self._new_theme("—", 0)
+        for child in self.completed.winfo_children():
+            child.destroy()
+        self.task_prog_var.set(f"0 / {task_total}")
+        self.task_bar.configure(maximum=max(task_total, 1), value=0)
+        self.theme_name_var.set("—")
+        self.image_var.set("running ..." if active else "idle")
+        self.theme_bar.configure(maximum=1, value=0)
+        self._refresh()
+
+    def _new_theme(self, name: str, pending: int) -> None:
+        self._theme_name = name
+        self._theme_pending = pending
+        self._theme_done = 0
+        self._theme_refused = 0
+        self._theme_gen: list[float] = []
+        self._theme_proc: list[float] = []
+        self._theme_bytes = 0
+        self._theme_folders: set[str] = set()
+        self._theme_rows: list[dict] = []
+        self._t_theme = time.monotonic()
+
+    # --- events (main thread, via the queue pump) ----------------------
+
+    def handle(self, event: dict) -> None:
+        kind = event["type"]
+        if kind == "sheet_start":
+            self._new_theme(event["sheet"], event["pending"])
+            self.theme_name_var.set(
+                f"{event['sheet']}  ({event['pending']} pending)"
+            )
+            self.theme_bar.configure(maximum=max(event["pending"], 1), value=0)
+        elif kind == "item_start":
+            self.image_var.set(
+                f"({event['idx']}/{event['of']}) {event['title'][:50]}"
+            )
+        elif kind == "item_done":
+            self._theme_done += 1
+            self._task_done += 1
+            self._theme_gen.append(event["gen_s"])
+            self._task_gen.append(event["gen_s"])
+            self._theme_proc.append(event["proc_s"])
+            self._task_proc.append(event["proc_s"])
+            self._theme_bytes += event["size"]
+            self._theme_folders.add(
+                PurePosixPath(event["drop_path"]).parent.as_posix()
+            )
+            self._theme_rows.append(event)
+        elif kind == "item_refused":
+            self._theme_refused += 1
+            self._task_refused += 1
+        elif kind == "item_retry":
+            self.image_var.set(self.image_var.get() + "  (safer retry…)")
+        elif kind == "sheet_done":
+            self._finalize_theme()
+            self.image_var.set("—")
+        self._refresh()
+
+    def _finalize_theme(self) -> None:
+        if self._theme_done + self._theme_refused == 0:
+            return  # nothing ran this theme (fully resumed / skipped)
+        self._task_themes_done += 1
+        wall = time.monotonic() - self._t_theme
+        header = (
+            f"{self._theme_name}   {self._theme_done}/{self._theme_pending}"
+            f"  ·  {fmt_duration(wall)}"
+            f"  ·  {fmt_size(self._theme_bytes)}"
+            f"  ·  {len(self._theme_folders)} folder(s)"
+        )
+        exp = Expander(self.completed, header, opened=False)
+        for row in self._theme_rows:
+            res = row["orig_res"]
+            if row["final_res"] not in ("", row["orig_res"]):
+                res = f"{row['orig_res']}→{row['final_res']}"
+            ttk.Label(
+                exp.body,
+                text=(
+                    f"{row['drop_path']}    gen {row['gen_s']:.0f}s /"
+                    f" proc {row['proc_s']:.1f}s    {res}"
+                    f"    {fmt_size(row['size'])}"
+                ),
+                style="Mono.TLabel",
+            ).pack(anchor="w")
+        if self._theme_refused:
+            ttk.Label(
+                exp.body,
+                text=f"({self._theme_refused} refused — see the log/report)",
+                style="Mono.TLabel",
+            ).pack(anchor="w")
+        exp.pack(fill="x", pady=1)
+
+    def _refresh(self) -> None:
+        now = time.monotonic()
+        # bars
+        self.theme_bar.configure(
+            maximum=max(self._theme_pending, 1),
+            value=self._theme_done + self._theme_refused,
+        )
+        self.task_bar.configure(
+            maximum=max(self._task_total, 1),
+            value=self._task_done + self._task_refused,
+        )
+        self.task_prog_var.set(
+            f"{self._task_done + self._task_refused} / {self._task_total}"
+            f"   ({self._task_themes_done}/{self._task_themes} themes)"
+        )
+        theme = _scope_stats(
+            self._theme_done, self._theme_refused, self._theme_gen,
+            self._theme_proc, self._theme_pending, now - self._t_theme,
+        )
+        task = _scope_stats(
+            self._task_done, self._task_refused, self._task_gen,
+            self._task_proc, self._task_total, now - self._t_task,
+        )
+        for key, _label in _METRICS:
+            self.cells[("theme", key)].set(theme[key])
+            self.cells[("task", key)].set(task[key])
+
+
+# ---------------------------------------------------------------------
+# Main window
+# ---------------------------------------------------------------------
 
 class PainterGui:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("PromptPainter")
-        root.minsize(780, 540)
+        root.minsize(900, 640)
+        setup_style(root)
 
         self._q: queue.Queue = queue.Queue()
         self._stop = threading.Event()
         self._workers: list[threading.Thread] = []
+        self._workers_left = 0  # counted down on each __worker_done__
         self._sheets: list[Path] = []
         # (site, source-path, drop-path) -> BooleanVar; missing = ticked
         self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
 
-        pad = {"padx": 6, "pady": 3}
-        frame = ttk.Frame(root)
-        frame.pack(fill="both", expand=True, **pad)
+        outer = ttk.Frame(root, padding=8)
+        outer.pack(fill="both", expand=True)
 
-        # --- the sheet queue -------------------------------------------
-        row = ttk.Frame(frame)
-        row.pack(fill="x", **pad)
-        ttk.Label(row, text="Sheets (.md):", width=12).pack(
-            side="left", anchor="n"
+        self._build_queue(outer)
+        self._build_options(outer)
+        self._build_toolbar(outer)
+        self._build_views(outer)
+
+        self.status_var = tk.StringVar(value="idle")
+        ttk.Label(
+            outer, textvariable=self.status_var, style="Muted.TLabel"
+        ).pack(fill="x", pady=(4, 0))
+
+        root.after(120, self._drain_queue)
+
+    # --- construction --------------------------------------------------
+
+    def _build_queue(self, parent) -> None:
+        lf = ttk.Labelframe(parent, text="Themes (prompt-sheet .md files)")
+        lf.pack(fill="x", pady=(0, 6))
+        self.sheet_list = tk.Listbox(
+            lf, height=5, activestyle="none", font=("Consolas", 9)
         )
-        self.sheet_list = tk.Listbox(row, height=5, activestyle="none")
         self.sheet_list.pack(side="left", fill="x", expand=True)
-        col = ttk.Frame(row)
-        col.pack(side="left", padx=4, anchor="n")
-        ttk.Button(col, text="Add...", command=self._add_sheets).pack(
-            fill="x"
-        )
+        col = ttk.Frame(lf)
+        col.pack(side="left", padx=(8, 0), anchor="n")
+        ttk.Button(col, text="Add…", command=self._add_sheets).pack(fill="x")
         ttk.Button(col, text="Remove", command=self._remove_sheet).pack(
-            fill="x", pady=2
+            fill="x", pady=4
         )
         ttk.Button(col, text="Clear", command=self._clear_sheets).pack(
             fill="x"
         )
 
-        # --- output -----------------------------------------------------
+    def _build_options(self, parent) -> None:
+        lf = ttk.Labelframe(parent, text="Output & run options")
+        lf.pack(fill="x", pady=(0, 6))
+
+        row = ttk.Frame(lf)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Output:", width=8).pack(side="left")
         self.out_var = tk.StringVar(value=str(DEFAULT_OUT_DIR))
-        row = ttk.Frame(frame)
-        row.pack(fill="x", **pad)
-        ttk.Label(row, text="Output:", width=12).pack(side="left")
         ttk.Entry(row, textvariable=self.out_var).pack(
             side="left", fill="x", expand=True
         )
-        ttk.Button(row, text="Browse...", command=self._pick_out).pack(
-            side="left", padx=4
+        ttk.Button(row, text="Browse…", command=self._pick_out).pack(
+            side="left", padx=(8, 0)
         )
 
-        # --- options ----------------------------------------------------
-        row = ttk.Frame(frame)
-        row.pack(fill="x", **pad)
+        row = ttk.Frame(lf)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Sites:", width=8).pack(side="left")
         self.site_vars = {
             key: tk.BooleanVar(value=True) for key in sorted(SITES)
         }
-        ttk.Label(row, text="Sites:", width=12).pack(side="left")
         self.background_vars: dict[str, tk.StringVar] = {}
         for key in sorted(SITES):
             ttk.Checkbutton(
@@ -103,37 +503,40 @@ class PainterGui:
             var = tk.StringVar(value=SITES[key].default_background)
             self.background_vars[key] = var
             ttk.Combobox(
-                row,
-                textvariable=var,
-                values=list(BACKGROUND_CHOICES),
-                state="readonly",
-                width=11,
-            ).pack(side="left", padx=(2, 10))
+                row, textvariable=var, values=list(BACKGROUND_CHOICES),
+                state="readonly", width=11,
+            ).pack(side="left", padx=(2, 12))
 
-        row = ttk.Frame(frame)
-        row.pack(fill="x", **pad)
-        ttk.Label(row, text="", width=12).pack(side="left")
+        row = ttk.Frame(lf)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="", width=8).pack(side="left")
         self.bgfix_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             row, text="Background fix", variable=self.bgfix_var
         ).pack(side="left")
         self.report_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            row, text="Write report txt", variable=self.report_var
-        ).pack(side="left", padx=14)
-        ttk.Label(row, text="Pause:").pack(side="left", padx=(8, 2))
+            row, text="Report txt", variable=self.report_var
+        ).pack(side="left", padx=12)
+        self.safer_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            row, text="Safer retry on refusal", variable=self.safer_var
+        ).pack(side="left", padx=12)
+
+        row = ttk.Frame(lf)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Pace:", width=8).pack(side="left")
+        ttk.Label(row, text="pause").pack(side="left")
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
         ttk.Spinbox(
             row, from_=0, to=600, width=5, textvariable=self.pause_min_var
-        ).pack(side="left")
+        ).pack(side="left", padx=(4, 0))
         ttk.Label(row, text="–").pack(side="left")
         ttk.Spinbox(
             row, from_=0, to=600, width=5, textvariable=self.pause_max_var
         ).pack(side="left")
-        ttk.Label(row, text="s (random)").pack(side="left")
-
-        ttk.Label(row, text="Action delay:").pack(side="left", padx=(14, 2))
+        ttk.Label(row, text="s   action delay").pack(side="left", padx=(2, 0))
         self.act_min_var = tk.StringVar(
             value=f"{TIMING.action_delay_min_s:.1f}"
         )
@@ -143,7 +546,7 @@ class PainterGui:
         ttk.Spinbox(
             row, from_=0, to=5, increment=0.1, width=4,
             textvariable=self.act_min_var,
-        ).pack(side="left")
+        ).pack(side="left", padx=(4, 0))
         ttk.Label(row, text="–").pack(side="left")
         ttk.Spinbox(
             row, from_=0, to=5, increment=0.1, width=4,
@@ -151,46 +554,49 @@ class PainterGui:
         ).pack(side="left")
         ttk.Label(row, text="s").pack(side="left")
 
-        # --- buttons ----------------------------------------------------
-        row = ttk.Frame(frame)
-        row.pack(fill="x", **pad)
+    def _build_toolbar(self, parent) -> None:
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(0, 6))
         self.btn_chrome = ttk.Button(
             row, text="Open Chrome (login)", command=self._open_chrome
         )
-        self.btn_chrome.pack(side="left", padx=2)
+        self.btn_chrome.pack(side="left")
         self.btn_check = ttk.Button(
-            row, text="Check sheets", command=self._check_sheets
+            row, text="Check", command=self._check_sheets
         )
-        self.btn_check.pack(side="left", padx=2)
+        self.btn_check.pack(side="left", padx=4)
         self.btn_select = ttk.Button(
-            row, text="Select images...", command=self._select_images
+            row, text="Select images…", command=self._select_images
         )
-        self.btn_select.pack(side="left", padx=2)
+        self.btn_select.pack(side="left", padx=4)
         self.btn_start = ttk.Button(row, text="Start", command=self._start)
-        self.btn_start.pack(side="left", padx=2)
+        self.btn_start.pack(side="left", padx=4)
         self.btn_stop = ttk.Button(
             row, text="Stop", command=self._request_stop, state="disabled"
         )
-        self.btn_stop.pack(side="left", padx=2)
-        ttk.Button(
-            row, text="BG removal only...", command=self._bg_remove_only
-        ).pack(side="left", padx=14)
+        self.btn_stop.pack(side="left", padx=4)
         ttk.Button(
             row, text="Instructions", command=self._open_instructions
-        ).pack(side="left", padx=2)
+        ).pack(side="right")
+        ttk.Button(
+            row, text="BG removal only…", command=self._bg_remove_only
+        ).pack(side="right", padx=4)
 
-        # --- the two views: Dashboard + Log -----------------------------
-        notebook = ttk.Notebook(frame)
-        notebook.pack(fill="both", expand=True, **pad)
+    def _build_views(self, parent) -> None:
+        notebook = ttk.Notebook(parent)
+        notebook.pack(fill="both", expand=True)
 
         dash_tab = ttk.Frame(notebook)
         notebook.add(dash_tab, text="Dashboard")
-        self.dash = {
-            key: DashPanel(dash_tab, SITES[key].name)
-            for key in sorted(SITES)
-        }
-        for panel in self.dash.values():
-            panel.pack(side="left", fill="both", expand=True, padx=6, pady=6)
+        self.dash: dict[str, DashPanel] = {}
+        for i, key in enumerate(sorted(SITES)):
+            col = ScrollFrame(dash_tab)
+            col.grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
+            dash_tab.columnconfigure(i, weight=1)
+            panel = DashPanel(col.body, SITES[key].name)
+            panel.pack(fill="both", expand=True)
+            self.dash[key] = panel
+        dash_tab.rowconfigure(0, weight=1)
 
         log_tab = ttk.Frame(notebook)
         notebook.add(log_tab, text="Log (detailed)")
@@ -199,24 +605,14 @@ class PainterGui:
         )
         self.log_box.pack(fill="both", expand=True)
 
-        self.status_var = tk.StringVar(value="idle")
-        ttk.Label(frame, textvariable=self.status_var, anchor="w").pack(
-            fill="x", **pad
-        )
-
-        root.after(120, self._drain_queue)
-
     def _open_instructions(self) -> None:
-        """Open the sheet-authoring instructions (root instructions.md)."""
-        import os
-
         path = Path(__file__).resolve().parent / "instructions.md"
         try:
             os.startfile(path)  # the OS default .md viewer
         except OSError as exc:
             messagebox.showerror("PromptPainter", f"Cannot open {path}: {exc}")
 
-    # --- helpers --------------------------------------------------------
+    # --- helpers -------------------------------------------------------
 
     def _log(self, line: str) -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -257,6 +653,17 @@ class PainterGui:
             self.out_var.get().strip() or str(DEFAULT_OUT_DIR)
         ).resolve()
 
+    def _progress_done(self, site: str, sheet: Sheet) -> set:
+        """Drop paths already generated for one site+theme (per sidecar)."""
+        progress_file = (
+            self._out_base() / site / (sheet.source.stem + PROGRESS_SUFFIX)
+        )
+        if progress_file.exists():
+            return set(
+                json.loads(progress_file.read_text(encoding="utf-8"))["done"]
+            )
+        return set()
+
     def _parse_all(self) -> list[Sheet]:
         """Parse every queued sheet; broken ones are reported and
         dropped from the run (the fix belongs in the sheet)."""
@@ -296,7 +703,30 @@ class PainterGui:
             good.append(sheet)
         return good
 
-    # --- actions --------------------------------------------------------
+    def _plan(
+        self,
+        site: str,
+        sheets: list[Sheet],
+        selection: dict[str, set[str] | None],
+    ) -> tuple[int, int]:
+        """Mirror run_sheet's queue rule to pre-count this run's scope:
+        (total images to generate, number of themes with work)."""
+        total = 0
+        themes = 0
+        for sheet in sheets:
+            done = self._progress_done(site, sheet)
+            pending = [it for it in sheet.items if it.drop_path not in done]
+            sel = selection.get(str(sheet.source))
+            if sel is not None:
+                pending = [it for it in pending if it.drop_path in sel]
+            else:
+                pending = [it for it in pending if not it.advice]
+            if pending:
+                total += len(pending)
+                themes += 1
+        return total, themes
+
+    # --- actions -------------------------------------------------------
 
     def _open_chrome(self) -> None:
         sites = self._selected_sites()
@@ -304,7 +734,7 @@ class PainterGui:
             messagebox.showerror("PromptPainter", "Tick at least one site.")
             return
         urls = tuple(SITES[k].url for k in sites)
-        self.status_var.set("opening Chrome ...")
+        self.status_var.set("opening Chrome …")
 
         def work():
             from painter.chrome import ChromeError, ensure_chrome
@@ -341,7 +771,6 @@ class PainterGui:
         return self._select_vars[key]
 
     def _select_images(self) -> None:
-        """Tick which images run — a separate list per site."""
         if not self._sheets:
             messagebox.showerror("PromptPainter", "Add sheet .md files first.")
             return
@@ -354,7 +783,6 @@ class PainterGui:
         SelectWindow(self, sheets)
 
     def _bg_remove_only(self) -> None:
-        """Standalone background removal over an existing folder."""
         from painter.postprocess import deps_error
 
         problem = deps_error()
@@ -373,7 +801,7 @@ class PainterGui:
             " skipped untouched)",
         ):
             return
-        self.status_var.set("BG removal running ...")
+        self.status_var.set("BG removal running …")
 
         def work():
             from painter.bg_remove import iter_images, process_file
@@ -423,6 +851,19 @@ class PainterGui:
                     " — sources are READ ONLY; pick another output.",
                 )
                 return
+        # the progress sidecar and report are keyed by filename stem, so
+        # two queued themes with the same filename would collide
+        stems = [s.source.stem for s in sheets]
+        dupes = sorted({s for s in stems if stems.count(s) > 1})
+        if dupes:
+            messagebox.showerror(
+                "PromptPainter",
+                "Two queued themes share a filename: "
+                + ", ".join(dupes)
+                + ".\nTheir progress/report files would collide — rename"
+                " one before running.",
+            )
+            return
 
         post_save = None
         if self.bgfix_var.get():
@@ -443,7 +884,9 @@ class PainterGui:
             act_min = float(self.act_min_var.get())
             act_max = float(self.act_max_var.get())
         except ValueError:
-            messagebox.showerror("PromptPainter", "Pause/delay must be numbers.")
+            messagebox.showerror(
+                "PromptPainter", "Pause/delay must be numbers."
+            )
             return
         if pause_min > pause_max or act_min > act_max:
             messagebox.showerror(
@@ -468,40 +911,52 @@ class PainterGui:
             )
             return
 
-        self._stop.clear()
-        self._workers = []
-        self.btn_start.configure(state="disabled")
-        self.btn_stop.configure(state="normal")
-        self.status_var.set("running: " + ", ".join(sites))
-        for key, panel in self.dash.items():
-            panel.reset(active=key in sites)
-        backgrounds = {
-            key: self.background_vars[key].get() for key in sites
-        }
-        self._log(
-            f"=== START {', '.join(sites)} | {len(sheets)} sheet(s)"
-            f" -> {out_base} | backgrounds: {backgrounds} ==="
-        )
-
         # the ticked selection, read in the tk thread: per site, per
-        # sheet -> the drop paths to run (None = everything)
+        # sheet -> the drop paths to run. None means "the owner never
+        # opened Select for this theme+site" (so the runner applies the
+        # default advice rule). Once Select has been opened, the ticks
+        # are authoritative — including ticked advice items — so we pass
+        # the explicit set, never collapsing "all ticked" back to None.
         selections: dict[str, dict[str, set[str] | None]] = {}
         for key in sites:
             per_sheet: dict[str, set[str] | None] = {}
             for sheet in sheets:
                 src = str(sheet.source)
-                unticked = {
-                    drop
-                    for (site, source, drop), var in self._select_vars.items()
-                    if site == key and source == src and not var.get()
-                }
-                per_sheet[src] = (
-                    {it.drop_path for it in sheet.items} - unticked
-                    if unticked
-                    else None
+                touched = any(
+                    site == key and source == src
+                    for (site, source, _drop) in self._select_vars
                 )
+                if touched:
+                    per_sheet[src] = {
+                        drop
+                        for (site, source, drop), var
+                        in self._select_vars.items()
+                        if site == key and source == src and var.get()
+                    }
+                else:
+                    per_sheet[src] = None
             selections[key] = per_sheet
 
+        self._stop.clear()
+        self._workers = []
+        self._workers_left = len(sites)
+        self.btn_start.configure(state="disabled")
+        self.btn_stop.configure(state="normal")
+        self.status_var.set("running: " + ", ".join(sites))
+        for key, panel in self.dash.items():
+            if key in sites:
+                total, themes = self._plan(key, sheets, selections[key])
+                panel.reset(active=True, task_total=total, task_themes=themes)
+            else:
+                panel.reset(active=False)
+        backgrounds = {key: self.background_vars[key].get() for key in sites}
+        self._log(
+            f"=== START {', '.join(sites)} | {len(sheets)} sheet(s)"
+            f" -> {out_base} | backgrounds: {backgrounds}"
+            f" | safer_retry={self.safer_var.get()} ==="
+        )
+
+        safer = self.safer_var.get()
         for key in sites:
             worker = threading.Thread(
                 target=self._drive_site,
@@ -514,6 +969,7 @@ class PainterGui:
                     partial(prompt_suffix, key, backgrounds[key]),
                     self.report_var.get(),
                     selections[key],
+                    safer,
                 ),
                 daemon=True,
             )
@@ -522,31 +978,32 @@ class PainterGui:
 
     def _drive_site(
         self, key, sheets, out_root, timing, post_save, suffix, report,
-        selection,
+        selection, safer,
     ) -> None:
-        """One site's whole run — the sheet queue in order, one thread."""
-        from painter.driver import DriverError, SiteDriver, TerminalState
-        from painter.runner import run_sheet
-
+        """One site's whole run — the theme queue in order, one thread."""
         log = lambda msg: self._q.put(f"[{key}] {msg}")
         events = lambda ev: self._q.put(("__event__", key, ev))
-        driver = SiteDriver(SITES[key], timing, CDP_URL)
-        t_site = time.monotonic()
+        driver = None
         done_sheets = 0
+        # the WHOLE body is guarded so __worker_done__ is ALWAYS posted
+        # (even if the imports or driver construction fail) — otherwise
+        # the Start button would stay disabled forever
         try:
+            from painter.driver import DriverError, SiteDriver, TerminalState
+            from painter.runner import run_sheet
+
+            driver = SiteDriver(SITES[key], timing, CDP_URL)
+            t_site = time.monotonic()
             title = driver.attach()
             log(f"attached to {title!r} — SUPERVISED, watch the window")
             for n, sheet in enumerate(sheets, start=1):
                 if self._stop.is_set():
-                    log("stopped on request — remaining sheets not started")
+                    log("stopped on request — remaining themes not started")
                     break
-                log(f"--- sheet {n}/{len(sheets)}: {sheet.source.name} ---")
+                log(f"--- theme {n}/{len(sheets)}: {sheet.source.name} ---")
                 try:
                     generated = run_sheet(
-                        sheet,
-                        driver,
-                        out_root,
-                        timing,
+                        sheet, driver, out_root, timing,
                         log=log,
                         should_stop=self._stop.is_set,
                         post_save=post_save,
@@ -554,17 +1011,15 @@ class PainterGui:
                         report=report,
                         only=selection.get(str(sheet.source)),
                         on_event=events,
+                        safer_retry=safer,
                     )
                     done_sheets += 1
-                    log(
-                        f"sheet done: {generated} image(s) into"
-                        f" {out_root}"
-                    )
+                    log(f"theme done: {generated} image(s) into {out_root}")
                 except TerminalState as exc:
-                    log(f"TERMINAL STATE (quota/refusal): {exc}")
+                    log(f"TERMINAL STATE (quota/rate limit): {exc}")
                     log(
                         "site stopped — finished work is saved; start"
-                        " again later to resume the remaining sheets"
+                        " again later to resume the remaining themes"
                     )
                     break
                 except DriverError as exc:
@@ -575,22 +1030,30 @@ class PainterGui:
                     )
                     break
             log(
-                f"finished {done_sheets}/{len(sheets)} sheet(s) in"
+                f"finished {done_sheets}/{len(sheets)} theme(s) in"
                 f" {(time.monotonic() - t_site) / 60:.1f} min"
             )
-        except DriverError as exc:
-            log(f"DRIVER ERROR: {exc}")
         except Exception as exc:  # surfaced, never swallowed
-            log(f"UNEXPECTED ERROR: {type(exc).__name__}: {exc}")
+            # attach()/construction failures land here (DriverError);
+            # so would a missing-playwright ImportError
+            kind = type(exc).__name__
+            if kind in (
+                "DriverError", "TerminalState", "SelectorRot",
+                "GenerationTimeout",
+            ):
+                log(f"DRIVER ERROR: {exc}")
+            else:
+                log(f"UNEXPECTED ERROR: {kind}: {exc}")
         finally:
-            driver.close()
+            if driver is not None:
+                driver.close()
             self._q.put(("__worker_done__", key))
 
     def _request_stop(self) -> None:
         self._stop.set()
-        self.status_var.set("stopping after the current item ...")
+        self.status_var.set("stopping after the current item …")
 
-    # --- queue pump -----------------------------------------------------
+    # --- queue pump ----------------------------------------------------
 
     def _drain_queue(self) -> None:
         try:
@@ -603,7 +1066,11 @@ class PainterGui:
                         self.dash[msg[1]].handle(msg[2])
                     elif msg[0] == "__worker_done__":
                         self._log(f"[{msg[1]}] worker finished")
-                        if all(not w.is_alive() for w in self._workers):
+                        # count down rather than poll is_alive(): the
+                        # worker posts this from its finally block while
+                        # its thread is still technically alive
+                        self._workers_left -= 1
+                        if self._workers_left <= 0:
                             self.btn_start.configure(state="normal")
                             self.btn_stop.configure(state="disabled")
                             self.status_var.set("idle")
@@ -614,210 +1081,143 @@ class PainterGui:
         self.root.after(120, self._drain_queue)
 
 
-class DashPanel(ttk.LabelFrame):
-    """The plain-user view of one site: progress, tempo, refusals.
-
-    Fed by the runner's structured events — no log reading needed.
-    """
-
-    def __init__(self, master, title: str):
-        super().__init__(master, text=title)
-        self.sheet_var = tk.StringVar(value="—")
-        self.item_var = tk.StringVar(value="—")
-        self.stats_var = tk.StringVar(value="idle")
-
-        ttk.Label(self, text="Sheet:", width=8).grid(
-            row=0, column=0, sticky="w", padx=6, pady=(8, 2)
-        )
-        ttk.Label(self, textvariable=self.sheet_var).grid(
-            row=0, column=1, sticky="w", pady=(8, 2)
-        )
-        ttk.Label(self, text="Image:", width=8).grid(
-            row=1, column=0, sticky="w", padx=6, pady=2
-        )
-        ttk.Label(self, textvariable=self.item_var).grid(
-            row=1, column=1, sticky="w", pady=2
-        )
-        self.bar = ttk.Progressbar(self, maximum=1, value=0)
-        self.bar.grid(
-            row=2, column=0, columnspan=2, sticky="we", padx=6, pady=8
-        )
-        ttk.Label(
-            self, textvariable=self.stats_var, font=("Segoe UI", 10, "bold")
-        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=6, pady=2)
-        self.columnconfigure(1, weight=1)
-        self.reset(active=False)
-
-    def reset(self, active: bool = True) -> None:
-        self._done = 0
-        self._refused = 0
-        self._total = 0
-        self._gen_times: list[float] = []
-        self._t0 = time.monotonic()
-        self.sheet_var.set("—")
-        self.item_var.set("—")
-        self.bar.configure(maximum=1, value=0)
-        self.stats_var.set("running ..." if active else "idle")
-
-    def handle(self, event: dict) -> None:
-        kind = event["type"]
-        if kind == "sheet_start":
-            self._total += event["pending"]
-            self.sheet_var.set(
-                f"{event['sheet']}  ({event['pending']} pending)"
-            )
-        elif kind == "item_start":
-            self.item_var.set(
-                f"({event['idx']}/{event['of']}) {event['title'][:52]}"
-            )
-        elif kind == "item_done":
-            self._done += 1
-            self._gen_times.append(event["gen_s"])
-        elif kind == "item_refused":
-            self._refused += 1
-        elif kind == "sheet_done":
-            self.item_var.set("—")
-        self._refresh()
-
-    def _refresh(self) -> None:
-        self.bar.configure(
-            maximum=max(self._total, 1), value=self._done + self._refused
-        )
-        remaining = max(self._total - self._done - self._refused, 0)
-        parts = [
-            f"Done {self._done}/{self._total}",
-            f"Left {remaining}",
-            f"Refused {self._refused}",
-        ]
-        if self._gen_times:
-            avg = sum(self._gen_times) / len(self._gen_times)
-            parts.append(f"Avg {avg:.0f}s/img")
-            elapsed = time.monotonic() - self._t0
-            if self._done and elapsed > 0:
-                tempo = self._done / (elapsed / 3600)
-                parts.append(f"Tempo {tempo:.0f}/h")
-                eta_min = remaining * (elapsed / self._done) / 60
-                parts.append(f"ETA ~{eta_min:.0f} min")
-        self.stats_var.set("   ".join(parts))
-
+# ---------------------------------------------------------------------
+# Select-images window
+# ---------------------------------------------------------------------
 
 class SelectWindow(tk.Toplevel):
-    """Tick which images each site generates — one column per site.
+    """Tick which images each site generates — a column per site.
 
-    Items a site has already finished (per its progress sidecar under
-    the current output folder) show disabled and unticked.
+    One collapsible section per theme. Already-done items (per the
+    site's progress under the current output folder) show disabled;
+    sheet-advised items show unticked with the reason.
     """
 
     def __init__(self, gui: PainterGui, sheets: list[Sheet]):
         super().__init__(gui.root)
         self.title("Select images per site")
-        self.minsize(680, 480)
+        self.minsize(720, 520)
         self._gui = gui
-
-        out_base = gui._out_base()
         site_keys = sorted(SITES)
-        done: dict[str, dict[str, set]] = {k: {} for k in site_keys}
-        for key in site_keys:
-            for sheet in sheets:
-                progress_file = (
-                    out_base / key / (sheet.source.stem + PROGRESS_SUFFIX)
-                )
-                entries: set = set()
-                if progress_file.exists():
-                    entries = set(
-                        json.loads(
-                            progress_file.read_text(encoding="utf-8")
-                        )["done"]
-                    )
-                done[key][str(sheet.source)] = entries
 
-        bar = ttk.Frame(self)
-        bar.pack(fill="x", padx=6, pady=4)
+        done = {
+            key: {
+                str(sheet.source): gui._progress_done(key, sheet)
+                for sheet in sheets
+            }
+            for key in site_keys
+        }
+
+        bar = ttk.Frame(self, padding=6)
+        bar.pack(fill="x")
         ttk.Label(
             bar,
-            text="Tick = generate. Already-done items are disabled.",
+            text="Tick = generate.  Already-done disabled;"
+            " ⚠ advice unticked by default.",
+            style="Muted.TLabel",
         ).pack(side="left")
-        ttk.Button(bar, text="Close", command=self.destroy).pack(
+        ttk.Button(bar, text="Expand all", command=self._expand_all).pack(
             side="right"
         )
-
-        canvas = tk.Canvas(self, highlightthickness=0)
-        scroll = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        inner = ttk.Frame(canvas)
-        inner.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        ttk.Button(
+            bar, text="Collapse all", command=self._collapse_all
+        ).pack(side="right", padx=4)
+        ttk.Button(bar, text="Close", command=self.destroy).pack(
+            side="right", padx=4
         )
-        canvas.create_window((0, 0), window=inner, anchor="nw")
-        canvas.configure(yscrollcommand=scroll.set)
-        canvas.pack(side="left", fill="both", expand=True, padx=6, pady=4)
-        scroll.pack(side="right", fill="y")
 
-        header = ttk.Frame(inner)
-        header.pack(fill="x", pady=(0, 2))
-        for key in site_keys:
-            ttk.Label(header, text=SITES[key].name, width=9).pack(
-                side="left"
-            )
-        ttk.Label(header, text="Image").pack(side="left", padx=8)
+        scroll = ScrollFrame(self, horizontal=True)
+        scroll.pack(fill="both", expand=True)
+        body = scroll.body
 
-        for sheet in sheets:
-            src = str(sheet.source)
-            head = ttk.Frame(inner)
-            head.pack(fill="x", pady=(8, 2))
+        header = ttk.Frame(body, padding=(2, 2))
+        header.pack(fill="x")
+        for c, key in enumerate(site_keys):
             ttk.Label(
-                head,
-                text=f"{sheet.source.name} — {sheet.theme}",
-                font=("Segoe UI", 9, "bold"),
-            ).pack(side="left")
-            for key in site_keys:
-                ttk.Button(
-                    head,
-                    text=f"{SITES[key].name}: all/none",
-                    command=partial(self._toggle_sheet, key, sheet),
-                ).pack(side="right", padx=2)
+                header, text=SITES[key].name, style="Head.TLabel", width=10,
+                anchor="center",
+            ).grid(row=0, column=c, padx=2)
+        ttk.Label(header, text="Image", style="Head.TLabel").grid(
+            row=0, column=len(site_keys), sticky="w", padx=8
+        )
 
-            for item in sheet.items:
-                row = ttk.Frame(inner)
-                row.pack(fill="x")
-                for key in site_keys:
-                    var = gui._select_var(
-                        key, src, item.drop_path,
-                        default=item.advice is None,
-                    )
-                    is_done = item.drop_path in done[key][src]
-                    if is_done:
-                        var.set(False)
-                    cb = ttk.Checkbutton(row, variable=var, width=8)
-                    if is_done:
-                        cb.state(["disabled"])
-                    cb.pack(side="left")
-                suffix = ""
-                done_sites = [
-                    k for k in site_keys if item.drop_path in done[k][src]
-                ]
-                if done_sites:
-                    suffix += "   ✔ done: " + ", ".join(
-                        SITES[k].name for k in done_sites
-                    )
-                if item.advice:
-                    suffix += f"   ⚠ {item.advice[:70]}"
-                # color by state: green = done everywhere, red =
-                # superseded, orange = other advice, default = pending
-                if len(done_sites) == len(site_keys):
-                    color = "#2e7d32"
-                elif item.advice and "supersed" in item.advice.lower():
-                    color = "#c62828"
-                elif item.advice:
-                    color = "#b26a00"
-                elif done_sites:
-                    color = "#558b2f"
-                else:
-                    color = ""
-                style = {"foreground": color} if color else {}
-                ttk.Label(
-                    row, text=item.drop_path + suffix, **style
-                ).pack(side="left", padx=8)
+        # each entry: (state dict, toggle callable) for expand/collapse all
+        self._sections: list[tuple[dict, object]] = []
+        for sheet in sheets:
+            self._add_theme(body, sheet, site_keys, done)
+
+    def _add_theme(self, body, sheet: Sheet, site_keys, done) -> None:
+        src = str(sheet.source)
+        section = ttk.Frame(body)
+        section.pack(fill="x", pady=(8, 0))
+
+        head = ttk.Frame(section)
+        head.pack(fill="x")
+        detail = ttk.Frame(section)
+        detail.pack(fill="x", padx=(14, 0))
+
+        state = {"open": True}
+        label = f"{sheet.source.name} — {sheet.theme}"
+        btn = ttk.Button(head, style="Expander.TButton")
+
+        def render() -> None:
+            btn.configure(text=("▼  " if state["open"] else "▶  ") + label)
+
+        def toggle() -> None:
+            state["open"] = not state["open"]
+            if state["open"]:
+                detail.pack(fill="x", padx=(14, 0))
+            else:
+                detail.forget()
+            render()
+
+        btn.configure(command=toggle)
+        # all/none buttons first (right), then the toggle fills the rest
+        for key in reversed(site_keys):
+            ttk.Button(
+                head, text=f"{SITES[key].name}: all/none", width=16,
+                command=partial(self._toggle_sheet, key, sheet),
+            ).pack(side="right", padx=2)
+        btn.pack(side="left", fill="x", expand=True)
+        render()
+        self._sections.append((state, toggle))
+
+        for r, item in enumerate(sheet.items):
+            done_sites = [
+                k for k in site_keys if item.drop_path in done[k][src]
+            ]
+            for c, key in enumerate(site_keys):
+                var = self._gui._select_var(
+                    key, src, item.drop_path, default=item.advice is None
+                )
+                is_done = item.drop_path in done[key][src]
+                if is_done:
+                    var.set(False)
+                cb = ttk.Checkbutton(detail, variable=var)
+                if is_done:
+                    cb.state(["disabled"])
+                cb.grid(row=r, column=c, padx=(20 if c == 0 else 6, 6))
+            text = item.drop_path
+            if done_sites:
+                text += "   ✔ done: " + ", ".join(
+                    SITES[k].name for k in done_sites
+                )
+            if item.advice:
+                text += f"   ⚠ {item.advice[:70]}"
+            if len(done_sites) == len(site_keys):
+                color = C_DONE
+            elif item.advice and "supersed" in item.advice.lower():
+                color = C_SUPERSEDED
+            elif item.advice:
+                color = C_ADVICE
+            elif done_sites:
+                color = C_DONE_SOFT
+            else:
+                color = ""
+            opt = {"foreground": color} if color else {}
+            ttk.Label(detail, text=text, **opt).grid(
+                row=r, column=len(site_keys), sticky="w", padx=8
+            )
 
     def _toggle_sheet(self, site: str, sheet: Sheet) -> None:
         src = str(sheet.source)
@@ -828,6 +1228,16 @@ class SelectWindow(tk.Toplevel):
         target = not all(var.get() for var in variables)
         for var in variables:
             var.set(target)
+
+    def _expand_all(self) -> None:
+        for state, toggle in self._sections:
+            if not state["open"]:
+                toggle()
+
+    def _collapse_all(self) -> None:
+        for state, toggle in self._sections:
+            if state["open"]:
+                toggle()
 
 
 def main() -> None:
