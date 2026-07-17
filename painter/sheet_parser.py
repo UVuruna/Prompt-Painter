@@ -10,14 +10,18 @@ contract (project CLAUDE.md):
    span and the arrow.
 3. The FIRST fenced code block after the entry is the prompt, taken
    byte-identical.
-4. Entries marked REUSE / SUPERSEDED / DO NOT GENERATE are logged as
-   skipped, never generated. The marker must sit inside a bold span:
-   in a span after the title it marks that one entry; alone in a
-   paragraph's first span (no drop path) it is a section note that
-   skips every entry until the next heading; in a section heading it
-   skips the whole section.
+4. Skip markers (REUSE / SUPERSEDED / DO NOT GENERATE, inside bold
+   spans) are ADVICE, not law: an entry that still carries a drop
+   path and a prompt LOADS as an item with ``advice`` set — the
+   callers untick it by default. A marker in a span after the title
+   advises that entry; alone in a paragraph's first span it advises
+   the rest of the section; in a section heading it advises the
+   whole section. Marked entries with NO prompt (the REUSE seats)
+   become informational ``SkippedItem``s — nothing to load.
 5. A heading the parser cannot pair with a prompt is REPORTED loudly
-   (the fix belongs in the sheet, not in parser leniency).
+   (the fix belongs in the sheet, not in parser leniency) — unless
+   it is advice-marked, in which case it is a retired entry, listed,
+   never a violation.
 """
 
 from __future__ import annotations
@@ -46,14 +50,18 @@ class PromptItem:
     drop_path: str  # POSIX-relative output path from the arrow line
     prompt: str     # the fenced block content, byte-identical
     line: int       # 1-based line of the entry heading
+    # a skip marker on the entry or its section (REUSE, SUPERSEDED,
+    # DO NOT GENERATE ...) — ADVICE, not law (owner 2026-07-17): the
+    # item still loads, but runs only when explicitly ticked
+    advice: str | None = None
 
 
 @dataclass(frozen=True)
 class SkippedItem:
-    """An entry the sheet marks as not-to-generate."""
+    """A marked entry with NO prompt in the sheet — nothing to load."""
 
     title: str
-    reason: str  # the marker span or section note that skipped it
+    reason: str  # the marker span or section note
     line: int
 
 
@@ -86,19 +94,26 @@ def parse_sheet(path: Path) -> Sheet:
     skipped: list[SkippedItem] = []
     problems: list[Problem] = []
 
-    # entry awaiting its prompt block: (title, drop_path, line)
-    pending: tuple[str, str, int] | None = None
-    # active skip reason from a marked section heading or note;
+    # entry awaiting its prompt block: (title, drop_path, line, advice)
+    pending: tuple[str, str, int, str | None] | None = None
+    # active advice from a marked section heading or note;
     # cleared by the next heading
     poison: str | None = None
 
     def flush_pending(why: str) -> None:
         nonlocal pending
         if pending is not None:
-            title, _, at = pending
-            problems.append(
-                Problem(f'entry "{title}" has no prompt block ({why})', at)
-            )
+            title, _, at, advice = pending
+            if advice is not None:
+                # a marked entry with no prompt block — retired; listed,
+                # never a contract violation
+                skipped.append(SkippedItem(title, advice, at))
+            else:
+                problems.append(
+                    Problem(
+                        f'entry "{title}" has no prompt block ({why})', at
+                    )
+                )
             pending = None
 
     i = 0
@@ -118,8 +133,10 @@ def parse_sheet(path: Path) -> Sheet:
                 )
             i += 1
             if pending is not None:
-                title, drop, at = pending
-                items.append(PromptItem(title, drop, "\n".join(block), at))
+                title, drop, at, advice = pending
+                items.append(
+                    PromptItem(title, drop, "\n".join(block), at, advice)
+                )
                 pending = None
             continue
 
@@ -160,14 +177,19 @@ def parse_sheet(path: Path) -> Sheet:
             (k for k, s in enumerate(spans) if _SKIP_MARKER.search(s)), None
         )
 
-        if marker_idx is not None:
+        reason = (
+            _WS.sub(" ", spans[marker_idx]).strip()
+            if marker_idx is not None
+            else None
+        )
+
+        if marker_idx is not None and arrow is None:
             flush_pending("a skip-marked paragraph interrupts it")
-            reason = _WS.sub(" ", spans[marker_idx]).strip()
-            if arrow is not None or marker_idx > 0:
-                # a named entry marked as skipped
+            if marker_idx > 0:
+                # a named entry with NO prompt to load (the REUSE seats)
                 skipped.append(SkippedItem(title, reason, start))
             else:
-                # a standalone note — skips the rest of the section
+                # a standalone note — advice for the rest of the section
                 poison = reason
             continue
 
@@ -197,10 +219,6 @@ def parse_sheet(path: Path) -> Sheet:
 
         flush_pending("the next entry starts")
 
-        if poison is not None:
-            skipped.append(SkippedItem(title, poison, start))
-            continue
-
         if any(item.drop_path == drop for item in items):
             problems.append(
                 Problem(
@@ -211,7 +229,9 @@ def parse_sheet(path: Path) -> Sheet:
             )
             continue
 
-        pending = (title, drop, start)
+        # the entry's own marker outranks the section's advice; either
+        # way the prompt LOADS — advice only unticks it by default
+        pending = (title, drop, start, reason or poison)
 
     flush_pending("the sheet ends")
 

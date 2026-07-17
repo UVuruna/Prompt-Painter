@@ -40,7 +40,8 @@ GOLDEN_COUNTS = {
     "persons_prompts.md": (4, 2),
     "one_soul_prompts.md": (8, 0),
     "walks_prompts.md": (16, 0),
-    "temperaments_prompts.md": (4, 4),
+    # 4 approved + 4 tetramorph loaded as ADVICE-skipped items
+    "temperaments_prompts.md": (8, 0),
     "calendar_prompts.md": (12, 0),
     "life_prompts.md": (16, 0),
 }
@@ -129,6 +130,8 @@ def test_walks_bell_rondel_prompt_byte_identical():
 # --- persons: REUSE seats are skipped, never generated ----------------
 
 def test_persons_reuse_skipped():
+    # the two REUSE seats have NO prompt in the sheet — nothing to
+    # load, so they stay informational skips (not items)
     sheet = golden("persons_prompts.md")
     assert [s.title for s in sheet.skipped] == [
         "Lucifer — Pride (red arm, 20h)",
@@ -145,24 +148,29 @@ def test_persons_reuse_skipped():
     }
 
 
-# --- temperaments: the unapproved tetramorph section is skipped -------
+# --- temperaments: the unapproved tetramorph section loads as ADVICE --
 
-def test_temperaments_tetramorph_skipped():
+def test_temperaments_tetramorph_is_advice_not_law():
     sheet = golden("temperaments_prompts.md")
-    assert [i.drop_path for i in sheet.items] == [
+    normal = [i for i in sheet.items if i.advice is None]
+    advised = [i for i in sheet.items if i.advice is not None]
+    assert [i.drop_path for i in normal] == [
         "temperaments/Sanguine.png",
         "temperaments/Choleric.png",
         "temperaments/Melancholic.png",
         "temperaments/Phlegmatic.png",
     ]
-    assert [s.title for s in sheet.skipped] == [
+    # the tetramorph rondels LOAD (prompt and all) but carry the
+    # sheet's advice — the GUI unticks them by default
+    assert [i.title for i in advised] == [
         "the Man/Angel rondel",
         "the Lion rondel",
         "the Ox rondel",
         "the Eagle rondel",
     ]
-    for s in sheet.skipped:
-        assert "do not generate" in s.reason.lower()
+    for item in advised:
+        assert "do not generate" in item.advice.lower()
+        assert item.prompt.strip()  # the prompt IS loaded
 
 
 # --- calendar: wrapped bold headings normalize to one line ------------
