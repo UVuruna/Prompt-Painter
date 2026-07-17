@@ -59,10 +59,11 @@ and a `ttk.Treeview` is the dashboard's finished-collection table.
   pause between prompts (fractional seconds) and the human-like
   hesitation between UI steps (click → paste → send, default
   0.2–0.6 s — never instant).
-- **Instructions** — opens an IN-APP viewer of the sheet-authoring
-  guide (`instructions.md`) — light Markdown formatting, selectable
-  read-only text, and a **Copy all (for AI)** button — so a
-  non-programmer never needs a code editor.
+- **Instructions** — opens the sheet-authoring guide
+  (`instructions.md`) in the in-app `DocWindow` — light Markdown
+  formatting, selectable read-only text, and a **Copy (for AI)**
+  button — so a non-programmer never needs a code editor. The same
+  `DocWindow` shows a collection file or a single prompt (Show ▸).
 - **Two views** (tabs): the **Dashboard** and the **Log
   (detailed)** (timestamped `[HH:MM:SS]`, both sites interleaved
   with `[gemini]` / `[chatgpt]` prefixes). A SAFETY refusal skips
@@ -79,10 +80,11 @@ runner's structured events (never by log-parsing):
   at Start by `_plan`, which mirrors the runner's queue rule).
 - **File / Image** — the current collection file, the current
   image, and a per-collection progress bar.
-- **Stats table** — two columns, `This one` and `Whole run`, over
-  Done, Refused, **AI generate avg** (SEND → image), **Our time
-  avg** (save + bgfix + pause — "sve se računa"), Tempo (/h) and
-  ETA. Title/value pairs, not one crammed line.
+- **Stats table** — two columns, `This one` and `Whole run`. Rows:
+  Done, Refused, a collapsible **Average** (its value is the total
+  per-image time; click ▶ to break it into **AI generation**, **Our
+  processing** (save+bgfix+pause), **Minimum** and **Maximum**),
+  then Tempo (/h) and ETA. Title/value pairs, not one crammed line.
 - **Collections (running + done)** — a `ttk.Treeview` TABLE, three
   levels deep, column headers (Name · Done · AI · Ours · Res · Time
   · Size), both scrollbars, everything column-aligned:
@@ -92,7 +94,9 @@ runner's structured events (never by log-parsing):
   3. **Image** — `AI` (generate), `Ours` (fills after its pause),
      `Res`, `Size`.
   The RUNNING collection appears live and open, images streaming in
-  under their folder as they save; it collapses when done.
+  under their folder as they save; it collapses when done. **Show ▸**
+  (or double-click a row) opens the selected collection's whole file,
+  or a single image's own prompt, in the same formatted viewer.
 
 ## Threading
 One worker thread per site; each creates its own Playwright

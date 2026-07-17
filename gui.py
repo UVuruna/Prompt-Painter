@@ -146,21 +146,25 @@ class ScrollFrame(ttk.Frame):
 # Dashboard
 # ---------------------------------------------------------------------
 
-_METRICS = [
-    ("done", "Done"),
-    ("refused", "Refused"),
-    ("gen", "AI generate avg"),
-    ("over", "Our time avg"),
-    ("tempo", "Tempo"),
-    ("eta", "ETA"),
-]
+# the stat keys shown per scope (the 'Average' group sits between
+# Refused and Tempo and collapses)
+_STAT_KEYS = ("done", "refused", "total", "gen", "over", "tmin", "tmax",
+              "tempo", "eta")
 
 
-def _scope_stats(done, refused, gen_times, over_times, total, elapsed):
-    """Display strings for one scope (a collection or the whole task)."""
-    remaining = max(total - done - refused, 0)
-    gen = f"{sum(gen_times) / len(gen_times):.0f} s" if gen_times else "—"
-    over = f"{sum(over_times) / len(over_times):.0f} s" if over_times else "—"
+def _scope_stats(
+    done, refused, gen_times, over_times, totals, pending, elapsed
+):
+    """Display strings for one scope (a collection or the whole task).
+
+    ``totals`` are per-image AI+our seconds (only for images whose our
+    time is known), so the total average / min / max are exact.
+    """
+    remaining = max(pending - done - refused, 0)
+
+    def avg(xs):
+        return f"{sum(xs) / len(xs):.0f} s" if xs else "—"
+
     if done and elapsed > 0:
         tempo = f"{done / (elapsed / 3600):.0f} /h"
         eta = (
@@ -172,10 +176,13 @@ def _scope_stats(done, refused, gen_times, over_times, total, elapsed):
         tempo = "—"
         eta = "—"
     return {
-        "done": f"{done}/{total}" if total else str(done),
+        "done": f"{done}/{pending}" if pending else str(done),
         "refused": str(refused),
-        "gen": gen,
-        "over": over,
+        "total": avg(totals),
+        "gen": avg(gen_times),
+        "over": avg(over_times),
+        "tmin": f"{min(totals):.0f} s" if totals else "—",
+        "tmax": f"{max(totals):.0f} s" if totals else "—",
         "tempo": tempo,
         "eta": eta,
     }
@@ -187,9 +194,11 @@ class DashPanel(ttk.Frame):
     Driven only by the runner's structured events (main thread).
     """
 
-    def __init__(self, master, site_name: str):
+    def __init__(self, master, site_name: str, on_show=None):
         super().__init__(master, padding=6)
         self._name = site_name
+        self._on_show = on_show  # called with a node-info dict on 'Show'
+        self._node_info: dict[str, dict] = {}  # tree item id -> info
 
         ttk.Label(self, text=site_name, style="Big.TLabel").pack(anchor="w")
 
@@ -225,31 +234,77 @@ class DashPanel(ttk.Frame):
         )
         self.theme_bar.pack(fill="x", pady=(2, 6))
 
-        # the two-scope stats table
+        # the two-scope stats table: Done, Refused, a collapsible
+        # 'Average' group (total avg + the AI/processing/min/max
+        # breakdown), then Tempo and ETA
         grid = ttk.Frame(self)
         grid.pack(fill="x", pady=(2, 6))
-        ttk.Label(grid, text="", width=14).grid(row=0, column=0)
-        ttk.Label(
-            grid, text="This one", style="Head.TLabel", width=11
-        ).grid(row=0, column=1, sticky="e")
-        ttk.Label(grid, text="Whole run", style="Head.TLabel", width=11).grid(
-            row=0, column=2, sticky="e"
-        )
         self.cells: dict[tuple[str, str], tk.StringVar] = {}
-        for r, (key, label) in enumerate(_METRICS, start=1):
-            ttk.Label(grid, text=label).grid(row=r, column=0, sticky="w")
+
+        def value_cells(r, key, muted=False):
             for c, scope in ((1, "theme"), (2, "task")):
                 var = tk.StringVar(value="—")
                 self.cells[(scope, key)] = var
                 ttk.Label(
-                    grid, textvariable=var, style="Value.TLabel", anchor="e"
+                    grid, textvariable=var,
+                    style="" if muted else "Value.TLabel", anchor="e",
                 ).grid(row=r, column=c, sticky="e", padx=4)
+
+        def plain_row(r, label, key):
+            ttk.Label(grid, text=label).grid(row=r, column=0, sticky="w")
+            value_cells(r, key)
+
+        ttk.Label(grid, text="", width=16).grid(row=0, column=0)
+        ttk.Label(grid, text="This one", style="Head.TLabel", width=10).grid(
+            row=0, column=1, sticky="e"
+        )
+        ttk.Label(grid, text="Whole run", style="Head.TLabel", width=10).grid(
+            row=0, column=2, sticky="e"
+        )
+        plain_row(1, "Done", "done")
+        plain_row(2, "Refused", "refused")
+
+        # the collapsible Average header (its value is the total avg)
+        self._avg_open = False
+        self._avg_btn = ttk.Button(
+            grid, style="Expander.TButton", command=self._toggle_avg
+        )
+        self._avg_btn.grid(row=3, column=0, sticky="w")
+        value_cells(3, "total")
+
+        self._avg_rows: list[list] = []
+        for i, (key, label) in enumerate((
+            ("gen", "     AI generation"),
+            ("over", "     Our processing"),
+            ("tmin", "     Minimum"),
+            ("tmax", "     Maximum"),
+        )):
+            r = 4 + i
+            widgets = [ttk.Label(grid, text=label, style="Muted.TLabel")]
+            widgets[0].grid(row=r, column=0, sticky="w")
+            for c, scope in ((1, "theme"), (2, "task")):
+                var = tk.StringVar(value="—")
+                self.cells[(scope, key)] = var
+                w = ttk.Label(grid, textvariable=var, anchor="e")
+                w.grid(row=r, column=c, sticky="e", padx=4)
+                widgets.append(w)
+            self._avg_rows.append(widgets)
+
+        plain_row(8, "Tempo", "tempo")
+        plain_row(9, "ETA", "eta")
         grid.columnconfigure(0, weight=1)
+        self._render_avg_btn()
+        self._collapse_avg()
 
         ttk.Separator(self).pack(fill="x", pady=4)
+        hdr = ttk.Frame(self)
+        hdr.pack(fill="x")
         ttk.Label(
-            self, text="Collections (running + done)", style="Head.TLabel"
-        ).pack(anchor="w")
+            hdr, text="Collections (running + done)", style="Head.TLabel"
+        ).pack(side="left")
+        ttk.Button(hdr, text="Show ▸", command=self._show_selected).pack(
+            side="right"
+        )
         # a real table: each collection is a collapsible parent row, its
         # images the children; the running one shows live, open. Native
         # column headers + both scrollbars
@@ -283,8 +338,36 @@ class DashPanel(ttk.Frame):
         hsb.grid(row=1, column=0, sticky="ew")
         wrap.rowconfigure(0, weight=1)
         wrap.columnconfigure(0, weight=1)
+        self.tree.bind("<Double-1>", lambda _e: self._show_selected())
 
         self.reset(active=False)
+
+    def _show_selected(self) -> None:
+        info = self._node_info.get(self.tree.focus())
+        if info and self._on_show is not None:
+            self._on_show(info)
+
+    # --- the collapsible Average group ---------------------------------
+
+    def _render_avg_btn(self) -> None:
+        self._avg_btn.configure(
+            text=("▼  Average" if self._avg_open else "▶  Average")
+        )
+
+    def _expand_avg(self) -> None:
+        for widgets in self._avg_rows:
+            for w in widgets:
+                w.grid()
+
+    def _collapse_avg(self) -> None:
+        for widgets in self._avg_rows:
+            for w in widgets:
+                w.grid_remove()
+
+    def _toggle_avg(self) -> None:
+        self._avg_open = not self._avg_open
+        (self._expand_avg if self._avg_open else self._collapse_avg)()
+        self._render_avg_btn()
 
     # --- state ---------------------------------------------------------
 
@@ -299,9 +382,11 @@ class DashPanel(ttk.Frame):
         self._task_themes_done = 0
         self._task_gen: list[float] = []
         self._task_over: list[float] = []
+        self._task_totals: list[float] = []
         self._t_task = now
         self._new_theme("—", 0)
         self.tree.delete(*self.tree.get_children())
+        self._node_info.clear()
         self.task_prog_var.set(f"0 / {task_total}")
         self.task_bar.configure(maximum=max(task_total, 1), value=0)
         self.theme_name_var.set("—")
@@ -316,6 +401,7 @@ class DashPanel(ttk.Frame):
         self._theme_refused = 0
         self._theme_gen: list[float] = []
         self._theme_over: list[float] = []
+        self._theme_totals: list[float] = []
         self._theme_bytes = 0
         self._theme_folders: set[str] = set()
         self._t_theme = time.monotonic()
@@ -367,13 +453,19 @@ class DashPanel(ttk.Frame):
                 ),
             )
             self._child_ids[drop] = child
+            self._node_info[child] = {
+                "level": "image", "sheet": self._theme_name, "drop": drop,
+            }
             self._update_folder(folder)
             self._update_parent()
         elif kind == "item_done":
             # our-time known now — fill the image's column + folder time
             over = event["over_s"]
+            total = event["gen_s"] + over
             self._theme_over.append(over)
             self._task_over.append(over)
+            self._theme_totals.append(total)
+            self._task_totals.append(total)
             drop = event["drop_path"]
             child = self._child_ids.get(drop)
             if child is not None:
@@ -388,10 +480,14 @@ class DashPanel(ttk.Frame):
             self._task_refused += 1
             drop = event.get("drop_path", "")
             fnode = self._ensure_folder(self._folder_of(drop))
-            self.tree.insert(
+            rnode = self.tree.insert(
                 fnode, "end", text=PurePosixPath(drop).name or "refused",
                 values=("", "", "", "REFUSED", "", ""),
             )
+            if drop:
+                self._node_info[rnode] = {
+                    "level": "image", "sheet": self._theme_name, "drop": drop,
+                }
             self._update_parent()
         elif kind == "item_retry":
             self.image_var.set(self.image_var.get() + "  (safer retry…)")
@@ -414,6 +510,9 @@ class DashPanel(ttk.Frame):
                 "", "end", text=name, open=True,
                 values=self._parent_values(),
             )
+            self._node_info[self._tree_item] = {
+                "level": "collection", "sheet": self._theme_name,
+            }
         return self._tree_item
 
     def _ensure_folder(self, folder: str) -> str:
@@ -426,6 +525,9 @@ class DashPanel(ttk.Frame):
                 values=("0", "", "", "", "", fmt_size(0)),
             )
             self._folder_nodes[folder] = node
+            self._node_info[node] = {
+                "level": "folder", "sheet": self._theme_name,
+            }
         return node
 
     def _parent_values(self) -> tuple:
@@ -478,13 +580,15 @@ class DashPanel(ttk.Frame):
         )
         theme = _scope_stats(
             self._theme_done, self._theme_refused, self._theme_gen,
-            self._theme_over, self._theme_pending, now - self._t_theme,
+            self._theme_over, self._theme_totals, self._theme_pending,
+            now - self._t_theme,
         )
         task = _scope_stats(
             self._task_done, self._task_refused, self._task_gen,
-            self._task_over, self._task_total, now - self._t_task,
+            self._task_over, self._task_totals, self._task_total,
+            now - self._t_task,
         )
-        for key, _label in _METRICS:
+        for key in _STAT_KEYS:
             self.cells[("theme", key)].set(theme[key])
             self.cells[("task", key)].set(task[key])
 
@@ -660,7 +764,7 @@ class PainterGui:
         notebook.add(dash_tab, text="Dashboard")
         self.dash: dict[str, DashPanel] = {}
         for i, key in enumerate(sorted(SITES)):
-            panel = DashPanel(dash_tab, SITES[key].name)
+            panel = DashPanel(dash_tab, SITES[key].name, on_show=self._show_node)
             panel.grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
             dash_tab.columnconfigure(i, weight=1)
             self.dash[key] = panel
@@ -680,7 +784,56 @@ class PainterGui:
         except OSError as exc:
             messagebox.showerror("PromptPainter", f"Cannot read {path}: {exc}")
             return
-        InstructionsWindow(self.root, text)
+        DocWindow(
+            self.root, "How to write a prompt sheet", text,
+            hint="Give this to whoever (a person or an AI) writes the"
+            " next prompt file.",
+        )
+
+    def _show_node(self, info: dict) -> None:
+        """A dashboard row's 'Show': a collection/folder opens its whole
+        file, an image opens just its own prompt — both in the same
+        formatted, selectable viewer."""
+        source = next(
+            (p for p in self._sheets if p.name == info["sheet"]), None
+        )
+        if source is None:
+            messagebox.showinfo(
+                "PromptPainter",
+                f"{info['sheet']} is no longer in the queue.",
+            )
+            return
+        if info["level"] == "image":
+            try:
+                sheet = parse_sheet(source)
+            except (SheetError, OSError) as exc:
+                messagebox.showerror("PromptPainter", str(exc))
+                return
+            item = next(
+                (it for it in sheet.items if it.drop_path == info["drop"]),
+                None,
+            )
+            if item is None:
+                messagebox.showinfo(
+                    "PromptPainter",
+                    f"No prompt found for {info['drop']} in {source.name}.",
+                )
+                return
+            md = (
+                f"# {item.title}\n\n`{item.drop_path}`\n\n"
+                f"```\n{item.prompt}\n```\n"
+            )
+            DocWindow(
+                self.root, item.drop_path, md, copy_text=item.prompt,
+                hint="The prompt for this one image.",
+            )
+        else:
+            try:
+                text = source.read_text(encoding="utf-8")
+            except OSError as exc:
+                messagebox.showerror("PromptPainter", str(exc))
+                return
+            DocWindow(self.root, source.name, text)
 
     # --- helpers -------------------------------------------------------
 
@@ -1313,27 +1466,29 @@ class SelectWindow(tk.Toplevel):
                 toggle()
 
 
-class InstructionsWindow(tk.Toplevel):
-    """A readable, selectable in-app viewer for instructions.md — for
-    people who do not want a code editor. Light Markdown formatting
-    (headings, code, bullets, bold) plus a one-click 'Copy for AI'."""
+class DocWindow(tk.Toplevel):
+    """A readable, selectable in-app viewer for Markdown — for people
+    who do not want a code editor. Light formatting (headings, code,
+    bullets, bold) plus a one-click 'Copy for AI'. Used for the
+    authoring instructions, a whole collection file, and a single
+    image's prompt."""
 
-    def __init__(self, master, raw_markdown: str):
+    def __init__(
+        self, master, title: str, raw_markdown: str,
+        copy_text: str | None = None, hint: str | None = None,
+    ):
         super().__init__(master)
-        self.title("How to write a prompt sheet")
+        self.title(title)
         self.minsize(720, 560)
         self._raw = raw_markdown
+        self._copy_text = copy_text if copy_text is not None else raw_markdown
 
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
-        ttk.Label(
-            bar,
-            text="Give this to whoever (a person or an AI) writes the"
-            " next prompt file.",
-            style="Muted.TLabel",
-        ).pack(side="left")
+        if hint:
+            ttk.Label(bar, text=hint, style="Muted.TLabel").pack(side="left")
         ttk.Button(
-            bar, text="Copy all (for AI)", command=self._copy_all
+            bar, text="Copy (for AI)", command=self._copy_all
         ).pack(side="right")
         ttk.Button(bar, text="Close", command=self.destroy).pack(
             side="right", padx=4
@@ -1413,11 +1568,11 @@ class InstructionsWindow(tk.Toplevel):
 
     def _copy_all(self) -> None:
         self.clipboard_clear()
-        self.clipboard_append(self._raw)
+        self.clipboard_append(self._copy_text)
         messagebox.showinfo(
             "PromptPainter",
-            "The full instructions were copied — paste them to your AI"
-            " (or into a document).",
+            "Copied to the clipboard — paste it to your AI or into a"
+            " document.",
             parent=self,
         )
 
