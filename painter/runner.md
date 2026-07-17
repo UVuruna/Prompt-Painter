@@ -5,12 +5,13 @@
 ## Purpose
 The paced, resumable loop over a clean sheet's pending items:
 paste (prompt + the site's rule suffix) → submit → await the done
-edge → extract bytes → save DIRECTLY at `<out_root>/<drop-path>` →
-background fix → report line → mark done in the sidecar state →
-pause → next. A crash or a quota stop costs nothing — the next run
-resumes past every marked item and the report keeps every finished
-line. The loop writes ONLY under `out_root`; sheets are READ ONLY
-by construction.
+edge → extract bytes → save at `out_base / dest_for(drop, site)`
+(the assets-mirroring layout) → background fix → report line →
+mark done in the sidecar state (under `_state/<site>/`) → pause →
+next. A crash or a quota stop costs nothing — the next run resumes
+past every marked item and the report keeps every finished line.
+The loop writes ONLY under `out_base`; sheets are READ ONLY by
+construction.
 
 ## Connections
 

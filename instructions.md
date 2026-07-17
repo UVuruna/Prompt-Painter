@@ -12,13 +12,14 @@ its best — see [Legacy forms](#legacy-forms)).
 ````markdown
 # My Theme Name — what this sheet generates
 
-**The First Image — short description** → `my_theme/First_Image.png`
+**The First Image — short description** →
+`assets/weekday/my_theme/primary/First_Image.png`
 
 ```
 The full generation prompt, exactly as it must be pasted.
 ```
 
-**The Second Image** → `my_theme/Second_Image.png`
+**The Second Image** → `assets/weekday/my_theme/primary/Second_Image.png`
 
 ```
 Another prompt.
@@ -35,14 +36,18 @@ rejected outright.
 
 ### 2. The entry: bold title, arrow, backticked path
 ```markdown
-**Title of the image** → `folder/File_Name.png`
+**Title of the image** → `assets/emblem/mood/Glory.png`
 ```
-- The `→` arrow line carries the OUTPUT FILENAME — the tool names
-  files itself, no renaming ever happens afterwards.
-- The path is RELATIVE (it lands at `<out>/<site>/<your path>`),
-  must end in `.png`, must be UNIQUE within the sheet, and should
-  start with the theme's folder (`my_theme/...`) so themes never
-  collide in a shared output folder.
+- The `→` arrow line carries the OUTPUT PATH — the tool names and
+  files images itself, no renaming ever happens afterwards.
+- Write the FULL, SITE-AGNOSTIC assets path:
+  `assets/<category>/<theme...>/<File>.png` (categories: weekday,
+  archetype, zodiac, badge, emblem, instrument). The tool slots the
+  site in after the category, so the output tree mirrors the DOMY
+  assets tree exactly:
+  `assets/emblem/mood/Glory.png` → `out/emblem/<site>/mood/Glory.png`
+  — and a finished collection copies straight into `assets/`.
+- The path must end in `.png` and be UNIQUE within the sheet.
 - Long titles and paths may wrap across lines; plain text may sit
   between the bold title and the arrow; the title may contain
   single backticks (`` `#8000FF` ``).
@@ -96,9 +101,9 @@ arrow form — it is the only one with loud error checking.
 ## Checklist before handing the sheet over
 
 - [ ] `# H1` theme name at the top
-- [ ] every image: `**Title** → \`theme/File.png\`` + one fenced
-      prompt block
-- [ ] every path unique, relative, `.png`, theme-prefixed
+- [ ] every image: `**Title** → \`assets/<category>/.../File.png\``
+      + one fenced prompt block
+- [ ] every path unique, `.png`, full `assets/` form (site-agnostic)
 - [ ] REUSE / not-approved entries marked in bold
 - [ ] run `python main.py "your_sheet.md" --dry-run` (or the GUI's
       "Check sheets") — zero problems reported

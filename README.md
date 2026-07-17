@@ -79,11 +79,14 @@ first time (the
 dedicated `chrome-profile/` keeps you logged in from then on),
 **Check sheets**, then **Start** — and go ride a bike.
 
-Each site works through the queue in order, closing theme after
-theme: images at `<out>/<site>/<drop-path>`, progress sidecar and
-`<theme>_report.txt` (timestamps, per-image generate + process
-times, resolutions, sizes, REMOVE BG actions, averages, totals)
-beside them. The **Dashboard** tab shows the same numbers live —
+Each site works through the queue in order, closing collection
+after collection. The out/ tree MIRRORS DOMY's `assets/` — sheets
+carry full site-agnostic `assets/...` paths and the tool injects
+the site after the category (`out/emblem/gemini/mood/Glory.png`),
+so a finished collection copies straight into `assets/`. Progress
+sidecars and `<collection>_report.txt` (timestamps, per-image AI +
+our times, resolutions, sizes, REMOVE BG actions, averages,
+totals) live under `out/_state/<site>/`. The **Dashboard** tab shows the same numbers live —
 per theme and for the whole task — with a collapsible history of
 finished themes. A quota stop ends only that site's queue with
 everything finished already saved — the next Start resumes the

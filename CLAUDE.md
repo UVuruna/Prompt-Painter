@@ -77,13 +77,17 @@ is the binding spec.
    project). It auto-detects per file — already-transparent
    skipped, white cleared + autocropped, ambiguous reported and
    left untouched. Failures are loud but never kill the run.
-7. Images save **DIRECTLY** to **`<out>/<site>/<drop-path>`**
-   (e.g. `out/gemini/trinity/Jesus_Advocate.png`) — no approval
-   step (owner 2026-07-17: saving IS the end of the tool's job;
-   quality review happens in the folder afterwards). The arrow
-   line's own path IS the theme folder; the per-site split keeps
-   parallel runs collision-free and matches DOMY's per-source
-   asset trees. An optional per-sheet **report txt**
+7. Images save **DIRECTLY** into a tree that MIRRORS DOMY's
+   `assets/` (owner 2026-07-18): sheets carry FULL site-agnostic
+   paths (`assets/emblem/mood/Glory.png`) and the tool injects the
+   site after the category —
+   `assets/<category>/<rest>` → `<out>/<category>/<site>/<rest>`
+   (e.g. `out/emblem/gemini/mood/Glory.png`) — so a finished
+   collection COPIES STRAIGHT into `DOMY Watch/assets/`. No
+   approval step (owner 2026-07-17: saving IS the end of the
+   tool's job). Run state + reports live under `<out>/_state/<site>/`
+   and backup variants under `<out>/EXTRA/` — neither pollutes the
+   copy-ready tree. An optional per-sheet **report txt**
    (`<stem>_report.txt`, on by default) logs run start/finish
    timestamps, per-image GENERATE time (AI: SEND -> image) and OUR
    time (save + bgfix + pause — "sve se računa"), original -> final
@@ -105,9 +109,11 @@ is the binding spec.
 
 Per theme `.md` file:
 1. The `# H1` names the theme.
-2. Every image is a `**Bold heading** → \`drop/path.png\`` line —
-   the arrow line carries the OUTPUT FILENAME (headings and paths
-   may wrap; the drop path is used verbatim under `<out>/<site>/`).
+2. Every image is a `**Bold heading** → \`assets/.../path.png\``
+   line — the arrow line carries the FULL SITE-AGNOSTIC assets
+   path (headings and paths may wrap). All 30 sheets migrated to
+   this form 2026-07-18; the sheet-authoring contract lives in
+   [instructions.md](instructions.md).
 3. The FIRST fenced code block after that heading is the prompt —
    copied byte-identical into the chat box, plus the site's
    background suffix.
@@ -180,7 +186,8 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
 
 `parse(sheet) → queue` → per pending item: paste (+ suffix) →
 submit → await the done-edge (hard timeout) → extract bytes → save
-`<out>/<site>/<drop-path>` → background fix → mark done in
+`<out>/<category>/<site>/<rest>` (the assets mirror) → background
+fix → mark done in
 `.progress.json` (RESUMABLE — a crash or quota stop costs nothing)
 → pause → next. Progress logging per item (elapsed, done/total —
 root Rule #10). At the end the owner reviews quality; unsatisfying

@@ -34,9 +34,13 @@ match.
 - `CHROME_PROFILE_DIR` — the dedicated automation profile
   (`chrome-profile/`, gitignored; Chrome 136+ refuses CDP on the
   default profile). Log in once there; sessions persist.
-- `DEFAULT_OUT_DIR`, `PROGRESS_SUFFIX`, `REPORT_SUFFIX` — images
-  save directly at `<out>/<site>/<drop-path>`; the run state and
-  the report sit beside them.
+- `DEFAULT_OUT_DIR`, `STATE_DIRNAME`, `PROGRESS_SUFFIX`,
+  `REPORT_SUFFIX`, `dest_for(drop, site)` — the out/ tree MIRRORS
+  DOMY's assets/: sheets carry site-agnostic
+  `assets/<category>/<rest>` paths and `dest_for` injects the site
+  after the category (`<out>/<category>/<site>/<rest>`); legacy
+  relative drops keep `<out>/<site>/<drop>`. Run state + reports
+  live under `<out>/_state/<site>/`, out of the copy-ready tree.
 - `IMAGE_EXTENSIONS`, `SKIP_MARKER_PATTERN` — the sheet contract's
   file-name rule and the REUSE / SUPERSEDED / DO-NOT-GENERATE
   marker regex.
