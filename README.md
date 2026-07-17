@@ -79,14 +79,19 @@ first time (the
 dedicated `chrome-profile/` keeps you logged in from then on),
 **Check sheets**, then **Start** — and go ride a bike.
 
-Each site works through the queue in order, closing sheet after
-sheet: images at `<out>/<site>/<drop-path>`, progress sidecar and
-`<sheet>_report.txt` (timestamps, per-image generation times,
-resolutions, REMOVE BG actions, averages, totals) beside them. A
-quota stop ends only that site's queue with everything finished
-already saved — the next Start resumes the rest. Every saved image
-goes through the in-house background remover (transparent → kept,
-white → cleared + cropped, ambiguous → reported).
+Each site works through the queue in order, closing theme after
+theme: images at `<out>/<site>/<drop-path>`, progress sidecar and
+`<theme>_report.txt` (timestamps, per-image generate + process
+times, resolutions, sizes, REMOVE BG actions, averages, totals)
+beside them. The **Dashboard** tab shows the same numbers live —
+per theme and for the whole task — with a collapsible history of
+finished themes. A quota stop ends only that site's queue with
+everything finished already saved — the next Start resumes the
+rest. Every saved image goes through the in-house background
+remover (transparent → kept, white → cleared + cropped, ambiguous
+→ reported). A SAFETY refusal skips just that image; with **safer
+retry** on, the item is re-sent once with an allegory-framing note
+first.
 
 CLI alternative (one site per run):
 

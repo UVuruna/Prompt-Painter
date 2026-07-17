@@ -85,9 +85,13 @@ is the binding spec.
    parallel runs collision-free and matches DOMY's per-source
    asset trees. An optional per-sheet **report txt**
    (`<stem>_report.txt`, on by default) logs run start/finish
-   timestamps, per-image generation time, original -> final
-   resolution, extra actions (REMOVE BG), the per-image average
-   and the sheet total.
+   timestamps, per-image GENERATE time (SEND -> image) and PROCESS
+   time (image -> saved), original -> final resolution, file size,
+   extra actions (REMOVE BG), the per-image averages and the theme
+   total. The GUI Dashboard shows the same numbers live, per theme
+   AND per whole task. On a SAFETY refusal the optional "safer
+   retry" re-sends the item ONCE with an allegory-framing preamble
+   (config `SAFER_PREAMBLE`) before giving up.
 8. **Sources are READ ONLY.** The tool writes ONLY under the chosen
    output folder (images, progress sidecars, reports, background
    fixes) and never touches the sheet's folder. The `UV/` folder is

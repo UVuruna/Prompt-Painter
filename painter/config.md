@@ -49,6 +49,12 @@ match.
   2026-07-17). Gemini's aspect law is picked FROM THE PROMPT:
   TALL/lancet prompts get tall portrait, everything else (badges,
   rondels, medallions) a perfect 1:1 square; plus NO reflections.
+- `SAFER_PREAMBLE` — the allegory-framing note prepended on a
+  one-shot safer retry after a SAFETY refusal (opt-in). An honest
+  reframing of legitimate symbolic art (no real people, non-graphic),
+  never a way to force disallowed content.
+- `fmt_duration(seconds)`, `fmt_size(bytes)` — the short human
+  formatters shared by the runner report and the GUI dashboard.
 - `MIN_IMAGE_PX` — an `<img>` narrower than this is a placeholder.
 
 ## Classes

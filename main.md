@@ -28,9 +28,10 @@ Options: `--site {chatgpt,gemini}`, `--out DIR` (images save
 directly at `<out>/<site>/<drop-path>`), `--background
 {transparent,white,none}` (default: the site's own — transparent
 on ChatGPT, white on Gemini; Gemini's three laws always ride
-along), `--pause SECONDS`, `--cdp URL`, `--no-bgfix` (skip the
-background remover), `--no-report` (skip the per-sheet report
-txt), `--dry-run`.
+along), `--pause MIN [MAX]` (one value = fixed, two = a random
+range), `--cdp URL`, `--no-bgfix` (skip the background remover),
+`--no-report` (skip the per-theme report txt), `--safer-retry`
+(one allegory-framed retry on a safety refusal), `--dry-run`.
 
 Broken sheets are reported and skipped; the rest run. Sheets are
 driven in the given order — each closes fully (images + progress +
