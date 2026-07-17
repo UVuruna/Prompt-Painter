@@ -171,7 +171,10 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
   retries it (the owner may also intervene manually — replying
   "MAKE IT SAFER" in the tab often regenerates). QUOTA/RATE-LIMIT
   markers are TERMINAL for the whole site — report and stop, never
-  blind-retry. Unknown no-image states stay loud DriverErrors.
+  blind-retry (EN + Serbian; ChatGPT's "hit the Plus plan limit /
+  limit resets" and Gemini's "limit resets / check your usage" both
+  captured live 2026-07-17). Unknown no-image states stay loud
+  DriverErrors.
 
 ## The Run Loop
 

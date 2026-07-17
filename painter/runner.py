@@ -406,7 +406,10 @@ def run_sheet(
                 }
             )
     except BaseException as exc:
-        stopped_why = f"aborted: {type(exc).__name__}"
+        stopped_why = {
+            "TerminalState": "quota / rate limit — stopped",
+            "GenerationTimeout": "generation timed out",
+        }.get(type(exc).__name__, f"aborted: {type(exc).__name__}")
         raise
     finally:
         if run_report is not None:

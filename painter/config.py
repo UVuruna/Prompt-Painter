@@ -303,6 +303,13 @@ SITES = {
             "too many requests",
             "rate limit",
             "try again later",
+            # live capture 2026-07-17: "You've hit the Plus plan limit
+            # for image generations requests. You can create more images
+            # when the limit resets in 14 hours ..."
+            "plan limit",
+            "limit resets",
+            "generation limit",
+            "image generation limit",
         ),
     ),
     "gemini": SiteConfig(
