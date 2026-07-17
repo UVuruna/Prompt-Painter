@@ -322,7 +322,12 @@ def run_sheet(
                     )
                     if run_report is not None:
                         run_report.refused(item.drop_path, reason)
-                    emit({"type": "item_refused"})
+                    emit(
+                        {
+                            "type": "item_refused",
+                            "drop_path": item.drop_path,
+                        }
+                    )
                     if idx < total:
                         _pause(timing, should_stop, log)
                     continue
@@ -358,13 +363,20 @@ def run_sheet(
             progress.mark_done(item.drop_path, dest)  # resume-safe now
             generated += 1
             log(f"    saved {dest} ({size:,} bytes)")
-            # count it live right away (dashboard progress + generate avg)
+            # count it live right away (dashboard progress + generate
+            # avg) — carries everything the dashboard needs to add the
+            # image to its table now, except our-time (needs the pause)
             emit(
                 {
                     "type": "item_progress",
                     "idx": idx,
                     "of": total,
+                    "title": item.title,
+                    "drop_path": item.drop_path,
                     "gen_s": gen_s,
+                    "orig_res": orig_res,
+                    "final_res": final_res,
+                    "size": size,
                 }
             )
 

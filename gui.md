@@ -81,10 +81,13 @@ runner's structured events (never by log-parsing):
   Done, Refused, **AI generate avg** (SEND → image), **Our time
   avg** (save + bgfix + pause — "sve se računa"), Tempo (/h) and
   ETA. Title/value pairs, not one crammed line.
-- **Completed collections** — a `ttk.Treeview` TABLE with column
-  headers (Collection/file · AI · Ours · Resolution · Size) and both
-  scrollbars: each finished collection is a collapsible parent row
-  (`done/total · time · MB · folders`), its images the child rows.
+- **Collections (running + done)** — a `ttk.Treeview` TABLE with
+  column headers (Collection/file · AI · Ours · Resolution · Size)
+  and both scrollbars. Each collection is a collapsible parent row
+  (`done/total · time · MB · folders`); the RUNNING one appears live
+  and open, its images streaming in as they save (the `Ours` column
+  fills in after each image's pause), then it collapses and stamps
+  `running…` off when done.
 
 ## Threading
 One worker thread per site; each creates its own Playwright

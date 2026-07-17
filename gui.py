@@ -248,11 +248,12 @@ class DashPanel(ttk.Frame):
         grid.columnconfigure(0, weight=1)
 
         ttk.Separator(self).pack(fill="x", pady=4)
-        ttk.Label(self, text="Completed collections", style="Head.TLabel").pack(
-            anchor="w"
-        )
+        ttk.Label(
+            self, text="Collections (running + done)", style="Head.TLabel"
+        ).pack(anchor="w")
         # a real table: each collection is a collapsible parent row, its
-        # images the children; native column headers + both scrollbars
+        # images the children; the running one shows live, open. Native
+        # column headers + both scrollbars
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, pady=(2, 0))
         cols = ("gen", "our", "res", "size")
@@ -313,8 +314,11 @@ class DashPanel(ttk.Frame):
         self._theme_over: list[float] = []
         self._theme_bytes = 0
         self._theme_folders: set[str] = set()
-        self._theme_rows: list[dict] = []
         self._t_theme = time.monotonic()
+        # the collection's live row appears on its first image (lazily,
+        # so fully-resumed collections never add an empty row)
+        self._tree_item: str | None = None
+        self._child_ids: dict[str, str] = {}  # drop_path -> tree row id
 
     # --- events (main thread, via the queue pump) ----------------------
 
@@ -331,23 +335,45 @@ class DashPanel(ttk.Frame):
                 f"({event['idx']}/{event['of']}) {event['title'][:50]}"
             )
         elif kind == "item_progress":
-            # the image is saved — count it live (before its paced pause)
+            # the image is saved — count it live AND add it to the table
+            # now (its our-time fills in after the pause, at item_done)
             self._theme_done += 1
             self._task_done += 1
             self._theme_gen.append(event["gen_s"])
             self._task_gen.append(event["gen_s"])
-        elif kind == "item_done":
-            # our-time (incl. pause) is now known — record it + the row
-            self._theme_over.append(event["over_s"])
-            self._task_over.append(event["over_s"])
             self._theme_bytes += event["size"]
             self._theme_folders.add(
                 PurePosixPath(event["drop_path"]).parent.as_posix()
             )
-            self._theme_rows.append(event)
+            parent = self._ensure_parent()
+            res = event["orig_res"]
+            if event["final_res"] not in ("", event["orig_res"]):
+                res = f"{event['orig_res']}→{event['final_res']}"
+            child = self.tree.insert(
+                parent, "end", text=event["drop_path"],
+                values=(
+                    f"{event['gen_s']:.0f}s", "…", res,
+                    fmt_size(event["size"]),
+                ),
+            )
+            self._child_ids[event["drop_path"]] = child
+            self._update_parent()
+        elif kind == "item_done":
+            # our-time (incl. pause) known now — fill the child's column
+            self._theme_over.append(event["over_s"])
+            self._task_over.append(event["over_s"])
+            child = self._child_ids.get(event["drop_path"])
+            if child is not None:
+                self.tree.set(child, "our", f"{event['over_s']:.0f}s")
         elif kind == "item_refused":
             self._theme_refused += 1
             self._task_refused += 1
+            parent = self._ensure_parent()
+            self.tree.insert(
+                parent, "end", text=f"REFUSED: {event.get('drop_path', '')}",
+                values=("", "", "refused", ""),
+            )
+            self._update_parent()
         elif kind == "item_retry":
             self.image_var.set(self.image_var.get() + "  (safer retry…)")
         elif kind == "sheet_done":
@@ -355,36 +381,39 @@ class DashPanel(ttk.Frame):
             self.image_var.set("—")
         self._refresh()
 
-    def _finalize_theme(self) -> None:
-        if self._theme_done + self._theme_refused == 0:
-            return  # nothing ran this collection (fully resumed / skipped)
-        self._task_themes_done += 1
+    def _parent_summary(self, running: bool) -> str:
         wall = time.monotonic() - self._t_theme
-        summary = (
+        tail = "  ·  running…" if running else ""
+        return (
             f"{self._theme_name}   {self._theme_done}/{self._theme_pending}"
             f"  ·  {fmt_duration(wall)}  ·  {fmt_size(self._theme_bytes)}"
-            f"  ·  {len(self._theme_folders)} folder(s)"
+            f"  ·  {len(self._theme_folders)} folder(s){tail}"
         )
-        parent = self.tree.insert("", "end", text=summary, open=False)
-        for row in self._theme_rows:
-            res = row["orig_res"]
-            if row["final_res"] not in ("", row["orig_res"]):
-                res = f"{row['orig_res']}→{row['final_res']}"
-            self.tree.insert(
-                parent, "end", text=row["drop_path"],
-                values=(
-                    f"{row['gen_s']:.0f}s",
-                    f"{row['over_s']:.0f}s",
-                    res,
-                    fmt_size(row["size"]),
-                ),
+
+    def _ensure_parent(self) -> str:
+        """The collection's row in the table — created (open) the first
+        time an image of it lands, so a running collection shows live."""
+        if self._tree_item is None:
+            self._tree_item = self.tree.insert(
+                "", "end", text=self._parent_summary(running=True), open=True
             )
-        if self._theme_refused:
-            self.tree.insert(
-                parent, "end",
-                text=f"({self._theme_refused} refused — see log/report)",
-                values=("", "", "", ""),
+        return self._tree_item
+
+    def _update_parent(self) -> None:
+        if self._tree_item is not None:
+            self.tree.item(
+                self._tree_item, text=self._parent_summary(running=True)
             )
+
+    def _finalize_theme(self) -> None:
+        if self._tree_item is None:
+            return  # nothing ran this collection (fully resumed / skipped)
+        self._task_themes_done += 1
+        # collapse the finished collection and stamp its final summary
+        self.tree.item(
+            self._tree_item, text=self._parent_summary(running=False),
+            open=False,
+        )
 
     def _refresh(self) -> None:
         now = time.monotonic()
