@@ -16,6 +16,7 @@ generation times, resolutions, extra actions and totals.
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
 import time
@@ -30,6 +31,7 @@ from painter.config import (
     BACKGROUND_CHOICES,
     CDP_URL,
     DEFAULT_OUT_DIR,
+    PROGRESS_SUFFIX,
     SITES,
     TIMING,
     prompt_suffix,
@@ -47,6 +49,8 @@ class PainterGui:
         self._stop = threading.Event()
         self._workers: list[threading.Thread] = []
         self._sheets: list[Path] = []
+        # (site, source-path, drop-path) -> BooleanVar; missing = ticked
+        self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
 
         pad = {"padx": 6, "pady": 3}
         frame = ttk.Frame(root)
@@ -137,12 +141,19 @@ class PainterGui:
             row, text="Check sheets", command=self._check_sheets
         )
         self.btn_check.pack(side="left", padx=2)
+        self.btn_select = ttk.Button(
+            row, text="Select images...", command=self._select_images
+        )
+        self.btn_select.pack(side="left", padx=2)
         self.btn_start = ttk.Button(row, text="Start", command=self._start)
         self.btn_start.pack(side="left", padx=2)
         self.btn_stop = ttk.Button(
             row, text="Stop", command=self._request_stop, state="disabled"
         )
         self.btn_stop.pack(side="left", padx=2)
+        ttk.Button(
+            row, text="BG removal only...", command=self._bg_remove_only
+        ).pack(side="left", padx=14)
 
         # --- log --------------------------------------------------------
         self.log_box = scrolledtext.ScrolledText(
@@ -262,6 +273,74 @@ class PainterGui:
             return
         self._parse_all()
 
+    def _select_var(
+        self, site: str, source: str, drop: str
+    ) -> tk.BooleanVar:
+        key = (site, source, drop)
+        if key not in self._select_vars:
+            self._select_vars[key] = tk.BooleanVar(value=True)
+        return self._select_vars[key]
+
+    def _select_images(self) -> None:
+        """Tick which images run — a separate list per site."""
+        if not self._sheets:
+            messagebox.showerror("PromptPainter", "Add sheet .md files first.")
+            return
+        sheets = self._parse_all()
+        if not sheets:
+            messagebox.showerror(
+                "PromptPainter", "No usable sheets in the queue."
+            )
+            return
+        SelectWindow(self, sheets)
+
+    def _bg_remove_only(self) -> None:
+        """Standalone background removal over an existing folder."""
+        from painter.postprocess import deps_error
+
+        problem = deps_error()
+        if problem:
+            messagebox.showerror("PromptPainter", problem)
+            return
+        folder = filedialog.askdirectory(
+            title="Folder with images — backgrounds removed IN PLACE"
+        )
+        if not folder:
+            return
+        if not messagebox.askyesno(
+            "PromptPainter",
+            "Remove backgrounds IN PLACE for every image under:\n"
+            f"{folder}?\n\n(already-transparent and unclear images are"
+            " skipped untouched)",
+        ):
+            return
+        self.status_var.set("BG removal running ...")
+
+        def work():
+            from painter.bg_remove import iter_images, process_file
+            from painter.config import BG_FIX_CROP
+
+            files = list(iter_images(Path(folder)))
+            self._q.put(f"BG removal: {len(files)} image(s) under {folder}")
+            counts: dict[str, int] = {}
+            for i, src in enumerate(files, start=1):
+                try:
+                    action = process_file(
+                        src, src, "auto", BG_FIX_CROP, None, None
+                    )
+                except Exception as exc:
+                    action = "FAILED"
+                    self._q.put(f"  BG FAIL {src.name}: {exc}")
+                counts[action] = counts.get(action, 0) + 1
+                self._q.put(f"  [{i}/{len(files)}] {action:16} {src.name}")
+            summary = ", ".join(
+                f"{k}={v}" for k, v in sorted(counts.items())
+            )
+            self._q.put(f"BG removal done: {summary or 'no images'}")
+            self._q.put(("__status__", "idle"))
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _start(self) -> None:
         if not self._sheets:
             messagebox.showerror("PromptPainter", "Add sheet .md files first.")
@@ -329,6 +408,25 @@ class PainterGui:
             f" -> {out_base} | backgrounds: {backgrounds} ==="
         )
 
+        # the ticked selection, read in the tk thread: per site, per
+        # sheet -> the drop paths to run (None = everything)
+        selections: dict[str, dict[str, set[str] | None]] = {}
+        for key in sites:
+            per_sheet: dict[str, set[str] | None] = {}
+            for sheet in sheets:
+                src = str(sheet.source)
+                unticked = {
+                    drop
+                    for (site, source, drop), var in self._select_vars.items()
+                    if site == key and source == src and not var.get()
+                }
+                per_sheet[src] = (
+                    {it.drop_path for it in sheet.items} - unticked
+                    if unticked
+                    else None
+                )
+            selections[key] = per_sheet
+
         for key in sites:
             worker = threading.Thread(
                 target=self._drive_site,
@@ -340,6 +438,7 @@ class PainterGui:
                     post_save,
                     partial(prompt_suffix, key, backgrounds[key]),
                     self.report_var.get(),
+                    selections[key],
                 ),
                 daemon=True,
             )
@@ -347,7 +446,8 @@ class PainterGui:
             worker.start()
 
     def _drive_site(
-        self, key, sheets, out_root, timing, post_save, suffix, report
+        self, key, sheets, out_root, timing, post_save, suffix, report,
+        selection,
     ) -> None:
         """One site's whole run — the sheet queue in order, one thread."""
         from painter.driver import DriverError, SiteDriver, TerminalState
@@ -376,6 +476,7 @@ class PainterGui:
                         post_save=post_save,
                         prompt_suffix=suffix,
                         report=report,
+                        only=selection.get(str(sheet.source)),
                     )
                     done_sheets += 1
                     log(
@@ -432,6 +533,122 @@ class PainterGui:
         except queue.Empty:
             pass
         self.root.after(120, self._drain_queue)
+
+
+class SelectWindow(tk.Toplevel):
+    """Tick which images each site generates — one column per site.
+
+    Items a site has already finished (per its progress sidecar under
+    the current output folder) show disabled and unticked.
+    """
+
+    def __init__(self, gui: PainterGui, sheets: list[Sheet]):
+        super().__init__(gui.root)
+        self.title("Select images per site")
+        self.minsize(680, 480)
+        self._gui = gui
+
+        out_base = gui._out_base()
+        site_keys = sorted(SITES)
+        done: dict[str, dict[str, set]] = {k: {} for k in site_keys}
+        for key in site_keys:
+            for sheet in sheets:
+                progress_file = (
+                    out_base / key / (sheet.source.stem + PROGRESS_SUFFIX)
+                )
+                entries: set = set()
+                if progress_file.exists():
+                    entries = set(
+                        json.loads(
+                            progress_file.read_text(encoding="utf-8")
+                        )["done"]
+                    )
+                done[key][str(sheet.source)] = entries
+
+        bar = ttk.Frame(self)
+        bar.pack(fill="x", padx=6, pady=4)
+        ttk.Label(
+            bar,
+            text="Tick = generate. Already-done items are disabled.",
+        ).pack(side="left")
+        ttk.Button(bar, text="Close", command=self.destroy).pack(
+            side="right"
+        )
+
+        canvas = tk.Canvas(self, highlightthickness=0)
+        scroll = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.pack(side="left", fill="both", expand=True, padx=6, pady=4)
+        scroll.pack(side="right", fill="y")
+
+        header = ttk.Frame(inner)
+        header.pack(fill="x", pady=(0, 2))
+        for key in site_keys:
+            ttk.Label(header, text=SITES[key].name, width=9).pack(
+                side="left"
+            )
+        ttk.Label(header, text="Image").pack(side="left", padx=8)
+
+        for sheet in sheets:
+            src = str(sheet.source)
+            head = ttk.Frame(inner)
+            head.pack(fill="x", pady=(8, 2))
+            ttk.Label(
+                head,
+                text=f"{sheet.source.name} — {sheet.theme}",
+                font=("Segoe UI", 9, "bold"),
+            ).pack(side="left")
+            for key in site_keys:
+                ttk.Button(
+                    head,
+                    text=f"{SITES[key].name}: all/none",
+                    command=partial(self._toggle_sheet, key, sheet),
+                ).pack(side="right", padx=2)
+
+            for item in sheet.items:
+                row = ttk.Frame(inner)
+                row.pack(fill="x")
+                for key in site_keys:
+                    var = gui._select_var(key, src, item.drop_path)
+                    is_done = item.drop_path in done[key][src]
+                    if is_done:
+                        var.set(False)
+                    cb = ttk.Checkbutton(row, variable=var, width=8)
+                    if is_done:
+                        cb.state(["disabled"])
+                    cb.pack(side="left")
+                suffix = (
+                    "   (done: "
+                    + ", ".join(
+                        SITES[k].name
+                        for k in site_keys
+                        if item.drop_path in done[k][src]
+                    )
+                    + ")"
+                    if any(
+                        item.drop_path in done[k][src] for k in site_keys
+                    )
+                    else ""
+                )
+                ttk.Label(row, text=item.drop_path + suffix).pack(
+                    side="left", padx=8
+                )
+
+    def _toggle_sheet(self, site: str, sheet: Sheet) -> None:
+        src = str(sheet.source)
+        variables = [
+            self._gui._select_var(site, src, item.drop_path)
+            for item in sheet.items
+        ]
+        target = not all(var.get() for var in variables)
+        for var in variables:
+            var.set(target)
 
 
 def main() -> None:
