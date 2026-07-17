@@ -5,10 +5,10 @@
 ## Purpose
 The owner's front door — a themed tkinter window over the same
 engine the CLI uses, built for unattended batches: queue the
-themes, press Start, go ride a bike. A `clam`-themed ttk look
+collections, press Start, go ride a bike. A `clam`-themed ttk look
 (setup_style) gives the whole app consistent fonts, padding and
-accent colours; reusable `ScrollFrame` and `Expander` widgets back
-the dashboard and the selection list.
+accent colours; a reusable `ScrollFrame` backs the selection list
+and a `ttk.Treeview` is the dashboard's finished-collection table.
 
 ## The window
 
@@ -81,9 +81,10 @@ runner's structured events (never by log-parsing):
   Done, Refused, **AI generate avg** (SEND → image), **Our time
   avg** (save + bgfix + pause — "sve se računa"), Tempo (/h) and
   ETA. Title/value pairs, not one crammed line.
-- **Completed collections** — a collapsible `Expander` per finished
-  collection: `done/total · time · MB · folders`, expanding to
-  every file with its AI/our times, resolution and size.
+- **Completed collections** — a `ttk.Treeview` TABLE with column
+  headers (Collection/file · AI · Ours · Resolution · Size) and both
+  scrollbars: each finished collection is a collapsible parent row
+  (`done/total · time · MB · folders`), its images the child rows.
 
 ## Threading
 One worker thread per site; each creates its own Playwright

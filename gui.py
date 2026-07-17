@@ -143,38 +143,6 @@ class ScrollFrame(ttk.Frame):
             self.canvas.unbind_all("<MouseWheel>")
 
 
-class Expander(ttk.Frame):
-    """A one-line header button that shows/hides a body frame below."""
-
-    def __init__(self, master, label: str, opened: bool = False):
-        super().__init__(master)
-        self._label = label
-        self._open = opened
-        self.btn = ttk.Button(
-            self, style="Expander.TButton", command=self.toggle
-        )
-        self.btn.pack(fill="x")
-        self.body = ttk.Frame(self)
-        if opened:
-            self.body.pack(fill="x", padx=(14, 0))
-        self._render()
-
-    def set_label(self, label: str) -> None:
-        self._label = label
-        self._render()
-
-    def _render(self) -> None:
-        self.btn.configure(text=("▼  " if self._open else "▶  ") + self._label)
-
-    def toggle(self) -> None:
-        self._open = not self._open
-        if self._open:
-            self.body.pack(fill="x", padx=(14, 0))
-        else:
-            self.body.forget()
-        self._render()
-
-
 # ---------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------
@@ -283,8 +251,33 @@ class DashPanel(ttk.Frame):
         ttk.Label(self, text="Completed collections", style="Head.TLabel").pack(
             anchor="w"
         )
-        self.completed = ttk.Frame(self)
-        self.completed.pack(fill="x")
+        # a real table: each collection is a collapsible parent row, its
+        # images the children; native column headers + both scrollbars
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True, pady=(2, 0))
+        cols = ("gen", "our", "res", "size")
+        self.tree = ttk.Treeview(wrap, columns=cols, height=7)
+        self.tree.heading("#0", text="Collection / file")
+        self.tree.column("#0", width=240, minwidth=150, stretch=True)
+        for cid, txt, w in (
+            ("gen", "AI", 60),
+            ("our", "Ours", 60),
+            ("res", "Resolution", 110),
+            ("size", "Size", 74),
+        ):
+            self.tree.heading(cid, text=txt)
+            self.tree.column(cid, width=w, minwidth=w, anchor="e",
+                             stretch=False)
+        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
+        hsb = ttk.Scrollbar(
+            wrap, orient="horizontal", command=self.tree.xview
+        )
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        wrap.rowconfigure(0, weight=1)
+        wrap.columnconfigure(0, weight=1)
 
         self.reset(active=False)
 
@@ -303,8 +296,7 @@ class DashPanel(ttk.Frame):
         self._task_over: list[float] = []
         self._t_task = now
         self._new_theme("—", 0)
-        for child in self.completed.winfo_children():
-            child.destroy()
+        self.tree.delete(*self.tree.get_children())
         self.task_prog_var.set(f"0 / {task_total}")
         self.task_bar.configure(maximum=max(task_total, 1), value=0)
         self.theme_name_var.set("—")
@@ -365,36 +357,34 @@ class DashPanel(ttk.Frame):
 
     def _finalize_theme(self) -> None:
         if self._theme_done + self._theme_refused == 0:
-            return  # nothing ran this theme (fully resumed / skipped)
+            return  # nothing ran this collection (fully resumed / skipped)
         self._task_themes_done += 1
         wall = time.monotonic() - self._t_theme
-        header = (
+        summary = (
             f"{self._theme_name}   {self._theme_done}/{self._theme_pending}"
-            f"  ·  {fmt_duration(wall)}"
-            f"  ·  {fmt_size(self._theme_bytes)}"
+            f"  ·  {fmt_duration(wall)}  ·  {fmt_size(self._theme_bytes)}"
             f"  ·  {len(self._theme_folders)} folder(s)"
         )
-        exp = Expander(self.completed, header, opened=False)
+        parent = self.tree.insert("", "end", text=summary, open=False)
         for row in self._theme_rows:
             res = row["orig_res"]
             if row["final_res"] not in ("", row["orig_res"]):
                 res = f"{row['orig_res']}→{row['final_res']}"
-            ttk.Label(
-                exp.body,
-                text=(
-                    f"{row['drop_path']}    AI {row['gen_s']:.0f}s /"
-                    f" ours {row['over_s']:.0f}s    {res}"
-                    f"    {fmt_size(row['size'])}"
+            self.tree.insert(
+                parent, "end", text=row["drop_path"],
+                values=(
+                    f"{row['gen_s']:.0f}s",
+                    f"{row['over_s']:.0f}s",
+                    res,
+                    fmt_size(row["size"]),
                 ),
-                style="Mono.TLabel",
-            ).pack(anchor="w")
+            )
         if self._theme_refused:
-            ttk.Label(
-                exp.body,
-                text=f"({self._theme_refused} refused — see the log/report)",
-                style="Mono.TLabel",
-            ).pack(anchor="w")
-        exp.pack(fill="x", pady=1)
+            self.tree.insert(
+                parent, "end",
+                text=f"({self._theme_refused} refused — see log/report)",
+                values=("", "", "", ""),
+            )
 
     def _refresh(self) -> None:
         now = time.monotonic()
@@ -595,11 +585,9 @@ class PainterGui:
         notebook.add(dash_tab, text="Dashboard")
         self.dash: dict[str, DashPanel] = {}
         for i, key in enumerate(sorted(SITES)):
-            col = ScrollFrame(dash_tab)
-            col.grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
+            panel = DashPanel(dash_tab, SITES[key].name)
+            panel.grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
             dash_tab.columnconfigure(i, weight=1)
-            panel = DashPanel(col.body, SITES[key].name)
-            panel.pack(fill="both", expand=True)
             self.dash[key] = panel
         dash_tab.rowconfigure(0, weight=1)
 
