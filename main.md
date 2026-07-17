@@ -15,23 +15,26 @@ loop.
 # the front door — opens the GUI
 python main.py
 
-# validate a sheet offline (no browser, no playwright needed)
+# validate sheets offline (no browser, no playwright needed)
 python main.py "path/to/theme_prompts.md" --dry-run
 
-# the supervised single-site run; if no debuggable Chrome answers,
-# the tool opens the automation Chrome itself (log in once, rerun)
-python main.py "path/to/theme_prompts.md" --site gemini
+# the supervised single-site run over one or more sheets, in order;
+# if no debuggable Chrome answers, the tool opens the automation
+# Chrome itself (log in once, rerun)
+python main.py sheet1.md sheet2.md --site gemini
 ```
 
-Options: `--site {chatgpt,gemini}`, `--out DIR` (generation stages
-at `<out>/_staging/<site>/`; approval moves images to
-`<out>/<site>/<drop-path>`), `--background {auto,transparent,
-white,none}`, `--approve-all` (skip the review phase for this
-run), `--pause SECONDS`, `--cdp URL`, `--no-bgfix` (skip the
-background remover), `--dry-run`.
+Options: `--site {chatgpt,gemini}`, `--out DIR` (images save
+directly at `<out>/<site>/<drop-path>`), `--background
+{transparent,white,none}` (default: the site's own — transparent
+on ChatGPT, white on Gemini; Gemini's three laws always ride
+along), `--pause SECONDS`, `--cdp URL`, `--no-bgfix` (skip the
+background remover), `--no-report` (skip the per-sheet report
+txt), `--dry-run`.
 
-Without `--approve-all` the run ends with the images STAGED; review
-them in the GUI ("Review staged") or rerun with `--approve-all`.
+Broken sheets are reported and skipped; the rest run. Sheets are
+driven in the given order — each closes fully (images + progress +
+report) before the next starts, so a quota stop costs nothing.
 
 ## Exit codes
 
@@ -39,7 +42,7 @@ them in the GUI ("Review staged") or rerun with `--approve-all`.
 |------|---------|
 | 0 | clean run, clean dry-run, or "Chrome opened — log in, rerun" |
 | 1 | driver/Chrome error — rerun to resume once fixed |
-| 2 | sheet unreadable / violates the contract / bad arguments / bgfix deps missing |
+| 2 | a sheet was skipped (unreadable/contract) / bad arguments / bgfix deps missing |
 | 3 | terminal site state (quota/refusal) — resume later |
 | 130 | interrupted — progress saved |
 
@@ -51,5 +54,5 @@ them in the GUI ("Review staged") or rerun with `--approve-all`.
   [CDP Driver](painter/driver.md),
   [Postprocess](painter/postprocess.md) — imported lazily, so
   `--dry-run` works without playwright
-- [Run Loop](painter/runner.md), [Review](painter/review.md)
+- [Run Loop](painter/runner.md)
 - [Config](painter/config.md)

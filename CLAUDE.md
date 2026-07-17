@@ -41,40 +41,51 @@ is the binding spec.
 ## The Workflow (owner 2026-07-17 — supersedes where it differs)
 
 1. The owner starts the app with **`python main.py`** — no
-   arguments opens the GUI (the usual front door); a sheet
-   argument runs the single-site CLI instead.
-2. He picks the sheet `.md` and the OUTPUT folder.
+   arguments opens the GUI (the usual front door); sheet arguments
+   run the single-site CLI instead.
+2. He queues **ONE OR MORE sheet `.md` files** and picks the OUTPUT
+   folder. Each site works through the queue IN ORDER, closing
+   sheet after sheet — a quota stop mid-batch never costs finished
+   work (per-sheet progress + report live beside the images), and
+   the next Start resumes the rest. The goal: queue 15 sheets,
+   go ride a bike.
 3. He picks the sites: **Gemini, ChatGPT, or BOTH IN PARALLEL** —
-   one window and one thread per site, each at its own pace (this
-   amends the older one-window rule: still ONE window PER SITE,
-   never parallel hammering of the same site).
+   one window and one thread per site, each at its own pace (still
+   ONE window PER SITE, never parallel hammering of the same site).
 4. The tool opens the automation Chrome itself (button / pre-run
    check). **Chrome 136+ refuses CDP on the default user profile**,
    so it launches with the project's own profile folder
    (`chrome-profile/`, gitignored) — the owner logs in there ONCE;
    sessions persist across runs.
-5. Every prompt gets a **background suffix** appended — a GUI
-   choice (`auto` / `transparent` / `white` / `none`; suffix texts
-   in config): `auto` asks ChatGPT for a fully TRANSPARENT
-   background and Gemini for flat PURE WHITE.
+5. Every prompt gets the site's **rule suffix** appended. The GUI
+   has a background dropdown PER SITE (`transparent` / `white` /
+   `none`), preselected to the site's default — ChatGPT
+   transparent, Gemini white. **Gemini additionally gets the
+   owner's three laws in EVERY prompt** (2026-07-17, after the
+   rondel_Dawn/rondel_Shield drift): the ASPECT RATIO law — picked
+   from the prompt itself: badges/rondels/medallions = exactly
+   1:1, TALL/lancet window prompts = tall portrait (config
+   keyword rules) — the background rule, and absolutely NO
+   reflections.
 6. After every save, the **background fix** runs —
    `painter/bg_remove.py`, IN-HOUSE (moved from DOMY Watch tools,
    owner 2026-07-17: no part of this program lives in another
    project). It auto-detects per file — already-transparent
    skipped, white cleared + autocropped, ambiguous reported and
    left untouched. Failures are loud but never kill the run.
-7. Output is **TWO-PHASE** (owner 2026-07-17): generation stages
-   every image at `<out>/_staging/<site>/<drop-path>`; when the run
-   ends, the review window shows them and ONLY the owner's Approve
-   moves an image to its final **`<out>/<site>/<drop-path>`**
-   (e.g. `out/gemini/trinity/Jesus_Advocate.png`). Reject deletes
-   the staged image and clears its progress mark, so the next run
-   regenerates it (usually after the prompt was reworked in the
-   sheet). The arrow line's own path IS the theme folder; the
-   per-site split keeps parallel runs collision-free and matches
-   DOMY's per-source asset trees.
+7. Images save **DIRECTLY** to **`<out>/<site>/<drop-path>`**
+   (e.g. `out/gemini/trinity/Jesus_Advocate.png`) — no approval
+   step (owner 2026-07-17: saving IS the end of the tool's job;
+   quality review happens in the folder afterwards). The arrow
+   line's own path IS the theme folder; the per-site split keeps
+   parallel runs collision-free and matches DOMY's per-source
+   asset trees. An optional per-sheet **report txt**
+   (`<stem>_report.txt`, on by default) logs run start/finish
+   timestamps, per-image generation time, original -> final
+   resolution, extra actions (REMOVE BG), the per-image average
+   and the sheet total.
 8. **Sources are READ ONLY.** The tool writes ONLY under the chosen
-   output folder (staging, images, progress sidecars, background
+   output folder (images, progress sidecars, reports, background
    fixes) and never touches the sheet's folder. The `UV/` folder is
    the owner's private material — gitignored, never committed, read
    only when he points at it.

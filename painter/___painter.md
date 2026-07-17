@@ -44,11 +44,6 @@ this program lives in another project): per-file auto-detection,
 white/black clearing, autocrop; also runnable standalone. See
 [Background Remover](bg_remove.md).
 
-### `review.py` — Staging & Approval
-Phase two of the output workflow: list staged images, Approve
-(move to the final folder) or Reject (delete + unmark, so a rerun
-regenerates). See [Review](review.md).
-
 ## Connections
 
 ### Uses
@@ -69,12 +64,11 @@ regenerates). See [Review](review.md).
   registers share stems and flattening would collide; the per-site
   split keeps parallel runs collision-free and mirrors DOMY's
   per-source asset trees.
-- **Two-phase output.** Generation stages under
-  `<out>/_staging/<site>/`; only the owner's Approve moves an
-  image to the final folder, and Reject deletes it AND clears its
-  progress mark so a rerun regenerates it. The progress sidecar
-  lives in staging, so "generated but awaiting review" never
-  regenerates by accident.
+- **Direct save, closed folders.** Images land straight in
+  `<out>/<site>/<drop-path>` (owner 2026-07-17: no approval step);
+  the per-sheet progress sidecar and report txt live beside them,
+  so every sheet CLOSES as a unit — a quota stop mid-batch never
+  costs finished work and the next run resumes the rest.
 - **Skip markers work at three levels** (all case-insensitive, and
   only inside `**bold**` spans, so prose mentions never trigger):
   a marker in a span after an entry's title skips that entry; a

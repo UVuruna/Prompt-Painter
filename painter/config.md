@@ -23,11 +23,9 @@ match.
 - [Chrome Launcher](chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 - [Postprocess](postprocess.md) — `BG_FIX_CROP`
-- [Review](review.md) — `STAGING_DIRNAME`, `PROGRESS_SUFFIX`,
-  `IMAGE_EXTENSIONS`
-- [Main (CLI)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
-  `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_MODES`,
-  `background_suffix`
+- [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
+  `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
+  `prompt_suffix`
 
 ## Values
 
@@ -36,19 +34,21 @@ match.
 - `CHROME_PROFILE_DIR` — the dedicated automation profile
   (`chrome-profile/`, gitignored; Chrome 136+ refuses CDP on the
   default profile). Log in once there; sessions persist.
-- `DEFAULT_OUT_DIR`, `STAGING_DIRNAME`, `PROGRESS_SUFFIX` —
-  generation stages at `<out>/_staging/<site>/<drop-path>`;
-  approval moves images to `<out>/<site>/<drop-path>`; run state
-  sits beside the staged images.
+- `DEFAULT_OUT_DIR`, `PROGRESS_SUFFIX`, `REPORT_SUFFIX` — images
+  save directly at `<out>/<site>/<drop-path>`; the run state and
+  the report sit beside them.
 - `IMAGE_EXTENSIONS`, `SKIP_MARKER_PATTERN` — the sheet contract's
   file-name rule and the REUSE / SUPERSEDED / DO-NOT-GENERATE
   marker regex.
 - `BG_FIX_CROP` — autocrop after clearing a background.
-- `BACKGROUND_SUFFIXES` / `BACKGROUND_MODES` /
-  `background_suffix(mode, site)` — the GUI-selectable background
-  instruction appended to every prompt; `auto` resolves to each
-  site's `default_background` (transparent on ChatGPT, white on
-  Gemini).
+- `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
+  `prompt_suffix(site_key, background, prompt_text)` — the rule
+  block appended to every prompt: the chosen background (each
+  site's dropdown defaults to its `default_background` — ChatGPT
+  transparent, Gemini white) plus the site's forced laws (owner
+  2026-07-17). Gemini's aspect law is picked FROM THE PROMPT:
+  TALL/lancet prompts get tall portrait, everything else (badges,
+  rondels, medallions) a perfect 1:1 square; plus NO reflections.
 - `MIN_IMAGE_PX` — an `<img>` narrower than this is a placeholder.
 
 ## Classes

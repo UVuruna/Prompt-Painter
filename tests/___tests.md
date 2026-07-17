@@ -21,18 +21,13 @@ on disk.
 
 ### `test_runner.py` — Run-Loop Tests
 Drives `run_sheet` with a duck-typed fake driver and a temp out
-folder — no browser: the background suffix on every submitted
-prompt (plus the `auto`/`transparent`/`white`/`none` mode
-resolution), the `<out>/<drop-path>` layout, resume via the
-progress sidecar (a second run drives nothing), the graceful stop
-flag, and the background-fix hook (action logged; a failure is
-loud, counted, and never kills the run).
-
-### `test_review.py` — Staging & Approval Tests
-Phase two offline: `staged_images` lists per site (progress
-sidecars never listed), `approve` moves an image to its final
-`<out>/<site>/<drop-path>` and keeps it marked done, `reject`
-deletes it and clears the progress mark so a rerun regenerates.
+folder — no browser: the per-site rule suffix on every submitted
+prompt (Gemini's three laws, ChatGPT without them), the direct
+`<out>/<drop-path>` layout, the report txt (header, per-image
+lines with resolution and REMOVE BG actions, averages, totals,
+stop reason), resume via the progress sidecar (a second run drives
+nothing), the graceful stop flag, and the background-fix hook (a
+failure is loud, counted, and never kills the run).
 
 ### `conftest.py` — Import Path
 Makes the `painter` package importable from any pytest invocation.
