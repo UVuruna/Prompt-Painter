@@ -19,9 +19,12 @@ leniency.
 3. The FIRST fenced code block after the entry is the prompt,
    byte-identical.
 4. Skip markers (`REUSE`, `SUPERSEDED`, `DO NOT GENERATE` —
-   case-insensitive, only inside bold spans) mark one entry, poison
-   the rest of a section (a standalone marked note), or skip a whole
-   marked section heading.
+   case-insensitive, only inside bold spans) are ADVICE: an entry
+   that still carries a path + prompt loads as an item with
+   `advice` set (default-unticked downstream); a standalone marked
+   note or a marked section heading advises everything until the
+   next heading; marked entries with no prompt become
+   informational `SkippedItem`s.
 5. Reported as problems: unpaired headings, drop paths that escape
    the out folder or name no image file, duplicate drop paths,
    unterminated fences, sheets with no entries at all.
@@ -40,11 +43,12 @@ leniency.
 
 ### PromptItem
 One image to generate: `title`, `drop_path` (POSIX-relative, becomes
-`out/<drop_path>`), `prompt` (byte-identical), `line`.
+`out/<drop_path>`), `prompt` (byte-identical), `line`, `advice`
+(the skip-marker text when the sheet advises against it, else None).
 
 ### SkippedItem
-An entry the sheet marks as not-to-generate: `title`, `reason` (the
-marker span or section note), `line`.
+A marked entry with NO prompt in the sheet (nothing to load):
+`title`, `reason` (the marker span or section note), `line`.
 
 ### Problem
 A contract violation: `message`, `line`.

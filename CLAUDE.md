@@ -104,10 +104,14 @@ Per theme `.md` file:
 3. The FIRST fenced code block after that heading is the prompt —
    copied byte-identical into the chat box, plus the site's
    background suffix.
-4. *(italic notes)* are skipped; entries marked REUSE or
-   DO-NOT-GENERATE are logged as skipped, never generated — the
-   markers count only inside `**bold**` spans, and work per entry,
-   per section note, or per marked section heading.
+4. *(italic notes)* are skipped. Skip markers (REUSE / SUPERSEDED /
+   DO-NOT-GENERATE, only inside `**bold**` spans; per entry, per
+   section note, or per marked section heading) are **ADVICE, not
+   law** (owner 2026-07-17): an entry that still carries a prompt
+   LOADS as an item with the advice attached — the GUI unticks it
+   by default and it runs only when explicitly ticked. Marked
+   entries with NO prompt in the sheet (the REUSE seats) are just
+   listed — there is nothing to load.
 5. A heading the parser cannot pair with a prompt is REPORTED
    loudly (the fix belongs in the sheet, not in parser leniency).
 

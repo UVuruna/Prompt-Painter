@@ -26,7 +26,8 @@ sheets, press Start, go ride a bike.
 - **Write report txt** — the per-sheet report beside the images:
   start/finish timestamps, per-image generation time, original ->
   final resolution, extra actions (REMOVE BG), average and totals.
-- **Pause** — seconds between prompts per site.
+- **Pause** — FROM–TO seconds; each pause is a random duration in
+  that range (fractional, e.g. 12.56 s).
 - **Open Chrome (login)** — launches the automation Chrome
   (dedicated `chrome-profile/`; log in once, sessions persist).
 - **Check sheets** — parses the whole queue into the log.
@@ -34,7 +35,10 @@ sheets, press Start, go ride a bike.
   items with one checkbox column per site (all/none toggles per
   sheet), so ChatGPT and Gemini can run different image lists.
   Already-done items (per the site's progress under the current
-  output folder) show disabled.
+  output folder) show disabled; sheet-ADVISED items (REUSE /
+  not-approved sections) show unticked with the ⚠ reason — tick
+  them to generate them anyway. Without any explicit ticks, a run
+  skips advised items by default.
 - **BG removal only...** — standalone background removal, in
   place, over any existing folder (confirmation first;
   already-transparent and unclear images are skipped untouched).
