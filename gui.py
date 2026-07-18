@@ -187,6 +187,31 @@ INPUT_RADIUS = 8
 INPUT_HEIGHT = 28
 HOVER_DARKEN = 0.75
 
+# --- Select-images window geometry (Rule #4) --------------------------
+# The three-level tree (collection -> folder -> image) is a frame-tree
+# of plain ttk widgets: names WRAP via ttk.Label(wraplength=), the two
+# per-site count/checkbox columns are FIXED width so they stay aligned
+# no matter how deep the row is or how far its name wraps.
+SELECT_MIN_W = 860          # open + minimum width (hint + bar buttons fit)
+SELECT_OPEN_H = 520         # open + minimum height
+SELECT_SCREEN_FRAC = 0.9    # clamp the open width to this fraction of screen
+SELECT_INDENT_PX = 22       # left indent added per tree level (folder, image)
+SELECT_TRI_PX = 22          # width reserved for a row's ▶/▼ triangle glyph
+SELECT_COUNT_COL_PX = 96    # ONE site count/checkbox column (fits 'NNN/NNN'
+#                             at the FONT_MAX zoom without clipping)
+SELECT_SCROLLBAR_PX = 18    # v-scrollbar gutter — header cells sit over body
+SELECT_WRAP_RESERVE_PX = 300  # indent+triangle+2*count reserve; canvas width
+#                               minus this is the label wraplength
+SELECT_WRAP_MIN_PX = 140    # never wrap tighter than this
+SELECT_ADVICE_TRUNC = 70    # advice text shown on a leaf row, truncated
+SELECT_ROW_PADY = 1         # vertical padding per tree row
+SELECT_EXPAND_CHUNK = 8     # leaf rows built per Expand-all tick — bounds the
+#                             main-thread block (measured median ≈ 120 ms, p90
+#                             ≈ 200 ms per tick over the owner's real queue) so
+#                             Expand-all fills progressively, never a freeze
+SELECT_EXPAND_TICK_MS = 1   # gap between Expand-all chunks — yields to the event
+#                             loop so the tree fills in progressively, non-blocked
+
 
 def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
     """Rasterize one SVG via QSvgRenderer: aspect-fit ``target_px`` on
@@ -548,6 +573,15 @@ def dark_listbox(widget: tk.Listbox) -> None:
     )
 
 
+def folder_of(drop_path: str) -> str:
+    """The POSIX parent directory of a drop path — the L2 folder
+    identity shared by the dashboard tree and the Select window
+    (e.g. 'assets/archetype/trinity/Jesus.png' -> 'assets/archetype/
+    trinity'). A path with no directory collapses to '(root)'."""
+    folder = PurePosixPath(drop_path).parent.as_posix()
+    return "(root)" if folder in (".", "") else folder
+
+
 class ScrollFrame(ttk.Frame):
     """A vertically (optionally also horizontally) scrollable frame.
 
@@ -560,6 +594,8 @@ class ScrollFrame(ttk.Frame):
     def __init__(self, master, horizontal: bool = False):
         super().__init__(master)
         self._stretch = not horizontal
+        self._sr_job = None  # coalesced scrollregion pass (see _on_body)
+        self._sr_suspended = False  # bulk-build pause (see suspend_...)
         self.canvas = tk.Canvas(
             self, highlightthickness=0, background=tb.Style().colors.bg
         )
@@ -588,11 +624,44 @@ class ScrollFrame(ttk.Frame):
         # a global <MouseWheel> binding outlives the widget — drop it
         # when the canvas is destroyed (e.g. the Select window closes
         # while the pointer is still over it) so it never fires on a
-        # dead widget
-        self.canvas.bind("<Destroy>", self._unbind_wheel)
+        # dead widget; and cancel any pending scrollregion pass
+        self.canvas.bind("<Destroy>", self._on_destroy)
 
     def _on_body(self, _event) -> None:
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        # COALESCE: one expand that grids dozens of children fires a
+        # <Configure> per child — recomputing bbox('all') each time is
+        # O(N^2). Instead flag one after_idle pass and let the whole
+        # settled layout be scanned exactly ONCE.
+        if self._sr_suspended or self._sr_job is not None:
+            return
+        self._sr_job = self.after_idle(self._recompute_sr)
+
+    def suspend_scrollregion(self) -> None:
+        """Pause the per-settle scrollregion recompute for a bulk build.
+        Each ``bbox('all')`` scan is O(current content); across a chunked
+        Expand-all that is one growing scan PER TICK. Suspend during the
+        build, ``resume_scrollregion`` once at the end for a SINGLE scan."""
+        self._sr_suspended = True
+
+    def resume_scrollregion(self) -> None:
+        if not self._sr_suspended:
+            return
+        self._sr_suspended = False
+        if self._sr_job is None:
+            self._sr_job = self.after_idle(self._recompute_sr)
+
+    def _recompute_sr(self) -> None:
+        self._sr_job = None
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        except tk.TclError:
+            pass  # canvas destroyed between the schedule and the pass
+
+    def _on_destroy(self, event) -> None:
+        if self._sr_job is not None:
+            self.after_cancel(self._sr_job)
+            self._sr_job = None
+        self._unbind_wheel(event)
 
     def _on_canvas(self, event) -> None:
         if self._stretch:
@@ -1104,7 +1173,7 @@ class DashPanel(ttk.Frame):
             self._task_gen.append(event["gen_s"])
             self._theme_bytes += event["size"]
             drop = event["drop_path"]
-            folder = self._folder_of(drop)
+            folder = folder_of(drop)
             self._theme_folders.add(folder)
             fnode = self._ensure_folder(folder)
             st = self._folder_stats[folder]
@@ -1138,7 +1207,7 @@ class DashPanel(ttk.Frame):
             child = self._child_ids.get(drop)
             if child is not None:
                 self.tree.set(child, "our", f"{over:.0f}s")
-            folder = self._folder_of(drop)
+            folder = folder_of(drop)
             st = self._folder_stats.get(folder)
             if st is not None:
                 st["time"] += event["gen_s"] + over
@@ -1147,7 +1216,7 @@ class DashPanel(ttk.Frame):
             self._theme_refused += 1
             self._task_refused += 1
             drop = event.get("drop_path", "")
-            fnode = self._ensure_folder(self._folder_of(drop))
+            fnode = self._ensure_folder(folder_of(drop))
             rnode = self.tree.insert(
                 fnode, "end", text=PurePosixPath(drop).name or "refused",
                 values=("", "", "", "REFUSED", "", ""),
@@ -1163,11 +1232,6 @@ class DashPanel(ttk.Frame):
             self._finalize_theme()
             self.image_var.set("—")
         self._refresh()
-
-    @staticmethod
-    def _folder_of(drop_path: str) -> str:
-        folder = PurePosixPath(drop_path).parent.as_posix()
-        return "(root)" if folder in (".", "") else folder
 
     def _ensure_parent(self) -> str:
         """The collection's row — created (open) the first time an image
@@ -1578,7 +1642,7 @@ class PainterGui:
             return
         members = [
             it for it in sheet.items
-            if DashPanel._folder_of(it.drop_path) == folder
+            if folder_of(it.drop_path) == folder
         ]
         if not members:
             messagebox.showinfo(
@@ -2357,36 +2421,85 @@ class PainterGui:
 # ---------------------------------------------------------------------
 
 class SelectWindow(tk.Toplevel):
-    """Tick which images each site generates — a column per site.
+    """Tick which images each site generates — a 3-level tree.
 
-    One collapsible section per theme. Already-done items (per the
-    site's progress under the current output folder) show disabled;
-    sheet-advised items show unticked with the reason.
+    Level 1 is the COLLECTION (the sheet file + theme), level 2 the
+    FOLDERS inside it (the drop paths' parent dirs — a sheet may have
+    several), level 3 the image files, each carrying one checkbox per
+    site. Levels 1 and 2 show a live ``selected/total`` count per site;
+    the header shows the grand ``selected/total`` per site over EVERY
+    loaded collection.
+
+    Performance model (the owner's "even a big collapsible list must
+    not lag" complaint): the body is plain ttk only — NO customtkinter
+    inside the scroll canvas (each CTkButton is a drawn canvas that
+    re-renders on every configure). L1/L2 nodes are always
+    materialised (cheap — a few dozen); L3 leaf rows are BUILT on a
+    folder's open and DESTROYED on its close, so the live-widget count
+    tracks only what is actually open. ``Expand all`` would otherwise
+    materialise EVERY leaf in one synchronous geometry pass (~280 rows
+    ≈ 3 s frozen); instead it builds folder-atomic CHUNKS across
+    ``after()`` ticks (``SELECT_EXPAND_CHUNK`` leaves per tick, ≈ 120 ms
+    median block), with a live progress cue (root Rule #10) — the tree
+    fills in progressively and the main thread is never blocked (the
+    scrollregion recompute is suspended for the run and scanned once at
+    the end, keeping per-tick cost flat as the queue grows). Counts
+    live-update through ONE coalesced ``after_idle`` recount driven by a
+    dirty flag (a var trace only raises the flag), and ``ScrollFrame``
+    coalesces its scrollregion recompute — so one settled user action
+    costs one geometry pass, never one per gridded child. Long names WRAP via
+    ``ttk.Label(wraplength=)``; the two per-site columns are
+    fixed-width so they stay aligned however deep a row is or however
+    far its name wraps.
     """
 
     def __init__(self, gui: PainterGui, sheets: list[Sheet]):
         super().__init__(gui.root)
         self.title("Select images per site")
-        # 860 keeps the hint + the three bar buttons fully visible
-        self.minsize(860, 520)
+        self.minsize(SELECT_MIN_W, SELECT_OPEN_H)
         self.configure(background=tb.Style().colors.bg)
         self._gui = gui
-        site_keys = sorted(SITES)
+        self._site_keys = sorted(SITES)
 
         done = {
             key: {
                 str(sheet.source): gui._progress_done(key, sheet)
                 for sheet in sheets
             }
-            for key in site_keys
+            for key in self._site_keys
         }
 
+        # --- the count model: build the data (vars + scopes) FIRST,
+        # before any widget, so counts are pure var-math and correct
+        # even for collapsed / never-built subtrees.
+        self._all_leaves: list[dict] = []
+        self._collections = [
+            self._build_collection_data(sheet, done) for sheet in sheets
+        ]
+
+        # ONE trace per leaf var -> raise the dirty flag; a single
+        # coalesced recount services an all/none over dozens of vars.
+        self._dirty = False
+        self._recount_job = None
+        self._wrap_job = None
+        # Expand-all runs as folder-atomic chunks across after() ticks
+        self._expand_job = None
+        self._expand_queue: list[tuple[dict, dict]] = []
+        self._expand_leaves_total = 0
+        self._traces: list[tuple[tk.BooleanVar, str]] = []
+        for leaf in self._all_leaves:
+            for key in self._site_keys:
+                var = leaf["sites"][key]["var"]
+                token = var.trace_add("write", self._mark_dirty)
+                self._traces.append((var, token))
+
+        # --- the top bar (CTk allowed here, OUTSIDE the scroll body)
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
         ttk.Label(
             bar,
-            text="Tick = generate.  Already-done disabled;"
-            " ⚠ advice unticked by default.",
+            text="Tick = generate.  Done = disabled.  ⚠ advice off."
+            "  Click a count = all/none.",
             style="Muted.TLabel",
         ).pack(side="left")
         rounded_button(
@@ -2401,153 +2514,424 @@ class SelectWindow(tk.Toplevel):
             bar, "Close", command=self.destroy,
         ).pack(side="right", padx=4)
 
-        scroll = ScrollFrame(self, horizontal=True)
-        scroll.pack(fill="both", expand=True)
-        body = scroll.body
-
-        header = ttk.Frame(body, padding=(2, 2))
+        # --- the non-scrolling header: one accent cell per site with
+        # the grand selected/total, right-aligned over the body columns
+        # (a gutter reserves the body's vertical scrollbar width).
+        header = ttk.Frame(self, padding=(8, 4))
         header.pack(fill="x")
-        for c, key in enumerate(site_keys):
-            ttk.Label(
-                header, text=SITES[key].name, style="Head.TLabel", width=10,
-                anchor="center",
-            ).grid(row=0, column=c, padx=2)
-        ttk.Label(header, text="Image", style="Head.TLabel").grid(
-            row=0, column=len(site_keys), sticky="w", padx=8
+        header.columnconfigure(0, weight=1)
+        # Expand-all progress cue (root Rule #10) — left of the site-count
+        # columns, empty except mid-build; accent + bold so it is unmissable
+        self._progress_lbl = ttk.Label(
+            header, text="", style="Value.TLabel",
+            foreground=tb.Style().colors.info,
+        )
+        self._progress_lbl.grid(row=0, column=0, sticky="w")
+        self._header_labels: dict[str, ttk.Label] = {}
+        for i, key in enumerate(self._site_keys):
+            lbl = ttk.Label(
+                header, style="Head.TLabel", anchor="e", cursor="hand2"
+            )
+            lbl.grid(row=0, column=1 + i, sticky="e", padx=(16, 0))
+            lbl.bind(
+                "<Button-1>",
+                lambda _e, s=key: self._toggle_scope(self._all_leaves, s),
+            )
+            self._header_labels[key] = lbl
+        ttk.Frame(header, width=SELECT_SCROLLBAR_PX).grid(
+            row=0, column=1 + len(self._site_keys)
         )
 
-        # each entry: (state dict, toggle callable) for expand/collapse all
-        self._sections: list[tuple[dict, object]] = []
-        for sheet in sheets:
-            self._add_theme(body, sheet, site_keys, done)
+        # --- the scrolling body (vertical only: names wrap, they never
+        # force horizontal growth)
+        self._scroll = ScrollFrame(self, horizontal=False)
+        self._scroll.pack(fill="both", expand=True)
+        self._canvas = self._scroll.canvas
+        self._canvas_width = SELECT_MIN_W - SELECT_SCROLLBAR_PX
+        self._wrap = self._wraplength_for(self._canvas_width)
+        self._canvas.bind("<Configure>", self._on_canvas_configure, add="+")
 
-        # open SIZED TO THE CONTENT WIDTH (rows can hold long paths +
-        # done/advice suffixes), clamped to 90 % of the screen
-        font = tk_font("root")
-        text_px = max(
-            (
-                font.measure(self._row_text(item, site_keys, done, sheet)[0])
-                for sheet in sheets
-                for item in sheet.items
-            ),
-            default=400,
-        )
+        # --- the tree: L1 + L2 always materialised, L3 lazy
+        self._static_labels: list[ttk.Label] = []  # L1/L2 names (wrap)
+        self._count_nodes: list[dict] = []  # L1 + L2 nodes for _recount
+        self._collection_nodes: list[dict] = []
+        for coll in self._collections:
+            self._build_collection_widgets(self._scroll.body, coll)
+
+        # first paint of the counts + the open geometry
+        self._dirty = True
+        self._recount()
+        self.bind("<Destroy>", self._on_destroy)
         width = min(
-            max(text_px + 2 * 52 + 120, 860),
-            int(self.winfo_screenwidth() * 0.9),
+            SELECT_MIN_W, int(self.winfo_screenwidth() * SELECT_SCREEN_FRAC)
         )
-        self.geometry(f"{width}x520")
+        self.geometry(f"{width}x{SELECT_OPEN_H}")
 
-    @staticmethod
-    def _row_text(item, site_keys, done, sheet) -> tuple[str, str]:
-        """One row's display text + status colour (shared by the lazy
-        row builder and the width estimator)."""
+    # --- data model (no widgets) --------------------------------------
+
+    def _build_collection_data(self, sheet: Sheet, done: dict) -> dict:
+        """One collection's leaf records + its folders (first-seen
+        order). Materialises the shared BooleanVars — run-safe: the
+        default (advice-free, not-done) set equals the runner's own
+        'never opened Select' rule."""
         src = str(sheet.source)
-        done_sites = [
-            k for k in site_keys if item.drop_path in done[k][src]
-        ]
-        text = item.drop_path
-        if done_sites:
-            text += "   ✔ done: " + ", ".join(
-                SITES[k].name for k in done_sites
-            )
-        if item.advice:
-            text += f"   ⚠ {item.advice[:70]}"
-        if len(done_sites) == len(site_keys):
-            color = C_DONE
-        elif item.advice and "supersed" in item.advice.lower():
-            color = C_SUPERSEDED
-        elif item.advice:
-            color = C_ADVICE
-        elif done_sites:
-            color = C_DONE_SOFT
-        else:
-            color = ""
-        return text, color
-
-    def _add_theme(self, body, sheet: Sheet, site_keys, done) -> None:
-        """One collapsible section — COLLAPSED at open, and its rows
-        (hundreds of checkbuttons across a big queue — the old eager
-        build was the Select window's lag) built lazily on the FIRST
-        expand."""
-        section = ttk.Frame(body)
-        section.pack(fill="x", pady=(8, 0))
-
-        head = ttk.Frame(section)
-        head.pack(fill="x")
-        detail = ttk.Frame(section)
-
-        state = {"open": False, "built": False}
-        label = f"{sheet.source.name} — {sheet.theme}"
-        btn = rounded_button(head, "", kind="expander")
-
-        def render() -> None:
-            btn.configure(text=("▼  " if state["open"] else "▶  ") + label)
-
-        def toggle() -> None:
-            state["open"] = not state["open"]
-            if state["open"]:
-                if not state["built"]:
-                    state["built"] = True
-                    self._build_rows(detail, sheet, site_keys, done)
-                detail.pack(fill="x", padx=(14, 0))
-            else:
-                detail.forget()
-            render()
-
-        btn.configure(command=toggle)
-        # all/none buttons first (right), then the toggle fills the rest
-        for key in reversed(site_keys):
-            rounded_button(
-                head, f"{SITES[key].name}: all/none", width=130,
-                command=partial(self._toggle_sheet, key, sheet),
-                kind="secondary-outline",
-            ).pack(side="right", padx=2)
-        btn.pack(side="left", fill="x", expand=True)
-        render()
-        self._sections.append((state, toggle))
-
-    def _build_rows(self, detail, sheet: Sheet, site_keys, done) -> None:
-        src = str(sheet.source)
-        for r, item in enumerate(sheet.items):
-            for c, key in enumerate(site_keys):
+        folders: dict[str, dict] = {}
+        leaves: list[dict] = []
+        for item in sheet.items:
+            drop = item.drop_path
+            done_sites = [k for k in self._site_keys if drop in done[k][src]]
+            leaf = {
+                "name": PurePosixPath(drop).name,
+                "advice": item.advice,
+                "color": self._leaf_color(item.advice, len(done_sites)),
+                "sites": {},
+            }
+            for key in self._site_keys:
                 var = self._gui._select_var(
-                    key, src, item.drop_path, default=item.advice is None
+                    key, src, drop, default=item.advice is None
                 )
-                is_done = item.drop_path in done[key][src]
+                is_done = drop in done[key][src]
                 if is_done:
-                    var.set(False)
-                # deliberately plain ttk here: this grid holds hundreds
-                # of rows and a CTkCheckBox per cell is too heavy
-                cb = ttk.Checkbutton(detail, variable=var)
-                if is_done:
-                    cb.state(["disabled"])
-                cb.grid(row=r, column=c, padx=(20 if c == 0 else 6, 6))
-            text, color = self._row_text(item, site_keys, done, sheet)
-            opt = {"foreground": color} if color else {}
-            ttk.Label(detail, text=text, **opt).grid(
-                row=r, column=len(site_keys), sticky="w", padx=8
-            )
+                    var.set(False)  # done -> never ticked, always disabled
+                leaf["sites"][key] = {"var": var, "done": is_done}
+            leaves.append(leaf)
+            self._all_leaves.append(leaf)
+            fname = folder_of(drop)
+            fnode = folders.get(fname)
+            if fnode is None:
+                fnode = {"folder": fname, "leaves": []}
+                folders[fname] = fnode
+            fnode["leaves"].append(leaf)
+        return {
+            "label": f"{sheet.source.name} — {sheet.theme}",
+            "leaves": leaves,
+            "folders": list(folders.values()),
+        }
 
-    def _toggle_sheet(self, site: str, sheet: Sheet) -> None:
-        src = str(sheet.source)
-        variables = [
-            self._gui._select_var(site, src, item.drop_path)
-            for item in sheet.items
-        ]
-        target = not all(var.get() for var in variables)
-        for var in variables:
-            var.set(target)
+    def _leaf_color(self, advice: str | None, n_done: int) -> str:
+        if n_done == len(self._site_keys):
+            return C_DONE
+        if advice and "supersed" in advice.lower():
+            return C_SUPERSEDED
+        if advice:
+            return C_ADVICE
+        if n_done:
+            return C_DONE_SOFT
+        return ""
+
+    # --- widgets -------------------------------------------------------
+
+    def _new_row(self, parent, level: int) -> ttk.Frame:
+        """A tree row: [indent][triangle][wrapped name .....][site0][site1].
+        The two right columns are fixed-width so they align across every
+        level; the name column takes all the slack."""
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=SELECT_ROW_PADY)
+        row.columnconfigure(0, minsize=level * SELECT_INDENT_PX)
+        row.columnconfigure(1, minsize=SELECT_TRI_PX)
+        row.columnconfigure(2, weight=1)
+        row.columnconfigure(3, minsize=SELECT_COUNT_COL_PX)
+        row.columnconfigure(4, minsize=SELECT_COUNT_COL_PX)
+        return row
+
+    def _count_cell(self, row, col: int, scope: list, key: str) -> ttk.Label:
+        lbl = ttk.Label(row, text="0/0", anchor="center", cursor="hand2")
+        lbl.grid(row=0, column=col, sticky="n")
+        lbl.bind(
+            "<Button-1>", lambda _e: self._toggle_scope(scope, key)
+        )
+        return lbl
+
+    def _build_collection_widgets(self, body, coll: dict) -> None:
+        section = ttk.Frame(body)
+        section.pack(fill="x", pady=(6, 0))
+        row = self._new_row(section, level=0)
+
+        node = {"open": False, "children": ttk.Frame(section), "folders": []}
+        tri = ttk.Label(row, text="▶ ", cursor="hand2")
+        tri.grid(row=0, column=1, sticky="nw")
+        node["triangle"] = tri
+        name = ttk.Label(
+            row, text=coll["label"], wraplength=self._wrap,
+            justify="left", anchor="w", cursor="hand2",
+        )
+        name.grid(row=0, column=2, sticky="nw")
+        self._static_labels.append(name)
+        count = {}
+        for i, key in enumerate(self._site_keys):
+            count[key] = self._count_cell(row, 3 + i, coll["leaves"], key)
+        self._count_nodes.append({"leaves": coll["leaves"], "count": count})
+
+        toggle = partial(self._toggle_collection, node)
+        for w in (tri, name):
+            w.bind("<Button-1>", lambda _e: toggle())
+
+        for folder in coll["folders"]:
+            self._build_folder_widgets(node["children"], node, folder)
+
+        self._collection_nodes.append(node)
+
+    def _build_folder_widgets(self, parent, cnode: dict, folder: dict) -> None:
+        section = ttk.Frame(parent)
+        section.pack(fill="x")
+        row = self._new_row(section, level=1)
+
+        fnode = {
+            "open": False, "built": False,
+            "children": ttk.Frame(section), "leaves": folder["leaves"],
+            "leaf_labels": [],
+        }
+        tri = ttk.Label(row, text="▶ ", cursor="hand2")
+        tri.grid(row=0, column=1, sticky="nw")
+        fnode["triangle"] = tri
+        name = ttk.Label(
+            row, text=folder["folder"], wraplength=self._wrap,
+            justify="left", anchor="w", cursor="hand2",
+        )
+        name.grid(row=0, column=2, sticky="nw")
+        self._static_labels.append(name)
+        count = {}
+        for i, key in enumerate(self._site_keys):
+            count[key] = self._count_cell(row, 3 + i, folder["leaves"], key)
+        self._count_nodes.append({"leaves": folder["leaves"], "count": count})
+
+        toggle = partial(self._toggle_folder, fnode)
+        for w in (tri, name):
+            w.bind("<Button-1>", lambda _e: toggle())
+        cnode["folders"].append(fnode)
+
+    def _build_leaves(self, fnode: dict) -> None:
+        """L3 rows — built on the folder's open (destroyed on close)."""
+        for leaf in fnode["leaves"]:
+            row = self._new_row(fnode["children"], level=2)
+            for i, key in enumerate(self._site_keys):
+                info = leaf["sites"][key]
+                cb = ttk.Checkbutton(row, variable=info["var"])
+                if info["done"]:
+                    cb.state(["disabled"])
+                cb.grid(row=0, column=3 + i, sticky="n")
+            text = leaf["name"]
+            if leaf["advice"]:
+                text += f"   ⚠ {leaf['advice'][:SELECT_ADVICE_TRUNC]}"
+            opt = {"foreground": leaf["color"]} if leaf["color"] else {}
+            lbl = ttk.Label(
+                row, text=text, wraplength=self._wrap, justify="left",
+                anchor="w", **opt,
+            )
+            lbl.grid(row=0, column=2, sticky="nw")
+            fnode["leaf_labels"].append(lbl)
+
+    # --- open / close (low-level: NO expand-cancel — the chunked
+    # Expand-all drives these directly and must not cancel itself) -----
+
+    def _set_collection_open(self, node: dict, want_open: bool) -> None:
+        if node["open"] == want_open:
+            return
+        node["open"] = want_open
+        node["triangle"].configure(text="▼ " if want_open else "▶ ")
+        if want_open:
+            node["children"].pack(fill="x")
+        else:
+            node["children"].forget()
+
+    def _open_folder_now(self, fnode: dict) -> None:
+        """Build (atomically) + reveal one folder's leaf rows."""
+        if not fnode["built"]:
+            self._build_leaves(fnode)
+            fnode["built"] = True
+        fnode["open"] = True
+        fnode["triangle"].configure(text="▼ ")
+        fnode["children"].pack(fill="x")
+
+    def _close_folder_now(self, fnode: dict) -> None:
+        # DESTROY the leaf rows (virtualization): the live-widget count
+        # tracks only currently-open folders
+        for w in fnode["children"].winfo_children():
+            w.destroy()
+        fnode["leaf_labels"].clear()
+        fnode["built"] = False
+        fnode["open"] = False
+        fnode["triangle"].configure(text="▶ ")
+        fnode["children"].forget()
+
+    # --- click handlers (cancel any in-flight Expand-all first) -------
+
+    def _toggle_collection(self, node: dict) -> None:
+        self._cancel_expand()
+        self._set_collection_open(node, not node["open"])
+
+    def _toggle_folder(self, fnode: dict) -> None:
+        self._cancel_expand()
+        if fnode["open"]:
+            self._close_folder_now(fnode)
+        else:
+            self._open_folder_now(fnode)
+
+    # --- Expand / Collapse all ----------------------------------------
 
     def _expand_all(self) -> None:
-        for state, toggle in self._sections:
-            if not state["open"]:
-                toggle()
+        """Open every node — but build the L3 leaf rows in folder-atomic
+        chunks across ``after()`` ticks, never in one synchronous pass
+        (that froze the main thread ~3 s at the owner's real queue). Each
+        tick builds up to ``SELECT_EXPAND_CHUNK`` leaves (≈ one folder),
+        yields to the event loop, and updates the progress cue."""
+        self._cancel_expand()
+        self._expand_queue = [
+            (cnode, fnode)
+            for cnode in self._collection_nodes
+            for fnode in cnode["folders"]
+            if not fnode["built"]
+        ]
+        self._expand_leaves_total = sum(
+            len(fnode["leaves"]) for _c, fnode in self._expand_queue
+        )
+        if not self._expand_queue:
+            # nothing to build — just reveal any collapsed collections
+            for cnode in self._collection_nodes:
+                self._set_collection_open(cnode, True)
+            return
+        # ONE scrollregion scan at the end, not one (growing) per tick
+        self._scroll.suspend_scrollregion()
+        self._expand_step()
+
+    def _expand_step(self) -> None:
+        """One chunk: build whole folders until the per-tick leaf budget
+        is reached (always at least one, so progress is guaranteed), then
+        reschedule. The collection is opened just-in-time before its first
+        folder builds."""
+        self._expand_job = None
+        built = 0
+        while self._expand_queue:
+            cnode, fnode = self._expand_queue[0]
+            n = len(fnode["leaves"])
+            if built and built + n > SELECT_EXPAND_CHUNK:
+                break  # keep this folder whole — defer to the next tick
+            self._expand_queue.pop(0)
+            self._set_collection_open(cnode, True)  # idempotent, once/coll
+            self._open_folder_now(fnode)
+            built += n
+        self._update_expand_progress()
+        if self._expand_queue:
+            self._expand_job = self.after(
+                SELECT_EXPAND_TICK_MS, self._expand_step
+            )
+        else:
+            # final sweep: open collections that had no unbuilt folders
+            for cnode in self._collection_nodes:
+                self._set_collection_open(cnode, True)
+            self._scroll.resume_scrollregion()  # the single settling scan
+            self._hide_expand_progress()
+
+    def _cancel_expand(self) -> None:
+        """Abort an in-flight Expand-all cleanly. Folders are atomic, so
+        the tree is always in a consistent state to stop at: whatever was
+        built stays open+built, the rest stays closed+unbuilt."""
+        if self._expand_job is not None:
+            self.after_cancel(self._expand_job)
+            self._expand_job = None
+        self._expand_queue = []
+        self._scroll.resume_scrollregion()  # scan whatever got built
+        self._hide_expand_progress()
+
+    def _update_expand_progress(self) -> None:
+        remaining = sum(len(fnode["leaves"]) for _c, fnode in self._expand_queue)
+        done = self._expand_leaves_total - remaining
+        pct = round(done / self._expand_leaves_total * 100)
+        self._progress_lbl.configure(
+            text=f"Expanding… {done}/{self._expand_leaves_total} ({pct}%)"
+        )
+
+    def _hide_expand_progress(self) -> None:
+        self._progress_lbl.configure(text="")
 
     def _collapse_all(self) -> None:
-        for state, toggle in self._sections:
-            if state["open"]:
-                toggle()
+        self._cancel_expand()
+        for cnode in self._collection_nodes:
+            for fnode in cnode["folders"]:
+                if fnode["open"]:
+                    self._close_folder_now(fnode)
+            self._set_collection_open(cnode, False)
+
+    # --- selection + counts -------------------------------------------
+
+    def _toggle_scope(self, leaves: list, site: str) -> None:
+        """All/none over one scope+site: flip every ENABLED (non-done)
+        leaf var. The traces coalesce into a single recount."""
+        enabled = [
+            leaf["sites"][site]["var"]
+            for leaf in leaves
+            if not leaf["sites"][site]["done"]
+        ]
+        if not enabled:
+            return
+        target = not all(v.get() for v in enabled)
+        for v in enabled:
+            v.set(target)
+
+    def _mark_dirty(self, *_args) -> None:
+        self._dirty = True
+        if self._recount_job is None:
+            self._recount_job = self.after_idle(self._recount)
+
+    def _recount(self) -> None:
+        """ONE coalesced pass: pure var-math over the cached scope
+        lists. L1/L2/header count labels always exist, so there is never
+        a write to a destroyed widget even while folders are collapsed."""
+        self._recount_job = None
+        if not self._dirty:
+            return
+        self._dirty = False
+        total = len(self._all_leaves)
+        for key in self._site_keys:
+            sel = sum(
+                leaf["sites"][key]["var"].get() for leaf in self._all_leaves
+            )
+            self._header_labels[key].configure(
+                text=f"{SITES[key].name}  {sel}/{total}"
+            )
+        for cnode in self._count_nodes:
+            leaves = cnode["leaves"]
+            tot = len(leaves)
+            for key in self._site_keys:
+                sel = sum(leaf["sites"][key]["var"].get() for leaf in leaves)
+                cnode["count"][key].configure(text=f"{sel}/{tot}")
+
+    # --- wrapping + teardown ------------------------------------------
+
+    @staticmethod
+    def _wraplength_for(canvas_width: int) -> int:
+        return max(canvas_width - SELECT_WRAP_RESERVE_PX, SELECT_WRAP_MIN_PX)
+
+    def _on_canvas_configure(self, event) -> None:
+        self._canvas_width = event.width
+        if self._wrap_job is None:
+            self._wrap_job = self.after_idle(self._apply_wrap)
+
+    def _apply_wrap(self) -> None:
+        """Re-flow the wrapped names to the settled canvas width — only
+        the currently-built labels (L1/L2 always, L3 only in open
+        folders)."""
+        self._wrap_job = None
+        self._wrap = self._wraplength_for(self._canvas_width)
+        for lbl in self._static_labels:
+            lbl.configure(wraplength=self._wrap)
+        for cnode in self._collection_nodes:
+            for fnode in cnode["folders"]:
+                if fnode["built"]:
+                    for lbl in fnode["leaf_labels"]:
+                        lbl.configure(wraplength=self._wrap)
+
+    def _on_destroy(self, event) -> None:
+        # <Destroy> bubbles up from every child — act only on our own
+        if event.widget is not self:
+            return
+        for var, token in self._traces:
+            var.trace_remove("write", token)
+        self._traces.clear()
+        for job in (self._recount_job, self._wrap_job, self._expand_job):
+            if job is not None:
+                self.after_cancel(job)
+        self._recount_job = self._wrap_job = self._expand_job = None
 
 
 class DocWindow(tk.Toplevel):

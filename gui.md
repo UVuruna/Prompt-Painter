@@ -38,14 +38,25 @@ layout so the ICON pins to the left edge while the TEXT centers in
 the remaining width. What stays ttk:
 the `Treeview` table, `Notebook` tabs, striped progressbars, round
 scrollbars, labels/frames — darkly widgets CTk has no better
-equivalent for — plus the Select grid's hundreds of per-image
-checkbuttons (deliberately light widgets). `setup_style` only adds
+equivalent for — plus the whole Select tree (frames, wrapped
+labels, per-site checkbuttons — deliberately light widgets; NO CTk
+inside a scroll canvas, since a CTkButton is a drawn canvas that
+re-renders on every configure). `setup_style` only adds
 the few named label styles darkly lacks; `dark_text` /
 `dark_listbox` skin the plain tk widgets from `Style().colors`,
 and the four semantic STATUS colours (done green, olive one-site,
 advice orange, superseded red) stay named constants aligned to
 darkly's accents. A reusable `ScrollFrame` backs the selection
-list and a `ttk.Treeview` is the dashboard's collection table.
+tree and a `ttk.Treeview` is the dashboard's collection table.
+`ScrollFrame` COALESCES its scrollregion: a body `<Configure>`
+only schedules ONE `after_idle` `bbox('all')` pass, so an expand
+that grids dozens of children costs one geometry scan, not one per
+child; `suspend_scrollregion` / `resume_scrollregion` pause even
+that during a bulk build (the Select tree's Expand-all) so the
+O(content) `bbox` scan runs ONCE at the end, not once per chunk.
+The module-level `folder_of(drop_path)` (a drop path's
+POSIX parent, `(root)` fallback) is the shared L2 folder identity
+for both the dashboard tree and the Select window.
 
 **Icons** (2026-07-18) are SVG-FIRST: the owner's
 `assets/icons/*.svg` (`add` / `remove` / `clear` on the queue
@@ -130,21 +141,52 @@ pointer.
 - **Check sheets** — parses the whole queue into the log AND
   switches the view to the Log tab so the output is immediately
   visible.
-- **Select images...** — the tick list, PER SITE: every sheet's
-  items with one checkbox column per site (all/none toggles per
-  sheet), so ChatGPT and Gemini can run different image lists.
-  Already-done items (per the site's progress under the current
-  output folder) show disabled; sheet-ADVISED items (REUSE /
-  not-approved sections) show unticked with the ⚠ reason — tick
-  them to generate them anyway. Without any explicit ticks, a run
-  skips advised items by default. Rows are COLOR-CODED: green =
+- **Select images...** — a PER-SITE 3-LEVEL tree
+  (`SelectWindow`): level 1 the COLLECTION (sheet file + theme),
+  level 2 the FOLDERS inside it (the drop paths' parent dirs — a
+  sheet may have several, e.g. `life` has `tree/` and `animals/`,
+  keyed by the shared `folder_of`), level 3 the IMAGE files. Only
+  the LEAVES carry checkboxes — one column per site — so ChatGPT
+  and Gemini can run different image lists. Every level shows a
+  LIVE `selected/total` count per site: the collapsible header
+  totals the whole queue per site (accent Head style, e.g.
+  `ChatGPT 49/55`), and each collection and folder row shows its
+  own `sel/tot`. **Clicking any count is all/none** for that
+  scope+site (header = whole site, collection, or folder); it
+  flips only the ENABLED (non-done) leaves, and every count
+  re-derives live. Already-done items (per the site's progress
+  under the current output folder) show disabled + unticked;
+  sheet-ADVISED items (REUSE / not-approved sections) show
+  unticked with the ⚠ reason truncated — tick them to generate
+  them anyway. Without any explicit ticks a run skips advised
+  items by default (eager var materialisation is run-safe: the
+  default advice-free, not-done set equals the runner's own
+  "never opened Select" rule). Leaf names are COLOR-CODED: green =
   done on both sites (olive = done on one), red = SUPERSEDED
-  advice, orange = other advice (not approved / REUSE), default =
-  pending. The window opens SIZED TO ITS CONTENT width (clamped to
-  90 % of the screen) with every section COLLAPSED, and a
-  section's rows — hundreds of checkbuttons across a big queue,
-  the old eager build was the window's lag — are built LAZILY on
-  its first expand.
+  advice, orange = other advice, default = pending. Long names
+  WRAP to 2–3 lines (`ttk.Label(wraplength=)`, recomputed on
+  resize/zoom) so they never eat horizontal space; the two
+  fixed-width per-site columns stay aligned however deep a row is.
+  **Performance** (the owner's "a collapsible list must not lag"):
+  the body is plain ttk only, L1/L2 nodes are always materialised
+  (cheap — a few dozen) while L3 leaf rows are BUILT on a folder's
+  open and DESTROYED on its close (live widgets track only open
+  folders, never accumulating), counts update via ONE coalesced
+  `after_idle` recount driven by a dirty flag (a var trace just
+  raises the flag — the traces are detached on window close), and
+  the scrollregion is coalesced too. **Expand all** would otherwise
+  materialise EVERY leaf in one synchronous geometry pass (~280
+  wraplength rows ≈ 3 s frozen at the owner's real queue); instead
+  it builds FOLDER-ATOMIC chunks across `after()` ticks
+  (`SELECT_EXPAND_CHUNK` leaves per tick ≈ 120 ms median block),
+  suspends the scrollregion scan for the run, and shows a live
+  `Expanding… done/total (pct)` cue (root Rule #10) — the tree
+  fills in progressively and the main thread is never blocked; any
+  manual toggle / Collapse-all cancels an in-flight expand cleanly
+  (folders are atomic, so the tree is always in a consistent
+  built-or-not state to stop at). The window opens from config
+  constants (no per-item font-measure sweep) with every section
+  COLLAPSED.
 - **BG removal only... / CROP only... / UPSCALE only...** — the
   three standalone in-place tools (one at a time): pick a folder,
   confirm, and the engine function (`remove_background` /
