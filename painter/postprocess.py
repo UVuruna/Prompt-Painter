@@ -30,6 +30,8 @@ from painter.config import (
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
     CROP_MIN_INK_PX,
+    SAFETY_MAX_REMOVE_FRAC,
+    SAFETY_MAX_REMOVE_FRAC_WHITE,
 )
 
 Log = Callable[[str], None]
@@ -58,8 +60,10 @@ def remove_background(path: Path, log: Log) -> str:
     """Clear one saved image's background in place.
 
     Returns "done" (white/black background cleared), "nothing"
-    (already transparent — no-op) or "unclear" (ambiguous
-    background: reported, left untouched). Raises
+    (already transparent — no-op) or "unclear" (ambiguous background,
+    OR the SAFETY guard fired: the removal would clear more than the
+    path's guard fraction — it ate the subject — so the ORIGINAL is
+    left untouched and reported for manual handling). Raises
     ``PostprocessError`` on a real failure.
     """
     from PIL import Image
@@ -82,9 +86,23 @@ def remove_background(path: Path, log: Log) -> str:
                 )
                 return "unclear"
             if action == "white":
-                out = remove_white_border(im, white_full, white_edge)
+                out, removed = remove_white_border(im, white_full, white_edge)
+                guard = SAFETY_MAX_REMOVE_FRAC_WHITE
             else:
-                out = remove_black_background(im)
+                out, removed = remove_black_background(im)
+                guard = SAFETY_MAX_REMOVE_FRAC
+        # SAFETY GUARD: never destroy an image. A removal that clears
+        # more than the path's guard fraction ate the subject (a dark
+        # subject keyed as black background, or a flood that leaked
+        # along a dark ring) — abort, leave the ORIGINAL untouched,
+        # report loudly. The white guard runs high because legit white
+        # backgrounds are large; the black guard is tight (see config).
+        if removed > guard:
+            log(
+                f"    background removal would clear {removed:.0%} —"
+                f" too risky, left untouched (do it manually): {path.name}"
+            )
+            return "unclear"
         out.save(path, "PNG", optimize=True)
         return "done"
     except Exception as exc:

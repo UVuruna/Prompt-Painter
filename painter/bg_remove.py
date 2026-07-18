@@ -6,10 +6,16 @@ choosing the method PER FILE automatically:
 
   * white plate   -> removes the white / off-white border, keeps interior
                      bright detail (edge-connected flood fill + soft edge).
-  * globe render  -> clears the black void around a bright subject, keeps the
-                     dark night side intact (largest bright blob, ~1px feather).
+  * globe render  -> clears the BORDER-CONNECTED black void around the
+                     subject, keeps dark interior regions ENCLOSED by the
+                     subject intact (same edge-connected flood as white,
+                     ~1px feather).
   * already transparent, or an ambiguous background (gradient, mid-tone)
                   -> SKIPPED, left untouched. Re-running a folder is safe.
+
+A SAFETY GUARD wraps both removals: if a removal would clear more than
+``SAFETY_MAX_REMOVE_FRAC`` of the image (it ate the subject, not just
+the background), it is ABORTED and the source is left untouched.
 
 Typical use (the launcher does exactly this):
 
@@ -36,15 +42,21 @@ from scipy import ndimage
 # import forms. Both fail loudly if config.py is genuinely missing.
 try:
     from painter.config import (
+        BLACK_VOID_MAX,
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
         CROP_MIN_INK_PX,
+        SAFETY_MAX_REMOVE_FRAC,
+        SAFETY_MAX_REMOVE_FRAC_WHITE,
     )
 except ImportError:  # standalone: script's own dir is on sys.path
     from config import (  # type: ignore[no-redef]
+        BLACK_VOID_MAX,
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
         CROP_MIN_INK_PX,
+        SAFETY_MAX_REMOVE_FRAC,
+        SAFETY_MAX_REMOVE_FRAC_WHITE,
     )
 
 # --- white mode -------------------------------------------------------------
@@ -52,7 +64,8 @@ WHITE_FULL = 250   # whiteness >= this  -> pure background   -> alpha 0
 WHITE_EDGE = 200   # whiteness  < this  -> definitely subject -> alpha 255
 
 # --- black mode -------------------------------------------------------------
-BLACK_SOLID = 6      # brightness >= this -> part of the subject body
+# BLACK_VOID_MAX (config) is the void brightness ceiling; the removal is
+# border-connected, so only the void that TOUCHES the frame is cleared.
 FEATHER_SIGMA = 0.8  # Gaussian sigma for the anti-aliased edge (~1px feather)
 
 # --- auto-detection ---------------------------------------------------------
@@ -86,15 +99,20 @@ def edge_connected_background(candidate: np.ndarray) -> np.ndarray:
 
 def remove_white_border(img: Image.Image,
                         white_full: int = WHITE_FULL,
-                        white_edge: int = WHITE_EDGE) -> Image.Image:
-    """RGBA copy with the edge-connected white background made transparent."""
+                        white_edge: int = WHITE_EDGE,
+                        ) -> tuple[Image.Image, float]:
+    """(RGBA copy, removed_frac) — edge-connected white made transparent.
+
+    ``removed_frac`` is the fraction of the image the removal clears
+    (the border-connected white mask); the caller's SAFETY guard aborts
+    when it is too high (a white/light subject the flood leaked into)."""
     rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
     w = whiteness(rgb)
     background = edge_connected_background(w >= white_edge)
     ramp = np.clip((white_full - w) / (white_full - white_edge), 0.0, 1.0)
     alpha = np.where(background, 255.0 * ramp, 255.0)
     out = np.dstack([rgb, alpha]).astype(np.uint8)
-    return Image.fromarray(out, mode="RGBA")
+    return Image.fromarray(out, mode="RGBA"), float(background.mean())
 
 
 # --------------------------------------------------------------------------- #
@@ -105,26 +123,27 @@ def brightness(rgb: np.ndarray) -> np.ndarray:
     return rgb.max(axis=2)
 
 
-def subject_disc(b: np.ndarray, solid: int) -> np.ndarray:
-    """Solid mask of the subject body: largest bright blob, holes filled."""
-    labels, n = ndimage.label(b >= solid)
-    if n == 0:
-        return np.zeros_like(b, dtype=bool)
-    sizes = ndimage.sum(np.ones_like(labels), labels, index=range(1, n + 1))
-    biggest = int(np.argmax(sizes)) + 1
-    return ndimage.binary_fill_holes(labels == biggest)
-
-
 def remove_black_background(img: Image.Image,
-                            solid: int = BLACK_SOLID,
-                            sigma: float = FEATHER_SIGMA) -> Image.Image:
-    """RGBA copy with the black void around a bright subject cleared."""
+                            void_max: int = BLACK_VOID_MAX,
+                            sigma: float = FEATHER_SIGMA,
+                            ) -> tuple[Image.Image, float]:
+    """(RGBA copy, removed_frac) — the BORDER-CONNECTED black void cleared.
+
+    Only near-black pixels (brightness <= ``void_max``) that CONNECT TO
+    THE IMAGE BORDER are removed — the corner void. Interior dark
+    regions ENCLOSED by the subject (the black leading between glass,
+    dark inner areas) are not border-connected and stay OPAQUE. This
+    replaces the old "biggest bright blob + fill holes" disc, which
+    could not tell a dark subject from a black background and ate dark
+    frames (the bible/dark rondels). ``removed_frac`` is the fraction
+    the removal clears; the caller's SAFETY guard aborts when the flood
+    leaked along a dark ring and over-removed."""
     rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
-    disc = subject_disc(brightness(rgb), solid)
-    alpha = np.clip(ndimage.gaussian_filter(disc.astype(np.float32), sigma),
-                    0.0, 1.0) * 255.0
+    background = edge_connected_background(brightness(rgb) <= void_max)
+    keep = (~background).astype(np.float32)
+    alpha = np.clip(ndimage.gaussian_filter(keep, sigma), 0.0, 1.0) * 255.0
     out = np.dstack([rgb, alpha]).astype(np.uint8)
-    return Image.fromarray(out, mode="RGBA")
+    return Image.fromarray(out, mode="RGBA"), float(background.mean())
 
 
 # --------------------------------------------------------------------------- #
@@ -215,7 +234,13 @@ def detect(img: Image.Image):
 
 def process_file(src: Path, dst: Path, mode: str, crop: bool,
                  force_full: int | None, force_edge: int | None) -> str:
-    """Process one image; returns the action taken (or a 'skip-*' reason)."""
+    """Process one image; returns the action taken (or a 'skip-*' reason).
+
+    'skip-risky' means the SAFETY guard fired: the removal would clear
+    more than the path's guard fraction (``SAFETY_MAX_REMOVE_FRAC`` for
+    black, ``SAFETY_MAX_REMOVE_FRAC_WHITE`` for white — white legit
+    backgrounds run large), i.e. it ate the subject, so the source is
+    LEFT UNTOUCHED — nothing is written."""
     with Image.open(src) as im:
         if mode == "auto":
             action, wf, we = detect(im)
@@ -228,9 +253,13 @@ def process_file(src: Path, dst: Path, mode: str, crop: bool,
         if action.startswith("skip"):
             return action
         if action == "white":
-            out = remove_white_border(im, wf, we)
+            out, removed = remove_white_border(im, wf, we)
+            guard = SAFETY_MAX_REMOVE_FRAC_WHITE
         else:
-            out = remove_black_background(im)
+            out, removed = remove_black_background(im)
+            guard = SAFETY_MAX_REMOVE_FRAC
+    if removed > guard:
+        return "skip-risky"  # ate the subject — leave the source untouched
     if crop:
         out = autocrop(out)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -297,6 +326,11 @@ def main(argv=None) -> int:
         if counts.get("skip-ambiguous"):
             print("  NOTE: 'skip-ambiguous' files had a non-white/non-black "
                   "background and were left untouched — tell me about those.")
+        if counts.get("skip-risky"):
+            print("  NOTE: 'skip-risky' files would have lost too much to "
+                  f"the removal (black > {SAFETY_MAX_REMOVE_FRAC:.0%}, white > "
+                  f"{SAFETY_MAX_REMOVE_FRAC_WHITE:.0%} — it ate the subject) "
+                  "and were LEFT UNTOUCHED — do those by hand.")
     else:
         if args.in_place:
             dst = args.src

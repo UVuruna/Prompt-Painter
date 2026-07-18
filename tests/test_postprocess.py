@@ -11,11 +11,16 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from painter.bg_remove import clean_edge_halo, content_bbox
+from painter.bg_remove import (
+    clean_edge_halo,
+    content_bbox,
+    remove_black_background,
+)
 from painter.config import (
     CLEAN_EDGE_ALPHA,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
+    SAFETY_MAX_REMOVE_FRAC,
 )
 from painter.postprocess import (
     PostprocessError,
@@ -37,9 +42,14 @@ def save_rgba(path: Path, arr: np.ndarray) -> None:
 
 
 def make_white_plate(path: Path, size: int = 100) -> None:
-    """A red square centered on a pure-white plate (the Gemini case)."""
+    """A red subject FILLING a pure-white plate (the Gemini case).
+
+    The subject fills the frame with only a thin white border, so the
+    removal clears ~29% (border-connected white) — under the SAFETY
+    guard. Real assets are medallions that fill the frame; a tiny
+    subject on a huge white plate would (correctly) trip the guard."""
     rgb = np.full((size, size, 3), 255, dtype=np.uint8)
-    rgb[30:70, 30:70] = (200, 30, 30)
+    rgb[8:size - 8, 8:size - 8] = (200, 30, 30)
     Image.fromarray(rgb, mode="RGB").save(path, "PNG")
 
 
@@ -58,6 +68,99 @@ def test_white_background_cleared(tmp_path):
     assert arr[50, 50, 3] == 255  # the subject stayed opaque
     # split contract: remove_background does NOT crop any more
     assert arr.shape[:2] == (100, 100)
+
+
+def test_black_bright_subject_on_black_is_cleared(tmp_path):
+    """A bright subject FILLING the frame on black: the border-connected
+    void is cleared, the subject stays opaque, removal is 'done'."""
+    img = tmp_path / "globe.png"
+    rgb = np.zeros((100, 100, 3), dtype=np.uint8)  # black background
+    rgb[8:92, 8:92] = 200                          # bright subject fills frame
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+
+    assert remove_background(img, print) == "done"
+    with Image.open(img) as out:
+        arr = np.asarray(out.convert("RGBA"))
+    assert arr[2, 2, 3] == 0        # the black corner void went transparent
+    assert arr[50, 50, 3] == 255    # the subject stayed opaque
+    assert arr.shape[:2] == (100, 100)
+
+
+def test_black_removal_keeps_enclosed_interior_dark_region():
+    """BORDER-CONNECTED black removal: the corner void is cleared, but a
+    dark region ENCLOSED by the subject (the black leading between glass,
+    the dark frame) is NOT border-connected and stays fully OPAQUE —
+    the exact bug the fix cures (the old disc ate it)."""
+    rgb = np.full((100, 100, 3), 180, dtype=np.uint8)  # bright subject fills frame
+    rgb[:12, :12] = 0        # black corner void — CONNECTED to the border
+    rgb[45:55, 45:55] = 0    # black interior detail — ENCLOSED by the subject
+    out, removed = remove_black_background(Image.fromarray(rgb, mode="RGB"))
+    alpha = np.asarray(out)[:, :, 3]
+
+    assert alpha[3, 3] == 0            # the corner void is cleared
+    assert alpha[50, 50] == 255        # the ENCLOSED interior black is kept opaque
+    assert removed < 0.05              # only the tiny corner (~1.4%) is removed
+
+
+def test_guard_aborts_black_over_removal_and_leaves_untouched(tmp_path):
+    """A tiny bright subject on a huge black void: the removal would
+    clear >guard of the image (it 'ate the subject'), so remove_background
+    ABORTS — returns 'unclear', leaves the original byte-identical, logs."""
+    img = tmp_path / "dark.png"
+    rgb = np.zeros((100, 100, 3), dtype=np.uint8)  # mostly black void
+    rgb[42:58, 42:58] = 220                        # tiny bright subject
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    before = img.read_bytes()
+    logs: list[str] = []
+
+    assert remove_background(img, logs.append) == "unclear"
+    assert img.read_bytes() == before               # ORIGINAL untouched
+    assert any("too risky" in line for line in logs)
+
+
+def test_white_guard_passes_legit_large_background(tmp_path):
+    """The white guard runs HIGH: a real badge on a white margin clears
+    ~54% of CLEAN white background with the subject fully intact — that
+    must still be "done", not a false bail. (A shared 0.40 guard would
+    have wrongly aborted it; measured real white plates reach ~0.57.)"""
+    img = tmp_path / "badge_on_white.png"
+    rgb = np.full((100, 100, 3), 255, dtype=np.uint8)  # white plate
+    rgb[16:84, 16:84] = (60, 90, 160)                  # subject ~46% -> ~54% bg
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+
+    assert remove_background(img, print) == "done"
+    with Image.open(img) as out:
+        arr = np.asarray(out.convert("RGBA"))
+    assert arr[0, 0, 3] == 0        # white corner cleared
+    assert arr[50, 50, 3] == 255    # subject intact
+
+
+def test_guard_aborts_white_over_removal_and_leaves_untouched(tmp_path):
+    """The guard is general — the white path also aborts, but only on a
+    CATASTROPHIC removal: a tiny dark subject on a huge white plate
+    clears ~97% (it ate the image), well over the white guard."""
+    img = tmp_path / "tiny_on_white.png"
+    rgb = np.full((100, 100, 3), 255, dtype=np.uint8)  # huge white plate
+    rgb[46:54, 46:54] = (30, 30, 30)                   # tiny dark subject (~0.6%)
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    before = img.read_bytes()
+    logs: list[str] = []
+
+    assert remove_background(img, logs.append) == "unclear"
+    assert img.read_bytes() == before
+    assert any("too risky" in line for line in logs)
+
+
+def test_black_removal_returns_removed_fraction():
+    """The remove_* contract is (rgba, removed_frac) — the fraction the
+    removal clears, which the guard checks. A clean bright-on-black frame
+    clears ~the border ring, well under the guard."""
+    rgb = np.zeros((100, 100, 3), dtype=np.uint8)
+    rgb[10:90, 10:90] = 210                       # 80x80 subject, 20px frame gone
+    out, removed = remove_black_background(Image.fromarray(rgb, mode="RGB"))
+    assert isinstance(removed, float)
+    assert abs(removed - 0.36) < 0.02             # (100^2 - 80^2)/100^2 = 0.36
+    assert removed < SAFETY_MAX_REMOVE_FRAC        # so it would be saved
 
 
 def test_already_transparent_is_nothing(tmp_path):

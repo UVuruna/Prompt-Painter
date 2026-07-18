@@ -23,10 +23,12 @@ match.
 - [Chrome Launcher](chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 - [Postprocess](postprocess.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
-  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`
+  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`,
+  `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`
 - [Background Remover](bg_remove.md) — the same crop/cleanup
-  constants (`content_bbox`, `clean_edge_halo`, `autocrop` defaults),
-  imported package-or-standalone
+  constants (`content_bbox`, `clean_edge_halo`, `autocrop` defaults)
+  plus `BLACK_VOID_MAX` and the two SAFETY guards, imported
+  package-or-standalone
 - [Upscale](upscale.md) — the `UPSCALE_*` block
 - [Settings](settings.md) — `SETTINGS_PATH`
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
@@ -64,6 +66,23 @@ match.
   interior soft edges — enclosed by the solid subject, never
   border-connected — are left alone. `CROP_MARGIN_PX` still pads the
   final box.
+- `BLACK_VOID_MAX`, `SAFETY_MAX_REMOVE_FRAC`,
+  `SAFETY_MAX_REMOVE_FRAC_WHITE` — the black-void removal + SAFETY guard
+  (owner 2026-07-19, the bible/dark case). Brightness-keying cannot
+  separate a DARK subject from a black background, so the old remover
+  ate the dark frames of dark rondels. `BLACK_VOID_MAX` (14) is the
+  void brightness ceiling for the BORDER-CONNECTED black removal (only
+  the near-black touching the frame is cleared; interior enclosed dark
+  regions stay opaque). The SAFETY guard aborts any removal that would
+  clear too much (it ate the subject) — leaving the ORIGINAL untouched.
+  It is PER PATH because the two paths' legit backgrounds differ wildly
+  (measured over 531 real outputs): the BLACK guard
+  `SAFETY_MAX_REMOVE_FRAC` (0.40) catches dark-rondel destruction
+  (0.45+) while bright-on-black clears only ~0.24; the WHITE guard
+  `SAFETY_MAX_REMOVE_FRAC_WHITE` (0.85) runs high because legit white
+  backgrounds are large (real plates clear 0.33-0.57, median 0.44) —
+  a single 0.40 would false-bail 58% of them, so white is guarded only
+  against a catastrophic white-subject-eaten.
 - `TOOLS_DIR`, `UPSCALE_DIR`, `UPSCALE_EXE_NAME`,
   `UPSCALE_ZIP_URL`, `UPSCALE_MODEL`, `UPSCALE_MIN_PX`,
   `UPSCALE_ASPECT_TOL` — the Real-ESRGAN upscaler: where the
