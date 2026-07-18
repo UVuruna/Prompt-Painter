@@ -22,7 +22,12 @@ from typing import Callable
 
 from playwright.sync_api import Locator, Page, sync_playwright
 
-from painter.config import MIN_IMAGE_PX, SiteConfig, Timing
+from painter.config import (
+    MIN_IMAGE_PX,
+    SiteConfig,
+    Timing,
+    parse_quota_reset,
+)
 
 Log = Callable[[str], None]
 
@@ -36,7 +41,17 @@ class SelectorRot(DriverError):
 
 
 class TerminalState(DriverError):
-    """Quota/rate limit — stop the whole site, never blind-retry."""
+    """Quota/rate limit — stop the whole site, never blind-retry.
+
+    ``retry_after_s`` is the wait the site itself named ("limit
+    resets in 27 minutes"), parsed via the config's
+    ``QUOTA_RESET_PATTERNS``; None when the message carried no
+    parseable time.
+    """
+
+    def __init__(self, message: str, retry_after_s: float | None = None):
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
 
 
 class ItemRefused(DriverError):
@@ -164,9 +179,11 @@ class SiteDriver:
         """Paste the prompt byte-identical and press send — with a
         person's rhythm (click ... paste ... send), never instant."""
         box = self._require(self.site.prompt_box, "the prompt box")
+        self._hesitate()
         box.click()
         self._hesitate()
         self.page.keyboard.press("Control+A")
+        self._hesitate()
         self.page.keyboard.press("Delete")
         self._hesitate()
         self.page.keyboard.insert_text(prompt)
@@ -249,6 +266,7 @@ class SiteDriver:
         whether that stops the run (it should not: the old chat still
         works, only longer)."""
         button = self._require(self.site.new_chat, "the New chat control")
+        self._hesitate()
         button.click()
         self._hesitate()
         # the fresh composer must be there before the next paste
@@ -262,6 +280,7 @@ class SiteDriver:
         Enter on an empty box does nothing."""
         send = self._query(self.site.send_button)
         if send is not None:
+            self._hesitate()
             try:
                 send.click()
             except Exception:
@@ -269,7 +288,9 @@ class SiteDriver:
                 # times out loudly if nothing ever takes
         box = self._query(self.site.prompt_box)
         if box is not None:
+            self._hesitate()
             box.click()
+            self._hesitate()
             self.page.keyboard.press("Enter")
 
     # --- DOM plumbing ---------------------------------------------------
@@ -345,7 +366,8 @@ class SiteDriver:
             if marker in lowered:
                 raise TerminalState(
                     f"{self.site.name}: quota/rate-limit response"
-                    f" (matched '{marker}'): {text[:300]}"
+                    f" (matched '{marker}'): {text[:300]}",
+                    retry_after_s=parse_quota_reset(text),
                 )
         for marker in self.site.refusal_text_markers:
             if marker in lowered:

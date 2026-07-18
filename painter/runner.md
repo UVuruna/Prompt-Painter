@@ -6,7 +6,8 @@
 The paced, resumable loop over a clean sheet's pending items:
 paste (prompt + the site's rule suffix) → submit → await the done
 edge → extract bytes → save at `out_base / dest_for(drop, site)`
-(the assets-mirroring layout) → background fix → report line →
+(the assets-mirroring layout) → the `post_save` hook (the caller's
+composed postprocess: bg removal / crop / upscale) → report line →
 mark done in the sidecar state (under `_state/<site>/`) → pause →
 next. A crash or a quota stop costs nothing — the next run resumes
 past every marked item and the report keeps every finished line.
@@ -39,9 +40,13 @@ image → summary), so an interrupted run keeps every finished line.
 Per image: completion timestamp, **gen** seconds (AI: SEND →
 image), **ours** seconds (save + bgfix + pause), original → final
 resolution (PNG header parse, stdlib only), final file size, extra
-actions (`REMOVE BG: <action>`). Summary: image count, average
-generation (AI) AND average our-time per image, their total, wall
-clock, run start/finish timestamps and why the run ended.
+actions — the `post_save` hook's own description (e.g.
+`REMOVE BG: done, CROP: done, UPSCALE: nothing`;
+`POSTPROCESS: FAILED` on a loud failure). Summary: image count,
+average generation (AI) AND average our-time per image, their
+total, wall clock, run start/finish timestamps and why the run
+ended — a quota stop includes the parsed reset time when the site
+named one (`quota / rate limit — stopped (reset in ~27m 00s)`).
 
 ## The two timings (owner 2026-07-17 — "sve se računa")
 
@@ -69,12 +74,18 @@ event) so the dashboard never stalls; the `item_done` event with
   GUI dashboard is built from these. Logs the
   sheet's skipped entries, filters the queue through `Progress`,
   drives every pending item, appends `prompt_suffix` (the caller
-  resolves the per-site rules), runs the `post_save` background fix
-  (failures loud, counted, never fatal), paces between prompts,
+  resolves the per-site rules), runs the `post_save` hook — the
+  caller composes the postprocess steps by flags and returns the
+  full action description; failures are loud, counted, never fatal
+  — paces between prompts,
   honors `should_stop`, and feeds `RunReport` when `report` is on.
   `only` narrows the queue to the owner's ticked drop paths. A
   SAFETY refusal (`ItemRefused`) skips just that item and the run
   continues; when `safer_retry` is on the item is re-sent ONCE with
   `SAFER_PREAMBLE` first, and only a second refusal counts as
   REFUSED. Terminal/driver errors propagate to the caller —
-  progress and report stay saved.
+  progress and report stay saved. A `TerminalState` is re-raised
+  UNCHANGED, so callers read its `retry_after_s` (the quota reset
+  time the site named, parsed by the driver); the runner logs it
+  first (`quota — reset in ~N min`) and stamps it into the report's
+  stop reason.

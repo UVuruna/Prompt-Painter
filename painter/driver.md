@@ -15,7 +15,11 @@ handed back for the runner to save under the sheet's own name.
 ## The per-item protocol
 
 1. `submit_prompt(prompt)` — click the prompt box, select-all +
-   delete, `insert_text` verbatim, click send.
+   delete, `insert_text` verbatim, click send. EVERY DOM
+   interaction here (and in the send retry and `new_chat`) is
+   preceded by `_hesitate()` — a random human-like pause from the
+   config's action-delay range (owner's #8), so nothing ever fires
+   machine-instant.
 2. `await_done(log)` — the done edge: the busy signal (stop button)
    must appear, then disappear, under the hard generation timeout;
    long waits log progress at the configured cadence.
@@ -41,7 +45,12 @@ pasted text lands).
 - `ItemRefused` — the response matches a SAFETY-refusal marker: the
   runner reports the item and continues with the rest.
 - `TerminalState` — the response matches a quota/rate-limit marker:
-  the whole site stops, never blind-retried.
+  the whole site stops, never blind-retried. Carries
+  `retry_after_s: float | None` — the wait the site itself named
+  ("limit resets in 27 minutes"), parsed via the config's
+  `QUOTA_RESET_PATTERNS` (English and Serbian phrasings); `None`
+  when the message carried no parseable time. The runner logs it
+  and re-raises the exception unchanged so the GUI/CLI read it too.
 - `GenerationTimeout` — no done edge inside the hard cap.
 
 While waiting for the result `<img>`, the response text is checked

@@ -25,6 +25,7 @@ from painter.config import (
     NEW_CHAT_CHOICES,
     SITES,
     TIMING,
+    fmt_duration,
     prompt_suffix,
 )
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
@@ -86,6 +87,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip the background remover after each saved image",
     )
     p.add_argument(
+        "--no-crop",
+        action="store_true",
+        help="skip the transparent autocrop after each saved image",
+    )
+    p.add_argument(
+        "--upscale",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Real-ESRGAN upscale of small near-square images (badge"
+            " class) so no dimension stays below the configured"
+            " minimum (default: on; --no-upscale to skip)"
+        ),
+    )
+    p.add_argument(
         "--no-report",
         action="store_true",
         help="do not write the per-sheet report txt",
@@ -127,6 +143,41 @@ def report_sheet(sheet: Sheet) -> None:
         print(f"  SKIP L{sk.line:<4} {sk.title} — {sk.reason}")
     for pr in sheet.problems:
         print(f"  PROBLEM L{pr.line}: {pr.message}")
+
+
+def _build_post_save(do_bg: bool, do_crop: bool, do_upscale: bool):
+    """The composed per-save hook (owner's #7: steps are flags).
+
+    Returns the hook callable, None when every step is off, or the
+    deps-problem STRING when the steps cannot run at all.
+    """
+    if not (do_bg or do_crop or do_upscale):
+        return None
+
+    # imported lazily so --dry-run stays stdlib-only
+    from painter.postprocess import (
+        crop_transparent,
+        deps_error,
+        remove_background,
+    )
+
+    problem = deps_error()
+    if problem:
+        return problem
+    if do_upscale:
+        from painter.upscale import upscale_if_small
+
+    def post_save(path: Path) -> str:
+        parts = []
+        if do_bg:
+            parts.append(f"REMOVE BG: {remove_background(path, print)}")
+        if do_crop:
+            parts.append(f"CROP: {crop_transparent(path, print)}")
+        if do_upscale:
+            parts.append(f"UPSCALE: {upscale_if_small(path, print)}")
+        return ", ".join(parts)
+
+    return post_save
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,18 +228,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
-    post_save = None
-    if not args.no_bgfix:
-        from painter.postprocess import deps_error, fix_background
-
-        problem = deps_error()
-        if problem:
-            print(
-                f"ERROR: {problem}\n(or rerun with --no-bgfix)",
-                file=sys.stderr,
-            )
-            return 2
-        post_save = fix_background
+    post_save = _build_post_save(
+        do_bg=not args.no_bgfix,
+        do_crop=not args.no_crop,
+        do_upscale=args.upscale,
+    )
+    if isinstance(post_save, str):  # a deps problem, not a hook
+        print(
+            f"ERROR: {post_save}\n(or rerun with --no-bgfix --no-crop"
+            " --no-upscale)",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.pause is None:
         timing = TIMING
@@ -256,9 +307,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2 if broken else 0
     except TerminalState as exc:
+        when = (
+            f" — quota resets in ~{fmt_duration(exc.retry_after_s)}"
+            if exc.retry_after_s is not None
+            else ""
+        )
         print(
             f"\nTERMINAL STATE: {exc}\n"
-            "Run stopped; finished work is saved — rerun later to resume.",
+            f"Run stopped; finished work is saved — rerun later to"
+            f" resume{when}.",
             file=sys.stderr,
         )
         return 3

@@ -34,15 +34,30 @@ Probes CDP and, when nothing answers, launches the automation
 Chrome with the dedicated `chrome-profile/` and one tab per site.
 See [Chrome Launcher](chrome.md).
 
-### `postprocess.py` — Background Fix
-Runs the in-house background remover over each saved image; loud
-on failure, never fatal. See [Postprocess](postprocess.md).
+### `postprocess.py` — Background Removal + Crop
+The two split, composable per-save steps (owner's #7):
+`remove_background` (auto-detected, in place) and
+`crop_transparent` (content box + safety margin) — callers compose
+them by flags; loud on failure, never fatal. See
+[Postprocess](postprocess.md).
 
 ### `bg_remove.py` — Background Remover
 The remover itself (moved in from DOMY Watch tools — no part of
 this program lives in another project): per-file auto-detection,
 white/black clearing, autocrop; also runnable standalone. See
 [Background Remover](bg_remove.md).
+
+### `upscale.py` — Real-ESRGAN Upscaler
+Upscales small near-square (badge-class) images with the
+`realesrgan-ncnn-vulkan` binary (downloaded on first use into
+`tools/`, gitignored) so no dimension stays below the configured
+minimum; loud but catchable on a machine without Vulkan. See
+[Upscale](upscale.md).
+
+### `settings.py` — Settings Persistence
+Loads/saves the GUI's remembered choices as `settings.json` at the
+project root (gitignored); a corrupt file is loud but never crashes
+the app. See [Settings](settings.md).
 
 ## Connections
 
@@ -84,6 +99,11 @@ white/black clearing, autocrop; also runnable standalone. See
   its heavy imports (numpy/scipy) load lazily, only when a fix
   actually runs. Fix failures are loud but never kill a run (the
   raw image is already saved; the remover is rerun-safe).
+- **Postprocess steps are split and composable** (owner's #7):
+  background removal, transparent crop and the Real-ESRGAN upscale
+  are three separate functions; the entry points compose them into
+  ONE `post_save` hook by flags, and the hook's returned string is
+  the report's per-image action description.
 - **Write-scope guarantee:** the loop writes only under `out_root`;
   sheets and their folders are READ ONLY by construction, and both
   entry points refuse an output folder that contains the sheet.

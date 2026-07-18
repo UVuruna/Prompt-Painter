@@ -25,17 +25,23 @@ Per image it auto-detects (sampling the outer 1% frame):
 - numpy, scipy (`ndimage`), Pillow
 
 ### Used by
-- [Postprocess](postprocess.md) — calls `process_file` directly
-  after every saved image
+- [Postprocess](postprocess.md) — uses the internals (`detect`,
+  `remove_white_border`, `remove_black_background`, `content_bbox`)
+  for its two split, composable steps
 - The owner, standalone:
   `python painter/bg_remove.py <file-or-folder> --in-place --crop`
 
 ## Functions
 
 - `process_file(src, dst, mode, crop, force_full, force_edge) ->
-  str` — one image; returns the action taken.
+  str` — one image; returns the action taken (the standalone CLI's
+  engine — the per-save pipeline goes through
+  [Postprocess](postprocess.md) instead).
 - `detect(img)` — the auto-detection described above.
 - `remove_white_border`, `remove_black_background`, `autocrop` —
   the three operations.
+- `content_bbox(img, alpha_thresh) -> (l, t, r, b) | None` — the
+  visible-pixel bounding box shared by `autocrop` and the
+  postprocess crop step; `None` when fully transparent.
 - `main(argv)` — the standalone CLI (`--in-place`, `--crop`,
   `--backup`, `--mode auto|white|black`).

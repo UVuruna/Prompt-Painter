@@ -10,6 +10,8 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from painter.config import (
     SAFER_PREAMBLE,
     SITES,
@@ -17,7 +19,7 @@ from painter.config import (
     dest_for,
     prompt_suffix,
 )
-from painter.driver import ItemRefused
+from painter.driver import ItemRefused, TerminalState
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
@@ -349,7 +351,7 @@ def test_stop_flag_stops_between_items(tmp_path):
     assert "stopped on request" in report
 
 
-def test_bgfix_hook_runs_and_failure_is_loud_not_fatal(tmp_path):
+def test_post_save_hook_runs_and_failure_is_loud_not_fatal(tmp_path):
     sheet = make_sheet(tmp_path)
     out = tmp_path / "out"
     driver = FakeDriver(SITES["gemini"])
@@ -357,10 +359,11 @@ def test_bgfix_hook_runs_and_failure_is_loud_not_fatal(tmp_path):
     fixed: list[Path] = []
 
     def post_save(path: Path) -> str:
+        # the hook composes its own steps and describes them all
         fixed.append(path)
         if len(fixed) == 2:
             raise RuntimeError("boom on the second image")
-        return "white"
+        return "REMOVE BG: done, CROP: done"
 
     generated = run_sheet(
         sheet, driver, out, "gemini", FAST,
@@ -368,12 +371,41 @@ def test_bgfix_hook_runs_and_failure_is_loud_not_fatal(tmp_path):
     )
     assert generated == 2  # the failure never kills the run
     assert len(fixed) == 2
-    assert any("bgfix: white" in line for line in logs)
-    assert any("BGFIX FAILED" in line for line in logs)
+    assert any("REMOVE BG: done, CROP: done" in line for line in logs)
+    assert any("POSTPROCESS FAILED" in line for line in logs)
     assert any("failed on 1 image(s)" in line for line in logs)
-    # the report names the extra action per image
+    # the report carries the hook's full description per image
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
-    assert "REMOVE BG: white" in report
-    assert "REMOVE BG: FAILED" in report
+    assert "REMOVE BG: done, CROP: done" in report
+    assert "POSTPROCESS: FAILED" in report
+
+
+def test_terminal_state_propagates_retry_after(tmp_path):
+    # a quota answer mid-run: the runner logs the parsed reset time,
+    # writes it into the report's stop reason, and re-raises the
+    # SAME exception so callers (GUI/CLI) can read retry_after_s
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+
+    class QuotaDriver(FakeDriver):
+        def extract_image(self):
+            raise TerminalState(
+                "ChatGPT: quota/rate-limit response (matched 'plan"
+                " limit'): ... limit resets in 27 minutes.",
+                retry_after_s=27 * 60.0,
+            )
+
+    logs: list[str] = []
+    with pytest.raises(TerminalState) as excinfo:
+        run_sheet(
+            sheet, QuotaDriver(SITES["chatgpt"]), out, "chatgpt", FAST,
+            log=logs.append,
+        )
+    assert excinfo.value.retry_after_s == 27 * 60.0
+    assert any("quota — reset in ~27 min" in line for line in logs)
+    report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "quota / rate limit — stopped (reset in ~27m 00s)" in report

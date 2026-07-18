@@ -31,7 +31,12 @@ from painter.config import (
     fmt_duration,
     fmt_size,
 )
-from painter.driver import ItemRefused, SiteDriver, sniff_format
+from painter.driver import (
+    ItemRefused,
+    SiteDriver,
+    TerminalState,
+    sniff_format,
+)
 from painter.sheet_parser import Sheet, SkippedItem
 
 Log = Callable[[str], None]
@@ -368,13 +373,20 @@ def run_sheet(
             actions: list[str] = []
             if post_save is not None:
                 try:
+                    # the hook composes its own steps (bg removal,
+                    # crop, upscale ...) and returns the full
+                    # description, e.g. "REMOVE BG: done, CROP: done"
                     action = post_save(dest)
-                    actions.append(f"REMOVE BG: {action}")
-                    log(f"    bgfix: {action}")
+                    if action:
+                        actions.append(action)
+                        log(f"    {action}")
                 except Exception as exc:
                     fix_failures += 1
-                    actions.append("REMOVE BG: FAILED")
-                    log(f"    BGFIX FAILED (image kept as saved): {exc}")
+                    actions.append("POSTPROCESS: FAILED")
+                    log(
+                        f"    POSTPROCESS FAILED (image kept as"
+                        f" saved): {exc}"
+                    )
 
             saved_bytes = dest.read_bytes()
             size = len(saved_bytes)
@@ -424,9 +436,14 @@ def run_sheet(
                     "size": size,
                 }
             )
+    except TerminalState as exc:
+        stopped_why = "quota / rate limit — stopped"
+        if exc.retry_after_s is not None:
+            log(f"  quota — reset in ~{exc.retry_after_s / 60:.0f} min")
+            stopped_why += f" (reset in ~{fmt_duration(exc.retry_after_s)})"
+        raise
     except BaseException as exc:
         stopped_why = {
-            "TerminalState": "quota / rate limit — stopped",
             "GenerationTimeout": "generation timed out",
         }.get(type(exc).__name__, f"aborted: {type(exc).__name__}")
         raise
@@ -444,7 +461,8 @@ def run_sheet(
         )
     if fix_failures:
         log(
-            f"  NOTE: background fix failed on {fix_failures} image(s) —"
-            " rerun painter/bg_remove.py over the output folder later"
+            f"  NOTE: postprocess failed on {fix_failures} image(s) —"
+            " the raw saves are kept; rerun the fixes over the output"
+            " folder later"
         )
     return generated

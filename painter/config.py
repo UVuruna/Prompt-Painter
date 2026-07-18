@@ -80,12 +80,43 @@ IMAGE_EXTENSIONS = (".png",)
 # skipped — logged, never generated.
 SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
 
-# --- Background fix (owner workflow step 5) --------------------------
+# --- Postprocess: background removal + crop (owner workflow step 6) --
 
-# painter/bg_remove.py runs over every saved image and auto-detects —
-# already-transparent images are skipped, white backgrounds (Gemini)
-# are cleared, ambiguous ones are reported and left untouched.
-BG_FIX_CROP = True  # autocrop to the visible subject after clearing
+# painter/postprocess.py runs over every saved image; the two steps
+# are COMPOSABLE (owner's #7): remove_background auto-detects per
+# file (already-transparent -> nothing, white/black cleared,
+# ambiguous -> unclear, left untouched); crop_transparent autocrops
+# a transparent image to its content bounding box.
+CROP_MARGIN_PX = 4  # safety margin kept around the content box
+CROP_ALPHA_THRESH = 8  # alpha below this counts as empty (feather ring)
+
+
+# --- Upscale (owner's #13) -------------------------------------------
+
+# Real-ESRGAN via the standalone realesrgan-ncnn-vulkan Windows
+# binary. It lives under tools/realesrgan/ (gitignored, downloaded
+# on first use from the official GitHub release).
+TOOLS_DIR = PROJECT_ROOT / "tools"
+UPSCALE_DIR = TOOLS_DIR / "realesrgan"
+UPSCALE_EXE_NAME = "realesrgan-ncnn-vulkan.exe"
+UPSCALE_ZIP_URL = (
+    "https://github.com/xinntao/Real-ESRGAN/releases/download/"
+    "v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip"
+)
+UPSCALE_MODEL = "realesrgan-x4plus"
+# Gating (owner 2026-07-18): an image qualifies ONLY if its aspect
+# ratio W/H is within 1 +- UPSCALE_ASPECT_TOL (the circular/badge
+# class) AND W or H is below UPSCALE_MIN_PX; then it is upscaled so
+# NO dimension stays below UPSCALE_MIN_PX (aspect preserved).
+UPSCALE_MIN_PX = 800
+UPSCALE_ASPECT_TOL = 0.1
+
+
+# --- Settings persistence (owner's #9) -------------------------------
+
+# The GUI's remembered choices; JSON at the project root, gitignored.
+# What goes in the dict is the GUI's business — this is just the home.
+SETTINGS_PATH = PROJECT_ROOT / "settings.json"
 
 
 # --- Prompt rules appended per site (owner 2026-07-17) ---------------
@@ -220,6 +251,40 @@ TIMING = Timing()
 
 # An <img> narrower than this is a placeholder, not a generated image.
 MIN_IMAGE_PX = 64
+
+
+# --- Quota reset time (owner's #2) -----------------------------------
+
+# ChatGPT's live quota message names the wait ("... when the limit
+# resets in 27 minutes" / "in 14 hours"); Serbian-locale variants
+# phrase it as "za 27 minuta" / "za 14 sati". Each pattern captures
+# ONE number; the value is multiplied by the unit's seconds. Matches
+# are summed so "in 2 hours" + a minutes phrase both count; an
+# unparseable message yields None (the caller still stops — the
+# reset time is a bonus, never a requirement).
+QUOTA_RESET_PATTERNS: tuple[tuple[re.Pattern, float], ...] = (
+    (re.compile(r"\bin\s+(\d+)\s*h(?:ours?|rs?)?\b", re.IGNORECASE), 3600.0),
+    (re.compile(r"\bin\s+(\d+)\s*min(?:ute)?s?\b", re.IGNORECASE), 60.0),
+    # Serbian: "za 14 sati" / "za 2 sata" / "za 27 minuta" / "za 1 minut"
+    (re.compile(r"\bza\s+(\d+)\s*sat(?:i|a)?\b", re.IGNORECASE), 3600.0),
+    (re.compile(r"\bza\s+(\d+)\s*min(?:ut)?a?\b", re.IGNORECASE), 60.0),
+)
+
+
+def parse_quota_reset(text: str) -> float | None:
+    """Seconds until the quota resets, read from a quota response.
+
+    None when no pattern matches — the message carried no parseable
+    wait time (e.g. Gemini's "as soon as your limit resets").
+    """
+    total = 0.0
+    found = False
+    for pattern, unit_s in QUOTA_RESET_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            total += float(match.group(1)) * unit_s
+            found = True
+    return total if found else None
 
 
 # --- Site DOM states (ONE config block, with fallbacks) --------------

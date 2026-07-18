@@ -112,13 +112,23 @@ def remove_black_background(img: Image.Image,
 # --------------------------------------------------------------------------- #
 # shared helpers
 # --------------------------------------------------------------------------- #
-def autocrop(img: Image.Image, alpha_thresh: int = 8) -> Image.Image:
-    """Crop to the bounding box of visible pixels (ignoring the feather ring)."""
+def content_bbox(img: Image.Image,
+                 alpha_thresh: int = 8) -> tuple[int, int, int, int] | None:
+    """Bounding box (l, t, r, b) of visible pixels of an RGBA image,
+    ignoring the feather ring; None when fully transparent."""
     alpha = np.asarray(img)[:, :, 3]
     ys, xs = np.where(alpha >= alpha_thresh)
     if len(xs) == 0:
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+
+def autocrop(img: Image.Image, alpha_thresh: int = 8) -> Image.Image:
+    """Crop to the bounding box of visible pixels (ignoring the feather ring)."""
+    box = content_bbox(img, alpha_thresh)
+    if box is None:
         return img
-    return img.crop((xs.min(), ys.min(), xs.max() + 1, ys.max() + 1))
+    return img.crop(box)
 
 
 def _border_pixels(rgb: np.ndarray) -> np.ndarray:

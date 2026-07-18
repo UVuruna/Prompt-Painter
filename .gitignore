@@ -7,6 +7,12 @@ UV/
 # The dedicated Chrome automation profile (logged-in sessions)
 chrome-profile/
 
+# Downloaded external binaries (Real-ESRGAN) — never committed
+tools/
+
+# The owner's local GUI settings
+settings.json
+
 # Python
 __pycache__/
 *.pyc

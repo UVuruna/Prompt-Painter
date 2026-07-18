@@ -22,7 +22,10 @@ match.
 - [Run Loop](runner.md) — `Timing`, `PROGRESS_SUFFIX`
 - [Chrome Launcher](chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
-- [Postprocess](postprocess.md) — `BG_FIX_CROP`
+- [Postprocess](postprocess.md) — `CROP_MARGIN_PX`,
+  `CROP_ALPHA_THRESH`
+- [Upscale](upscale.md) — the `UPSCALE_*` block
+- [Settings](settings.md) — `SETTINGS_PATH`
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
   `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
   `prompt_suffix`
@@ -44,7 +47,23 @@ match.
 - `IMAGE_EXTENSIONS`, `SKIP_MARKER_PATTERN` — the sheet contract's
   file-name rule and the REUSE / SUPERSEDED / DO-NOT-GENERATE
   marker regex.
-- `BG_FIX_CROP` — autocrop after clearing a background.
+- `CROP_MARGIN_PX`, `CROP_ALPHA_THRESH` — the postprocess crop
+  step's safety margin around the content box and its "visible
+  pixel" alpha threshold.
+- `TOOLS_DIR`, `UPSCALE_DIR`, `UPSCALE_EXE_NAME`,
+  `UPSCALE_ZIP_URL`, `UPSCALE_MODEL`, `UPSCALE_MIN_PX`,
+  `UPSCALE_ASPECT_TOL` — the Real-ESRGAN upscaler: where the
+  downloaded binary lives (`tools/`, gitignored), the official
+  release zip, and the locked gating (owner 2026-07-18) — aspect
+  W/H within `1 ± UPSCALE_ASPECT_TOL` AND a dimension below
+  `UPSCALE_MIN_PX`.
+- `QUOTA_RESET_PATTERNS`, `parse_quota_reset(text) -> float | None`
+  — the quota reset time (owner's #2): each pattern captures one
+  number ("resets in 27 minutes", "in 14 hours", Serbian "za 27
+  minuta" / "za 2 sata"); matches sum, no match → `None`. The
+  driver stamps the result into `TerminalState.retry_after_s`.
+- `SETTINGS_PATH` — the GUI settings JSON at the project root
+  (gitignored).
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text)` — the rule
   block appended to every prompt: the chosen background (each

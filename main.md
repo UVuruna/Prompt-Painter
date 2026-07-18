@@ -30,8 +30,12 @@ directly at `<out>/<site>/<drop-path>`), `--background
 on ChatGPT, white on Gemini; Gemini's three laws always ride
 along), `--pause MIN [MAX]` (one value = fixed, two = a random
 range), `--cdp URL`, `--no-bgfix` (skip the background remover),
-`--no-report` (skip the per-theme report txt), `--safer-retry`
-(one allegory-framed retry on a safety refusal), `--dry-run`.
+`--no-crop` (skip the transparent autocrop), `--upscale` /
+`--no-upscale` (Real-ESRGAN on small near-square badge images —
+default on; the three postprocess steps compose into ONE
+`post_save` hook per the flags), `--no-report` (skip the per-theme
+report txt), `--safer-retry` (one allegory-framed retry on a
+safety refusal), `--dry-run`.
 
 Broken sheets are reported and skipped; the rest run. Sheets are
 driven in the given order — each closes fully (images + progress +
@@ -43,8 +47,8 @@ report) before the next starts, so a quota stop costs nothing.
 |------|---------|
 | 0 | clean run, clean dry-run, or "Chrome opened — log in, rerun" |
 | 1 | driver/Chrome error — rerun to resume once fixed |
-| 2 | a sheet was skipped (unreadable/contract) / bad arguments / bgfix deps missing |
-| 3 | terminal site state (quota/refusal) — resume later |
+| 2 | a sheet was skipped (unreadable/contract) / bad arguments / postprocess deps missing |
+| 3 | terminal site state (quota) — resume later; the parsed quota reset time is printed when the site named one |
 | 130 | interrupted — progress saved |
 
 ## Connections
@@ -53,7 +57,8 @@ report) before the next starts, so a quota stop costs nothing.
 - [Sheet Parser](painter/sheet_parser.md)
 - [Chrome Launcher](painter/chrome.md),
   [CDP Driver](painter/driver.md),
-  [Postprocess](painter/postprocess.md) — imported lazily, so
-  `--dry-run` works without playwright
+  [Postprocess](painter/postprocess.md),
+  [Upscale](painter/upscale.md) — imported lazily, so `--dry-run`
+  works without playwright
 - [Run Loop](painter/runner.md)
 - [Config](painter/config.md)

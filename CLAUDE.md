@@ -71,12 +71,21 @@ is the binding spec.
    1:1, TALL/lancet window prompts = tall portrait (config
    keyword rules) — the background rule, and absolutely NO
    reflections.
-6. After every save, the **background fix** runs —
-   `painter/bg_remove.py`, IN-HOUSE (moved from DOMY Watch tools,
+6. After every save, the **postprocess hook** runs — THREE
+   composable steps (owner's #7, 2026-07-18), each toggleable per
+   run, all defaulting ON: `remove_background`
+   (`painter/postprocess.py` over the IN-HOUSE
+   `painter/bg_remove.py` internals — moved from DOMY Watch tools,
    owner 2026-07-17: no part of this program lives in another
-   project). It auto-detects per file — already-transparent
-   skipped, white cleared + autocropped, ambiguous reported and
-   left untouched. Failures are loud but never kill the run.
+   project; auto-detects per file — already-transparent nothing,
+   white/black cleared, ambiguous reported and left untouched),
+   `crop_transparent` (autocrop to the content box + a small config
+   margin), and `upscale_if_small` (`painter/upscale.py`,
+   Real-ESRGAN ncnn-vulkan binary auto-downloaded into `tools/`,
+   gitignored) — ONLY images with aspect W/H in 0.9–1.1 AND a
+   dimension under 800 px, upscaled native-4x then LANCZOS so no
+   dimension stays below 800. Failures are loud but never kill the
+   run.
 7. Images save **DIRECTLY** into a tree that MIRRORS DOMY's
    `assets/` (owner 2026-07-18): sheets carry FULL site-agnostic
    paths (`assets/emblem/mood/Glory.png`) and the tool injects the
