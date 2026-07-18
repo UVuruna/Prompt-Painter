@@ -5,18 +5,19 @@
 ## Purpose
 The owner's front door — a themed tkinter window over the same
 engine the CLI uses, built for unattended batches: queue the
-collections, press Start, go ride a bike. The widget stack
-(2026-07-18) is **customtkinter rounded controls over a
+collections, press a site's Start, go ride a bike. The widget
+stack (2026-07-18) is **customtkinter rounded controls over a
 ttkbootstrap `darkly` base — the same mix RHMH uses**: every
 button is a `CTkButton` with RHMH's strong corner radius (12 px,
 hover = the same colour darkened to 0.75), the output path field a
-rounded bordered `CTkEntry`, the four pace fields compact
-`Spinner`s (ONE reusable class — a rounded `CTkFrame` holding
+rounded bordered `CTkEntry`, the pace fields compact `Spinner`s
+(ONE reusable class — a rounded `CTkFrame` holding
 [−] [entry] [+]: ~24 px pads, step 1 s for the pauses, 0.1 s for
 the action delays, direct typing still allowed and validated on
 Start, never below 0), the background / New-chat dropdowns rounded
-`CTkComboBox`es, the site and option toggles `CTkSwitch`es with
-the site's LOGO in a small `CTkLabel` beside each site switch. All
+`CTkComboBox`es, the option toggles `CTkSwitch`es, and each site's
+whole control set an `AgentPanel` labelframe with the site's LOGO
+in its header. All
 their colours are PULLED from the live darkly palette
 (`tb.Style().colors`) by the `rounded_button` / `rounded_entry` /
 `rounded_combo` / `rounded_switch` factories and `_button_colors`
@@ -102,30 +103,33 @@ pointer.
   report would collide).
 - **Output** — the folder; images save DIRECTLY to
   `<out>/<site>/<drop-path>` (no approval step).
-- **Sites** — Gemini / ChatGPT switches, each with its site logo
-  beside it; both ticked = both run
-  IN PARALLEL, one thread and one tab each. Beside each site sits
-  its own **background dropdown** (`transparent` / `white` /
-  `none`), preselected to the site's default — ChatGPT
-  transparent, Gemini white. Gemini's three laws ride along
-  automatically: the aspect law picked per prompt (badges 1:1,
-  TALL lancets portrait), the background, and no reflections.
-- **Background fix** — runs the in-house remover after every save.
-- **Report txt** — the per-theme report beside the images:
-  start/finish timestamps, per-image generate + process times,
-  original → final resolution, file size, extra actions (REMOVE
-  BG), averages and totals.
-- **Safer retry on refusal** — ON by default: on a SAFETY refusal,
-  re-send the item ONCE with an allegory-framing preamble before
-  giving up (then it just moves on — rework the prompt later).
-- **New chat** — `off` / `collection` (default: a fresh chat after
-  every finished collection) / `folder` (also between folder groups
-  INSIDE a collection, primary → colored …). A failed New-chat
-  click is loud but never stops the run (the old chat still works,
-  just longer).
-- **Open Chrome (login)** — launches the automation Chrome
-  (dedicated `chrome-profile/`; log in once, sessions persist).
-- **Check sheets** — parses the whole queue into the log.
+- **The two AGENT PANELS** (2026-07-18, full per-agent
+  separation) — ChatGPT and Gemini each get their OWN
+  `AgentPanel` labelframe (site logo in the header) holding
+  everything below the shared Output line: the **background
+  dropdown** (`transparent` / `white` / `none`, preselected to the
+  site's default — ChatGPT transparent, Gemini white; Gemini's
+  three laws still ride along automatically), the three composable
+  **post-save switches** — `BG removal`, `Crop`, `Upscale` (all ON
+  by default; each site's post-save pipeline runs exactly ITS
+  ticked steps, in that order, loud on failure but never killing
+  the run), **Report txt**, **Safer retry**, the **New chat** mode,
+  its own **pause** and **action delay** Spinner ranges, and its
+  own **Start / Stop** pair. A site "participates" in a run by
+  being STARTED — there are no site on/off switches any more, and
+  one site running never blocks starting the other. Start/Stop
+  availability is STYLED (`style_action_button`): an available
+  button is FILLED with its colour (solid green Start / solid red
+  Stop), an unavailable one is a disabled OUTLINE — re-applied on
+  every run-state change (while a quota auto-restart is pending,
+  BOTH are available: Start starts earlier, Stop cancels the
+  timer).
+- **Open Chrome (login)** — launches the automation Chrome with
+  both sites' tabs (dedicated `chrome-profile/`; log in once,
+  sessions persist).
+- **Check sheets** — parses the whole queue into the log AND
+  switches the view to the Log tab so the output is immediately
+  visible.
 - **Select images...** — the tick list, PER SITE: every sheet's
   items with one checkbox column per site (all/none toggles per
   sheet), so ChatGPT and Gemini can run different image lists.
@@ -136,38 +140,72 @@ pointer.
   skips advised items by default. Rows are COLOR-CODED: green =
   done on both sites (olive = done on one), red = SUPERSEDED
   advice, orange = other advice (not approved / REUSE), default =
-  pending.
-- **BG removal only...** — standalone background removal, in
-  place, over any existing folder (confirmation first;
-  already-transparent and unclear images are skipped untouched).
-- **Start / Stop** — Stop is graceful: each site finishes its
-  current item; everything finished is already saved.
+  pending. The window opens SIZED TO ITS CONTENT width (clamped to
+  90 % of the screen) with every section COLLAPSED, and a
+  section's rows — hundreds of checkbuttons across a big queue,
+  the old eager build was the window's lag — are built LAZILY on
+  its first expand.
+- **BG removal only... / CROP only... / UPSCALE only...** — the
+  three standalone in-place tools (one at a time): pick a folder,
+  confirm, and the engine function (`remove_background` /
+  `crop_transparent` / `upscale_if_small`) runs over every image
+  under it, in order. They are site-less, so progress reports on
+  the FIRST VISIBLE dashboard panel (its counters restart for the
+  run): done = the file was changed, REFUSED = the engine said
+  "nothing"/"unclear" — nothing to do for that file (for Upscale:
+  failed the gate — aspect outside 0.9–1.1 or both sides already
+  ≥ 800).
+- **Stop** — graceful: the site finishes its current item;
+  everything finished is already saved.
 - **Pause / Action delay** — both are random FROM–TO ranges: the
   pause between prompts (fractional seconds) and the human-like
   hesitation between UI steps (click → paste → send, default
-  0.2–0.6 s — never instant). All four fields are the compact
-  `Spinner` units ([−]/[+] step or type directly).
+  0.2–0.6 s — never instant). All four fields per panel are the
+  compact `Spinner` units ([−]/[+] step or type directly).
 - **Instructions** — opens the sheet-authoring guide
   (`instructions.md`) in the in-app `DocWindow` — light Markdown
   formatting, selectable read-only text, and a **Copy (for AI)**
-  button — so a non-programmer never needs a code editor. The same
-  `DocWindow` shows a collection file or a single prompt (Show).
+  button — so a non-programmer never needs a code editor. Every
+  `DocWindow` opening (instructions, a collection file, a folder
+  excerpt, a single prompt) sizes its WIDTH to the text content
+  (clamped to 90 % of the screen).
 - **Two views** (tabs): the **Dashboard** and the **Log
   (detailed)** (timestamped `[HH:MM:SS]`, both sites interleaved
   with `[gemini]` / `[chatgpt]` prefixes). A SAFETY refusal skips
   only that image (REFUSED in log + report; a rerun retries it). A
   quota stop (`TERMINAL STATE`) stops only that site's queue — the
-  other continues; the next Start resumes what remains.
+  other continues. When the site named its reset time
+  (`TerminalState.retry_after_s`), the GUI schedules a **QUOTA
+  AUTO-RESTART** — reset + a polite random 30–120 s, live
+  countdown ("quota — auto-restart in MM:SS") on the site's
+  dashboard panel; it fires whenever the app is open. That site's
+  Stop cancels the pending restart, its Start just starts earlier
+  (cancelling the timer); an unparseable reset keeps the plain
+  stop behaviour.
+- **Settings persistence** (`painter/settings.py`) — remembered
+  across starts: the queue file list, the output folder, EVERY
+  per-agent panel setting, the font zoom base, the dashboard sash
+  position and the window geometry (selection ticks stay
+  per-run). Saves debounce on every meaningful change (var
+  traces, queue edits, zoom, sash release) and always fire on
+  close; loading applies missing keys as current defaults and
+  drops queued files that no longer exist (reported in the log).
+  The stored dict: `queue` (list of paths), `output`,
+  `font_base`, `sash`, `geometry`, and `agents.<site>` with
+  `background`, `bg_removal`, `crop`, `upscale`, `report`,
+  `safer_retry`, `new_chat`, `pause_min/max`, `act_min/max`.
 
 ## The Dashboard
 One `DashPanel` per site, fed ONLY by the runner's structured
-events (never by log-parsing). The tab is ADAPTIVE (2026-07-18):
-it grids a panel only for sites whose switch is ON — one active
-site means ONE full-width panel — reacting live to the site
-switches (`trace_add` on the BooleanVars → `_update_dash_layout`
-re-grids and re-weights the columns). Hidden panels keep all
-their state, they are just `grid_remove`d; with BOTH switches off
-both panels show (such a run cannot Start anyway). Each panel:
+events (never by log-parsing). The panels live in a horizontal
+`ttk.PanedWindow` — DRAG the divider to give one panel more width
+(the sash position persists in the settings). The tab is
+ADAPTIVE: a panel shows only while its site is RUNNING (or
+waiting on a quota restart) or once it HAS DATA — a single
+visible panel takes the full width, no sash; when nothing runs
+and nothing has data yet, both show. Hidden panels keep all their
+state. Each panel (title, then the state line — the quota
+countdown lives there):
 
 - **Task** — a whole-run progress bar and `done / total
   (done/collections)` across every queued collection (pre-counted
@@ -181,7 +219,10 @@ both panels show (such a run cannot Start anyway). Each panel:
   then Tempo (/h) and ETA. Title/value pairs, not one crammed line.
 - **Collections (running + done)** — a `ttk.Treeview` TABLE, three
   levels deep, column headers (Name · Done · AI · Ours · Res · Time
-  · Size), both scrollbars, everything column-aligned:
+  · Size), both scrollbars, everything column-aligned; every column
+  (Name included) has `stretch=False`, so widening Name grows the
+  tree's content width and the horizontal scrollbar takes over
+  instead of squeezing the other columns:
   1. **Collection** — `Done` (done/total), `Time` (wall), `Size`.
   2. **Folder** (the drop-path directory) — `Done` (count in that
      folder), `Time`, `Size`, same columns as the collection.
@@ -189,23 +230,33 @@ both panels show (such a run cannot Start anyway). Each panel:
      `Res`, `Size`.
   The RUNNING collection appears live and open, images streaming in
   under their folder as they save; it collapses when done. **Show**
-  (with its right-arrow icon; or double-click a row) opens the
-  selected collection's whole file,
-  or a single image's own prompt, in the same formatted viewer.
+  (with its right-arrow icon; or double-click a row) opens, in the
+  same formatted viewer: a COLLECTION row — its whole file; a
+  FOLDER row — only that folder's excerpt of the sheet (from the
+  first member entry through the last one's prompt fence, titled
+  with the folder name); an IMAGE row — its own prompt AND, when
+  the destination file already exists, the saved image below it,
+  scaled to fit the window width.
 
 ## Threading
-One worker thread per site; each creates its own Playwright
-instance and `SiteDriver` (sync Playwright is per-thread) and
-walks the theme queue sequentially. Workers touch the window ONLY
-through a queue drained on the tk timer (`_drain_queue` via
-`root.after`) — every widget mutation runs on the main thread.
+One worker thread per site, started and stopped INDEPENDENTLY by
+its panel's buttons (per-site stop events); each creates its own
+Playwright instance and `SiteDriver` (sync Playwright is
+per-thread) and walks the theme queue sequentially. Workers touch
+the window ONLY through a queue drained on the tk timer
+(`_drain_queue` via `root.after`) — every widget mutation runs on
+the main thread; a quota `TerminalState` posts its
+`retry_after_s` the same way and the main thread schedules the
+auto-restart via `root.after`. The standalone tools run on one
+extra worker (one at a time).
 
 ## Connections
 
 ### Uses
 - [Sheet Parser](painter/sheet_parser.md), [CDP Driver](painter/driver.md),
   [Run Loop](painter/runner.md), [Chrome Launcher](painter/chrome.md),
-  [Postprocess](painter/postprocess.md), [Config](painter/config.md)
+  [Postprocess](painter/postprocess.md), [Upscale](painter/upscale.md),
+  [Settings](painter/settings.md), [Config](painter/config.md)
 
 ### Used by
 - The owner (`python main.py` with no arguments).
