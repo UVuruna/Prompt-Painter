@@ -5,10 +5,13 @@
 ## Purpose
 The owner's front door — a themed tkinter window over the same
 engine the CLI uses, built for unattended batches: queue the
-collections, press Start, go ride a bike. A `clam`-themed ttk look
-(setup_style) gives the whole app consistent fonts, padding and
-accent colours; a reusable `ScrollFrame` backs the selection list
-and a `ttk.Treeview` is the dashboard's finished-collection table.
+collections, press Start, go ride a bike. The look is the owner's
+DARK MODERN palette (2026-07-18, UV/UI examples): navy surfaces
+(`#12182b`/`#1a2238`), light text, cyan/green accents, an accent
+Start button, dark fields/tables/log — all through `setup_style`
+(clam) plus `dark_text`/`dark_listbox` for the plain tk widgets. A
+reusable `ScrollFrame` backs the selection list and a
+`ttk.Treeview` is the dashboard's collection table.
 
 ## The window
 
@@ -36,6 +39,11 @@ and a `ttk.Treeview` is the dashboard's finished-collection table.
 - **Safer retry on refusal** — ON by default: on a SAFETY refusal,
   re-send the item ONCE with an allegory-framing preamble before
   giving up (then it just moves on — rework the prompt later).
+- **New chat** — `off` / `collection` (default: a fresh chat after
+  every finished collection) / `folder` (also between folder groups
+  INSIDE a collection, primary → colored …). A failed New-chat
+  click is loud but never stops the run (the old chat still works,
+  just longer).
 - **Open Chrome (login)** — launches the automation Chrome
   (dedicated `chrome-profile/`; log in once, sessions persist).
 - **Check sheets** — parses the whole queue into the log.

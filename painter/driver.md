@@ -19,6 +19,10 @@ handed back for the runner to save under the sheet's own name.
 2. `await_done(log)` — the done edge: the busy signal (stop button)
    must appear, then disappear, under the hard generation timeout;
    long waits log progress at the configured cadence.
+2b. `new_chat(log)` — clicks the sidebar's New-chat control (config
+   selectors, captured live 2026-07-18) and waits for the fresh
+   composer; the callers use it between collections/folder groups
+   when the option is on, and treat a failure as loud-but-not-fatal.
 3. `extract_image() -> bytes` — the last loaded, non-placeholder
    `<img>` of the last response turn, read in-page CANVAS-FIRST
    (`drawImage` + `toDataURL`): site CSP (Gemini) blocks `fetch()`
