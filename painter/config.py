@@ -251,6 +251,9 @@ class SiteConfig:
     # substrings marking a quota/rate limit — TERMINAL for the whole
     # site: report and stop, never blind-retry
     quota_text_markers: tuple[str, ...]
+    # the sidebar "New chat" control (owner captures 2026-07-18) —
+    # clicked between collections/folders when the option is on
+    new_chat: tuple[str, ...] = ()
 
 
 SITES = {
@@ -325,6 +328,10 @@ SITES = {
             "generation limit",
             "image generation limit",
         ),
+        new_chat=(
+            'a[data-testid="create-new-chat-button"]',
+            'a[href="/"][data-sidebar-item="true"]',
+        ),
     ),
     "gemini": SiteConfig(
         name="Gemini",
@@ -396,5 +403,15 @@ SITES = {
             "dostigli ste",
             "ograničenj",
         ),
+        new_chat=(
+            'a[aria-label="New chat"]',
+            'gem-icon-button a[href="/app"]',
+        ),
     ),
 }
+
+# When to open a fresh chat during a run (GUI dropdown / CLI flag):
+# off = one long conversation per site; collection = a new chat after
+# every finished collection; folder = also between folder groups
+# INSIDE a collection (primary -> colored ...).
+NEW_CHAT_CHOICES = ("off", "collection", "folder")

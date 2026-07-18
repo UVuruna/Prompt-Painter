@@ -22,6 +22,7 @@ from painter.config import (
     BACKGROUND_CHOICES,
     CDP_URL,
     DEFAULT_OUT_DIR,
+    NEW_CHAT_CHOICES,
     SITES,
     TIMING,
     prompt_suffix,
@@ -88,6 +89,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-report",
         action="store_true",
         help="do not write the per-sheet report txt",
+    )
+    p.add_argument(
+        "--new-chat",
+        choices=NEW_CHAT_CHOICES,
+        default="collection",
+        help=(
+            "open a fresh chat after every collection, also between"
+            " folder groups, or never (default: collection)"
+        ),
     )
     p.add_argument(
         "--safer-retry",
@@ -218,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         total = 0
         for n, sheet in enumerate(sheets, start=1):
             print(f"\n--- sheet {n}/{len(sheets)}: {sheet.source.name} ---")
-            total += run_sheet(
+            generated = run_sheet(
                 sheet,
                 driver,
                 out_base,
@@ -228,7 +238,18 @@ def main(argv: list[str] | None = None) -> int:
                 prompt_suffix=suffix,
                 report=not args.no_report,
                 safer_retry=args.safer_retry,
+                new_chat_per_folder=(args.new_chat == "folder"),
             )
+            total += generated
+            if (
+                args.new_chat in ("collection", "folder")
+                and generated
+                and n < len(sheets)
+            ):
+                try:
+                    driver.new_chat()
+                except Exception as exc:
+                    print(f"NEW CHAT FAILED (continuing): {exc}")
         print(
             f"\nDone: {total} image(s) across {len(sheets)} sheet(s)"
             f" into {out_base}"

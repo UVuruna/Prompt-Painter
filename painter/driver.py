@@ -242,6 +242,19 @@ class SiteDriver:
         b64 = img.evaluate(_FETCH_IMAGE_JS)
         return base64.b64decode(b64)
 
+    def new_chat(self, log: Log = print) -> None:
+        """Open a fresh conversation (the sidebar's New chat control).
+
+        Loud when the control cannot be found — the caller decides
+        whether that stops the run (it should not: the old chat still
+        works, only longer)."""
+        button = self._require(self.site.new_chat, "the New chat control")
+        button.click()
+        self._hesitate()
+        # the fresh composer must be there before the next paste
+        self._require(self.site.prompt_box, "the prompt box (new chat)")
+        log("    new chat opened")
+
     def _retry_send(self) -> None:
         """Second chance for a submit that did not take: click the send
         button again if present, then Enter in the prompt box (both

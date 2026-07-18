@@ -31,6 +31,7 @@ from painter.config import (
     BACKGROUND_CHOICES,
     CDP_URL,
     DEFAULT_OUT_DIR,
+    NEW_CHAT_CHOICES,
     PROGRESS_SUFFIX,
     SITES,
     STATE_DIRNAME,
@@ -41,42 +42,160 @@ from painter.config import (
 )
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
-# accent colours (shared by the dashboard and the selection list)
-C_DONE = "#2e7d32"      # green — finished
-C_DONE_SOFT = "#558b2f"  # olive — partly done
-C_ADVICE = "#b26a00"     # orange — sheet advice (REUSE / not approved)
-C_SUPERSEDED = "#c62828"  # red — superseded
-C_MUTED = "#666666"
+# the dark modern palette (owner's UV/UI examples: navy surfaces,
+# card panels, cyan/green/purple accents)
+C_BG = "#12182b"        # window background
+C_SURFACE = "#1a2238"   # cards / panels
+C_FIELD = "#141b2e"     # entries, lists, tables
+C_EDGE = "#2b3854"      # hairline borders
+C_TEXT = "#e8ecf5"
+C_MUTED = "#8b94ad"
+C_ACCENT = "#4fc3f7"    # cyan — primary accent / theme bar
+C_DONE = "#2ee59d"      # green — finished / task bar
+C_DONE_SOFT = "#9ccc65"  # olive — partly done
+C_ADVICE = "#ffb74d"     # orange — sheet advice (REUSE / not approved)
+C_SUPERSEDED = "#ff6b6b"  # red — superseded
+C_SELECT = "#24406b"     # selection background
 
 
 def setup_style(root: tk.Tk) -> None:
-    """A light, consistent ttk look — Segoe UI, roomy padding, accents."""
+    """The dark modern ttk look — navy surfaces, accent colours."""
+    root.configure(background=C_BG)
     style = ttk.Style(root)
     try:
         style.theme_use("clam")
     except tk.TclError:
         pass
     base = ("Segoe UI", 10)
-    style.configure(".", font=base)
-    style.configure("TButton", padding=(10, 5))
-    style.configure("TLabelframe", padding=8)
-    style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
-    style.configure("Head.TLabel", font=("Segoe UI", 11, "bold"))
-    style.configure("Big.TLabel", font=("Segoe UI", 15, "bold"))
+    style.configure(
+        ".", font=base, background=C_BG, foreground=C_TEXT,
+        fieldbackground=C_FIELD, troughcolor=C_FIELD,
+        bordercolor=C_EDGE, lightcolor=C_SURFACE, darkcolor=C_BG,
+        focuscolor=C_ACCENT, selectbackground=C_SELECT,
+        selectforeground=C_TEXT, insertcolor=C_TEXT,
+    )
+    style.configure("TFrame", background=C_BG)
+    style.configure("TLabel", background=C_BG, foreground=C_TEXT)
+    style.configure(
+        "TButton", padding=(12, 6), background=C_SURFACE,
+        foreground=C_TEXT, borderwidth=1,
+    )
+    style.map(
+        "TButton",
+        background=[("pressed", C_SELECT), ("active", "#233052")],
+        foreground=[("disabled", C_MUTED)],
+    )
+    style.configure(
+        "Accent.TButton", background=C_DONE, foreground="#0b1220",
+        font=("Segoe UI", 10, "bold"),
+    )
+    style.map(
+        "Accent.TButton",
+        background=[("pressed", "#22b97d"), ("active", "#4dedb0"),
+                    ("disabled", C_SURFACE)],
+        foreground=[("disabled", C_MUTED)],
+    )
+    style.configure(
+        "TLabelframe", padding=10, background=C_BG,
+        bordercolor=C_EDGE, relief="solid",
+    )
+    style.configure(
+        "TLabelframe.Label", font=("Segoe UI", 10, "bold"),
+        background=C_BG, foreground=C_ACCENT,
+    )
+    style.configure("TCheckbutton", background=C_BG, foreground=C_TEXT)
+    style.map(
+        "TCheckbutton",
+        background=[("active", C_BG)],
+        indicatorcolor=[("selected", C_ACCENT), ("!selected", C_FIELD)],
+    )
+    style.configure(
+        "TCombobox", fieldbackground=C_FIELD, background=C_SURFACE,
+        foreground=C_TEXT, arrowcolor=C_TEXT,
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", C_FIELD)],
+        foreground=[("readonly", C_TEXT)],
+    )
+    root.option_add("*TCombobox*Listbox.background", C_FIELD)
+    root.option_add("*TCombobox*Listbox.foreground", C_TEXT)
+    root.option_add("*TCombobox*Listbox.selectBackground", C_SELECT)
+    style.configure(
+        "TSpinbox", fieldbackground=C_FIELD, background=C_SURFACE,
+        foreground=C_TEXT, arrowcolor=C_TEXT, insertcolor=C_TEXT,
+    )
+    style.configure(
+        "TEntry", fieldbackground=C_FIELD, foreground=C_TEXT,
+        insertcolor=C_TEXT,
+    )
+    style.configure("TNotebook", background=C_BG, borderwidth=0)
+    style.configure(
+        "TNotebook.Tab", padding=(16, 7), background=C_SURFACE,
+        foreground=C_MUTED,
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", C_BG)],
+        foreground=[("selected", C_ACCENT)],
+    )
+    style.configure(
+        "Treeview", background=C_FIELD, fieldbackground=C_FIELD,
+        foreground=C_TEXT, rowheight=24, borderwidth=0,
+    )
+    style.map(
+        "Treeview",
+        background=[("selected", C_SELECT)],
+        foreground=[("selected", C_TEXT)],
+    )
+    style.configure(
+        "Treeview.Heading", background=C_SURFACE, foreground=C_ACCENT,
+        font=("Segoe UI", 9, "bold"), relief="flat",
+    )
+    style.map("Treeview.Heading", background=[("active", C_SELECT)])
+    style.configure(
+        "TScrollbar", background=C_SURFACE, troughcolor=C_BG,
+        arrowcolor=C_MUTED, bordercolor=C_BG,
+    )
+    style.configure("TSeparator", background=C_EDGE)
+    style.configure("Head.TLabel", font=("Segoe UI", 11, "bold"),
+                    foreground=C_ACCENT)
+    style.configure("Big.TLabel", font=("Segoe UI", 16, "bold"),
+                    foreground=C_TEXT)
     style.configure("Value.TLabel", font=("Segoe UI", 10, "bold"))
     style.configure("Muted.TLabel", foreground=C_MUTED)
     style.configure("Mono.TLabel", font=("Consolas", 9), foreground=C_MUTED)
     style.configure(
-        "Expander.TButton", anchor="w", padding=(6, 4),
-        font=("Segoe UI", 10, "bold"),
+        "Expander.TButton", anchor="w", padding=(8, 5),
+        font=("Segoe UI", 10, "bold"), background=C_SURFACE,
     )
     style.configure(
-        "Task.Horizontal.TProgressbar", troughcolor="#e6e6e6",
-        background=C_DONE,
+        "Task.Horizontal.TProgressbar", troughcolor=C_FIELD,
+        background=C_DONE, bordercolor=C_EDGE,
+        lightcolor=C_DONE, darkcolor=C_DONE,
     )
     style.configure(
-        "Theme.Horizontal.TProgressbar", troughcolor="#e6e6e6",
-        background="#1565c0",
+        "Theme.Horizontal.TProgressbar", troughcolor=C_FIELD,
+        background=C_ACCENT, bordercolor=C_EDGE,
+        lightcolor=C_ACCENT, darkcolor=C_ACCENT,
+    )
+
+
+def dark_text(widget: tk.Text) -> None:
+    """The dark skin for plain tk Text/ScrolledText widgets."""
+    widget.configure(
+        background=C_FIELD, foreground=C_TEXT, insertbackground=C_TEXT,
+        selectbackground=C_SELECT, selectforeground=C_TEXT,
+        relief="flat", highlightthickness=0,
+    )
+
+
+def dark_listbox(widget: tk.Listbox) -> None:
+    widget.configure(
+        background=C_FIELD, foreground=C_TEXT,
+        selectbackground=C_SELECT, selectforeground=C_TEXT,
+        relief="flat", highlightthickness=1,
+        highlightbackground=C_EDGE, highlightcolor=C_ACCENT,
     )
 
 
@@ -92,7 +211,8 @@ class ScrollFrame(ttk.Frame):
     def __init__(self, master, horizontal: bool = False):
         super().__init__(master)
         self._stretch = not horizontal
-        self.canvas = tk.Canvas(self, highlightthickness=0)
+        self.canvas = tk.Canvas(self, highlightthickness=0,
+                                background=C_BG)
         vbar = ttk.Scrollbar(
             self, orient="vertical", command=self.canvas.yview
         )
@@ -638,6 +758,7 @@ class PainterGui:
         self.sheet_list = tk.Listbox(
             lf, height=5, activestyle="none", font=("Consolas", 9)
         )
+        dark_listbox(self.sheet_list)
         self.sheet_list.pack(side="left", fill="x", expand=True)
         col = ttk.Frame(lf)
         col.pack(side="left", padx=(8, 0), anchor="n")
@@ -697,6 +818,12 @@ class PainterGui:
         ttk.Checkbutton(
             row, text="Safer retry on refusal", variable=self.safer_var
         ).pack(side="left", padx=12)
+        ttk.Label(row, text="New chat:").pack(side="left", padx=(12, 2))
+        self.new_chat_var = tk.StringVar(value="collection")
+        ttk.Combobox(
+            row, textvariable=self.new_chat_var,
+            values=list(NEW_CHAT_CHOICES), state="readonly", width=10,
+        ).pack(side="left")
 
         row = ttk.Frame(lf)
         row.pack(fill="x", pady=2)
@@ -744,7 +871,10 @@ class PainterGui:
             row, text="Select images…", command=self._select_images
         )
         self.btn_select.pack(side="left", padx=4)
-        self.btn_start = ttk.Button(row, text="Start", command=self._start)
+        self.btn_start = ttk.Button(
+            row, text="▶  Start", style="Accent.TButton",
+            command=self._start,
+        )
         self.btn_start.pack(side="left", padx=4)
         self.btn_stop = ttk.Button(
             row, text="Stop", command=self._request_stop, state="disabled"
@@ -776,6 +906,7 @@ class PainterGui:
         self.log_box = scrolledtext.ScrolledText(
             log_tab, height=16, state="disabled", font=("Consolas", 9)
         )
+        dark_text(self.log_box)
         self.log_box.pack(fill="both", expand=True)
 
     def _open_instructions(self) -> None:
@@ -1182,6 +1313,7 @@ class PainterGui:
         )
 
         safer = self.safer_var.get()
+        new_chat = self.new_chat_var.get()
         for key in sites:
             worker = threading.Thread(
                 target=self._drive_site,
@@ -1195,6 +1327,7 @@ class PainterGui:
                     self.report_var.get(),
                     selections[key],
                     safer,
+                    new_chat,
                 ),
                 daemon=True,
             )
@@ -1203,7 +1336,7 @@ class PainterGui:
 
     def _drive_site(
         self, key, sheets, out_base, timing, post_save, suffix, report,
-        selection, safer,
+        selection, safer, new_chat,
     ) -> None:
         """One site's whole run — the theme queue in order, one thread."""
         log = lambda msg: self._q.put(f"[{key}] {msg}")
@@ -1240,9 +1373,22 @@ class PainterGui:
                         only=selection.get(str(sheet.source)),
                         on_event=events,
                         safer_retry=safer,
+                        new_chat_per_folder=(new_chat == "folder"),
                     )
                     done_sheets += 1
                     log(f"collection done: {generated} image(s) into {out_base}")
+                    if (
+                        new_chat in ("collection", "folder")
+                        and generated
+                        and n < len(sheets)
+                    ):
+                        try:
+                            driver.new_chat(log)
+                        except Exception as exc:
+                            log(
+                                "NEW CHAT FAILED (continuing in the old"
+                                f" one): {exc}"
+                            )
                 except TerminalState as exc:
                     log(f"TERMINAL STATE (quota/rate limit): {exc}")
                     log(
@@ -1499,10 +1645,10 @@ class DocWindow(tk.Toplevel):
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self.txt = tk.Text(
-            wrap, wrap="word", font=("Segoe UI", 10), padx=12, pady=10,
-            spacing1=2, spacing3=2, background="white", relief="flat",
-            cursor="arrow",
+            wrap, wrap="word", font=("Segoe UI", 10), padx=14, pady=12,
+            spacing1=2, spacing3=2, cursor="arrow",
         )
+        dark_text(self.txt)
         vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.txt.yview)
         self.txt.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
@@ -1515,14 +1661,17 @@ class DocWindow(tk.Toplevel):
 
     def _configure_tags(self) -> None:
         self.txt.tag_configure("h1", font=("Segoe UI", 15, "bold"),
+                               foreground=C_ACCENT,
                                spacing1=10, spacing3=6)
         self.txt.tag_configure("h2", font=("Segoe UI", 12, "bold"),
+                               foreground=C_ACCENT,
                                spacing1=8, spacing3=4)
         self.txt.tag_configure("h3", font=("Segoe UI", 11, "bold"),
+                               foreground=C_DONE,
                                spacing1=6, spacing3=3)
         self.txt.tag_configure(
-            "code", font=("Consolas", 9), background="#f2f2f2",
-            lmargin1=16, lmargin2=16,
+            "code", font=("Consolas", 9), background="#0d1322",
+            foreground="#a5d6ff", lmargin1=16, lmargin2=16,
         )
         self.txt.tag_configure("bold", font=("Segoe UI", 10, "bold"))
         self.txt.tag_configure("bullet", lmargin1=16, lmargin2=30)

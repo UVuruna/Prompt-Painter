@@ -192,6 +192,7 @@ def run_sheet(
     only: set[str] | None = None,
     on_event: OnEvent | None = None,
     safer_retry: bool = False,
+    new_chat_per_folder: bool = False,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -282,12 +283,23 @@ def run_sheet(
     refused = 0
     fix_failures = 0
     stopped_why = "all pending items done"
+    last_folder: str | None = None
     try:
         for idx, item in enumerate(queue, start=1):
             if should_stop is not None and should_stop():
                 stopped_why = "stopped on request"
                 log(f"  STOPPED on request — {generated}/{total} this run")
                 break
+            if new_chat_per_folder:
+                folder = str(Path(item.drop_path).parent)
+                if last_folder is not None and folder != last_folder:
+                    log(f"  new chat (folder change -> {folder})")
+                    try:
+                        driver.new_chat(log)
+                    except Exception as exc:  # loud, never fatal
+                        log(f"  NEW CHAT FAILED (continuing in the"
+                            f" old one): {exc}")
+                last_folder = folder
             elapsed = time.monotonic() - start
             log(f"[{elapsed:7.1f}s] ({idx}/{total}) {item.title}")
             emit(
