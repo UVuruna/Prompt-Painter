@@ -43,31 +43,60 @@ from painter.config import (
     CDP_URL,
     DEFAULT_OUT_DIR,
     NEW_CHAT_CHOICES,
-    PROGRESS_SUFFIX,
     SITES,
     STATE_DIRNAME,
+    SWITCH_ANIM_MS,
+    SWITCH_ASPECT,
+    SWITCH_CLOUD,
+    SWITCH_CLOUD_HI,
+    SWITCH_CRATER,
+    SWITCH_CRATERS,
+    SWITCH_FRAME_MS,
+    SWITCH_H,
+    SWITCH_HOVER_SCALE,
+    SWITCH_KNOB_FACTOR,
+    SWITCH_MOON,
+    SWITCH_MOON_EDGE,
+    SWITCH_PAD_PX,
+    SWITCH_STAR,
+    SWITCH_SUN,
+    SWITCH_SUN_GLOW,
+    SWITCH_TRACK_DAY,
+    SWITCH_TRACK_NIGHT,
+    PROGRESS_SUFFIX,
+    THEMES,
     TIMING,
     dest_for,
     fmt_duration,
     fmt_size,
     prompt_suffix,
+    status_pair,
+    theme_pair,
 )
 from painter.settings import load_settings, save_settings
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
-# the rounded controls are customtkinter (the SAME mix RHMH runs:
-# CTk widgets living inside a ttkbootstrap window); their colours are
-# pulled from the live darkly palette so both families read as one.
-# Appearance is pinned dark — never the OS light mode over darkly.
-ctk.set_appearance_mode("dark")
+# ---------------------------------------------------------------------
+# Theming — TWO coordinated backbones flipped as one (owner 2026-07-18)
+# ---------------------------------------------------------------------
+# THEMES (painter/config.py) is the single source of truth. Every CTk
+# colour kwarg below is a fixed (day, night) tuple via theme_pair(), so
+# one ctk.set_appearance_mode() repaints all CTk controls with zero
+# re-walk; ttk flips via theme_use() + a re-run of setup_style(); plain
+# tk (Text/Listbox/Canvas/Toplevel) goes through the THEMED_TK role
+# registry; and open Toplevels each expose apply_theme(). There is NO
+# module-level appearance pin — startup applies the saved theme BEFORE
+# building any widget, so no widget is ever born in the wrong theme.
 
-# semantic STATUS colours only — the widget look itself comes from
-# ttkbootstrap's darkly theme. These colour-code Selection-window
-# rows and DocWindow tags, aligned to darkly's own accents
-C_DONE = "#00bc8c"        # green — finished (darkly 'success')
-C_DONE_SOFT = "#9ccc65"   # olive — done on one site only
-C_ADVICE = "#f39c12"      # orange — sheet advice (darkly 'warning')
-C_SUPERSEDED = "#e74c3c"  # red — superseded (darkly 'danger')
+# the LIVE theme name — status()/skinners read it at call time, so
+# lazily-built widgets never hold a stale global
+ACTIVE_THEME = "night"
+
+
+def status(role: str) -> str:
+    """The ACTIVE theme's semantic status colour for one role (read
+    live, so a widget built after a flip gets the right colour)."""
+    return THEMES[ACTIVE_THEME]["status"][role]
 
 # button icons — SVG-first (the owner's assets/icons/*.svg), rasterized
 # through Qt's QSvgRenderer (PySide6, already a monorepo build dep) at
@@ -304,43 +333,56 @@ def _darken(hex_color: str, factor: float = HOVER_DARKEN) -> str:
     )
 
 
+def _darken_pair(
+    pair: tuple[str, str], factor: float = HOVER_DARKEN
+) -> tuple[str, str]:
+    """Darken each end of a (day, night) tuple so hover shades stay
+    theme-aware tuples the appearance mode can flip."""
+    return (_darken(pair[0], factor), _darken(pair[1], factor))
+
+
 def _button_colors(kind: str) -> dict:
-    """CTkButton colour kwargs for one semantic kind, pulled from the
-    LIVE darkly palette so the CTk/ttk mix stays one colour family."""
-    c = tb.Style().colors
+    """CTkButton colour kwargs for one semantic kind, as (day, night)
+    tuples via theme_pair() — a single ctk.set_appearance_mode() then
+    repaints every button with zero re-walk. Solid buttons carry the
+    status btn_text (white in both themes) so they stay legible on the
+    cream day fill."""
     solid = {
-        "secondary": c.secondary,
-        "success": c.success,
-        "danger": c.danger,
-        "info": c.info,
+        "secondary": theme_pair("secondary"),
+        "success": theme_pair("success"),
+        "danger": theme_pair("danger"),
+        "info": theme_pair("info"),
     }
     if kind in solid:
         color = solid[kind]
         return dict(
-            fg_color=color, hover_color=_darken(color),
-            text_color=c.fg, text_color_disabled=c.light,
+            fg_color=color, hover_color=_darken_pair(color),
+            text_color=status_pair("btn_text"),
+            text_color_disabled=theme_pair("light"),
         )
     outline = {
-        "secondary-outline": c.light,
-        "danger-outline": c.danger,
-        "success-outline": c.success,
+        "secondary-outline": theme_pair("light"),
+        "danger-outline": theme_pair("danger"),
+        "success-outline": theme_pair("success"),
     }
     if kind in outline:
         color = outline[kind]
         return dict(
             fg_color="transparent", border_width=1, border_color=color,
-            hover_color=_darken(color, 0.35),
-            text_color=color, text_color_disabled=c.secondary,
+            hover_color=_darken_pair(color, 0.35),
+            text_color=color, text_color_disabled=theme_pair("secondary"),
         )
     if kind == "link":  # borderless accent button (dashboard 'Show')
         return dict(
-            fg_color="transparent", hover_color=c.dark,
-            text_color=c.info, text_color_disabled=c.secondary,
+            fg_color="transparent", hover_color=theme_pair("dark"),
+            text_color=theme_pair("info"),
+            text_color_disabled=theme_pair("secondary"),
         )
     if kind == "expander":  # flat left-aligned ▶/▼ section header
         return dict(
-            fg_color="transparent", hover_color=c.dark,
-            text_color=c.fg, text_color_disabled=c.secondary,
+            fg_color="transparent", hover_color=theme_pair("dark"),
+            text_color=theme_pair("fg"),
+            text_color_disabled=theme_pair("secondary"),
             anchor="w",
         )
     raise ValueError(f"unknown button kind: {kind}")
@@ -387,7 +429,7 @@ def rounded_button(
     pins the icon to the left edge and centers the text (the stacked
     Collections buttons)."""
     opts = _button_colors(kind)
-    opts.setdefault("bg_color", tb.Style().colors.bg)
+    opts.setdefault("bg_color", theme_pair("bg"))
     opts.update(kwargs)
     cls = EdgeIconButton if icon_edge else ctk.CTkButton
     return cls(
@@ -400,15 +442,15 @@ def rounded_button(
 
 
 def _input_colors() -> dict:
-    """Shared colour kwargs for rounded CTk entry/combobox fields.
+    """Shared colour kwargs for rounded CTk entry/combobox fields, as
+    (day, night) tuples.
 
-    ``bg_color`` is pinned to the darkly window background so the
-    canvas corners around the rounded field never show the CTk theme's
-    own gray on a ttk parent."""
-    c = tb.Style().colors
+    ``bg_color`` is pinned to the active window background so the canvas
+    corners around the rounded field never show the CTk theme's own gray
+    on a ttk parent."""
     return dict(
-        fg_color=c.inputbg, border_color=c.secondary,
-        text_color=c.inputfg, bg_color=c.bg,
+        fg_color=theme_pair("inputbg"), border_color=theme_pair("secondary"),
+        text_color=theme_pair("inputfg"), bg_color=theme_pair("bg"),
     )
 
 
@@ -445,14 +487,13 @@ def rounded_combo(
     parent, values, variable, width: int = 140, **kwargs
 ) -> ctk.CTkComboBox:
     """A rounded read-only dropdown bound to ``variable``."""
-    c = tb.Style().colors
     opts = _input_colors()
     opts.update(
-        button_color=c.secondary,
-        button_hover_color=_darken(c.secondary),
-        dropdown_fg_color=c.dark,
-        dropdown_hover_color=c.selectbg,
-        dropdown_text_color=c.fg,
+        button_color=theme_pair("secondary"),
+        button_hover_color=_darken_pair(theme_pair("secondary")),
+        dropdown_fg_color=theme_pair("dark"),
+        dropdown_hover_color=theme_pair("selectbg"),
+        dropdown_text_color=theme_pair("fg"),
     )
     opts.update(kwargs)
     field = ctk.CTkComboBox(
@@ -474,10 +515,10 @@ class Spinner(ctk.CTkFrame):
     (never below 0). Unparsable text is left for Start to report."""
 
     def __init__(self, parent, variable, step: float, entry_width: int = 40):
-        c = tb.Style().colors
         super().__init__(
             parent, corner_radius=INPUT_RADIUS, border_width=1,
-            fg_color=c.inputbg, border_color=c.secondary, bg_color=c.bg,
+            fg_color=theme_pair("inputbg"), border_color=theme_pair("secondary"),
+            bg_color=theme_pair("bg"),
         )
         self._var = variable
         self._step = step
@@ -489,8 +530,8 @@ class Spinner(ctk.CTkFrame):
         # cover the bottom border row under the buttons)
         btn = dict(
             width=24, height=20, corner_radius=INPUT_RADIUS - 2,
-            fg_color="transparent", hover_color=c.selectbg,
-            text_color=c.fg, font=ctk_font("spin"),
+            fg_color="transparent", hover_color=theme_pair("selectbg"),
+            text_color=theme_pair("fg"), font=ctk_font("spin"),
         )
         ctk.CTkButton(
             self, text="−", command=partial(self._bump, -1.0), **btn
@@ -498,7 +539,7 @@ class Spinner(ctk.CTkFrame):
         entry = ctk.CTkEntry(
             self, width=entry_width, height=INPUT_HEIGHT - 10,
             corner_radius=0, border_width=0, fg_color="transparent",
-            text_color=c.inputfg, justify="center",
+            text_color=theme_pair("inputfg"), justify="center",
             font=ctk_font("root"), textvariable=variable,
         )
         _untheme_inner_entry(entry)
@@ -518,22 +559,23 @@ class Spinner(ctk.CTkFrame):
 
 def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
     """A rounded on/off switch for the main run options."""
-    c = tb.Style().colors
     return ctk.CTkSwitch(
         parent, text=text, variable=variable,
         onvalue=True, offvalue=False,
         font=ctk_font("root"),
-        fg_color=c.secondary, progress_color=c.success,
-        text_color=c.fg, bg_color=c.bg,
+        fg_color=theme_pair("secondary"), progress_color=theme_pair("success"),
+        text_color=theme_pair("fg"), bg_color=theme_pair("bg"),
     )
 
 
-def setup_style(root: tk.Tk) -> None:
-    """The few named styles the darkly theme does not ship.
+def setup_style() -> None:
+    """The few named styles the active ttkbootstrap theme does not ship.
 
-    Every font comes from the registry's shared named fonts, so a
-    zoom (set_font_base) re-renders all of them without touching the
-    styles again."""
+    Reads ``style.colors`` LIVE, so re-running it after a theme_use()
+    reproduces the styles in the new palette (this is how the ttk half
+    of the app flips). Every font comes from the registry's shared named
+    fonts, so a zoom (set_font_base) re-renders all of them without
+    touching the styles again."""
     style = tb.Style()
     colors = style.colors
     style.configure(".", font=tk_font("root"))
@@ -549,8 +591,18 @@ def setup_style(root: tk.Tk) -> None:
     style.configure("Treeview.Heading", font=tk_font("bold"))
 
 
-def dark_text(widget: tk.Text) -> None:
-    """The theme skin for plain tk Text/ScrolledText widgets."""
+# ---------------------------------------------------------------------
+# Plain-tk colour registry — the ONLY place plain tk Text/Listbox/
+# Canvas/Toplevel colours live. Each widget is created through a skin_*
+# helper that colours it AND registers (widget, role); apply_theme()
+# then re-walks the flat registry, re-applying each role's skin from the
+# now-active palette and pruning dead widgets. ttk styles and CTk tuples
+# flip on their own; these do not, so they need the registry.
+# ---------------------------------------------------------------------
+THEMED_TK: list[tuple[tk.Misc, str]] = []
+
+
+def _apply_text_skin(widget: tk.Text) -> None:
     colors = tb.Style().colors
     widget.configure(
         background=colors.inputbg, foreground=colors.inputfg,
@@ -561,7 +613,7 @@ def dark_text(widget: tk.Text) -> None:
     )
 
 
-def dark_listbox(widget: tk.Listbox) -> None:
+def _apply_listbox_skin(widget: tk.Listbox) -> None:
     colors = tb.Style().colors
     widget.configure(
         background=colors.inputbg, foreground=colors.inputfg,
@@ -570,6 +622,98 @@ def dark_listbox(widget: tk.Listbox) -> None:
         relief="flat", highlightthickness=1,
         highlightbackground=colors.border,
         highlightcolor=colors.primary,
+    )
+
+
+def _apply_surface_skin(widget: tk.Misc) -> None:
+    """Canvas / Toplevel: just the active window background."""
+    widget.configure(background=tb.Style().colors.bg)
+
+
+_TK_SKIN = {
+    "text": _apply_text_skin,
+    "listbox": _apply_listbox_skin,
+    "canvas": _apply_surface_skin,
+    "toplevel": _apply_surface_skin,
+}
+
+
+def _skin(widget: tk.Misc, role: str) -> None:
+    _TK_SKIN[role](widget)
+    THEMED_TK.append((widget, role))
+
+
+def skin_text(widget: tk.Text) -> None:
+    """Colour a plain tk Text from the active palette and register it."""
+    _skin(widget, "text")
+
+
+def skin_listbox(widget: tk.Listbox) -> None:
+    _skin(widget, "listbox")
+
+
+def skin_canvas(widget: tk.Canvas) -> None:
+    _skin(widget, "canvas")
+
+
+def skin_toplevel(widget: tk.Misc) -> None:
+    _skin(widget, "toplevel")
+
+
+def recolor_tk_registry() -> None:
+    """Re-apply every registered plain-tk widget's role skin from the
+    now-active palette; prune widgets destroyed since (the codebase's
+    tk.TclError idiom)."""
+    alive: list[tuple[tk.Misc, str]] = []
+    for widget, role in THEMED_TK:
+        try:
+            _TK_SKIN[role](widget)
+            alive.append((widget, role))
+        except tk.TclError:
+            pass  # widget destroyed — drop it
+    THEMED_TK[:] = alive
+
+
+# every theme-aware Toplevel (SelectWindow, DocWindow) registers itself
+# here on __init__ and unregisters on <Destroy>; apply_theme fires each
+# open one's own apply_theme() so it flips coherently with the main
+# window (their per-widget foregrounds do not follow ttk styles)
+THEME_TOPLEVELS: list = []
+
+
+def apply_theme(name: str) -> None:
+    """The ONE coherent flip, used by BOTH startup and the toggle: swap
+    the ttkbootstrap theme + re-run setup_style (the ttk half), flip the
+    customtkinter appearance mode (every CTk tuple re-resolves), recolour
+    the plain-tk registry, then fire every open Toplevel's apply_theme.
+    No window teardown — an active run's worker threads, dashboard
+    counters and quota countdowns all survive."""
+    global ACTIVE_THEME
+    ACTIVE_THEME = name
+    theme = THEMES[name]
+    tb.Style().theme_use(theme["ttkname"])
+    setup_style()
+    ctk.set_appearance_mode(theme["mode"])
+    recolor_tk_registry()
+    for top in list(THEME_TOPLEVELS):
+        try:
+            top.apply_theme()
+        except tk.TclError:
+            pass  # closed mid-flip
+
+
+def register_painter_day() -> None:
+    """Register the custom light theme ONCE (idempotent). No stock light
+    theme carries the owner's warm-gold accent, so 'day' is a custom
+    ThemeDefinition drawing every ttk widget from the site colours."""
+    from ttkbootstrap.style import ThemeDefinition
+
+    style = tb.Style()
+    day = THEMES["day"]
+    if day["ttkname"] in style.theme_names():
+        return
+    style.register_theme(
+        ThemeDefinition(day["ttkname"], day["ttk"], day["mode"])
     )
 
 
@@ -596,9 +740,8 @@ class ScrollFrame(ttk.Frame):
         self._stretch = not horizontal
         self._sr_job = None  # coalesced scrollregion pass (see _on_body)
         self._sr_suspended = False  # bulk-build pause (see suspend_...)
-        self.canvas = tk.Canvas(
-            self, highlightthickness=0, background=tb.Style().colors.bg
-        )
+        self.canvas = tk.Canvas(self, highlightthickness=0)
+        skin_canvas(self.canvas)  # registered so its bg re-tints on a flip
         vbar = ttk.Scrollbar(
             self, orient="vertical", command=self.canvas.yview,
             bootstyle="round",
@@ -684,15 +827,20 @@ class ScrollFrame(ttk.Frame):
             self.canvas.unbind_all("<MouseWheel>")
 
 
-def style_action_button(btn: ctk.CTkButton, color: str, available: bool) -> None:
+def style_action_button(
+    btn: ctk.CTkButton, kind: str, available: bool
+) -> None:
     """Start/Stop availability styling: AVAILABLE = FILLED with its
     colour, UNAVAILABLE = disabled OUTLINE (coloured border, dark
-    inside). Re-applied on every run-state change."""
-    c = tb.Style().colors
+    inside). ``kind`` is a semantic palette key ('success' / 'danger')
+    resolved to a (day, night) tuple, so the runtime recolour flips with
+    the appearance mode like every other CTk control. Re-applied on
+    every run-state change."""
+    color = theme_pair(kind)
     if available:
         btn.configure(
             state="normal", fg_color=color, border_width=0,
-            hover_color=_darken(color), text_color=c.fg,
+            hover_color=_darken_pair(color), text_color=status_pair("btn_text"),
         )
     else:
         btn.configure(
@@ -729,7 +877,7 @@ class AgentPanel(ttk.Labelframe):
         head = ttk.Frame(self)
         ctk.CTkLabel(
             head, text="", image=icon(_SITE_ICON[site_key]), width=22,
-            fg_color="transparent", bg_color=tb.Style().colors.bg,
+            fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(head, text=site.name, style="Head.TLabel").pack(side="left")
         self.configure(labelwidget=head, padding=6)
@@ -812,10 +960,9 @@ class AgentPanel(ttk.Labelframe):
         """Start is available unless the site runs; Stop is available
         while it runs OR while a quota auto-restart is pending (Stop
         then cancels the pending restart)."""
-        c = tb.Style().colors
-        style_action_button(self.btn_start, c.success, not running)
+        style_action_button(self.btn_start, "success", not running)
         style_action_button(
-            self.btn_stop, c.danger, running or pending_restart
+            self.btn_stop, "danger", running or pending_restart
         )
 
     def pace_floats(self) -> tuple[float, float, float, float]:
@@ -1335,13 +1482,21 @@ class PainterGui:
         self.root = root
         root.title("PromptPainter")
         root.minsize(900, 640)
-        setup_style(root)
 
-        # persisted state first — the saved font zoom must apply
-        # BEFORE any widget is built (fonts are created lazily)
+        # register the custom light theme before anything can apply it
+        register_painter_day()
+
+        # persisted state first — the saved font zoom must apply BEFORE
+        # any widget is built (fonts are created lazily), and the saved
+        # theme must be APPLIED before building so every widget is born
+        # in the right theme (no first-frame flash, no half-theme window)
         self._settings = load_settings()
         if "font_base" in self._settings:
             set_font_base(int(self._settings["font_base"]))
+        theme = self._settings.get("theme", "night")
+        if theme not in THEMES:
+            theme = "night"
+        apply_theme(theme)  # sets the ttk theme + CTk mode BEFORE build
 
         self._q: queue.Queue = queue.Queue()
         self._sheets: list[Path] = []
@@ -1361,6 +1516,11 @@ class PainterGui:
         outer = ttk.Frame(root, padding=8)
         outer.pack(fill="both", expand=True)
 
+        # a thin top strip packed FIRST so the Day/Night switch sits
+        # top-right without overlapping the full-width Collections frame
+        self._top_strip = ttk.Frame(outer)
+        self._top_strip.pack(fill="x")
+
         self._build_queue(outer)
         self._build_options(outer)
         self._build_toolbar(outer)
@@ -1370,6 +1530,10 @@ class PainterGui:
         ttk.Label(
             outer, textvariable=self.status_var, style="Muted.TLabel"
         ).pack(fill="x", pady=(4, 0))
+
+        # the mini Day/Night switch — reflects the already-applied theme
+        self.switch = DayNightSwitch(self._top_strip, self)
+        self.switch.pack(side="right")
 
         self._bind_zoom()
         self._apply_settings(self._settings)
@@ -1426,7 +1590,7 @@ class PainterGui:
         self.sheet_list = tk.Listbox(
             lf, height=5, activestyle="none", font=tk_font("mono")
         )
-        dark_listbox(self.sheet_list)
+        skin_listbox(self.sheet_list)
         self.sheet_list.pack(side="left", fill="x", expand=True)
         col = ttk.Frame(lf)
         col.pack(side="left", padx=(8, 0), anchor="n")
@@ -1537,7 +1701,7 @@ class PainterGui:
         self.log_box = tk.Text(
             log_tab, height=16, state="disabled", font=tk_font("mono")
         )
-        dark_text(self.log_box)
+        skin_text(self.log_box)
         log_vsb = ttk.Scrollbar(
             log_tab, orient="vertical", command=self.log_box.yview,
             bootstyle="round",
@@ -2352,6 +2516,7 @@ class PainterGui:
             "queue": [str(p) for p in self._sheets],
             "output": self.out_var.get(),
             "font_base": FONT_BASE,
+            "theme": ACTIVE_THEME,
             "sash": sash,
             "geometry": self.root.geometry(),
             "agents": {
@@ -2457,7 +2622,8 @@ class SelectWindow(tk.Toplevel):
         super().__init__(gui.root)
         self.title("Select images per site")
         self.minsize(SELECT_MIN_W, SELECT_OPEN_H)
-        self.configure(background=tb.Style().colors.bg)
+        skin_toplevel(self)  # bg registered so a flip re-tints the window
+        THEME_TOPLEVELS.append(self)  # flip coherently with the main window
         self._gui = gui
         self._site_keys = sorted(SITES)
 
@@ -2583,6 +2749,10 @@ class SelectWindow(tk.Toplevel):
             leaf = {
                 "name": PurePosixPath(drop).name,
                 "advice": item.advice,
+                # n_done is retained so apply_theme can RECOMPUTE the
+                # status colour for the new theme (the colours differ
+                # per theme for contrast on the light background)
+                "n_done": len(done_sites),
                 "color": self._leaf_color(item.advice, len(done_sites)),
                 "sites": {},
             }
@@ -2609,15 +2779,34 @@ class SelectWindow(tk.Toplevel):
         }
 
     def _leaf_color(self, advice: str | None, n_done: int) -> str:
+        # reads status() live, so a flip recolours the leaves through
+        # this same function
         if n_done == len(self._site_keys):
-            return C_DONE
+            return status("done")
         if advice and "supersed" in advice.lower():
-            return C_SUPERSEDED
+            return status("superseded")
         if advice:
-            return C_ADVICE
+            return status("advice")
         if n_done:
-            return C_DONE_SOFT
+            return status("done_soft")
         return ""
+
+    def apply_theme(self) -> None:
+        """Re-colour this window's PER-WIDGET foregrounds for the active
+        theme (they do not follow ttk styles): the built leaf labels and
+        the Expand-all progress cue. The toplevel bg + scroll canvas ride
+        the global recolour_tk_registry; every ttk widget rides the style
+        re-run."""
+        self._progress_lbl.configure(foreground=tb.Style().colors.info)
+        default_fg = tb.Style().colors.fg
+        for cnode in self._collection_nodes:
+            for fnode in cnode["folders"]:
+                if not fnode["built"]:
+                    continue
+                for leaf, lbl in zip(fnode["leaves"], fnode["leaf_labels"]):
+                    color = self._leaf_color(leaf["advice"], leaf["n_done"])
+                    leaf["color"] = color
+                    lbl.configure(foreground=color or default_fg)
 
     # --- widgets -------------------------------------------------------
 
@@ -2925,6 +3114,8 @@ class SelectWindow(tk.Toplevel):
         # <Destroy> bubbles up from every child — act only on our own
         if event.widget is not self:
             return
+        if self in THEME_TOPLEVELS:
+            THEME_TOPLEVELS.remove(self)
         for var, token in self._traces:
             var.trace_remove("write", token)
         self._traces.clear()
@@ -2949,7 +3140,8 @@ class DocWindow(tk.Toplevel):
         super().__init__(master)
         self.title(title)
         self.minsize(600, 560)
-        self.configure(background=tb.Style().colors.bg)
+        skin_toplevel(self)  # bg registered so a flip re-tints the window
+        THEME_TOPLEVELS.append(self)  # flip coherently with the main window
         self._raw = raw_markdown
         self._copy_text = copy_text if copy_text is not None else raw_markdown
         self._image_path = image_path
@@ -2973,7 +3165,7 @@ class DocWindow(tk.Toplevel):
             wrap, wrap="word", font=tk_font("root"), padx=14, pady=12,
             spacing1=2, spacing3=2, cursor="arrow",
         )
-        dark_text(self.txt)
+        skin_text(self.txt)
         vsb = ttk.Scrollbar(
             wrap, orient="vertical", command=self.txt.yview,
             bootstyle="round",
@@ -2988,6 +3180,18 @@ class DocWindow(tk.Toplevel):
         self._append_image()
         # read-only, but fully selectable and Ctrl+C / Ctrl+A copyable
         self.txt.bind("<Key>", self._readonly_keys)
+        self.bind("<Destroy>", self._on_destroy)
+
+    def _on_destroy(self, event) -> None:
+        # <Destroy> bubbles up from every child — act only on our own
+        if event.widget is self and self in THEME_TOPLEVELS:
+            THEME_TOPLEVELS.remove(self)
+
+    def apply_theme(self) -> None:
+        """Re-run the tag config so the inserted text recolours in place
+        (the Text tags carry per-tag foregrounds that do not follow ttk
+        styles); the Text body bg/fg rides the global recolour."""
+        self._configure_tags()
 
     def _size_to_content(self, md: str) -> None:
         """Width follows the text (longest line, roughly per-role
@@ -3062,11 +3266,11 @@ class DocWindow(tk.Toplevel):
                                foreground=colors.info,
                                spacing1=8, spacing3=4)
         self.txt.tag_configure("h3", font=tk_font("head"),
-                               foreground=C_DONE,
+                               foreground=status("done"),
                                spacing1=6, spacing3=3)
         self.txt.tag_configure(
             "code", font=tk_font("mono"), background=colors.dark,
-            foreground="#a5d6ff", lmargin1=16, lmargin2=16,
+            foreground=status("code_fg"), lmargin1=16, lmargin2=16,
         )
         self.txt.tag_configure("bold", font=tk_font("bold"))
         self.txt.tag_configure("bullet", lmargin1=16, lmargin2=30)
@@ -3121,6 +3325,184 @@ class DocWindow(tk.Toplevel):
             " document.",
             parent=self,
         )
+
+
+class DayNightSwitch(tk.Canvas):
+    """The mini Day/Night toggle, top-right — a Canvas pill ported from
+    the owner's website switch (geometry/colours in the SWITCH_*
+    config). OFF/left = MOON on a dark-blue track with silver stars;
+    ON/right = SUN (with a soft glow) on a light-blue track with clouds.
+    A click flips the theme SYNCHRONOUSLY (the app is coherent instantly)
+    and persists it, then a ~600 ms smoothstep slide runs as flourish.
+
+    The whole pill is redrawn each animation frame (a handful of ovals on
+    a tiny canvas — cheaper and simpler than moving a dozen items); the
+    track colour + decorations hard-swap at the knob's midpoint (tk
+    Canvas has no alpha, so no cross-fade). The canvas is registered as a
+    'canvas' surface so its own background re-tints with the window."""
+
+    def __init__(self, master, gui: "PainterGui"):
+        self._h = SWITCH_H
+        self._pad = SWITCH_PAD_PX
+        self._track_w = round(self._h * SWITCH_ASPECT)
+        self._knob_d = round(self._h * SWITCH_KNOB_FACTOR)
+        inset = (self._h - self._knob_d) / 2
+        super().__init__(
+            master,
+            width=self._track_w + 2 * self._pad,
+            height=self._h + 2 * self._pad,
+            highlightthickness=0, bd=0, cursor="hand2",
+        )
+        skin_canvas(self)  # its background follows the window bg on a flip
+        self._gui = gui
+        self._x_off = self._pad + inset
+        self._x_on = self._pad + self._track_w - self._knob_d - inset
+        self._hover = False
+        self._anim_job: str | None = None
+        self._on = THEMES[ACTIVE_THEME]["switch_on"]  # reflect the theme
+        self._knob_x = self._x_on if self._on else self._x_off
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        self._redraw()
+
+    # --- public API ----------------------------------------------------
+
+    def set(self, name: str, animate: bool = False) -> None:
+        """Reflect a theme name on the knob (used if the theme is set by
+        something other than a click); no apply_theme call, no recursion."""
+        self._on = THEMES[name]["switch_on"]
+        if animate:
+            self._animate()
+        else:
+            self._cancel_anim()
+            self._knob_x = self._x_on if self._on else self._x_off
+            self._redraw()
+
+    # --- events --------------------------------------------------------
+
+    def _on_click(self, _event=None) -> None:
+        self._on = not self._on
+        name = "day" if self._on else "night"
+        apply_theme(name)          # flip the whole app now (coherent)
+        self._gui._schedule_save()  # persist the choice
+        self._animate()            # slide the knob as flourish
+
+    def _on_enter(self, _event) -> None:
+        self._hover = True
+        self._redraw()
+
+    def _on_leave(self, _event) -> None:
+        self._hover = False
+        self._redraw()
+
+    # --- animation -----------------------------------------------------
+
+    def _cancel_anim(self) -> None:
+        if self._anim_job is not None:
+            self.after_cancel(self._anim_job)
+            self._anim_job = None
+
+    def _animate(self) -> None:
+        self._cancel_anim()
+        target = self._x_on if self._on else self._x_off
+        start = self._knob_x
+        frames = max(round(SWITCH_ANIM_MS / SWITCH_FRAME_MS), 1)
+        self._anim_i = 0
+
+        def step():
+            self._anim_i += 1
+            t = self._anim_i / frames
+            ease = t * t * (3 - 2 * t)  # smoothstep
+            self._knob_x = start + (target - start) * ease
+            self._redraw()
+            if self._anim_i < frames:
+                self._anim_job = self.after(SWITCH_FRAME_MS, step)
+            else:
+                self._knob_x = target
+                self._anim_job = None
+                self._redraw()
+
+        step()
+
+    # --- drawing -------------------------------------------------------
+
+    def _redraw(self) -> None:
+        self.delete("all")
+        day = self._knob_x > (self._x_off + self._x_on) / 2
+        self._draw_track(SWITCH_TRACK_DAY if day else SWITCH_TRACK_NIGHT)
+        if day:
+            self._draw_clouds()
+        else:
+            self._draw_stars()
+        self._draw_knob(self._knob_x, day)
+
+    def _draw_track(self, fill: str) -> None:
+        p, h, tw = self._pad, self._h, self._track_w
+        # a rounded pill = two end-cap circles + a joining rectangle
+        self.create_oval(p, p, p + h, p + h, fill=fill, outline=fill)
+        self.create_oval(p + tw - h, p, p + tw, p + h, fill=fill, outline=fill)
+        self.create_rectangle(
+            p + h / 2, p, p + tw - h / 2, p + h, fill=fill, outline=fill
+        )
+
+    def _draw_stars(self) -> None:
+        # scattered over the empty RIGHT side (the knob sits left in night)
+        p, h, tw = self._pad, self._h, self._track_w
+        for fx, fy, rr in (
+            (0.62, 0.32, 1.4), (0.72, 0.60, 1.1),
+            (0.82, 0.38, 1.3), (0.70, 0.30, 0.9),
+        ):
+            cx, cy = p + fx * tw, p + fy * h
+            self.create_oval(
+                cx - rr, cy - rr, cx + rr, cy + rr,
+                fill=SWITCH_STAR, outline=SWITCH_STAR,
+            )
+
+    def _draw_clouds(self) -> None:
+        # over the empty LEFT side (the knob sits right in day)
+        p, h, tw = self._pad, self._h, self._track_w
+        cx, cy = p + 0.30 * tw, p + 0.62 * h
+        for dx, dy, rr, col in (
+            (-3.5, 1.0, 2.2, SWITCH_CLOUD_HI),
+            (0.0, 0.0, 3.3, SWITCH_CLOUD),
+            (3.5, 1.0, 2.5, SWITCH_CLOUD),
+        ):
+            self.create_oval(
+                cx + dx - rr, cy + dy - rr, cx + dx + rr, cy + dy + rr,
+                fill=col, outline=col,
+            )
+
+    def _draw_knob(self, x: float, day: bool) -> None:
+        d = self._knob_d * (SWITCH_HOVER_SCALE if self._hover else 1.0)
+        cx = x + self._knob_d / 2
+        cy = self._pad + self._h / 2
+        if day:
+            g = d * 1.3  # solid glow disc behind the sun (no tk alpha)
+            self.create_oval(
+                cx - g / 2, cy - g / 2, cx + g / 2, cy + g / 2,
+                fill=SWITCH_SUN_GLOW, outline=SWITCH_SUN_GLOW,
+            )
+            self.create_oval(
+                cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2,
+                fill=SWITCH_SUN, outline=SWITCH_SUN,
+            )
+        else:
+            self.create_oval(
+                cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2,
+                fill=SWITCH_MOON, outline=SWITCH_MOON_EDGE,
+            )
+            # craters, positioned within the UNSCALED knob for stability
+            top = cy - self._knob_d / 2
+            left = x
+            for cf, cxf, cyf in SWITCH_CRATERS:
+                cd = self._knob_d * cf
+                ccx = left + cxf * self._knob_d
+                ccy = top + cyf * self._knob_d
+                self.create_oval(
+                    ccx - cd / 2, ccy - cd / 2, ccx + cd / 2, ccy + cd / 2,
+                    fill=SWITCH_CRATER, outline=SWITCH_CRATER,
+                )
 
 
 def main() -> None:

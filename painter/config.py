@@ -119,6 +119,141 @@ UPSCALE_ASPECT_TOL = 0.1
 SETTINGS_PATH = PROJECT_ROOT / "settings.json"
 
 
+# --- GUI themes: the single source of truth (owner 2026-07-18) -------
+#
+# TWO coordinated palettes flipped as one by the GUI's Day/Night
+# switch. This block is PURE DATA (hex strings only) so the engine and
+# every test can import config.py without pulling in tkinter /
+# ttkbootstrap. gui.py turns each entry into the two backbones:
+#   - `ttk`   -> the 16 ttkbootstrap colour keys. "night" is the
+#               built-in darkly theme written out VERBATIM (the owner
+#               is happy with it); "day" is a custom light theme
+#               ("painter_day") mapped from the owner's website LIGHT
+#               palette, authored to how THIS app actually uses each
+#               key. Two keys are deliberately repurposed: `dark` is a
+#               LIGHT surface on day (#e8e4dd) because the app uses it
+#               only as the combobox-dropdown / hover / code-box
+#               background, and `light` is a MID grey (#888888) because
+#               the app uses it only as a muted-text / outline
+#               foreground, never as a light fill.
+#   - `status`-> the semantic colours that are set PER WIDGET at
+#               construction (Select-tree leaf rows, DocWindow text
+#               tags) and so must be recomputed on a flip; contrast-
+#               tuned for each background.
+#   - `ttkname`/`mode`/`switch_on` -> the ttkbootstrap theme name, the
+#               customtkinter appearance mode, and the switch knob side
+#               (False = left/moon, True = right/sun).
+THEMES = {
+    "night": {
+        "ttkname": "darkly",
+        "mode": "dark",
+        "switch_on": False,
+        "ttk": {
+            "primary": "#375a7f",
+            "secondary": "#444444",
+            "success": "#00bc8c",
+            "info": "#3498db",
+            "warning": "#f39c12",
+            "danger": "#e74c3c",
+            "light": "#ADB5BD",
+            "dark": "#303030",
+            "bg": "#222222",
+            "fg": "#ffffff",
+            "selectbg": "#555555",
+            "selectfg": "#ffffff",
+            "border": "#222222",
+            "inputfg": "#ffffff",
+            "inputbg": "#2f2f2f",
+            "active": "#1F1F1F",
+        },
+        "status": {
+            "done": "#00bc8c",       # green — finished (darkly success)
+            "done_soft": "#9ccc65",  # olive — done on one site only
+            "advice": "#f39c12",     # orange — sheet advice (warning)
+            "superseded": "#e74c3c",  # red — superseded (danger)
+            "code_fg": "#a5d6ff",    # DocWindow code text on dark box
+            "btn_text": "#ffffff",   # solid-button label
+        },
+    },
+    "day": {
+        "ttkname": "painter_day",
+        "mode": "light",
+        "switch_on": True,
+        "ttk": {
+            "primary": "#a8873d",    # accent gold
+            "secondary": "#6b6456",  # warm grey
+            "success": "#1a8f6a",    # Start
+            "info": "#8a6f32",       # accent-dark (headers + fills)
+            "warning": "#b9770e",
+            "danger": "#c0392b",     # Stop
+            "light": "#888888",      # MID grey — muted/outline foreground
+            "dark": "#e8e4dd",       # LIGHT surface — dropdown/hover/code bg
+            "bg": "#f5f2ed",         # cream window
+            "fg": "#1a1a1a",         # text-primary
+            "selectbg": "#a8873d",   # gold selection
+            "selectfg": "#ffffff",
+            "border": "#d4d0c8",
+            "inputfg": "#1a1a1a",
+            "inputbg": "#ffffff",    # white fields
+            "active": "#e8e4dd",     # border-light
+        },
+        "status": {
+            "done": "#1a8f6a",
+            "done_soft": "#6f8f2f",
+            "advice": "#b9770e",
+            "superseded": "#c0392b",
+            "code_fg": "#1f5b9e",    # legible on the light code surface
+            "btn_text": "#ffffff",
+        },
+    },
+}
+
+
+def theme_pair(key: str) -> tuple[str, str]:
+    """A CustomTkinter (light, dark) colour tuple for one ttk palette
+    key — day is the light end, night the dark end. Passing every CTk
+    colour as this tuple lets a single ctk.set_appearance_mode() repaint
+    every CTk control on a flip with zero re-walk."""
+    return (THEMES["day"]["ttk"][key], THEMES["night"]["ttk"][key])
+
+
+def status_pair(role: str) -> tuple[str, str]:
+    """The (light, dark) tuple for one semantic STATUS role — for the
+    few CTk colours (solid-button text) that come from the status block
+    rather than the ttk palette."""
+    return (THEMES["day"]["status"][role], THEMES["night"]["status"][role])
+
+
+# --- The Day/Night switch (a Canvas pill, ported from the owner's
+# website switch — geometry scales from the switch height H) ----------
+SWITCH_H = 26               # mini switch height (px) for the top-right corner
+SWITCH_ASPECT = 2.1539      # track width = round(H * this)
+SWITCH_KNOB_FACTOR = 0.85   # knob diameter = round(H * this)
+SWITCH_PAD_PX = 3           # canvas margin around the pill (hover overflow)
+SWITCH_ANIM_MS = 600        # total knob-slide duration
+SWITCH_FRAME_MS = 16        # ~60 fps -> ~37 smoothstep frames
+SWITCH_HOVER_SCALE = 1.05   # knob grows this much on hover
+
+# The switch's OWN fixed art colours (independent of the app themes).
+SWITCH_TRACK_NIGHT = "#212736"   # OFF track
+SWITCH_STAR = "#a2aec1"          # silver stars on the night track
+SWITCH_TRACK_DAY = "#5ea7ee"     # ON track
+SWITCH_CLOUD = "#c8e6f8"         # day clouds
+SWITCH_CLOUD_HI = "#ffffff"      # cloud highlight
+SWITCH_MOON = "#cfcfcf"          # moon disc (mid silver)
+SWITCH_MOON_EDGE = "#b8b8b8"     # moon outline
+SWITCH_CRATER = "#6a7280"        # moon craters
+# each crater: (diameter, centre-x, centre-y) as fractions of the knob
+# diameter, converted from the spec's edge insets
+SWITCH_CRATERS = (
+    (0.31, 0.595, 0.305),
+    (0.25, 0.305, 0.625),
+    (0.16, 0.740, 0.610),
+)
+SWITCH_SUN = "#f5a623"           # sun disc (gold)
+SWITCH_SUN_GLOW = "#ffd97a"      # soft glow behind the sun (no alpha in tk)
+
+
 # --- Prompt rules appended per site (owner 2026-07-17) ---------------
 
 # The GUI shows ONE background dropdown PER SITE; the default

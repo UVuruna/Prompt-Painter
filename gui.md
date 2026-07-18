@@ -18,15 +18,16 @@ Start, never below 0), the background / New-chat dropdowns rounded
 `CTkComboBox`es, the option toggles `CTkSwitch`es, and each site's
 whole control set an `AgentPanel` labelframe with the site's LOGO
 in its header. All
-their colours are PULLED from the live darkly palette
-(`tb.Style().colors`) by the `rounded_button` / `rounded_entry` /
-`rounded_combo` / `rounded_switch` factories and `_button_colors`
-(semantic kinds: secondary, success Start, danger outline Stop,
-info Copy, outlines, flat link and ▶/▼ expander), so the CTk and
-ttk families read as ONE dark look; appearance is pinned with
-`ctk.set_appearance_mode("dark")` and every factory pins
-`bg_color` to the darkly window background so rounded corners
-never show a foreign gray on ttk parents. Two smooth-field fixes
+their colours come from the active theme (see **Theming** below) via
+the `rounded_button` / `rounded_entry` / `rounded_combo` /
+`rounded_switch` factories and `_button_colors` (semantic kinds:
+secondary, success Start, danger outline Stop, info Copy, outlines,
+flat link and ▶/▼ expander) — every CTk colour kwarg is a fixed
+`(day, night)` tuple via `theme_pair()`, so a single
+`ctk.set_appearance_mode()` flip repaints all CTk controls with zero
+re-walk; every factory also pins `bg_color` to the active window
+background so rounded corners never show a foreign gray on ttk
+parents. Two smooth-field fixes
 live in the factories (2026-07-18): `_untheme_inner_entry`
 unsubscribes the `tkinter.Entry` INSIDE every CTkEntry/CTkComboBox
 from ttkbootstrap's constructor-hook re-styling and drops its
@@ -42,11 +43,13 @@ equivalent for — plus the whole Select tree (frames, wrapped
 labels, per-site checkbuttons — deliberately light widgets; NO CTk
 inside a scroll canvas, since a CTkButton is a drawn canvas that
 re-renders on every configure). `setup_style` only adds
-the few named label styles darkly lacks; `dark_text` /
-`dark_listbox` skin the plain tk widgets from `Style().colors`,
-and the four semantic STATUS colours (done green, olive one-site,
-advice orange, superseded red) stay named constants aligned to
-darkly's accents. A reusable `ScrollFrame` backs the selection
+the few named label styles the base theme lacks (re-run on every
+flip); `skin_text` / `skin_listbox` / `skin_canvas` /
+`skin_toplevel` colour the plain tk widgets from `Style().colors`
+AND register them in the `THEMED_TK` role registry so a flip
+re-tints them; the semantic STATUS colours (done, olive one-site,
+advice, superseded, code text) live PER THEME in `THEMES[*].status`
+and are read live through `status(role)`. A reusable `ScrollFrame` backs the selection
 tree and a `ttk.Treeview` is the dashboard's collection table.
 `ScrollFrame` COALESCES its scrollregion: a body `<Configure>`
 only schedules ONE `after_idle` `bbox('all')` pass, so an expand
@@ -224,16 +227,24 @@ pointer.
   Stop cancels the pending restart, its Start just starts earlier
   (cancelling the timer); an unparseable reset keeps the plain
   stop behaviour.
+- **Day/Night switch** (top-right, `DayNightSwitch`) — a mini
+  Canvas pill ported from the owner's website switch: OFF/left =
+  MOON on a dark-blue track with silver stars (NIGHT = the dark
+  theme), ON/right = SUN with a soft glow on a light-blue track
+  with a cloud (DAY = the light theme). A click flips the WHOLE app
+  SYNCHRONOUSLY (coherent instantly) and persists the choice, then
+  a ~600 ms smoothstep slide runs as flourish. See **Theming**.
 - **Settings persistence** (`painter/settings.py`) — remembered
   across starts: the queue file list, the output folder, EVERY
-  per-agent panel setting, the font zoom base, the dashboard sash
-  position and the window geometry (selection ticks stay
-  per-run). Saves debounce on every meaningful change (var
-  traces, queue edits, zoom, sash release) and always fire on
-  close; loading applies missing keys as current defaults and
-  drops queued files that no longer exist (reported in the log).
-  The stored dict: `queue` (list of paths), `output`,
-  `font_base`, `sash`, `geometry`, and `agents.<site>` with
+  per-agent panel setting, the font zoom base, the **theme**
+  (`day` / `night`), the dashboard sash position and the window
+  geometry (selection ticks stay per-run). Saves debounce on every
+  meaningful change (var traces, queue edits, zoom, sash release,
+  theme flip) and always fire on close; loading applies missing
+  keys as current defaults (a missing `theme` = `night`) and drops
+  queued files that no longer exist (reported in the log). The
+  stored dict: `queue` (list of paths), `output`, `font_base`,
+  `theme`, `sash`, `geometry`, and `agents.<site>` with
   `background`, `bg_removal`, `crop`, `upscale`, `report`,
   `safer_retry`, `new_chat`, `pause_min/max`, `act_min/max`.
 
@@ -279,6 +290,76 @@ countdown lives there):
   with the folder name); an IMAGE row — its own prompt AND, when
   the destination file already exists, the saved image below it,
   scaled to fit the window width.
+
+## Theming
+Two coordinated palettes — **night** (the built-in `darkly`, kept
+byte-for-byte: the owner is happy with the dark look) and **day** (a
+custom light theme, the owner's warm-gold website palette) — flipped
+as ONE by the top-right `DayNightSwitch`. The single source of truth
+is `THEMES` in [Config](painter/config.md): each entry
+carries its ttkbootstrap theme name, the customtkinter appearance
+mode, the switch knob side, the 16 ttkbootstrap colour keys and a
+`status` block (the semantic colours set PER WIDGET at construction).
+`config.py` stays framework-free (pure hex data), so the engine and
+all tests import it without tkinter/ttkbootstrap.
+
+**The three widget families each flip differently — and each is
+covered so NO widget is ever stranded in the other theme** (the bug
+the owner caught in an accidental half-light window):
+
+- **customtkinter** — every colour kwarg in the factories is a fixed
+  `(day, night)` tuple via `theme_pair()` (and `status_pair()` for
+  the solid-button text, `_darken_pair()` for hover shades). CTk
+  stores the tuple and re-resolves it per mode, so a single
+  `ctk.set_appearance_mode()` repaints EVERY CTk control with zero
+  re-walk. `style_action_button` takes a semantic KEY
+  (`success`/`danger`) for the same reason — its runtime Start/Stop
+  recolour stays a tuple.
+- **ttkbootstrap** — `Style().theme_use()` swaps the theme and
+  `setup_style()` is re-run (it reads `style.colors` live, so it
+  reproduces the named styles in the new palette). ttk looks styles
+  up at draw time, so this updates every style-driven widget with no
+  per-widget work. The custom `painter_day` theme is registered ONCE
+  at startup (`register_painter_day`, idempotent) via
+  `Style().register_theme(ThemeDefinition(...))`.
+- **plain tk** (Text / Listbox / Canvas / Toplevel) — created through
+  `skin_text` / `skin_listbox` / `skin_canvas` / `skin_toplevel`,
+  which colour the widget AND append `(widget, role)` to the flat
+  `THEMED_TK` registry; `recolor_tk_registry()` re-walks it on a
+  flip, re-applying each role's skin and pruning dead widgets via
+  `tk.TclError`. This is the ONLY place plain-tk colours live.
+
+**`apply_theme(name)`** is the ONE coherent flip, used by BOTH
+startup and the toggle: set the module `ACTIVE_THEME` → `theme_use`
+→ `setup_style()` → `set_appearance_mode()` → `recolor_tk_registry()`
+→ fire every open Toplevel's `apply_theme()`. It NEVER tears down the
+window, so an active run's worker threads, dashboard counters and
+quota countdowns survive a flip. **Open Toplevels** (`SelectWindow`,
+`DocWindow`) each register in `THEME_TOPLEVELS` on `__init__`,
+unregister on `<Destroy>`, and expose their own `apply_theme()` —
+because their per-widget foregrounds (Select tree leaf colours + the
+header progress label, DocWindow's Text tags) do NOT follow ttk
+styles and must be recomputed from `status()`/`colors` live (Select
+retains each leaf's `advice` + `n_done` to recompute its colour).
+
+**Startup order** (`PainterGui.__init__`) applies the saved theme
+BEFORE building any widget — `register_painter_day()` → load settings
+→ font zoom → `apply_theme(saved_theme)` → build the queue / options /
+toolbar / views → create the switch in a thin top strip packed FIRST
+in `outer` (so it never overlaps the full-width Collections frame).
+Because the theme is live before the first widget is born, CTk tuples
+resolve to the right end and tk skinners read the active palette — no
+first-frame flash, no half-theme window. The chosen theme persists in
+`settings.json` (`theme` key, missing = `night`).
+
+**The switch** (`DayNightSwitch(tk.Canvas)`) draws the whole pill
+each animation frame from the `SWITCH_*` config (geometry scales from
+the height `H`; the switch's OWN art colours are independent of the
+app palettes). A click toggles state, calls `apply_theme` +
+`_schedule_save` synchronously, then runs a ~36-frame smoothstep
+`after()` slide (cancel/restart if re-clicked); hover redraws the
+knob at 1.05 scale. Its canvas is registered as a `canvas` surface so
+its background re-tints with the window.
 
 ## Threading
 One worker thread per site, started and stopped INDEPENDENTLY by

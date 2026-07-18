@@ -64,6 +64,23 @@ match.
   driver stamps the result into `TerminalState.retry_after_s`.
 - `SETTINGS_PATH` — the GUI settings JSON at the project root
   (gitignored).
+- `THEMES`, `theme_pair(key)`, `status_pair(role)`, `SWITCH_*` — the
+  GUI theming single source of truth (owner 2026-07-18). `THEMES`
+  holds the two coordinated palettes, **night** (the built-in
+  `darkly`, written out verbatim) and **day** (the custom
+  `painter_day` light theme, the owner's warm-gold website palette),
+  each with its ttkbootstrap theme name, customtkinter appearance
+  mode, switch knob side, the 16 ttk colour keys and a `status`
+  block (the semantic colours set per-widget: done / done_soft /
+  advice / superseded / code_fg / btn_text). `theme_pair(key)`
+  returns the `(day, night)` tuple every customtkinter colour kwarg
+  passes so `set_appearance_mode()` flips them; `status_pair` does
+  the same for the status block. The `SWITCH_*` constants are the
+  Day/Night switch geometry (scaled from `SWITCH_H`) and its own
+  fixed art colours (moon/sun/track/stars/clouds). This block is
+  PURE hex data — no tkinter/ttkbootstrap import — so the engine and
+  tests stay framework-free; [GUI](../gui.md) turns it into the live
+  themes.
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text)` — the rule
   block appended to every prompt: the chosen background (each
