@@ -92,7 +92,9 @@ class Sheet:
 
 def parse_sheet(path: Path) -> Sheet:
     """Parse one sheet file into its queue, skips and problems."""
-    lines = path.read_text(encoding="utf-8").split("\n")
+    # utf-8-sig: some editors save the sheets with a BOM, which would
+    # otherwise hide the H1 from startswith("# ")
+    lines = path.read_text(encoding="utf-8-sig").split("\n")
     n = len(lines)
 
     theme: str | None = None

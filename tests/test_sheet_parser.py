@@ -37,11 +37,13 @@ GOLDEN_COUNTS = {
     # sheet: (items, skipped)
     "trinity_prompts.md": (7, 0),
     "family_prompts.md": (7, 0),
-    "persons_prompts.md": (4, 2),
+    # + the Prism center Seal (DOMY 0.14.322)
+    "persons_prompts.md": (5, 2),
     "one_soul_prompts.md": (8, 0),
     "walks_prompts.md": (16, 0),
-    # 4 approved + 4 tetramorph loaded as ADVICE-skipped items
-    "temperaments_prompts.md": (8, 0),
+    # 4 temperaments + the 4 tetramorph (approved 2026-07-17, moved
+    # to archetype/tetramorph/) + the Throne center (DOMY 0.14.322)
+    "temperaments_prompts.md": (9, 0),
     "calendar_prompts.md": (12, 0),
     "life_prompts.md": (16, 0),
 }
@@ -145,32 +147,24 @@ def test_persons_reuse_skipped():
         "assets/archetype/persons/Michael_Courage.png",
         "assets/archetype/persons/Devil_Hatred.png",
         "assets/archetype/persons/Jesus_Humility.png",
+        "assets/archetype/persons/Seal.png",
     }
 
 
-# --- temperaments: the unapproved tetramorph section loads as ADVICE --
+# --- temperaments: tetramorph approved + the Throne center ------------
 
-def test_temperaments_tetramorph_is_advice_not_law():
+def test_temperaments_tetramorph_now_approved():
+    # the tetramorph was owner-APPROVED 2026-07-17 and moved to its
+    # own archetype/tetramorph/ drop (DOMY 0.14.322) — no advice left
     sheet = golden("temperaments_prompts.md")
-    normal = [i for i in sheet.items if i.advice is None]
-    advised = [i for i in sheet.items if i.advice is not None]
-    assert [i.drop_path for i in normal] == [
-        "assets/archetype/temperaments/Sanguine.png",
-        "assets/archetype/temperaments/Choleric.png",
-        "assets/archetype/temperaments/Melancholic.png",
-        "assets/archetype/temperaments/Phlegmatic.png",
-    ]
-    # the tetramorph rondels LOAD (prompt and all) but carry the
-    # sheet's advice — the GUI unticks them by default
-    assert [i.title for i in advised] == [
-        "the Man/Angel rondel",
-        "the Lion rondel",
-        "the Ox rondel",
-        "the Eagle rondel",
-    ]
-    for item in advised:
-        assert "do not generate" in item.advice.lower()
-        assert item.prompt.strip()  # the prompt IS loaded
+    assert all(i.advice is None for i in sheet.items)
+    paths = [i.drop_path for i in sheet.items]
+    assert "assets/archetype/tetramorph/Man.png" in paths
+    assert "assets/archetype/tetramorph/Eagle.png" in paths
+    assert "assets/archetype/temperaments/Throne.png" in paths
+    # the sheet is BOM-prefixed since 0.14.322 — utf-8-sig must
+    # still see the H1
+    assert sheet.theme.startswith("Seasons Archetype Prompts")
 
 
 # --- calendar: wrapped bold headings normalize to one line ------------
