@@ -52,6 +52,34 @@ C_DONE_SOFT = "#9ccc65"   # olive — done on one site only
 C_ADVICE = "#f39c12"      # orange — sheet advice (darkly 'warning')
 C_SUPERSEDED = "#e74c3c"  # red — superseded (darkly 'danger')
 
+# button icons — PNGs reused from RHMH's Slike/ set (copied into this
+# project; RHMH itself untouched). Resolved beside gui.py, never the CWD.
+ICON_DIR = Path(__file__).resolve().parent / "assets" / "icons"
+ICON_TARGET_PX = 20  # max icon height inside a button
+
+# tkinter keeps NO reference to a PhotoImage a widget shows — without a
+# persistent cache the image is garbage-collected and the button goes
+# blank. Keyed by icon name, lives for the whole process.
+_ICONS: dict[str, tk.PhotoImage] = {}
+
+
+def icon(name: str) -> tk.PhotoImage:
+    """The named button icon, loaded once and downscaled to fit.
+
+    A missing file is a loud FileNotFoundError (root Rule #1) — no
+    silent icon-less fallback.
+    """
+    if name not in _ICONS:
+        path = ICON_DIR / f"{name}.png"
+        if not path.is_file():
+            raise FileNotFoundError(f"GUI icon missing: {path}")
+        img = tk.PhotoImage(file=str(path))
+        factor = -(-max(img.width(), img.height()) // ICON_TARGET_PX)  # ceil
+        if factor > 1:
+            img = img.subsample(factor)
+        _ICONS[name] = img
+    return _ICONS[name]
+
 
 def setup_style(root: tk.Tk) -> None:
     """The few named styles the darkly theme does not ship."""
@@ -324,7 +352,8 @@ class DashPanel(ttk.Frame):
             hdr, text="Collections (running + done)", style="Head.TLabel"
         ).pack(side="left")
         ttk.Button(
-            hdr, text="Show ▸", command=self._show_selected,
+            hdr, text="Show", command=self._show_selected,
+            image=icon("right"), compound="right",
             bootstyle="link",
         ).pack(side="right")
         # a real table: each collection is a collapsible parent row, its
@@ -669,14 +698,17 @@ class PainterGui:
         col.pack(side="left", padx=(8, 0), anchor="n")
         ttk.Button(
             col, text="Add…", command=self._add_sheets,
+            image=icon("add"), compound="left",
             bootstyle="secondary",
         ).pack(fill="x")
         ttk.Button(
             col, text="Remove", command=self._remove_sheet,
+            image=icon("remove"), compound="left",
             bootstyle="secondary",
         ).pack(fill="x", pady=4)
         ttk.Button(
             col, text="Clear", command=self._clear_sheets,
+            image=icon("clear"), compound="left",
             bootstyle="secondary",
         ).pack(fill="x")
 
@@ -776,6 +808,7 @@ class PainterGui:
         row.pack(fill="x", pady=(0, 6))
         self.btn_chrome = ttk.Button(
             row, text="Open Chrome (login)", command=self._open_chrome,
+            image=icon("web"), compound="left",
             bootstyle="secondary",
         )
         self.btn_chrome.pack(side="left")
@@ -790,7 +823,8 @@ class PainterGui:
         )
         self.btn_select.pack(side="left", padx=4)
         self.btn_start = ttk.Button(
-            row, text="▶  Start", bootstyle="success",
+            row, text="Start", bootstyle="success",
+            image=icon("start"), compound="left",
             command=self._start,
         )
         self.btn_start.pack(side="left", padx=4)
@@ -1570,6 +1604,7 @@ class DocWindow(tk.Toplevel):
             ttk.Label(bar, text=hint, style="Muted.TLabel").pack(side="left")
         ttk.Button(
             bar, text="Copy (for AI)", command=self._copy_all,
+            image=icon("ai"), compound="left",
             bootstyle="info",
         ).pack(side="right")
         ttk.Button(

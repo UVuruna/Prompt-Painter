@@ -19,6 +19,18 @@ constants aligned to darkly's accents. A reusable `ScrollFrame`
 backs the selection list and a `ttk.Treeview` is the dashboard's
 collection table.
 
+**Button icons** (2026-07-18) are PNGs REUSED from the RHMH
+project's icon set, copied into `assets/icons/` (RHMH untouched):
+`add` / `remove` / `clear` on the queue buttons, `web` (globe) on
+Open Chrome, `start` (play) on Start, `right` on the dashboard's
+Show button, `ai` on DocWindow's Copy (for AI). The module-level
+`icon()` loader resolves them beside `gui.py` (never the CWD),
+downscales with `PhotoImage.subsample` to ≤20 px, and caches every
+image in `_ICONS` for the process lifetime — tkinter keeps no
+reference of its own, so without the cache the buttons would go
+blank. A missing icon file raises `FileNotFoundError` loudly
+(root Rule #1); buttons keep their text (`compound="left"`).
+
 ## The window
 
 - **Collections** — a QUEUE of one or more prompt `.md` files (each
@@ -77,7 +89,7 @@ collection table.
   (`instructions.md`) in the in-app `DocWindow` — light Markdown
   formatting, selectable read-only text, and a **Copy (for AI)**
   button — so a non-programmer never needs a code editor. The same
-  `DocWindow` shows a collection file or a single prompt (Show ▸).
+  `DocWindow` shows a collection file or a single prompt (Show).
 - **Two views** (tabs): the **Dashboard** and the **Log
   (detailed)** (timestamped `[HH:MM:SS]`, both sites interleaved
   with `[gemini]` / `[chatgpt]` prefixes). A SAFETY refusal skips
@@ -108,8 +120,9 @@ runner's structured events (never by log-parsing):
   3. **Image** — `AI` (generate), `Ours` (fills after its pause),
      `Res`, `Size`.
   The RUNNING collection appears live and open, images streaming in
-  under their folder as they save; it collapses when done. **Show ▸**
-  (or double-click a row) opens the selected collection's whole file,
+  under their folder as they save; it collapses when done. **Show**
+  (with its right-arrow icon; or double-click a row) opens the
+  selected collection's whole file,
   or a single image's own prompt, in the same formatted viewer.
 
 ## Threading
