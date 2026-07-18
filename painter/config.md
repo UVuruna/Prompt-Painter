@@ -22,8 +22,11 @@ match.
 - [Run Loop](runner.md) — `Timing`, `PROGRESS_SUFFIX`
 - [Chrome Launcher](chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
-- [Postprocess](postprocess.md) — `CROP_MARGIN_PX`,
-  `CROP_ALPHA_THRESH`
+- [Postprocess](postprocess.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
+  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`
+- [Background Remover](bg_remove.md) — the same crop/cleanup
+  constants (`content_bbox`, `clean_edge_halo`, `autocrop` defaults),
+  imported package-or-standalone
 - [Upscale](upscale.md) — the `UPSCALE_*` block
 - [Settings](settings.md) — `SETTINGS_PATH`
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
@@ -47,9 +50,20 @@ match.
 - `IMAGE_EXTENSIONS`, `SKIP_MARKER_PATTERN` — the sheet contract's
   file-name rule and the REUSE / SUPERSEDED / DO-NOT-GENERATE
   marker regex.
-- `CROP_MARGIN_PX`, `CROP_ALPHA_THRESH` — the postprocess crop
-  step's safety margin around the content box and its "visible
-  pixel" alpha threshold.
+- `CROP_MARGIN_PX`, `CROP_INK_ALPHA`, `CROP_MIN_INK_PX`,
+  `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE` — the postprocess crop step
+  (owner 2026-07-18, the OldAge.png case). The old single-threshold
+  box (any pixel at alpha ≥ 8) was defeated by faint stray pixels
+  hugging the border, so the crop trimmed almost nothing. Now the box
+  is INK-BASED: a row/col counts as content only when it holds at
+  least `CROP_MIN_INK_PX` pixels that are at least `CROP_INK_ALPHA`
+  opaque, so a sparse faint line is ignored while wide soft regions
+  register. Before cropping, `CLEAN_EDGE_ALPHA` + `CLEAN_EDGE_ENABLE`
+  drive a CONSERVATIVE edge-halo cleanup: faint pixels connected to
+  the image border (the visible stray line / halo) are zeroed, while
+  interior soft edges — enclosed by the solid subject, never
+  border-connected — are left alone. `CROP_MARGIN_PX` still pads the
+  final box.
 - `TOOLS_DIR`, `UPSCALE_DIR`, `UPSCALE_EXE_NAME`,
   `UPSCALE_ZIP_URL`, `UPSCALE_MODEL`, `UPSCALE_MIN_PX`,
   `UPSCALE_ASPECT_TOL` — the Real-ESRGAN upscaler: where the

@@ -24,7 +24,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from painter.config import CROP_ALPHA_THRESH, CROP_MARGIN_PX
+from painter.config import (
+    CLEAN_EDGE_ALPHA,
+    CLEAN_EDGE_ENABLE,
+    CROP_INK_ALPHA,
+    CROP_MARGIN_PX,
+    CROP_MIN_INK_PX,
+)
 
 Log = Callable[[str], None]
 
@@ -88,34 +94,55 @@ def remove_background(path: Path, log: Log) -> str:
 
 
 def crop_transparent(path: Path, log: Log) -> str:
-    """Autocrop one transparent image to its content box, in place.
+    """Clean the faint border halo, then autocrop, in place.
 
-    The box keeps a small safety margin (``CROP_MARGIN_PX``).
-    Returns "done" (cropped) or "nothing" — no transparency to crop
-    against (fully opaque, so the box IS the image), fully
-    transparent, or already tight. Raises ``PostprocessError`` on a
-    real failure.
+    Two composable steps on the one image (both from
+    [Background Remover]): (1) when ``CLEAN_EDGE_ENABLE``, faint
+    pixels connected to the image border — the stray line / halo
+    hugging the frame — are zeroed (``clean_edge_halo``); (2) the
+    image is cropped to its INK-BASED content box (a row/col needs
+    ``CROP_MIN_INK_PX`` pixels at alpha >= ``CROP_INK_ALPHA``, so a
+    sparse faint line no longer defeats the crop) plus the
+    ``CROP_MARGIN_PX`` safety margin.
+
+    Returns "done" when it changed anything (halo cleaned OR box
+    trimmed) or "nothing" — no transparency to crop against (fully
+    opaque, so the box IS the image), fully transparent, or already
+    tight AND nothing to clean. Raises ``PostprocessError`` on a real
+    failure.
     """
     from PIL import Image
 
-    from painter.bg_remove import content_bbox
+    from painter.bg_remove import clean_edge_halo, content_bbox
 
     try:
         with Image.open(path) as im:
             rgba = im.convert("RGBA")
-        box = content_bbox(rgba, CROP_ALPHA_THRESH)
+
+        cleaned = 0
+        if CLEAN_EDGE_ENABLE:
+            rgba, cleaned = clean_edge_halo(rgba, CLEAN_EDGE_ALPHA)
+
+        box = content_bbox(rgba, CROP_INK_ALPHA, CROP_MIN_INK_PX)
         if box is None:
-            return "nothing"  # fully transparent — nothing to crop to
+            # no solid content to crop to (fully transparent / faint
+            # speckle only); a halo cleanup may still have changed it
+            if cleaned:
+                rgba.save(path, "PNG", optimize=True)
+                return "done"
+            return "nothing"
+
         width, height = rgba.size
         left = max(0, box[0] - CROP_MARGIN_PX)
         top = max(0, box[1] - CROP_MARGIN_PX)
         right = min(width, box[2] + CROP_MARGIN_PX)
         bottom = min(height, box[3] + CROP_MARGIN_PX)
-        if (left, top, right, bottom) == (0, 0, width, height):
-            return "nothing"  # opaque or already tight
-        rgba.crop((left, top, right, bottom)).save(
-            path, "PNG", optimize=True
-        )
+        trimmed = (left, top, right, bottom) != (0, 0, width, height)
+
+        if not trimmed and not cleaned:
+            return "nothing"  # opaque or already tight, nothing to clean
+        result = rgba.crop((left, top, right, bottom)) if trimmed else rgba
+        result.save(path, "PNG", optimize=True)
         return "done"
     except Exception as exc:
         raise PostprocessError(

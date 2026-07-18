@@ -29,6 +29,24 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
+# The ink-crop / edge-cleanup thresholds live in config.py (the single
+# home for tunables). This module is ALSO runnable as a standalone
+# script (`python painter/bg_remove.py ...`), where `painter` is not an
+# importable package but config.py sits right beside it — hence the two
+# import forms. Both fail loudly if config.py is genuinely missing.
+try:
+    from painter.config import (
+        CLEAN_EDGE_ALPHA,
+        CROP_INK_ALPHA,
+        CROP_MIN_INK_PX,
+    )
+except ImportError:  # standalone: script's own dir is on sys.path
+    from config import (  # type: ignore[no-redef]
+        CLEAN_EDGE_ALPHA,
+        CROP_INK_ALPHA,
+        CROP_MIN_INK_PX,
+    )
+
 # --- white mode -------------------------------------------------------------
 WHITE_FULL = 250   # whiteness >= this  -> pure background   -> alpha 0
 WHITE_EDGE = 200   # whiteness  < this  -> definitely subject -> alpha 255
@@ -113,19 +131,52 @@ def remove_black_background(img: Image.Image,
 # shared helpers
 # --------------------------------------------------------------------------- #
 def content_bbox(img: Image.Image,
-                 alpha_thresh: int = 8) -> tuple[int, int, int, int] | None:
-    """Bounding box (l, t, r, b) of visible pixels of an RGBA image,
-    ignoring the feather ring; None when fully transparent."""
+                 ink_alpha: int = CROP_INK_ALPHA,
+                 min_ink_px: int = CROP_MIN_INK_PX,
+                 ) -> tuple[int, int, int, int] | None:
+    """INK-BASED content bounding box (l, t, r, b) of an RGBA image.
+
+    A row or column counts as content only when it holds at least
+    ``min_ink_px`` pixels that are at least ``ink_alpha`` opaque, so a
+    sparse faint stray line hugging the border does NOT extend the box
+    (the OldAge.png case), while a genuinely wide soft region still
+    registers. ``None`` when no row/column qualifies (fully
+    transparent, or only faint speckle)."""
     alpha = np.asarray(img)[:, :, 3]
-    ys, xs = np.where(alpha >= alpha_thresh)
-    if len(xs) == 0:
+    solid = alpha >= ink_alpha
+    cols = np.where(solid.sum(axis=0) >= min_ink_px)[0]
+    rows = np.where(solid.sum(axis=1) >= min_ink_px)[0]
+    if len(cols) == 0 or len(rows) == 0:
         return None
-    return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+    return (int(cols.min()), int(rows.min()),
+            int(cols.max()) + 1, int(rows.max()) + 1)
 
 
-def autocrop(img: Image.Image, alpha_thresh: int = 8) -> Image.Image:
-    """Crop to the bounding box of visible pixels (ignoring the feather ring)."""
-    box = content_bbox(img, alpha_thresh)
+def clean_edge_halo(img: Image.Image,
+                    edge_alpha: int = CLEAN_EDGE_ALPHA,
+                    ) -> tuple[Image.Image, int]:
+    """Zero the faint BORDER-CONNECTED halo of an RGBA image.
+
+    Faint pixels (alpha < ``edge_alpha``) that connect to the image
+    border — the stray line / halo living in the transparent frame —
+    have their alpha set to 0; faint pixels enclosed by the solid
+    subject (interior soft edges) are never border-connected and stay
+    untouched (this is deliberately NOT a global ``alpha[alpha<K]=0``,
+    which would nibble genuine soft edges). Returns the cleaned RGBA
+    copy and the count of pixels that actually lost visible alpha."""
+    arr = np.asarray(img.convert("RGBA")).copy()
+    alpha = arr[:, :, 3]
+    halo = edge_connected_background(alpha < edge_alpha)
+    cleaned = int(np.count_nonzero(halo & (alpha > 0)))
+    arr[:, :, 3] = np.where(halo, 0, alpha)
+    return Image.fromarray(arr, mode="RGBA"), cleaned
+
+
+def autocrop(img: Image.Image,
+             ink_alpha: int = CROP_INK_ALPHA,
+             min_ink_px: int = CROP_MIN_INK_PX) -> Image.Image:
+    """Crop to the ink-based content box (see ``content_bbox``)."""
+    box = content_bbox(img, ink_alpha, min_ink_px)
     if box is None:
         return img
     return img.crop(box)

@@ -88,7 +88,25 @@ SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
 # ambiguous -> unclear, left untouched); crop_transparent autocrops
 # a transparent image to its content bounding box.
 CROP_MARGIN_PX = 4  # safety margin kept around the content box
-CROP_ALPHA_THRESH = 8  # alpha below this counts as empty (feather ring)
+
+# INK-BASED content box (owner 2026-07-18, the OldAge.png case). A
+# single-threshold box (any pixel at alpha >= 8) was defeated by faint
+# stray pixels hugging the border (a thin far-left line at alpha ~8-32),
+# so the crop trimmed almost nothing. Instead a row/column counts as
+# content only when it holds at least CROP_MIN_INK_PX pixels that are at
+# least CROP_INK_ALPHA opaque: a sparse faint line no longer extends the
+# box, while a genuinely wide soft region still registers.
+CROP_INK_ALPHA = 40   # alpha >= this counts as a solid "ink" pixel
+CROP_MIN_INK_PX = 3   # a row/col needs this many ink pixels to be content
+
+# CONSERVATIVE EDGE-HALO CLEANUP (owner 2026-07-18). Before cropping,
+# faint pixels (alpha < CLEAN_EDGE_ALPHA) that are CONNECTED TO THE IMAGE
+# BORDER — the visible stray line / halo in the transparent frame — have
+# their alpha zeroed. Interior soft edges are enclosed by the solid
+# subject, never border-connected, and stay untouched. This is NOT a
+# global alpha[alpha<K]=0 (that would nibble genuine soft edges).
+CLEAN_EDGE_ALPHA = 40     # faint pixels below this may be border halo
+CLEAN_EDGE_ENABLE = True  # run the border-connected cleanup before crop
 
 
 # --- Upscale (owner's #13) -------------------------------------------
@@ -238,6 +256,14 @@ SWITCH_PAD_PX = 5           # canvas margin around the pill (hover + sun glow)
 SWITCH_ANIM_MS = 600        # total knob-slide duration
 SWITCH_FRAME_MS = 16        # ~60 fps -> ~37 smoothstep frames
 SWITCH_HOVER_SCALE = 1.05   # knob grows this much on hover
+# The theme CROSS-FADE (owner 2026-07-18): tkinter cannot interpolate
+# widget colours, so a live theme flip repaints as an ugly cascade of
+# half-themed frames (black boxes, half-styled spinners). The switch
+# hides that cascade behind a STATIC SNAPSHOT of the OLD theme in a
+# borderless overlay Toplevel, then fades the overlay's window alpha out
+# over the freshly repainted NEW theme underneath.
+SWITCH_FADE_MS = 260        # total snapshot cross-fade duration (alpha 1->0)
+SWITCH_FADE_STEPS = 16      # alpha ramp ticks across SWITCH_FADE_MS
 SWITCH_SUPERSAMPLE = 4      # render knobs at Nx, then LANCZOS down for crisp edges
 
 # the two track pill SVGs (stems, resolved in assets/icons) — reused

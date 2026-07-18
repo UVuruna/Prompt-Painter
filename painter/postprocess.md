@@ -16,11 +16,17 @@ a no-op — only for real errors (`PostprocessError`, loud).
   (Gemini) or black background → cleared, `"done"`, ambiguous
   (gradient, mid-tone) → `"unclear"` (reported via the log,
   left untouched). No cropping any more — that is the second step.
-- **`crop_transparent`** — autocrop a transparent image to its
-  content bounding box plus the `CROP_MARGIN_PX` safety margin:
-  `"done"` when it shrank, `"nothing"` when there is no
-  transparency to crop against (fully opaque), the image is fully
-  transparent, or it is already tight.
+- **`crop_transparent`** — two composable steps in place (owner
+  2026-07-18, the OldAge.png case): (1) `clean_edge_halo` zeroes the
+  faint stray line / halo CONNECTED TO THE IMAGE BORDER
+  (`CLEAN_EDGE_ENABLE`), then (2) autocrop to the INK-BASED content
+  box (a row/col needs `CROP_MIN_INK_PX` pixels at alpha ≥
+  `CROP_INK_ALPHA`, so a sparse faint line no longer defeats the
+  crop) plus the `CROP_MARGIN_PX` safety margin. `"done"` when it
+  changed anything (halo cleaned OR box trimmed); `"nothing"` when
+  there is no transparency to crop against (fully opaque), the image
+  is fully transparent, or it is already tight AND there was no halo
+  to clean.
 
 A failed step is LOUD but never kills the run (the runner catches,
 counts and reports it; the raw image stays saved).
@@ -28,10 +34,12 @@ counts and reports it; the raw image stays saved).
 ## Connections
 
 ### Uses
-- [Config](config.md) — `CROP_MARGIN_PX`, `CROP_ALPHA_THRESH`
+- [Config](config.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
+  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`
 - [Background Remover](bg_remove.md) — `detect`,
-  `remove_white_border`, `remove_black_background`, `content_bbox`;
-  imported lazily (numpy/scipy load only when a step actually runs)
+  `remove_white_border`, `remove_black_background`, `content_bbox`,
+  `clean_edge_halo`; imported lazily (numpy/scipy load only when a
+  step actually runs)
 
 ### Used by
 - [Main (Entry Point)](../main.md) — composed into the `post_save`
