@@ -6,8 +6,10 @@ numpy>=1.26
 scipy>=1.11
 pillow>=10
 
-# Runtime — the GUI theme (darkly + modern ttk widgets)
+# Runtime — the GUI theme (darkly base + modern ttk widgets) and the
+# rounded controls layered over it (the same mix RHMH runs)
 ttkbootstrap>=1.10
+customtkinter>=5.2
 
 # Development — the offline test suite
 pytest>=8

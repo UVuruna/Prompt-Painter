@@ -5,19 +5,30 @@
 ## Purpose
 The owner's front door — a themed tkinter window over the same
 engine the CLI uses, built for unattended batches: queue the
-collections, press Start, go ride a bike. The look is
-**ttkbootstrap's `darkly` theme** (2026-07-18): modern flat
-widgets out of the box — round-toggle switches for the option
-checkboxes, a green success Start / outline-danger Stop, striped
-progressbars, round scrollbars, themed combos/spinboxes/tabs.
-`setup_style` only adds the few named styles darkly lacks (the
-Head/Big/Value/Muted/Mono labels, the Expander button, Treeview
-row height); `dark_text`/`dark_listbox` skin the plain tk widgets
-from `Style().colors`, and the four semantic STATUS colours (done
-green, olive one-site, advice orange, superseded red) stay named
-constants aligned to darkly's accents. A reusable `ScrollFrame`
-backs the selection list and a `ttk.Treeview` is the dashboard's
-collection table.
+collections, press Start, go ride a bike. The widget stack
+(2026-07-18) is **customtkinter rounded controls over a
+ttkbootstrap `darkly` base — the same mix RHMH uses**: every
+button is a `CTkButton` with RHMH's strong corner radius (12 px,
+hover = the same colour darkened to 0.75), the output path and
+pace fields are rounded bordered `CTkEntry`s, the background /
+New-chat dropdowns rounded `CTkComboBox`es, the site and option
+toggles `CTkSwitch`es. All their colours are PULLED from the live
+darkly palette (`tb.Style().colors`) by the `rounded_button` /
+`rounded_entry` / `rounded_combo` / `rounded_switch` factories and
+`_button_colors` (semantic kinds: secondary, success Start, danger
+outline Stop, info Copy, outlines, flat link and ▶/▼ expander), so
+the CTk and ttk families read as ONE dark look; appearance is
+pinned with `ctk.set_appearance_mode("dark")`. What stays ttk:
+the `Treeview` table, `Notebook` tabs, striped progressbars, round
+scrollbars, labels/frames — darkly widgets CTk has no better
+equivalent for — plus the Select grid's hundreds of per-image
+checkbuttons (deliberately light widgets). `setup_style` only adds
+the few named label styles darkly lacks; `dark_text` /
+`dark_listbox` skin the plain tk widgets from `Style().colors`,
+and the four semantic STATUS colours (done green, olive one-site,
+advice orange, superseded red) stay named constants aligned to
+darkly's accents. A reusable `ScrollFrame` backs the selection
+list and a `ttk.Treeview` is the dashboard's collection table.
 
 **Button icons** (2026-07-18) are PNGs REUSED from the RHMH
 project's icon set, copied into `assets/icons/` (RHMH untouched):
@@ -25,11 +36,12 @@ project's icon set, copied into `assets/icons/` (RHMH untouched):
 Open Chrome, `start` (play) on Start, `right` on the dashboard's
 Show button, `ai` on DocWindow's Copy (for AI). The module-level
 `icon()` loader resolves them beside `gui.py` (never the CWD),
-downscales with `PhotoImage.subsample` to ≤20 px, and caches every
-image in `_ICONS` for the process lifetime — tkinter keeps no
-reference of its own, so without the cache the buttons would go
-blank. A missing icon file raises `FileNotFoundError` loudly
-(root Rule #1); buttons keep their text (`compound="left"`).
+loads each PNG through Pillow into a `CTkImage` scaled to ≤20 px
+(smooth resampling — sharper than the old `PhotoImage.subsample`),
+and caches every image in `_ICONS` for the process lifetime so all
+buttons share one instance per icon. A missing icon file raises
+`FileNotFoundError` loudly (root Rule #1); buttons keep their text
+(`compound="left"`).
 
 ## The window
 
@@ -42,7 +54,7 @@ blank. A missing icon file raises `FileNotFoundError` loudly
   report would collide).
 - **Output** — the folder; images save DIRECTLY to
   `<out>/<site>/<drop-path>` (no approval step).
-- **Sites** — Gemini / ChatGPT checkboxes; both ticked = both run
+- **Sites** — Gemini / ChatGPT switches; both ticked = both run
   IN PARALLEL, one thread and one tab each. Beside each site sits
   its own **background dropdown** (`transparent` / `white` /
   `none`), preselected to the site's default — ChatGPT

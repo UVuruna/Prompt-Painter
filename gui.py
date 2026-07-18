@@ -27,7 +27,9 @@ from functools import partial
 from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, ttk
 
+import customtkinter as ctk
 import ttkbootstrap as tb
+from PIL import Image
 
 from painter.config import (
     BACKGROUND_CHOICES,
@@ -44,6 +46,12 @@ from painter.config import (
 )
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
+# the rounded controls are customtkinter (the SAME mix RHMH runs:
+# CTk widgets living inside a ttkbootstrap window); their colours are
+# pulled from the live darkly palette so both families read as one.
+# Appearance is pinned dark — never the OS light mode over darkly.
+ctk.set_appearance_mode("dark")
+
 # semantic STATUS colours only — the widget look itself comes from
 # ttkbootstrap's darkly theme. These colour-code Selection-window
 # rows and DocWindow tags, aligned to darkly's own accents
@@ -57,13 +65,20 @@ C_SUPERSEDED = "#e74c3c"  # red — superseded (darkly 'danger')
 ICON_DIR = Path(__file__).resolve().parent / "assets" / "icons"
 ICON_TARGET_PX = 20  # max icon height inside a button
 
-# tkinter keeps NO reference to a PhotoImage a widget shows — without a
-# persistent cache the image is garbage-collected and the button goes
-# blank. Keyed by icon name, lives for the whole process.
-_ICONS: dict[str, tk.PhotoImage] = {}
+# CTkButtons show CTkImage (PIL-backed, smooth downscale) — cached for
+# the whole process so every button reuses one instance per icon.
+_ICONS: dict[str, ctk.CTkImage] = {}
+
+# the rounded-control geometry — one place so every control matches
+# (RHMH runs CTkButton corner_radius 10–12; hover = colour * 0.75)
+BTN_RADIUS = 12
+BTN_HEIGHT = 30
+INPUT_RADIUS = 8
+INPUT_HEIGHT = 28
+HOVER_DARKEN = 0.75
 
 
-def icon(name: str) -> tk.PhotoImage:
+def icon(name: str) -> ctk.CTkImage:
     """The named button icon, loaded once and downscaled to fit.
 
     A missing file is a loud FileNotFoundError (root Rule #1) — no
@@ -73,12 +88,141 @@ def icon(name: str) -> tk.PhotoImage:
         path = ICON_DIR / f"{name}.png"
         if not path.is_file():
             raise FileNotFoundError(f"GUI icon missing: {path}")
-        img = tk.PhotoImage(file=str(path))
-        factor = -(-max(img.width(), img.height()) // ICON_TARGET_PX)  # ceil
-        if factor > 1:
-            img = img.subsample(factor)
-        _ICONS[name] = img
+        img = Image.open(path)
+        scale = min(ICON_TARGET_PX / max(img.width, img.height), 1.0)
+        size = (
+            max(round(img.width * scale), 1),
+            max(round(img.height * scale), 1),
+        )
+        _ICONS[name] = ctk.CTkImage(
+            light_image=img, dark_image=img, size=size
+        )
     return _ICONS[name]
+
+
+def _darken(hex_color: str, factor: float = HOVER_DARKEN) -> str:
+    """The hover shade RHMH uses: the same colour scaled toward black."""
+    r = int(hex_color[1:3], 16)
+    g = int(hex_color[3:5], 16)
+    b = int(hex_color[5:7], 16)
+    return (
+        f"#{int(r * factor):02x}{int(g * factor):02x}{int(b * factor):02x}"
+    )
+
+
+def _button_colors(kind: str) -> dict:
+    """CTkButton colour kwargs for one semantic kind, pulled from the
+    LIVE darkly palette so the CTk/ttk mix stays one colour family."""
+    c = tb.Style().colors
+    solid = {
+        "secondary": c.secondary,
+        "success": c.success,
+        "danger": c.danger,
+        "info": c.info,
+    }
+    if kind in solid:
+        color = solid[kind]
+        return dict(
+            fg_color=color, hover_color=_darken(color),
+            text_color=c.fg, text_color_disabled=c.light,
+        )
+    if kind in ("secondary-outline", "danger-outline"):
+        color = c.danger if kind == "danger-outline" else c.light
+        return dict(
+            fg_color="transparent", border_width=1, border_color=color,
+            hover_color=_darken(color, 0.35),
+            text_color=color, text_color_disabled=c.secondary,
+        )
+    if kind == "link":  # borderless accent button (dashboard 'Show')
+        return dict(
+            fg_color="transparent", hover_color=c.dark,
+            text_color=c.info, text_color_disabled=c.secondary,
+        )
+    if kind == "expander":  # flat left-aligned ▶/▼ section header
+        return dict(
+            fg_color="transparent", hover_color=c.dark,
+            text_color=c.fg, text_color_disabled=c.secondary,
+            anchor="w",
+        )
+    raise ValueError(f"unknown button kind: {kind}")
+
+
+def rounded_button(
+    parent,
+    text: str,
+    command=None,
+    kind: str = "secondary",
+    icon_name: str | None = None,
+    compound: str = "left",
+    width: int = 0,
+    **kwargs,
+) -> ctk.CTkButton:
+    """Every GUI button: a rounded CTkButton in the darkly palette —
+    the RHMH look. ``width`` is a minimum in px (0 = fit the text);
+    the button grows to fit longer text either way."""
+    opts = _button_colors(kind)
+    opts.update(kwargs)
+    return ctk.CTkButton(
+        parent, text=text, command=command, width=width,
+        height=BTN_HEIGHT, corner_radius=BTN_RADIUS,
+        font=("Segoe UI", 10, "bold"),
+        image=icon(icon_name) if icon_name else None,
+        compound=compound, **opts,
+    )
+
+
+def _input_colors() -> dict:
+    """Shared colour kwargs for rounded CTk entry/combobox fields."""
+    c = tb.Style().colors
+    return dict(
+        fg_color=c.inputbg, border_color=c.secondary,
+        text_color=c.inputfg,
+    )
+
+
+def rounded_entry(parent, width: int = 140, **kwargs) -> ctk.CTkEntry:
+    """A rounded, bordered entry in the darkly palette."""
+    opts = _input_colors()
+    opts.update(kwargs)
+    return ctk.CTkEntry(
+        parent, width=width, height=INPUT_HEIGHT,
+        corner_radius=INPUT_RADIUS, border_width=1,
+        font=("Segoe UI", 10), **opts,
+    )
+
+
+def rounded_combo(
+    parent, values, variable, width: int = 140, **kwargs
+) -> ctk.CTkComboBox:
+    """A rounded read-only dropdown bound to ``variable``."""
+    c = tb.Style().colors
+    opts = _input_colors()
+    opts.update(
+        button_color=c.secondary,
+        button_hover_color=_darken(c.secondary),
+        dropdown_fg_color=c.dark,
+        dropdown_hover_color=c.selectbg,
+        dropdown_text_color=c.fg,
+    )
+    opts.update(kwargs)
+    return ctk.CTkComboBox(
+        parent, values=list(values), variable=variable, width=width,
+        height=INPUT_HEIGHT, corner_radius=INPUT_RADIUS, border_width=1,
+        state="readonly", font=("Segoe UI", 10),
+        dropdown_font=("Segoe UI", 10), **opts,
+    )
+
+
+def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
+    """A rounded on/off switch for the main run options."""
+    c = tb.Style().colors
+    return ctk.CTkSwitch(
+        parent, text=text, variable=variable,
+        onvalue=True, offvalue=False,
+        font=("Segoe UI", 10),
+        fg_color=c.secondary, progress_color=c.success,
+        text_color=c.fg,
+    )
 
 
 def setup_style(root: tk.Tk) -> None:
@@ -93,10 +237,6 @@ def setup_style(root: tk.Tk) -> None:
     style.configure("Muted.TLabel", foreground=colors.light)
     style.configure("Mono.TLabel", font=("Consolas", 9),
                     foreground=colors.light)
-    style.configure(
-        "Expander.TButton", anchor="w", padding=(8, 5),
-        font=("Segoe UI", 10, "bold"),
-    )
     style.configure("Treeview", rowheight=24)
 
 
@@ -315,8 +455,8 @@ class DashPanel(ttk.Frame):
 
         # the collapsible Average header (its value is the total avg)
         self._avg_open = False
-        self._avg_btn = ttk.Button(
-            grid, style="Expander.TButton", command=self._toggle_avg
+        self._avg_btn = rounded_button(
+            grid, "", command=self._toggle_avg, kind="expander"
         )
         self._avg_btn.grid(row=3, column=0, sticky="w")
         value_cells(3, "total")
@@ -351,10 +491,9 @@ class DashPanel(ttk.Frame):
         ttk.Label(
             hdr, text="Collections (running + done)", style="Head.TLabel"
         ).pack(side="left")
-        ttk.Button(
-            hdr, text="Show", command=self._show_selected,
-            image=icon("right"), compound="right",
-            bootstyle="link",
+        rounded_button(
+            hdr, "Show", command=self._show_selected, kind="link",
+            icon_name="right", compound="right",
         ).pack(side="right")
         # a real table: each collection is a collapsible parent row, its
         # images the children; the running one shows live, open. Native
@@ -696,20 +835,17 @@ class PainterGui:
         self.sheet_list.pack(side="left", fill="x", expand=True)
         col = ttk.Frame(lf)
         col.pack(side="left", padx=(8, 0), anchor="n")
-        ttk.Button(
-            col, text="Add…", command=self._add_sheets,
-            image=icon("add"), compound="left",
-            bootstyle="secondary",
+        rounded_button(
+            col, "Add…", command=self._add_sheets, icon_name="add",
+            width=110,
         ).pack(fill="x")
-        ttk.Button(
-            col, text="Remove", command=self._remove_sheet,
-            image=icon("remove"), compound="left",
-            bootstyle="secondary",
+        rounded_button(
+            col, "Remove", command=self._remove_sheet, icon_name="remove",
+            width=110,
         ).pack(fill="x", pady=4)
-        ttk.Button(
-            col, text="Clear", command=self._clear_sheets,
-            image=icon("clear"), compound="left",
-            bootstyle="secondary",
+        rounded_button(
+            col, "Clear", command=self._clear_sheets, icon_name="clear",
+            width=110,
         ).pack(fill="x")
 
     def _build_options(self, parent) -> None:
@@ -720,12 +856,11 @@ class PainterGui:
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Output:", width=8).pack(side="left")
         self.out_var = tk.StringVar(value=str(DEFAULT_OUT_DIR))
-        ttk.Entry(row, textvariable=self.out_var).pack(
+        rounded_entry(row, textvariable=self.out_var).pack(
             side="left", fill="x", expand=True
         )
-        ttk.Button(
-            row, text="Browse…", command=self._pick_out,
-            bootstyle="secondary",
+        rounded_button(
+            row, "Browse…", command=self._pick_out,
         ).pack(side="left", padx=(8, 0))
 
         row = ttk.Frame(lf)
@@ -736,54 +871,52 @@ class PainterGui:
         }
         self.background_vars: dict[str, tk.StringVar] = {}
         for key in sorted(SITES):
-            ttk.Checkbutton(
-                row, text=SITES[key].name, variable=self.site_vars[key],
-                bootstyle="round-toggle",
+            rounded_switch(
+                row, SITES[key].name, self.site_vars[key]
             ).pack(side="left", padx=(2, 0))
             var = tk.StringVar(value=SITES[key].default_background)
             self.background_vars[key] = var
-            ttk.Combobox(
-                row, textvariable=var, values=list(BACKGROUND_CHOICES),
-                state="readonly", width=11,
+            rounded_combo(
+                row, BACKGROUND_CHOICES, var, width=110,
             ).pack(side="left", padx=(2, 12))
 
         row = ttk.Frame(lf)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="", width=8).pack(side="left")
         self.bgfix_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            row, text="Background fix", variable=self.bgfix_var,
-            bootstyle="round-toggle",
+        rounded_switch(
+            row, "Background fix", self.bgfix_var
         ).pack(side="left")
         self.report_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            row, text="Report txt", variable=self.report_var,
-            bootstyle="round-toggle",
+        rounded_switch(
+            row, "Report txt", self.report_var
         ).pack(side="left", padx=12)
         self.safer_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            row, text="Safer retry on refusal", variable=self.safer_var,
-            bootstyle="round-toggle",
+        rounded_switch(
+            row, "Safer retry on refusal", self.safer_var
         ).pack(side="left", padx=12)
         ttk.Label(row, text="New chat:").pack(side="left", padx=(12, 2))
         self.new_chat_var = tk.StringVar(value="collection")
-        ttk.Combobox(
-            row, textvariable=self.new_chat_var,
-            values=list(NEW_CHAT_CHOICES), state="readonly", width=10,
+        rounded_combo(
+            row, NEW_CHAT_CHOICES, self.new_chat_var, width=105,
         ).pack(side="left")
 
         row = ttk.Frame(lf)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Pace:", width=8).pack(side="left")
         ttk.Label(row, text="pause").pack(side="left")
+        # CTk has no spinbox — small rounded entries instead (typed
+        # numbers; ranges are validated on Start, same as before)
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
-        ttk.Spinbox(
-            row, from_=0, to=600, width=5, textvariable=self.pause_min_var
+        rounded_entry(
+            row, width=52, textvariable=self.pause_min_var,
+            justify="center",
         ).pack(side="left", padx=(4, 0))
-        ttk.Label(row, text="–").pack(side="left")
-        ttk.Spinbox(
-            row, from_=0, to=600, width=5, textvariable=self.pause_max_var
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        rounded_entry(
+            row, width=52, textvariable=self.pause_max_var,
+            justify="center",
         ).pack(side="left")
         ttk.Label(row, text="s   action delay").pack(side="left", padx=(2, 0))
         self.act_min_var = tk.StringVar(
@@ -792,54 +925,48 @@ class PainterGui:
         self.act_max_var = tk.StringVar(
             value=f"{TIMING.action_delay_max_s:.1f}"
         )
-        ttk.Spinbox(
-            row, from_=0, to=5, increment=0.1, width=4,
-            textvariable=self.act_min_var,
+        rounded_entry(
+            row, width=46, textvariable=self.act_min_var,
+            justify="center",
         ).pack(side="left", padx=(4, 0))
-        ttk.Label(row, text="–").pack(side="left")
-        ttk.Spinbox(
-            row, from_=0, to=5, increment=0.1, width=4,
-            textvariable=self.act_max_var,
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        rounded_entry(
+            row, width=46, textvariable=self.act_max_var,
+            justify="center",
         ).pack(side="left")
         ttk.Label(row, text="s").pack(side="left")
 
     def _build_toolbar(self, parent) -> None:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(0, 6))
-        self.btn_chrome = ttk.Button(
-            row, text="Open Chrome (login)", command=self._open_chrome,
-            image=icon("web"), compound="left",
-            bootstyle="secondary",
+        self.btn_chrome = rounded_button(
+            row, "Open Chrome (login)", command=self._open_chrome,
+            icon_name="web",
         )
         self.btn_chrome.pack(side="left")
-        self.btn_check = ttk.Button(
-            row, text="Check", command=self._check_sheets,
-            bootstyle="secondary",
+        self.btn_check = rounded_button(
+            row, "Check", command=self._check_sheets,
         )
         self.btn_check.pack(side="left", padx=4)
-        self.btn_select = ttk.Button(
-            row, text="Select images…", command=self._select_images,
-            bootstyle="secondary",
+        self.btn_select = rounded_button(
+            row, "Select images…", command=self._select_images,
         )
         self.btn_select.pack(side="left", padx=4)
-        self.btn_start = ttk.Button(
-            row, text="Start", bootstyle="success",
-            image=icon("start"), compound="left",
-            command=self._start,
+        self.btn_start = rounded_button(
+            row, "Start", command=self._start, kind="success",
+            icon_name="start", width=90,
         )
         self.btn_start.pack(side="left", padx=4)
-        self.btn_stop = ttk.Button(
-            row, text="Stop", command=self._request_stop,
-            state="disabled", bootstyle="danger-outline",
+        self.btn_stop = rounded_button(
+            row, "Stop", command=self._request_stop,
+            kind="danger-outline", width=70, state="disabled",
         )
         self.btn_stop.pack(side="left", padx=4)
-        ttk.Button(
-            row, text="Instructions", command=self._open_instructions,
-            bootstyle="secondary",
+        rounded_button(
+            row, "Instructions", command=self._open_instructions,
         ).pack(side="right")
-        ttk.Button(
-            row, text="BG removal only…", command=self._bg_remove_only,
-            bootstyle="secondary",
+        rounded_button(
+            row, "BG removal only…", command=self._bg_remove_only,
         ).pack(side="right", padx=4)
 
     def _build_views(self, parent) -> None:
@@ -1452,17 +1579,16 @@ class SelectWindow(tk.Toplevel):
             " ⚠ advice unticked by default.",
             style="Muted.TLabel",
         ).pack(side="left")
-        ttk.Button(
-            bar, text="Expand all", command=self._expand_all,
-            bootstyle="secondary-outline",
+        rounded_button(
+            bar, "Expand all", command=self._expand_all,
+            kind="secondary-outline",
         ).pack(side="right")
-        ttk.Button(
-            bar, text="Collapse all", command=self._collapse_all,
-            bootstyle="secondary-outline",
+        rounded_button(
+            bar, "Collapse all", command=self._collapse_all,
+            kind="secondary-outline",
         ).pack(side="right", padx=4)
-        ttk.Button(
-            bar, text="Close", command=self.destroy,
-            bootstyle="secondary",
+        rounded_button(
+            bar, "Close", command=self.destroy,
         ).pack(side="right", padx=4)
 
         scroll = ScrollFrame(self, horizontal=True)
@@ -1497,7 +1623,7 @@ class SelectWindow(tk.Toplevel):
 
         state = {"open": True}
         label = f"{sheet.source.name} — {sheet.theme}"
-        btn = ttk.Button(head, style="Expander.TButton")
+        btn = rounded_button(head, "", kind="expander")
 
         def render() -> None:
             btn.configure(text=("▼  " if state["open"] else "▶  ") + label)
@@ -1513,10 +1639,10 @@ class SelectWindow(tk.Toplevel):
         btn.configure(command=toggle)
         # all/none buttons first (right), then the toggle fills the rest
         for key in reversed(site_keys):
-            ttk.Button(
-                head, text=f"{SITES[key].name}: all/none", width=16,
+            rounded_button(
+                head, f"{SITES[key].name}: all/none", width=130,
                 command=partial(self._toggle_sheet, key, sheet),
-                bootstyle="secondary-outline",
+                kind="secondary-outline",
             ).pack(side="right", padx=2)
         btn.pack(side="left", fill="x", expand=True)
         render()
@@ -1533,6 +1659,8 @@ class SelectWindow(tk.Toplevel):
                 is_done = item.drop_path in done[key][src]
                 if is_done:
                     var.set(False)
+                # deliberately plain ttk here: this grid holds hundreds
+                # of rows and a CTkCheckBox per cell is too heavy
                 cb = ttk.Checkbutton(detail, variable=var)
                 if is_done:
                     cb.state(["disabled"])
@@ -1602,14 +1730,12 @@ class DocWindow(tk.Toplevel):
         bar.pack(fill="x")
         if hint:
             ttk.Label(bar, text=hint, style="Muted.TLabel").pack(side="left")
-        ttk.Button(
-            bar, text="Copy (for AI)", command=self._copy_all,
-            image=icon("ai"), compound="left",
-            bootstyle="info",
+        rounded_button(
+            bar, "Copy (for AI)", command=self._copy_all, kind="info",
+            icon_name="ai",
         ).pack(side="right")
-        ttk.Button(
-            bar, text="Close", command=self.destroy,
-            bootstyle="secondary",
+        rounded_button(
+            bar, "Close", command=self.destroy,
         ).pack(side="right", padx=4)
 
         wrap = ttk.Frame(self)
