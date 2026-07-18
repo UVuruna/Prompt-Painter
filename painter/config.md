@@ -90,6 +90,12 @@ match.
   release zip, and the locked gating (owner 2026-07-18) — aspect
   W/H within `1 ± UPSCALE_ASPECT_TOL` AND a dimension below
   `UPSCALE_MIN_PX`.
+- `ASPECT_TOL`, `ASPECT_DEFAULT_W`, `ASPECT_DEFAULT_H` — the
+  [Change Aspect Ratio](aspect.md) batch deform tool: `ASPECT_TOL`
+  (0.001) is how close an image's W/H must be to the target ratio to
+  count as already-at-ratio (left byte-unchanged, no write);
+  `ASPECT_DEFAULT_W`/`ASPECT_DEFAULT_H` (16 / 9) preselect the GUI's
+  ratio prompt.
 - `QUOTA_RESET_PATTERNS`, `parse_quota_reset(text) -> float | None`
   — the quota reset time (owner's #2): each pattern captures one
   number ("resets in 27 minutes", "in 14 hours", Serbian "za 27

@@ -54,6 +54,13 @@ Upscales small near-square (badge-class) images with the
 minimum; loud but catchable on a machine without Vulkan. See
 [Upscale](upscale.md).
 
+### `aspect.py` — Change Aspect Ratio
+The standalone batch DEFORM tool (owner 2026-07-19): stretches every
+image in a folder to a target ratio `X:Y` in place — a grow-only,
+non-proportional LANCZOS stretch that never shrinks either axis and
+leaves an already-at-ratio image byte-unchanged. Loud but catchable.
+See [Change Aspect Ratio](aspect.md).
+
 ### `settings.py` — Settings Persistence
 Loads/saves the GUI's remembered choices as `settings.json` at the
 project root (gitignored); a corrupt file is loud but never crashes

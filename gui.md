@@ -252,16 +252,23 @@ reachability fixes:
   (`screen*DOC_HEIGHT_FRAC`, floored at `SELECT_OPEN_H`) with every
   section COLLAPSED — the L1-title measure is bounded (~30 titles),
   never the old open-time sweep over every leaf.
-- **BG removal only... / CROP only... / UPSCALE only...** — the
-  three standalone in-place tools (one at a time): pick a folder,
-  confirm, and the engine function (`remove_background` /
-  `crop_transparent` / `upscale_if_small`) runs over every image
-  under it, in order. They are site-less, so progress reports on
-  the FIRST VISIBLE dashboard panel (its counters restart for the
-  run): done = the file was changed, REFUSED = the engine said
-  "nothing"/"unclear" — nothing to do for that file (for Upscale:
-  failed the gate — aspect outside 0.9–1.1 or both sides already
-  ≥ 800).
+- **Aspect ratio... / BG removal only... / CROP only... /
+  UPSCALE only...** — the standalone in-place tools (one at a time):
+  pick a folder, confirm, and the engine function
+  (`change_aspect` / `remove_background` / `crop_transparent` /
+  `upscale_if_small`) runs over every image under it, in order. They
+  are site-less, so progress reports on the FIRST VISIBLE dashboard
+  panel (its counters restart for the run): done = the file was
+  changed, REFUSED = the engine said "nothing"/"unclear" — nothing to
+  do for that file (for Upscale: failed the gate — aspect outside
+  0.9–1.1 or both sides already ≥ 800; for Aspect: already at the
+  target ratio, left byte-unchanged). **Aspect ratio…** first opens an
+  `AspectRatioDialog` — a tiny modal prompt with two positive-integer
+  fields **W** and **H** (default 16 : 9); its **Run** binds the ratio
+  into `change_aspect` and hands off to the SAME generic
+  `_standalone_tool` plumbing (folder pick + confirm + in-place loop +
+  dashboard reporting) the other three use, with a DESTRUCTIVE-deform
+  confirmation (non-proportional stretch, overwritten in place).
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause / Action delay** — both are random FROM–TO ranges: the

@@ -40,6 +40,8 @@ import ttkbootstrap as tb
 from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageGrab, ImageTk
 
 from painter.config import (
+    ASPECT_DEFAULT_H,
+    ASPECT_DEFAULT_W,
     BACKGROUND_CHOICES,
     CDP_URL,
     DEFAULT_OUT_DIR,
@@ -269,6 +271,10 @@ DOC_MIN_W = 520             # never narrower than this (the top button bar fits)
 DOC_MIN_H = 400             # never shorter than this (also the provisional height)
 DOC_IMG_PAD_PX = 60         # horizontal padding around the image column (image mode)
 DOC_CHROME_PAD_PX = 48      # non-text vertical chrome: Text pady + frame margins
+
+# --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
+ASPECT_DIALOG_ENTRY_W = 64  # px width of each W / H field in the ratio dialog
+ASPECT_DIALOG_PAD_PX = 16   # padding around the ratio dialog body
 
 # --- Main window: min size, on-screen clamp, wheel, collapse (Rule #4) -
 # The whole window is vertically scrollable so a stale-tall geometry can
@@ -2060,8 +2066,8 @@ class PainterGui:
         rounded_button(
             row, "Instructions", command=self._open_instructions,
         ).pack(side="right")
-        # the three standalone in-place tools (site-less; run one at a
-        # time, reported on the first visible dashboard panel)
+        # the standalone in-place tools (site-less; run one at a time,
+        # reported on the first visible dashboard panel)
         rounded_button(
             row, "UPSCALE only…", command=partial(
                 self._standalone_tool, "Upscale", "upscale"
@@ -2077,6 +2083,9 @@ class PainterGui:
                 self._standalone_tool, "BG removal", "bg_removal"
             ),
         ).pack(side="right", padx=4)
+        rounded_button(
+            row, "Aspect ratio…", command=self._aspect_tool,
+        ).pack(side="right")
 
     def _build_views(self, parent) -> None:
         self.notebook = ttk.Notebook(parent)
@@ -2433,12 +2442,20 @@ class PainterGui:
             if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
         )
 
-    def _standalone_tool(self, label: str, kind: str) -> None:
-        """One of the three standalone runs (BG removal / Crop /
-        Upscale): pick a folder, confirm, process IN PLACE in order.
+    def _standalone_tool(
+        self, label: str, kind: str, *, func=None, confirm=None
+    ) -> None:
+        """One standalone run (BG removal / Crop / Upscale / Aspect):
+        pick a folder, confirm, process IN PLACE in filename order.
         Site-less — progress and the done/refused counts feed the
         FIRST VISIBLE dashboard panel ("refused" = the engine said
-        "nothing"/"unclear": nothing to do for that file)."""
+        "nothing"/"unclear": nothing to do for that file).
+
+        ``func`` overrides the engine function (``func(path, log) ->
+        str``) — the aspect tool passes one with its ratio bound, so
+        every tool shares this one loop. ``confirm`` overrides the
+        confirmation text with a ``confirm(folder) -> str`` callable
+        (the aspect tool warns it DEFORMS destructively)."""
         if self._standalone_busy:
             messagebox.showerror(
                 "PromptPainter", "A standalone tool is already running."
@@ -2449,12 +2466,13 @@ class PainterGui:
         )
         if not folder:
             return
-        if not messagebox.askyesno(
-            "PromptPainter",
+        message = (
+            confirm(folder) if confirm is not None else
             f"{label} IN PLACE for every image under:\n{folder}?\n\n"
             "(files with nothing to do are skipped untouched and"
-            " counted as Refused)",
-        ):
+            " counted as Refused)"
+        )
+        if not messagebox.askyesno("PromptPainter", message):
             return
         # the reporting panel: the first visible one (they're site-less)
         panes = self.dash_pane.panes()
@@ -2469,7 +2487,7 @@ class PainterGui:
         def work():
             emit = lambda ev: self._q.put(("__event__", target, ev))
             try:
-                func = self._standalone_func(kind)
+                run_func = func if func is not None else self._standalone_func(kind)
                 files = self._iter_images(Path(folder))
                 self._q.put(
                     f"{label}: {len(files)} image(s) under {folder}"
@@ -2493,7 +2511,7 @@ class PainterGui:
                     })
                     t_item = time.time()
                     try:
-                        status = func(src, log)
+                        status = run_func(src, log)
                     except Exception as exc:
                         status = "FAILED"
                         self._q.put(f"  {label} FAIL {src.name}: {exc}")
@@ -2529,6 +2547,39 @@ class PainterGui:
                 self._q.put(("__status__", "idle"))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _aspect_tool(self) -> None:
+        """The standalone 'Aspect ratio…' run: ask for a target ratio
+        (W : H), then DEFORM every image in a folder to it in place.
+        Reuses ``_standalone_tool`` (folder pick + confirm + in-place
+        loop + dashboard reporting) with the ratio bound into the
+        engine func and a DESTRUCTIVE-deform confirmation."""
+        if self._standalone_busy:
+            messagebox.showerror(
+                "PromptPainter", "A standalone tool is already running."
+            )
+            return
+        ratio = AspectRatioDialog(self.root).result
+        if ratio is None:
+            return
+        ratio_w, ratio_h = ratio
+        from painter.aspect import change_aspect
+
+        def confirm(folder: str) -> str:
+            return (
+                f"DEFORM every image under:\n{folder}\n\n"
+                f"to a {ratio_w}:{ratio_h} aspect ratio?\n\n"
+                "This is a non-proportional STRETCH written IN PLACE"
+                " (destructive — the originals are overwritten). Images"
+                f" already at {ratio_w}:{ratio_h} are skipped untouched"
+                " and counted as Refused."
+            )
+
+        self._standalone_tool(
+            f"Aspect {ratio_w}:{ratio_h}", "aspect",
+            func=lambda path, log: change_aspect(path, ratio_w, ratio_h, log),
+            confirm=confirm,
+        )
 
     def _compose_post_save(self, key: str):
         """The site's post-save hook per ITS panel switches — the same
@@ -3589,6 +3640,96 @@ class SelectWindow(tk.Toplevel):
             if job is not None:
                 self.after_cancel(job)
         self._recount_job = self._wrap_job = self._expand_job = None
+
+
+class AspectRatioDialog(tk.Toplevel):
+    """A tiny MODAL prompt for the target aspect ratio of the standalone
+    'Aspect ratio…' deform tool. Two positive-integer fields (W and H,
+    defaulting to the configured 16:9); ``result`` is ``(w, h)`` on Run
+    or ``None`` on Cancel / Escape. Themed like the app (skinned
+    Toplevel + rounded fields / buttons)."""
+
+    def __init__(
+        self, master,
+        default_w: int = ASPECT_DEFAULT_W, default_h: int = ASPECT_DEFAULT_H,
+    ):
+        super().__init__(master)
+        self.title("Change aspect ratio")
+        self.resizable(False, False)
+        skin_toplevel(self)  # bg registered so a flip re-tints the window
+        self.result: tuple[int, int] | None = None
+        self._w_var = tk.StringVar(value=str(default_w))
+        self._h_var = tk.StringVar(value=str(default_h))
+
+        body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
+        body.pack(fill="both", expand=True)
+        ttk.Label(
+            body, text="Target aspect ratio — stretches every image to it:",
+        ).pack(anchor="w", pady=(0, 10))
+
+        fields = ttk.Frame(body)
+        fields.pack()
+        ttk.Label(fields, text="W").pack(side="left", padx=(0, 4))
+        self._w_entry = rounded_entry(
+            fields, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._w_var,
+            justify="center",
+        )
+        self._w_entry.pack(side="left")
+        ttk.Label(fields, text=":", font=tk_font("head")).pack(
+            side="left", padx=8
+        )
+        ttk.Label(fields, text="H").pack(side="left", padx=(0, 4))
+        self._h_entry = rounded_entry(
+            fields, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._h_var,
+            justify="center",
+        )
+        self._h_entry.pack(side="left")
+
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(14, 0))
+        rounded_button(btns, "Run", command=self._run, kind="success").pack(
+            side="right"
+        )
+        rounded_button(btns, "Cancel", command=self.destroy).pack(
+            side="right", padx=6
+        )
+
+        self.bind("<Return>", lambda _e: self._run())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.update_idletasks()
+        self._center_on(master)
+        self.transient(master)
+        self.grab_set()
+        self._w_entry.focus_set()
+        self.wait_window(self)
+
+    def _center_on(self, master) -> None:
+        """Place the dialog over the middle-upper third of the parent."""
+        master.update_idletasks()
+        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_reqwidth()) // 2
+        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+    def _run(self) -> None:
+        """Validate the two fields as positive whole numbers, then close
+        with ``result`` set; a bad value stays open with a loud message."""
+        try:
+            ratio_w = int(self._w_var.get().strip())
+            ratio_h = int(self._h_var.get().strip())
+        except ValueError:
+            messagebox.showerror(
+                "PromptPainter",
+                "Width and height must be whole numbers.", parent=self,
+            )
+            return
+        if ratio_w <= 0 or ratio_h <= 0:
+            messagebox.showerror(
+                "PromptPainter",
+                "Width and height must both be positive.", parent=self,
+            )
+            return
+        self.result = (ratio_w, ratio_h)
+        self.destroy()
 
 
 class DocWindow(tk.Toplevel):

@@ -179,6 +179,20 @@ UPSCALE_MIN_PX = 800
 UPSCALE_ASPECT_TOL = 0.1
 
 
+# --- Change aspect ratio (owner's batch deform tool, 2026-07-19) -----
+
+# painter/aspect.py DEFORMS every image in a folder to a target ratio
+# X:Y in place — a non-proportional LANCZOS STRETCH (intended). The
+# rule NEVER shrinks either dimension: the result is the smallest box
+# of the target ratio that still CONTAINS the original, so exactly ONE
+# axis grows and neither is cut. An image whose current W/H is within
+# ASPECT_TOL of the target ratio is already at ratio and left BYTE-
+# UNCHANGED (no write). The GUI's ratio prompt defaults to 16:9.
+ASPECT_TOL = 0.001
+ASPECT_DEFAULT_W = 16
+ASPECT_DEFAULT_H = 9
+
+
 # --- Settings persistence (owner's #9) -------------------------------
 
 # The GUI's remembered choices; JSON at the project root, gitignored.
