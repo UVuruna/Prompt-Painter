@@ -37,7 +37,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 import ttkbootstrap as tb
-from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageTk
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageGrab, ImageTk
 
 from painter.config import (
     BACKGROUND_CHOICES,
@@ -50,6 +50,8 @@ from painter.config import (
     SWITCH_ASPECT,
     SWITCH_CRATER,
     SWITCH_CRATERS,
+    SWITCH_FADE_MS,
+    SWITCH_FADE_STEPS,
     SWITCH_FRAME_MS,
     SWITCH_H,
     SWITCH_HOVER_SCALE,
@@ -818,13 +820,13 @@ def recolor_tk_registry() -> None:
 THEME_TOPLEVELS: list = []
 
 
-def apply_theme(name: str) -> None:
-    """The ONE coherent flip, used by BOTH startup and the toggle: swap
-    the ttkbootstrap theme + re-run setup_style (the ttk half), flip the
-    customtkinter appearance mode (every CTk tuple re-resolves), recolour
-    the plain-tk registry, then fire every open Toplevel's apply_theme.
-    No window teardown — an active run's worker threads, dashboard
-    counters and quota countdowns all survive."""
+def _apply_theme_now(name: str) -> None:
+    """The actual coherent flip (no animation): swap the ttkbootstrap
+    theme + re-run setup_style (the ttk half), flip the customtkinter
+    appearance mode (every CTk tuple re-resolves), recolour the plain-tk
+    registry, then fire every open Toplevel's apply_theme. No window
+    teardown — an active run's worker threads, dashboard counters and
+    quota countdowns all survive."""
     global ACTIVE_THEME
     ACTIVE_THEME = name
     theme = THEMES[name]
@@ -837,6 +839,98 @@ def apply_theme(name: str) -> None:
             top.apply_theme()
         except tk.TclError:
             pass  # closed mid-flip
+
+
+# --- Theme cross-fade (snapshot overlay) -----------------------------
+# tkinter has no native colour transitions, so a LIVE flip repaints as a
+# visible cascade of half-themed frames (black boxes, half-styled
+# spinners). apply_theme(animate=True) hides that cascade: grab the
+# OLD-theme window, show it in a borderless topmost overlay, repaint the
+# real window underneath in the NEW theme, then fade the overlay's window
+# alpha out and destroy it. It is a pure visual nicety — any failure
+# (ImageGrab unavailable, alpha unsupported, an occluded window) degrades
+# to the plain instant flip, never a stuck overlay or an un-themed app.
+
+
+def _snapshot_overlay(root: tk.Misc) -> tk.Toplevel:
+    """Grab the root window's client area (PIL.ImageGrab) and mount it in
+    a borderless, topmost, fully-opaque Toplevel placed exactly over the
+    window. The PhotoImage is held on the overlay (tk keeps no ref of its
+    own) so it survives the whole fade."""
+    x, y = root.winfo_rootx(), root.winfo_rooty()
+    w, h = root.winfo_width(), root.winfo_height()
+    photo = ImageTk.PhotoImage(ImageGrab.grab(bbox=(x, y, x + w, y + h)))
+    overlay = tk.Toplevel(root)
+    overlay.overrideredirect(True)
+    overlay.geometry(f"{w}x{h}+{x}+{y}")
+    overlay.attributes("-topmost", True)
+    overlay.attributes("-alpha", 1.0)
+    label = tk.Label(
+        overlay, image=photo, borderwidth=0, highlightthickness=0
+    )
+    label.image = photo          # tk holds no ref — keep it alive here
+    label.pack(fill="both", expand=True)
+    overlay._snapshot = photo    # belt-and-braces: outlives the whole fade
+    overlay.update_idletasks()
+    return overlay
+
+
+def _fade_out_overlay(root: tk.Misc, overlay: tk.Toplevel) -> None:
+    """Ramp the overlay's window alpha 1.0 -> 0.0 across SWITCH_FADE_STEPS
+    root.after ticks (ease-out — the stale snapshot clears fast, then
+    eases), then destroy it. A destroyed-mid-fade overlay (TclError) ends
+    the ramp cleanly, so no overlay is ever left stuck on screen."""
+    steps = max(SWITCH_FADE_STEPS, 1)
+    interval = max(round(SWITCH_FADE_MS / steps), 1)
+
+    def tick(i: int) -> None:
+        try:
+            frac = i / steps
+            if frac >= 1.0:
+                overlay.destroy()
+                return
+            overlay.attributes("-alpha", (1.0 - frac) ** 2)  # ease-out
+            root.after(interval, tick, i + 1)
+        except tk.TclError:
+            try:
+                overlay.destroy()
+            except tk.TclError:
+                pass  # already gone
+
+    tick(1)
+
+
+def apply_theme(name: str, animate: bool = False) -> None:
+    """The ONE coherent flip, used by BOTH startup and the toggle.
+
+    Startup passes ``animate=False`` (no window exists yet) for an
+    instant flip. The switch passes ``animate=True``: when the window is
+    on-screen the whole repaint cascade is hidden behind a SNAPSHOT
+    CROSS-FADE (see _snapshot_overlay / _fade_out_overlay). The cross-fade
+    is a visual nicety only — any failure in the snapshot/overlay/alpha
+    path is caught, any partial overlay is destroyed, and the plain
+    instant flip runs instead (a one-line note is logged, root Rule #1)."""
+    root = tb.Style().master
+    if not (
+        animate and root is not None
+        and root.winfo_ismapped() and root.winfo_viewable()
+    ):
+        _apply_theme_now(name)
+        return
+    overlay = None
+    try:
+        overlay = _snapshot_overlay(root)
+        _apply_theme_now(name)      # repaint the real window BEHIND the snap
+        root.update_idletasks()     # force the cascade to settle, hidden
+        _fade_out_overlay(root, overlay)
+    except Exception as exc:        # visual nicety — never crash the flip
+        if overlay is not None:
+            try:
+                overlay.destroy()
+            except tk.TclError:
+                pass
+        print(f"[theme] cross-fade unavailable, flipped instantly: {exc}")
+        _apply_theme_now(name)
 
 
 def register_painter_day() -> None:
@@ -3829,7 +3923,9 @@ class DayNightSwitch(tk.Canvas):
     def _on_click(self, _event=None) -> None:
         self._on = not self._on
         name = "day" if self._on else "night"
-        apply_theme(name)          # flip the whole app now (coherent)
+        # cross-fade the whole app (snapshot overlay hides the repaint
+        # cascade); the knob slide below runs concurrently underneath it
+        apply_theme(name, animate=True)
         self._gui._schedule_save()  # persist the choice
         self._animate()            # slide the knob as flourish
 

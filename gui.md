@@ -410,18 +410,43 @@ the owner caught in an accidental half-light window):
   flip, re-applying each role's skin and pruning dead widgets via
   `tk.TclError`. This is the ONLY place plain-tk colours live.
 
-**`apply_theme(name)`** is the ONE coherent flip, used by BOTH
-startup and the toggle: set the module `ACTIVE_THEME` → `theme_use`
-→ `setup_style()` → `set_appearance_mode()` → `recolor_tk_registry()`
-→ fire every open Toplevel's `apply_theme()`. It NEVER tears down the
-window, so an active run's worker threads, dashboard counters and
-quota countdowns survive a flip. **Open Toplevels** (`SelectWindow`,
-`DocWindow`) each register in `THEME_TOPLEVELS` on `__init__`,
-unregister on `<Destroy>`, and expose their own `apply_theme()` —
-because their per-widget foregrounds (Select tree leaf colours + the
-header progress label, DocWindow's Text tags) do NOT follow ttk
-styles and must be recomputed from `status()`/`colors` live (Select
-retains each leaf's `advice` + `n_done` to recompute its colour).
+**`apply_theme(name, animate=False)`** is the ONE coherent flip, used
+by BOTH startup and the toggle. Its core (`_apply_theme_now`): set the
+module `ACTIVE_THEME` → `theme_use` → `setup_style()` →
+`set_appearance_mode()` → `recolor_tk_registry()` → fire every open
+Toplevel's `apply_theme()`. It NEVER tears down the window, so an
+active run's worker threads, dashboard counters and quota countdowns
+survive a flip. **Open Toplevels** (`SelectWindow`, `DocWindow`) each
+register in `THEME_TOPLEVELS` on `__init__`, unregister on
+`<Destroy>`, and expose their own `apply_theme()` — because their
+per-widget foregrounds (Select tree leaf colours + the header progress
+label, DocWindow's Text tags) do NOT follow ttk styles and must be
+recomputed from `status()`/`colors` live (Select retains each leaf's
+`advice` + `n_done` to recompute its colour).
+
+**The cross-fade** (owner 2026-07-18): tkinter has no native colour
+transitions, so a live flip repaints as an ugly cascade of half-themed
+frames (black boxes, half-styled spinners). When `animate=True` AND the
+window is on-screen (`winfo_ismapped` + `winfo_viewable`), the whole
+cascade is hidden behind a SNAPSHOT CROSS-FADE: `_snapshot_overlay`
+grabs the current OLD-theme window client area with `PIL.ImageGrab`
+(from `winfo_rootx/rooty/width/height`) into an `ImageTk.PhotoImage`
+(held on the overlay so tk cannot GC it), and mounts it in a
+borderless, topmost, `overrideredirect` Toplevel placed exactly over
+the window at `-alpha` 1.0. `_apply_theme_now` then repaints the REAL
+window in the new theme UNDERNEATH the snapshot, one forced
+`update_idletasks` settles that cascade invisibly, and
+`_fade_out_overlay` ramps the overlay's window `-alpha` 1.0 → 0.0 over
+`SWITCH_FADE_MS` (≈260 ms) in `SWITCH_FADE_STEPS` (16) `root.after`
+ticks (ease-out) before destroying it. It is a pure visual nicety:
+any failure (ImageGrab unavailable, `-alpha` unsupported) is caught,
+any partial overlay destroyed, and the plain instant `_apply_theme_now`
+runs instead with a one-line log note (root Rule #1 — never a stuck
+overlay or an un-themed app). Caveats: `ImageGrab` grabs SCREEN pixels,
+so a window occluding ours is captured in the snapshot; the app is
+frozen (static snapshot) for the ~260 ms fade, so live dashboard
+updates are briefly hidden. Startup passes `animate=False` (no window
+yet) — instant flip, no overlay.
 
 **Startup order** (`PainterGui.__init__`) applies the saved theme
 BEFORE building any widget — `register_painter_day()` → load settings
@@ -450,9 +475,11 @@ glow — then LANCZOS-down). It is a FIXED size (it does not follow the
 font zoom), so once is enough. Each `_redraw` just re-places the track
 `create_image` (hard-swapped night/day at the knob's midpoint) and the
 knob `create_image` at the animated x. A click toggles state, calls
-`apply_theme` + `_schedule_save` synchronously, then runs a ~36-frame
-smoothstep `after()` slide (cancel/restart if re-clicked); hover swaps
-in the 1.05x knob. A missing track SVG is a loud `FileNotFoundError`
+`apply_theme(name, animate=True)` (the snapshot cross-fade above) +
+`_schedule_save`, then runs a ~36-frame smoothstep `after()` knob slide
+(cancel/restart if re-clicked) — the slide runs CONCURRENTLY on the
+switch canvas underneath the fade overlay, revealed as the snapshot
+fades; hover swaps in the 1.05x knob. A missing track SVG is a loud `FileNotFoundError`
 (Rule #1). Its canvas is registered as a `canvas` surface so its
 background re-tints with the window — the pill's transparent corners
 blend into the top strip in both themes.
