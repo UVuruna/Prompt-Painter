@@ -25,7 +25,9 @@ from dataclasses import replace
 from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import filedialog, messagebox, ttk
+
+import ttkbootstrap as tb
 
 from painter.config import (
     BACKGROUND_CHOICES,
@@ -42,160 +44,55 @@ from painter.config import (
 )
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
-# the dark modern palette (owner's UV/UI examples: navy surfaces,
-# card panels, cyan/green/purple accents)
-C_BG = "#12182b"        # window background
-C_SURFACE = "#1a2238"   # cards / panels
-C_FIELD = "#141b2e"     # entries, lists, tables
-C_EDGE = "#2b3854"      # hairline borders
-C_TEXT = "#e8ecf5"
-C_MUTED = "#8b94ad"
-C_ACCENT = "#4fc3f7"    # cyan — primary accent / theme bar
-C_DONE = "#2ee59d"      # green — finished / task bar
-C_DONE_SOFT = "#9ccc65"  # olive — partly done
-C_ADVICE = "#ffb74d"     # orange — sheet advice (REUSE / not approved)
-C_SUPERSEDED = "#ff6b6b"  # red — superseded
-C_SELECT = "#24406b"     # selection background
+# semantic STATUS colours only — the widget look itself comes from
+# ttkbootstrap's darkly theme. These colour-code Selection-window
+# rows and DocWindow tags, aligned to darkly's own accents
+C_DONE = "#00bc8c"        # green — finished (darkly 'success')
+C_DONE_SOFT = "#9ccc65"   # olive — done on one site only
+C_ADVICE = "#f39c12"      # orange — sheet advice (darkly 'warning')
+C_SUPERSEDED = "#e74c3c"  # red — superseded (darkly 'danger')
 
 
 def setup_style(root: tk.Tk) -> None:
-    """The dark modern ttk look — navy surfaces, accent colours."""
-    root.configure(background=C_BG)
-    style = ttk.Style(root)
-    try:
-        style.theme_use("clam")
-    except tk.TclError:
-        pass
-    base = ("Segoe UI", 10)
-    style.configure(
-        ".", font=base, background=C_BG, foreground=C_TEXT,
-        fieldbackground=C_FIELD, troughcolor=C_FIELD,
-        bordercolor=C_EDGE, lightcolor=C_SURFACE, darkcolor=C_BG,
-        focuscolor=C_ACCENT, selectbackground=C_SELECT,
-        selectforeground=C_TEXT, insertcolor=C_TEXT,
-    )
-    style.configure("TFrame", background=C_BG)
-    style.configure("TLabel", background=C_BG, foreground=C_TEXT)
-    style.configure(
-        "TButton", padding=(12, 6), background=C_SURFACE,
-        foreground=C_TEXT, borderwidth=1,
-    )
-    style.map(
-        "TButton",
-        background=[("pressed", C_SELECT), ("active", "#233052")],
-        foreground=[("disabled", C_MUTED)],
-    )
-    style.configure(
-        "Accent.TButton", background=C_DONE, foreground="#0b1220",
-        font=("Segoe UI", 10, "bold"),
-    )
-    style.map(
-        "Accent.TButton",
-        background=[("pressed", "#22b97d"), ("active", "#4dedb0"),
-                    ("disabled", C_SURFACE)],
-        foreground=[("disabled", C_MUTED)],
-    )
-    style.configure(
-        "TLabelframe", padding=10, background=C_BG,
-        bordercolor=C_EDGE, relief="solid",
-    )
-    style.configure(
-        "TLabelframe.Label", font=("Segoe UI", 10, "bold"),
-        background=C_BG, foreground=C_ACCENT,
-    )
-    style.configure("TCheckbutton", background=C_BG, foreground=C_TEXT)
-    style.map(
-        "TCheckbutton",
-        background=[("active", C_BG)],
-        indicatorcolor=[("selected", C_ACCENT), ("!selected", C_FIELD)],
-    )
-    style.configure(
-        "TCombobox", fieldbackground=C_FIELD, background=C_SURFACE,
-        foreground=C_TEXT, arrowcolor=C_TEXT,
-    )
-    style.map(
-        "TCombobox",
-        fieldbackground=[("readonly", C_FIELD)],
-        foreground=[("readonly", C_TEXT)],
-    )
-    root.option_add("*TCombobox*Listbox.background", C_FIELD)
-    root.option_add("*TCombobox*Listbox.foreground", C_TEXT)
-    root.option_add("*TCombobox*Listbox.selectBackground", C_SELECT)
-    style.configure(
-        "TSpinbox", fieldbackground=C_FIELD, background=C_SURFACE,
-        foreground=C_TEXT, arrowcolor=C_TEXT, insertcolor=C_TEXT,
-    )
-    style.configure(
-        "TEntry", fieldbackground=C_FIELD, foreground=C_TEXT,
-        insertcolor=C_TEXT,
-    )
-    style.configure("TNotebook", background=C_BG, borderwidth=0)
-    style.configure(
-        "TNotebook.Tab", padding=(16, 7), background=C_SURFACE,
-        foreground=C_MUTED,
-    )
-    style.map(
-        "TNotebook.Tab",
-        background=[("selected", C_BG)],
-        foreground=[("selected", C_ACCENT)],
-    )
-    style.configure(
-        "Treeview", background=C_FIELD, fieldbackground=C_FIELD,
-        foreground=C_TEXT, rowheight=24, borderwidth=0,
-    )
-    style.map(
-        "Treeview",
-        background=[("selected", C_SELECT)],
-        foreground=[("selected", C_TEXT)],
-    )
-    style.configure(
-        "Treeview.Heading", background=C_SURFACE, foreground=C_ACCENT,
-        font=("Segoe UI", 9, "bold"), relief="flat",
-    )
-    style.map("Treeview.Heading", background=[("active", C_SELECT)])
-    style.configure(
-        "TScrollbar", background=C_SURFACE, troughcolor=C_BG,
-        arrowcolor=C_MUTED, bordercolor=C_BG,
-    )
-    style.configure("TSeparator", background=C_EDGE)
+    """The few named styles the darkly theme does not ship."""
+    style = tb.Style()
+    colors = style.colors
+    style.configure(".", font=("Segoe UI", 10))
     style.configure("Head.TLabel", font=("Segoe UI", 11, "bold"),
-                    foreground=C_ACCENT)
-    style.configure("Big.TLabel", font=("Segoe UI", 16, "bold"),
-                    foreground=C_TEXT)
+                    foreground=colors.info)
+    style.configure("Big.TLabel", font=("Segoe UI", 16, "bold"))
     style.configure("Value.TLabel", font=("Segoe UI", 10, "bold"))
-    style.configure("Muted.TLabel", foreground=C_MUTED)
-    style.configure("Mono.TLabel", font=("Consolas", 9), foreground=C_MUTED)
+    style.configure("Muted.TLabel", foreground=colors.light)
+    style.configure("Mono.TLabel", font=("Consolas", 9),
+                    foreground=colors.light)
     style.configure(
         "Expander.TButton", anchor="w", padding=(8, 5),
-        font=("Segoe UI", 10, "bold"), background=C_SURFACE,
+        font=("Segoe UI", 10, "bold"),
     )
-    style.configure(
-        "Task.Horizontal.TProgressbar", troughcolor=C_FIELD,
-        background=C_DONE, bordercolor=C_EDGE,
-        lightcolor=C_DONE, darkcolor=C_DONE,
-    )
-    style.configure(
-        "Theme.Horizontal.TProgressbar", troughcolor=C_FIELD,
-        background=C_ACCENT, bordercolor=C_EDGE,
-        lightcolor=C_ACCENT, darkcolor=C_ACCENT,
-    )
+    style.configure("Treeview", rowheight=24)
 
 
 def dark_text(widget: tk.Text) -> None:
-    """The dark skin for plain tk Text/ScrolledText widgets."""
+    """The theme skin for plain tk Text/ScrolledText widgets."""
+    colors = tb.Style().colors
     widget.configure(
-        background=C_FIELD, foreground=C_TEXT, insertbackground=C_TEXT,
-        selectbackground=C_SELECT, selectforeground=C_TEXT,
+        background=colors.inputbg, foreground=colors.inputfg,
+        insertbackground=colors.inputfg,
+        selectbackground=colors.selectbg,
+        selectforeground=colors.selectfg,
         relief="flat", highlightthickness=0,
     )
 
 
 def dark_listbox(widget: tk.Listbox) -> None:
+    colors = tb.Style().colors
     widget.configure(
-        background=C_FIELD, foreground=C_TEXT,
-        selectbackground=C_SELECT, selectforeground=C_TEXT,
+        background=colors.inputbg, foreground=colors.inputfg,
+        selectbackground=colors.selectbg,
+        selectforeground=colors.selectfg,
         relief="flat", highlightthickness=1,
-        highlightbackground=C_EDGE, highlightcolor=C_ACCENT,
+        highlightbackground=colors.border,
+        highlightcolor=colors.primary,
     )
 
 
@@ -211,10 +108,12 @@ class ScrollFrame(ttk.Frame):
     def __init__(self, master, horizontal: bool = False):
         super().__init__(master)
         self._stretch = not horizontal
-        self.canvas = tk.Canvas(self, highlightthickness=0,
-                                background=C_BG)
+        self.canvas = tk.Canvas(
+            self, highlightthickness=0, background=tb.Style().colors.bg
+        )
         vbar = ttk.Scrollbar(
-            self, orient="vertical", command=self.canvas.yview
+            self, orient="vertical", command=self.canvas.yview,
+            bootstyle="round",
         )
         self.canvas.configure(yscrollcommand=vbar.set)
         self.body = ttk.Frame(self.canvas)
@@ -226,7 +125,8 @@ class ScrollFrame(ttk.Frame):
         vbar.pack(side="right", fill="y")
         if horizontal:
             hbar = ttk.Scrollbar(
-                self, orient="horizontal", command=self.canvas.xview
+                self, orient="horizontal", command=self.canvas.xview,
+                bootstyle="round",
             )
             self.canvas.configure(xscrollcommand=hbar.set)
             hbar.pack(side="bottom", fill="x")
@@ -332,7 +232,7 @@ class DashPanel(ttk.Frame):
             task, textvariable=self.task_prog_var, style="Value.TLabel"
         ).pack(side="right")
         self.task_bar = ttk.Progressbar(
-            self, style="Task.Horizontal.TProgressbar", maximum=1, value=0
+            self, bootstyle="success-striped", maximum=1, value=0
         )
         self.task_bar.pack(fill="x", pady=(0, 6))
 
@@ -351,7 +251,7 @@ class DashPanel(ttk.Frame):
         )
         cur.columnconfigure(1, weight=1)
         self.theme_bar = ttk.Progressbar(
-            self, style="Theme.Horizontal.TProgressbar", maximum=1, value=0
+            self, bootstyle="info-striped", maximum=1, value=0
         )
         self.theme_bar.pack(fill="x", pady=(2, 6))
 
@@ -423,9 +323,10 @@ class DashPanel(ttk.Frame):
         ttk.Label(
             hdr, text="Collections (running + done)", style="Head.TLabel"
         ).pack(side="left")
-        ttk.Button(hdr, text="Show ▸", command=self._show_selected).pack(
-            side="right"
-        )
+        ttk.Button(
+            hdr, text="Show ▸", command=self._show_selected,
+            bootstyle="link",
+        ).pack(side="right")
         # a real table: each collection is a collapsible parent row, its
         # images the children; the running one shows live, open. Native
         # column headers + both scrollbars
@@ -449,9 +350,13 @@ class DashPanel(ttk.Frame):
             self.tree.heading(cid, text=txt)
             self.tree.column(cid, width=w, minwidth=w, anchor=anc,
                              stretch=False)
-        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
+        vsb = ttk.Scrollbar(
+            wrap, orient="vertical", command=self.tree.yview,
+            bootstyle="round",
+        )
         hsb = ttk.Scrollbar(
-            wrap, orient="horizontal", command=self.tree.xview
+            wrap, orient="horizontal", command=self.tree.xview,
+            bootstyle="round",
         )
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -762,13 +667,18 @@ class PainterGui:
         self.sheet_list.pack(side="left", fill="x", expand=True)
         col = ttk.Frame(lf)
         col.pack(side="left", padx=(8, 0), anchor="n")
-        ttk.Button(col, text="Add…", command=self._add_sheets).pack(fill="x")
-        ttk.Button(col, text="Remove", command=self._remove_sheet).pack(
-            fill="x", pady=4
-        )
-        ttk.Button(col, text="Clear", command=self._clear_sheets).pack(
-            fill="x"
-        )
+        ttk.Button(
+            col, text="Add…", command=self._add_sheets,
+            bootstyle="secondary",
+        ).pack(fill="x")
+        ttk.Button(
+            col, text="Remove", command=self._remove_sheet,
+            bootstyle="secondary",
+        ).pack(fill="x", pady=4)
+        ttk.Button(
+            col, text="Clear", command=self._clear_sheets,
+            bootstyle="secondary",
+        ).pack(fill="x")
 
     def _build_options(self, parent) -> None:
         lf = ttk.Labelframe(parent, text="Output & run options")
@@ -781,9 +691,10 @@ class PainterGui:
         ttk.Entry(row, textvariable=self.out_var).pack(
             side="left", fill="x", expand=True
         )
-        ttk.Button(row, text="Browse…", command=self._pick_out).pack(
-            side="left", padx=(8, 0)
-        )
+        ttk.Button(
+            row, text="Browse…", command=self._pick_out,
+            bootstyle="secondary",
+        ).pack(side="left", padx=(8, 0))
 
         row = ttk.Frame(lf)
         row.pack(fill="x", pady=2)
@@ -794,7 +705,8 @@ class PainterGui:
         self.background_vars: dict[str, tk.StringVar] = {}
         for key in sorted(SITES):
             ttk.Checkbutton(
-                row, text=SITES[key].name, variable=self.site_vars[key]
+                row, text=SITES[key].name, variable=self.site_vars[key],
+                bootstyle="round-toggle",
             ).pack(side="left", padx=(2, 0))
             var = tk.StringVar(value=SITES[key].default_background)
             self.background_vars[key] = var
@@ -808,15 +720,18 @@ class PainterGui:
         ttk.Label(row, text="", width=8).pack(side="left")
         self.bgfix_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            row, text="Background fix", variable=self.bgfix_var
+            row, text="Background fix", variable=self.bgfix_var,
+            bootstyle="round-toggle",
         ).pack(side="left")
         self.report_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            row, text="Report txt", variable=self.report_var
+            row, text="Report txt", variable=self.report_var,
+            bootstyle="round-toggle",
         ).pack(side="left", padx=12)
         self.safer_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            row, text="Safer retry on refusal", variable=self.safer_var
+            row, text="Safer retry on refusal", variable=self.safer_var,
+            bootstyle="round-toggle",
         ).pack(side="left", padx=12)
         ttk.Label(row, text="New chat:").pack(side="left", padx=(12, 2))
         self.new_chat_var = tk.StringVar(value="collection")
@@ -860,31 +775,37 @@ class PainterGui:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(0, 6))
         self.btn_chrome = ttk.Button(
-            row, text="Open Chrome (login)", command=self._open_chrome
+            row, text="Open Chrome (login)", command=self._open_chrome,
+            bootstyle="secondary",
         )
         self.btn_chrome.pack(side="left")
         self.btn_check = ttk.Button(
-            row, text="Check", command=self._check_sheets
+            row, text="Check", command=self._check_sheets,
+            bootstyle="secondary",
         )
         self.btn_check.pack(side="left", padx=4)
         self.btn_select = ttk.Button(
-            row, text="Select images…", command=self._select_images
+            row, text="Select images…", command=self._select_images,
+            bootstyle="secondary",
         )
         self.btn_select.pack(side="left", padx=4)
         self.btn_start = ttk.Button(
-            row, text="▶  Start", style="Accent.TButton",
+            row, text="▶  Start", bootstyle="success",
             command=self._start,
         )
         self.btn_start.pack(side="left", padx=4)
         self.btn_stop = ttk.Button(
-            row, text="Stop", command=self._request_stop, state="disabled"
+            row, text="Stop", command=self._request_stop,
+            state="disabled", bootstyle="danger-outline",
         )
         self.btn_stop.pack(side="left", padx=4)
         ttk.Button(
-            row, text="Instructions", command=self._open_instructions
+            row, text="Instructions", command=self._open_instructions,
+            bootstyle="secondary",
         ).pack(side="right")
         ttk.Button(
-            row, text="BG removal only…", command=self._bg_remove_only
+            row, text="BG removal only…", command=self._bg_remove_only,
+            bootstyle="secondary",
         ).pack(side="right", padx=4)
 
     def _build_views(self, parent) -> None:
@@ -903,11 +824,17 @@ class PainterGui:
 
         log_tab = ttk.Frame(notebook)
         notebook.add(log_tab, text="Log (detailed)")
-        self.log_box = scrolledtext.ScrolledText(
+        self.log_box = tk.Text(
             log_tab, height=16, state="disabled", font=("Consolas", 9)
         )
         dark_text(self.log_box)
-        self.log_box.pack(fill="both", expand=True)
+        log_vsb = ttk.Scrollbar(
+            log_tab, orient="vertical", command=self.log_box.yview,
+            bootstyle="round",
+        )
+        self.log_box.configure(yscrollcommand=log_vsb.set)
+        log_vsb.pack(side="right", fill="y")
+        self.log_box.pack(side="left", fill="both", expand=True)
 
     def _open_instructions(self) -> None:
         path = Path(__file__).resolve().parent / "instructions.md"
@@ -1471,6 +1398,7 @@ class SelectWindow(tk.Toplevel):
         super().__init__(gui.root)
         self.title("Select images per site")
         self.minsize(720, 520)
+        self.configure(background=tb.Style().colors.bg)
         self._gui = gui
         site_keys = sorted(SITES)
 
@@ -1490,15 +1418,18 @@ class SelectWindow(tk.Toplevel):
             " ⚠ advice unticked by default.",
             style="Muted.TLabel",
         ).pack(side="left")
-        ttk.Button(bar, text="Expand all", command=self._expand_all).pack(
-            side="right"
-        )
         ttk.Button(
-            bar, text="Collapse all", command=self._collapse_all
+            bar, text="Expand all", command=self._expand_all,
+            bootstyle="secondary-outline",
+        ).pack(side="right")
+        ttk.Button(
+            bar, text="Collapse all", command=self._collapse_all,
+            bootstyle="secondary-outline",
         ).pack(side="right", padx=4)
-        ttk.Button(bar, text="Close", command=self.destroy).pack(
-            side="right", padx=4
-        )
+        ttk.Button(
+            bar, text="Close", command=self.destroy,
+            bootstyle="secondary",
+        ).pack(side="right", padx=4)
 
         scroll = ScrollFrame(self, horizontal=True)
         scroll.pack(fill="both", expand=True)
@@ -1551,6 +1482,7 @@ class SelectWindow(tk.Toplevel):
             ttk.Button(
                 head, text=f"{SITES[key].name}: all/none", width=16,
                 command=partial(self._toggle_sheet, key, sheet),
+                bootstyle="secondary-outline",
             ).pack(side="right", padx=2)
         btn.pack(side="left", fill="x", expand=True)
         render()
@@ -1628,6 +1560,7 @@ class DocWindow(tk.Toplevel):
         super().__init__(master)
         self.title(title)
         self.minsize(720, 560)
+        self.configure(background=tb.Style().colors.bg)
         self._raw = raw_markdown
         self._copy_text = copy_text if copy_text is not None else raw_markdown
 
@@ -1636,11 +1569,13 @@ class DocWindow(tk.Toplevel):
         if hint:
             ttk.Label(bar, text=hint, style="Muted.TLabel").pack(side="left")
         ttk.Button(
-            bar, text="Copy (for AI)", command=self._copy_all
+            bar, text="Copy (for AI)", command=self._copy_all,
+            bootstyle="info",
         ).pack(side="right")
-        ttk.Button(bar, text="Close", command=self.destroy).pack(
-            side="right", padx=4
-        )
+        ttk.Button(
+            bar, text="Close", command=self.destroy,
+            bootstyle="secondary",
+        ).pack(side="right", padx=4)
 
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -1649,7 +1584,10 @@ class DocWindow(tk.Toplevel):
             spacing1=2, spacing3=2, cursor="arrow",
         )
         dark_text(self.txt)
-        vsb = ttk.Scrollbar(wrap, orient="vertical", command=self.txt.yview)
+        vsb = ttk.Scrollbar(
+            wrap, orient="vertical", command=self.txt.yview,
+            bootstyle="round",
+        )
         self.txt.configure(yscrollcommand=vsb.set)
         vsb.pack(side="right", fill="y")
         self.txt.pack(side="left", fill="both", expand=True)
@@ -1660,17 +1598,18 @@ class DocWindow(tk.Toplevel):
         self.txt.bind("<Key>", self._readonly_keys)
 
     def _configure_tags(self) -> None:
+        colors = tb.Style().colors
         self.txt.tag_configure("h1", font=("Segoe UI", 15, "bold"),
-                               foreground=C_ACCENT,
+                               foreground=colors.info,
                                spacing1=10, spacing3=6)
         self.txt.tag_configure("h2", font=("Segoe UI", 12, "bold"),
-                               foreground=C_ACCENT,
+                               foreground=colors.info,
                                spacing1=8, spacing3=4)
         self.txt.tag_configure("h3", font=("Segoe UI", 11, "bold"),
                                foreground=C_DONE,
                                spacing1=6, spacing3=3)
         self.txt.tag_configure(
-            "code", font=("Consolas", 9), background="#0d1322",
+            "code", font=("Consolas", 9), background=colors.dark,
             foreground="#a5d6ff", lmargin1=16, lmargin2=16,
         )
         self.txt.tag_configure("bold", font=("Segoe UI", 10, "bold"))
@@ -1729,7 +1668,7 @@ class DocWindow(tk.Toplevel):
 
 
 def main() -> None:
-    root = tk.Tk()
+    root = tb.Window(themename="darkly")
     PainterGui(root)
     root.mainloop()
 

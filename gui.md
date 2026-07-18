@@ -5,13 +5,19 @@
 ## Purpose
 The owner's front door — a themed tkinter window over the same
 engine the CLI uses, built for unattended batches: queue the
-collections, press Start, go ride a bike. The look is the owner's
-DARK MODERN palette (2026-07-18, UV/UI examples): navy surfaces
-(`#12182b`/`#1a2238`), light text, cyan/green accents, an accent
-Start button, dark fields/tables/log — all through `setup_style`
-(clam) plus `dark_text`/`dark_listbox` for the plain tk widgets. A
-reusable `ScrollFrame` backs the selection list and a
-`ttk.Treeview` is the dashboard's collection table.
+collections, press Start, go ride a bike. The look is
+**ttkbootstrap's `darkly` theme** (2026-07-18): modern flat
+widgets out of the box — round-toggle switches for the option
+checkboxes, a green success Start / outline-danger Stop, striped
+progressbars, round scrollbars, themed combos/spinboxes/tabs.
+`setup_style` only adds the few named styles darkly lacks (the
+Head/Big/Value/Muted/Mono labels, the Expander button, Treeview
+row height); `dark_text`/`dark_listbox` skin the plain tk widgets
+from `Style().colors`, and the four semantic STATUS colours (done
+green, olive one-site, advice orange, superseded red) stay named
+constants aligned to darkly's accents. A reusable `ScrollFrame`
+backs the selection list and a `ttk.Treeview` is the dashboard's
+collection table.
 
 ## The window
 
