@@ -16,6 +16,7 @@ of finished themes) and the detailed **Log**.
 
 from __future__ import annotations
 
+import io
 import json
 import queue
 import threading
@@ -60,14 +61,35 @@ C_DONE_SOFT = "#9ccc65"   # olive — done on one site only
 C_ADVICE = "#f39c12"      # orange — sheet advice (darkly 'warning')
 C_SUPERSEDED = "#e74c3c"  # red — superseded (darkly 'danger')
 
-# button icons — PNGs reused from RHMH's Slike/ set (copied into this
-# project; RHMH itself untouched). Resolved beside gui.py, never the CWD.
+# button icons — SVG-first (the owner's assets/icons/*.svg), rasterized
+# through Qt's QSvgRenderer (PySide6, already a monorepo build dep) at
+# 4x and LANCZOS-downscaled for crispness; PNG is the fallback for
+# icons with no svg (web, ai) and for svgs Qt cannot render (see
+# _QT_UNSUPPORTED_SVG). Resolved beside gui.py, never the CWD.
 ICON_DIR = Path(__file__).resolve().parent / "assets" / "icons"
-ICON_TARGET_PX = 20  # max icon height inside a button
+ICON_TARGET_PX = 20  # max icon side inside a button / beside a switch
+SVG_OVERSAMPLE = 4  # rasterize at 4x, then LANCZOS down
 
-# CTkButtons show CTkImage (PIL-backed, smooth downscale) — cached for
-# the whole process so every button reuses one instance per icon.
-_ICONS: dict[str, ctk.CTkImage] = {}
+# QtSvg implements the SVG Tiny profile: clipPath/mask/filter (typical
+# of Illustrator raster-trace exports like gemini.svg, 12 embedded
+# rasters under 28 clipPaths) render as garbage — such files need a
+# pre-rasterized .png sibling (gemini.png was rendered once from the
+# svg via chromium, transparent, 512 px).
+_QT_UNSUPPORTED_SVG = (b"<clipPath", b"<mask", b"<filter")
+
+# CTk widgets show CTkImage (PIL-backed, smooth downscale) — cached per
+# (name, size) for the whole process so every widget reuses one
+# instance per icon.
+_ICONS: dict[tuple[str, int], ctk.CTkImage] = {}
+
+# QSvgRenderer needs a live QGuiApplication; created lazily on the
+# first svg icon and kept for the whole process (never exec()-ed — it
+# only serves offscreen painting, tkinter keeps the event loop).
+_QT_APP = None
+
+# the site-switch logos: SITES key -> icon file stem (the owner's
+# capitalisation in assets/icons/)
+_SITE_ICON = {"chatgpt": "chatGPT", "gemini": "gemini"}
 
 # the rounded-control geometry — one place so every control matches
 # (RHMH runs CTkButton corner_radius 10–12; hover = colour * 0.75)
@@ -78,26 +100,85 @@ INPUT_HEIGHT = 28
 HOVER_DARKEN = 0.75
 
 
-def icon(name: str) -> ctk.CTkImage:
-    """The named button icon, loaded once and downscaled to fit.
+def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
+    """Rasterize one SVG via QSvgRenderer: aspect-fit ``target_px`` on
+    the longer side, rendered at SVG_OVERSAMPLE x and LANCZOS-downscaled
+    so ~20 px icons stay crisp."""
+    global _QT_APP
+    from PySide6.QtCore import QBuffer, Qt
+    from PySide6.QtGui import QGuiApplication, QImage, QPainter
+    from PySide6.QtSvg import QSvgRenderer
 
-    A missing file is a loud FileNotFoundError (root Rule #1) — no
-    silent icon-less fallback.
+    if _QT_APP is None:
+        _QT_APP = QGuiApplication.instance() or QGuiApplication([])
+    renderer = QSvgRenderer(str(path))
+    if not renderer.isValid():
+        raise ValueError(f"unrenderable SVG: {path}")
+    base = renderer.defaultSize()
+    scale = target_px / max(base.width(), base.height())
+    final = (
+        max(round(base.width() * scale), 1),
+        max(round(base.height() * scale), 1),
+    )
+    qimg = QImage(
+        final[0] * SVG_OVERSAMPLE, final[1] * SVG_OVERSAMPLE,
+        QImage.Format.Format_ARGB32,
+    )
+    qimg.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(qimg)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+    renderer.render(painter)
+    painter.end()
+    buffer = QBuffer()
+    buffer.open(QBuffer.OpenModeFlag.ReadWrite)
+    qimg.save(buffer, "PNG")
+    pil = Image.open(io.BytesIO(bytes(buffer.data()))).convert("RGBA")
+    return pil.resize(final, Image.LANCZOS)
+
+
+def icon(name: str, size: int = ICON_TARGET_PX) -> ctk.CTkImage:
+    """The named icon, loaded once per (name, size) and scaled to fit.
+
+    ``name.svg`` wins when Qt can render it; ``name.png`` covers the
+    rest (web/ai have no svg; gemini.svg needs its pre-rasterized
+    sibling). A missing/unrenderable icon is a loud error (root
+    Rule #1) — no silent icon-less fallback.
     """
-    if name not in _ICONS:
-        path = ICON_DIR / f"{name}.png"
-        if not path.is_file():
-            raise FileNotFoundError(f"GUI icon missing: {path}")
-        img = Image.open(path)
-        scale = min(ICON_TARGET_PX / max(img.width, img.height), 1.0)
-        size = (
-            max(round(img.width * scale), 1),
-            max(round(img.height * scale), 1),
+    key = (name, size)
+    if key not in _ICONS:
+        svg_path = ICON_DIR / f"{name}.svg"
+        png_path = ICON_DIR / f"{name}.png"
+        svg_ok = svg_path.is_file() and not any(
+            tag in svg_path.read_bytes() for tag in _QT_UNSUPPORTED_SVG
         )
-        _ICONS[name] = ctk.CTkImage(
-            light_image=img, dark_image=img, size=size
+        if svg_ok:
+            img = _svg_to_pil(svg_path, size)
+        elif png_path.is_file():
+            img = Image.open(png_path)
+            scale = min(size / max(img.width, img.height), 1.0)
+            img = img.convert("RGBA").resize(
+                (
+                    max(round(img.width * scale), 1),
+                    max(round(img.height * scale), 1),
+                ),
+                Image.LANCZOS,
+            )
+        elif svg_path.is_file():
+            raise FileNotFoundError(
+                f"GUI icon {svg_path} uses SVG features QtSvg cannot"
+                " render (clipPath/mask/filter) and has no .png sibling"
+                " — pre-rasterize it once (e.g. via a browser) and save"
+                f" it as {png_path}"
+            )
+        else:
+            raise FileNotFoundError(
+                f"GUI icon missing: {svg_path} / {png_path}"
+            )
+        _ICONS[key] = ctk.CTkImage(
+            light_image=img, dark_image=img, size=img.size
         )
-    return _ICONS[name]
+    return _ICONS[key]
 
 
 def _darken(hex_color: str, factor: float = HOVER_DARKEN) -> str:
@@ -147,6 +228,30 @@ def _button_colors(kind: str) -> dict:
     raise ValueError(f"unknown button kind: {kind}")
 
 
+class EdgeIconButton(ctk.CTkButton):
+    """A CTkButton whose ICON sits at the left edge while the TEXT
+    centers in the remaining width — for stacked equal-width buttons
+    (Add…/Remove/Clear), where the default centered icon+text block
+    makes the icons jitter with the text length.
+
+    CTkButton lays image and text on an internal 5x5 grid (pad, image,
+    spacing, text, pad); this override pins the image column west and
+    gives the text cell all the remaining weight, centered."""
+
+    def _create_grid(self):
+        super()._create_grid()
+        if self._image_label is None or self._text_label is None:
+            return  # icon-less (or image-only) — default layout stands
+        # col 0 keeps its minsize (the corner inset) but stops growing;
+        # col 3 takes ALL the slack so the un-sticky text centers in it
+        self.grid_columnconfigure(0, weight=0)
+        self.grid_columnconfigure((1, 2), weight=0)
+        self.grid_columnconfigure(3, weight=1)
+        self.grid_columnconfigure(4, weight=0)
+        self._image_label.grid(row=2, column=1, sticky="w")
+        self._text_label.grid(row=2, column=3, sticky="")
+
+
 def rounded_button(
     parent,
     text: str,
@@ -155,14 +260,19 @@ def rounded_button(
     icon_name: str | None = None,
     compound: str = "left",
     width: int = 0,
+    icon_edge: bool = False,
     **kwargs,
 ) -> ctk.CTkButton:
     """Every GUI button: a rounded CTkButton in the darkly palette —
     the RHMH look. ``width`` is a minimum in px (0 = fit the text);
-    the button grows to fit longer text either way."""
+    the button grows to fit longer text either way. ``icon_edge``
+    pins the icon to the left edge and centers the text (the stacked
+    Collections buttons)."""
     opts = _button_colors(kind)
+    opts.setdefault("bg_color", tb.Style().colors.bg)
     opts.update(kwargs)
-    return ctk.CTkButton(
+    cls = EdgeIconButton if icon_edge else ctk.CTkButton
+    return cls(
         parent, text=text, command=command, width=width,
         height=BTN_HEIGHT, corner_radius=BTN_RADIUS,
         font=("Segoe UI", 10, "bold"),
@@ -172,23 +282,45 @@ def rounded_button(
 
 
 def _input_colors() -> dict:
-    """Shared colour kwargs for rounded CTk entry/combobox fields."""
+    """Shared colour kwargs for rounded CTk entry/combobox fields.
+
+    ``bg_color`` is pinned to the darkly window background so the
+    canvas corners around the rounded field never show the CTk theme's
+    own gray on a ttk parent."""
     c = tb.Style().colors
     return dict(
         fg_color=c.inputbg, border_color=c.secondary,
-        text_color=c.inputfg,
+        text_color=c.inputfg, bg_color=c.bg,
     )
+
+
+def _untheme_inner_entry(field) -> None:
+    """Kill the square ring inside CTk entry-like widgets.
+
+    ttkbootstrap wraps EVERY plain-tk widget constructor and re-themes
+    the widget right after creation — the tkinter.Entry INSIDE a
+    CTkEntry/CTkComboBox gets ``highlightthickness=1`` with the darkly
+    selectbg ring, which reads as a lighter SQUARE inside the rounded
+    field. Unsubscribe it from ttkbootstrap's re-style publisher and
+    drop the ring so the field is one smooth rounded shape."""
+    from ttkbootstrap.publisher import Publisher
+
+    inner = field._entry
+    Publisher.unsubscribe(str(inner))
+    inner.configure(highlightthickness=0)
 
 
 def rounded_entry(parent, width: int = 140, **kwargs) -> ctk.CTkEntry:
     """A rounded, bordered entry in the darkly palette."""
     opts = _input_colors()
     opts.update(kwargs)
-    return ctk.CTkEntry(
+    field = ctk.CTkEntry(
         parent, width=width, height=INPUT_HEIGHT,
         corner_radius=INPUT_RADIUS, border_width=1,
         font=("Segoe UI", 10), **opts,
     )
+    _untheme_inner_entry(field)
+    return field
 
 
 def rounded_combo(
@@ -205,12 +337,65 @@ def rounded_combo(
         dropdown_text_color=c.fg,
     )
     opts.update(kwargs)
-    return ctk.CTkComboBox(
+    field = ctk.CTkComboBox(
         parent, values=list(values), variable=variable, width=width,
         height=INPUT_HEIGHT, corner_radius=INPUT_RADIUS, border_width=1,
         state="readonly", font=("Segoe UI", 10),
         dropdown_font=("Segoe UI", 10), **opts,
     )
+    _untheme_inner_entry(field)
+    return field
+
+
+class Spinner(ctk.CTkFrame):
+    """A compact [-][entry][+] spinner as ONE rounded unit (Rule #5:
+    one class — the four pace fields are its instances).
+
+    The entry keeps the caller's StringVar, direct typing stays
+    allowed and Start's validation is unchanged; +/- steps the value
+    (never below 0). Unparsable text is left for Start to report."""
+
+    def __init__(self, parent, variable, step: float, entry_width: int = 40):
+        c = tb.Style().colors
+        super().__init__(
+            parent, corner_radius=INPUT_RADIUS, border_width=1,
+            fg_color=c.inputbg, border_color=c.secondary, bg_color=c.bg,
+        )
+        self._var = variable
+        self._step = step
+        # 1.0 steps show "8", 0.1 steps show "0.6"
+        self._decimals = 0 if float(step).is_integer() else 1
+        # the +/- pads: ~24 px wide (clickable), slightly lower than the
+        # frame so their canvases never overpaint the frame's own 1 px
+        # border (CTk scales canvases; a 24 px child + 2 px pady used to
+        # cover the bottom border row under the buttons)
+        btn = dict(
+            width=24, height=20, corner_radius=INPUT_RADIUS - 2,
+            fg_color="transparent", hover_color=c.selectbg,
+            text_color=c.fg, font=("Segoe UI", 12, "bold"),
+        )
+        ctk.CTkButton(
+            self, text="−", command=partial(self._bump, -1.0), **btn
+        ).pack(side="left", padx=(3, 0), pady=4)
+        entry = ctk.CTkEntry(
+            self, width=entry_width, height=INPUT_HEIGHT - 10,
+            corner_radius=0, border_width=0, fg_color="transparent",
+            text_color=c.inputfg, justify="center",
+            font=("Segoe UI", 10), textvariable=variable,
+        )
+        _untheme_inner_entry(entry)
+        entry.pack(side="left", fill="x", expand=True, pady=4)
+        ctk.CTkButton(
+            self, text="+", command=partial(self._bump, 1.0), **btn
+        ).pack(side="left", padx=(0, 3), pady=4)
+
+    def _bump(self, sign: float) -> None:
+        try:
+            value = float(self._var.get())
+        except ValueError:
+            return  # typed garbage — Start's validation reports it
+        value = max(value + sign * self._step, 0.0)
+        self._var.set(f"{value:.{self._decimals}f}")
 
 
 def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
@@ -221,7 +406,7 @@ def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
         onvalue=True, offvalue=False,
         font=("Segoe UI", 10),
         fg_color=c.secondary, progress_color=c.success,
-        text_color=c.fg,
+        text_color=c.fg, bg_color=c.bg,
     )
 
 
@@ -837,15 +1022,15 @@ class PainterGui:
         col.pack(side="left", padx=(8, 0), anchor="n")
         rounded_button(
             col, "Add…", command=self._add_sheets, icon_name="add",
-            width=110,
+            width=110, icon_edge=True,
         ).pack(fill="x")
         rounded_button(
             col, "Remove", command=self._remove_sheet, icon_name="remove",
-            width=110,
+            width=110, icon_edge=True,
         ).pack(fill="x", pady=4)
         rounded_button(
             col, "Clear", command=self._clear_sheets, icon_name="clear",
-            width=110,
+            width=110, icon_edge=True,
         ).pack(fill="x")
 
     def _build_options(self, parent) -> None:
@@ -871,9 +1056,15 @@ class PainterGui:
         }
         self.background_vars: dict[str, tk.StringVar] = {}
         for key in sorted(SITES):
+            # the site's logo (owner's svg; gemini via its png sibling)
+            # sits beside its switch; the switch keeps the name text
+            ctk.CTkLabel(
+                row, text="", image=icon(_SITE_ICON[key]), width=22,
+                fg_color="transparent", bg_color=tb.Style().colors.bg,
+            ).pack(side="left", padx=(6, 3))
             rounded_switch(
                 row, SITES[key].name, self.site_vars[key]
-            ).pack(side="left", padx=(2, 0))
+            ).pack(side="left", padx=(0, 0))
             var = tk.StringVar(value=SITES[key].default_background)
             self.background_vars[key] = var
             rounded_combo(
@@ -905,19 +1096,16 @@ class PainterGui:
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Pace:", width=8).pack(side="left")
         ttk.Label(row, text="pause").pack(side="left")
-        # CTk has no spinbox — small rounded entries instead (typed
-        # numbers; ranges are validated on Start, same as before)
+        # one Spinner class, four instances (Rule #5): step 1 s for the
+        # pauses, 0.1 s for the action delays; typing stays allowed and
+        # the ranges are validated on Start, same as before
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
-        rounded_entry(
-            row, width=52, textvariable=self.pause_min_var,
-            justify="center",
-        ).pack(side="left", padx=(4, 0))
+        Spinner(row, self.pause_min_var, step=1.0).pack(
+            side="left", padx=(4, 0)
+        )
         ttk.Label(row, text="–").pack(side="left", padx=2)
-        rounded_entry(
-            row, width=52, textvariable=self.pause_max_var,
-            justify="center",
-        ).pack(side="left")
+        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
         ttk.Label(row, text="s   action delay").pack(side="left", padx=(2, 0))
         self.act_min_var = tk.StringVar(
             value=f"{TIMING.action_delay_min_s:.1f}"
@@ -925,15 +1113,11 @@ class PainterGui:
         self.act_max_var = tk.StringVar(
             value=f"{TIMING.action_delay_max_s:.1f}"
         )
-        rounded_entry(
-            row, width=46, textvariable=self.act_min_var,
-            justify="center",
-        ).pack(side="left", padx=(4, 0))
+        Spinner(row, self.act_min_var, step=0.1).pack(
+            side="left", padx=(4, 0)
+        )
         ttk.Label(row, text="–").pack(side="left", padx=2)
-        rounded_entry(
-            row, width=46, textvariable=self.act_max_var,
-            justify="center",
-        ).pack(side="left")
+        Spinner(row, self.act_max_var, step=0.1).pack(side="left")
         ttk.Label(row, text="s").pack(side="left")
 
     def _build_toolbar(self, parent) -> None:

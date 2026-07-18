@@ -11,5 +11,9 @@ pillow>=10
 ttkbootstrap>=1.10
 customtkinter>=5.2
 
+# Runtime — GUI icon rasterization: QSvgRenderer for the .svg icons
+# (the same SVG engine the monorepo build pipeline uses)
+PySide6>=6.5
+
 # Development — the offline test suite
 pytest>=8

@@ -9,16 +9,32 @@ collections, press Start, go ride a bike. The widget stack
 (2026-07-18) is **customtkinter rounded controls over a
 ttkbootstrap `darkly` base — the same mix RHMH uses**: every
 button is a `CTkButton` with RHMH's strong corner radius (12 px,
-hover = the same colour darkened to 0.75), the output path and
-pace fields are rounded bordered `CTkEntry`s, the background /
-New-chat dropdowns rounded `CTkComboBox`es, the site and option
-toggles `CTkSwitch`es. All their colours are PULLED from the live
-darkly palette (`tb.Style().colors`) by the `rounded_button` /
-`rounded_entry` / `rounded_combo` / `rounded_switch` factories and
-`_button_colors` (semantic kinds: secondary, success Start, danger
-outline Stop, info Copy, outlines, flat link and ▶/▼ expander), so
-the CTk and ttk families read as ONE dark look; appearance is
-pinned with `ctk.set_appearance_mode("dark")`. What stays ttk:
+hover = the same colour darkened to 0.75), the output path field a
+rounded bordered `CTkEntry`, the four pace fields compact
+`Spinner`s (ONE reusable class — a rounded `CTkFrame` holding
+[−] [entry] [+]: ~24 px pads, step 1 s for the pauses, 0.1 s for
+the action delays, direct typing still allowed and validated on
+Start, never below 0), the background / New-chat dropdowns rounded
+`CTkComboBox`es, the site and option toggles `CTkSwitch`es with
+the site's LOGO in a small `CTkLabel` beside each site switch. All
+their colours are PULLED from the live darkly palette
+(`tb.Style().colors`) by the `rounded_button` / `rounded_entry` /
+`rounded_combo` / `rounded_switch` factories and `_button_colors`
+(semantic kinds: secondary, success Start, danger outline Stop,
+info Copy, outlines, flat link and ▶/▼ expander), so the CTk and
+ttk families read as ONE dark look; appearance is pinned with
+`ctk.set_appearance_mode("dark")` and every factory pins
+`bg_color` to the darkly window background so rounded corners
+never show a foreign gray on ttk parents. Two smooth-field fixes
+live in the factories (2026-07-18): `_untheme_inner_entry`
+unsubscribes the `tkinter.Entry` INSIDE every CTkEntry/CTkComboBox
+from ttkbootstrap's constructor-hook re-styling and drops its
+`highlightthickness=1` square ring (the "lighter square inside the
+rounded field" defect), and `EdgeIconButton`
+(`rounded_button(..., icon_edge=True)`, the stacked
+Add…/Remove/Clear queue buttons) re-grids CTkButton's internal 5x5
+layout so the ICON pins to the left edge while the TEXT centers in
+the remaining width. What stays ttk:
 the `Treeview` table, `Notebook` tabs, striped progressbars, round
 scrollbars, labels/frames — darkly widgets CTk has no better
 equivalent for — plus the Select grid's hundreds of per-image
@@ -30,16 +46,25 @@ advice orange, superseded red) stay named constants aligned to
 darkly's accents. A reusable `ScrollFrame` backs the selection
 list and a `ttk.Treeview` is the dashboard's collection table.
 
-**Button icons** (2026-07-18) are PNGs REUSED from the RHMH
-project's icon set, copied into `assets/icons/` (RHMH untouched):
-`add` / `remove` / `clear` on the queue buttons, `web` (globe) on
-Open Chrome, `start` (play) on Start, `right` on the dashboard's
-Show button, `ai` on DocWindow's Copy (for AI). The module-level
-`icon()` loader resolves them beside `gui.py` (never the CWD),
-loads each PNG through Pillow into a `CTkImage` scaled to ≤20 px
-(smooth resampling — sharper than the old `PhotoImage.subsample`),
-and caches every image in `_ICONS` for the process lifetime so all
-buttons share one instance per icon. A missing icon file raises
+**Icons** (2026-07-18) are SVG-FIRST: the owner's
+`assets/icons/*.svg` (`add` / `remove` / `clear` on the queue
+buttons, `start` (play) on Start, `right` on the dashboard's Show
+button, `chatGPT` / `gemini` as the site-switch logos) rasterized
+through Qt's `QSvgRenderer` (PySide6 — already the monorepo build
+pipeline's SVG engine; a lazy, never-exec()-ed `QGuiApplication`
+serves only offscreen painting) at 4x the target size and
+LANCZOS-downscaled for crispness. PNG stays the fallback for icons
+with no svg (`web` on Open Chrome, `ai` on DocWindow's Copy) AND
+for svgs QtSvg cannot render: QtSvg implements the SVG *Tiny*
+profile, so a file using `clipPath`/`mask`/`filter` (Illustrator
+raster-trace exports — `gemini.svg` is 12 embedded rasters under
+28 clipPaths) is detected by tag-sniffing the bytes and loaded
+from its pre-rasterized `.png` sibling instead (`gemini.png` was
+rendered ONCE from the svg via chromium, transparent, 512 px).
+The module-level `icon(name, size=20)` loader resolves beside
+`gui.py` (never the CWD), returns a `CTkImage`, and caches per
+(name, size) in `_ICONS` for the process lifetime. A missing icon
+— or a Tiny-unrenderable svg with no png sibling — raises
 `FileNotFoundError` loudly (root Rule #1); buttons keep their text
 (`compound="left"`).
 
@@ -54,7 +79,8 @@ buttons share one instance per icon. A missing icon file raises
   report would collide).
 - **Output** — the folder; images save DIRECTLY to
   `<out>/<site>/<drop-path>` (no approval step).
-- **Sites** — Gemini / ChatGPT switches; both ticked = both run
+- **Sites** — Gemini / ChatGPT switches, each with its site logo
+  beside it; both ticked = both run
   IN PARALLEL, one thread and one tab each. Beside each site sits
   its own **background dropdown** (`transparent` / `white` /
   `none`), preselected to the site's default — ChatGPT
@@ -96,7 +122,8 @@ buttons share one instance per icon. A missing icon file raises
 - **Pause / Action delay** — both are random FROM–TO ranges: the
   pause between prompts (fractional seconds) and the human-like
   hesitation between UI steps (click → paste → send, default
-  0.2–0.6 s — never instant).
+  0.2–0.6 s — never instant). All four fields are the compact
+  `Spinner` units ([−]/[+] step or type directly).
 - **Instructions** — opens the sheet-authoring guide
   (`instructions.md`) in the in-app `DocWindow` — light Markdown
   formatting, selectable read-only text, and a **Copy (for AI)**
