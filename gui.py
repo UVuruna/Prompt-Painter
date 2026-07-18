@@ -24,6 +24,7 @@ import io
 import json
 import queue
 import random
+import re
 import threading
 import time
 import tkinter as tk
@@ -262,6 +263,19 @@ DOC_MIN_W = 520             # never narrower than this (the top button bar fits)
 DOC_MIN_H = 400             # never shorter than this (also the provisional height)
 DOC_IMG_PAD_PX = 60         # horizontal padding around the image column (image mode)
 DOC_CHROME_PAD_PX = 48      # non-text vertical chrome: Text pady + frame margins
+
+# --- Main window: min size, on-screen clamp, wheel, collapse (Rule #4) -
+# The whole window is vertically scrollable so a stale-tall geometry can
+# never hide the bottom, and the upper control area collapses to a thin
+# per-agent strip so the Dashboard can take the full height.
+WINDOW_MIN_W = 900          # root.minsize width
+WINDOW_MIN_H = 640          # root.minsize height
+WINDOW_SCREEN_MARGIN_PX = 80  # taskbar + titlebar + slack subtracted from
+#                               screen w/h when clamping a restored geometry
+WHEEL_DELTA_UNIT = 120      # one mouse-wheel notch (event.delta per detent)
+COMPACT_CLUSTER_GAP_PX = 24  # gap between the two agent clusters when collapsed
+COLLAPSE_GLYPH_EXPANDED = "▾  Controls"   # toggle label while controls show
+COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
 
 
 def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
@@ -757,9 +771,16 @@ class ScrollFrame(ttk.Frame):
     appears.
     """
 
-    def __init__(self, master, horizontal: bool = False):
+    def __init__(
+        self, master, horizontal: bool = False, fill_height: bool = False
+    ):
         super().__init__(master)
         self._stretch = not horizontal
+        # fill_height: keep the body AT LEAST as tall as the canvas, so a
+        # child packed expand=True (the notebook) fills the whole viewport
+        # when the content is shorter than the window (see _apply_fill_height)
+        self._fill_height = fill_height
+        self._fill_h = 0  # last forced body height (change-guarded loop break)
         self._sr_job = None  # coalesced scrollregion pass (see _on_body)
         self._sr_suspended = False  # bulk-build pause (see suspend_...)
         self.canvas = tk.Canvas(self, highlightthickness=0)
@@ -817,10 +838,37 @@ class ScrollFrame(ttk.Frame):
 
     def _recompute_sr(self) -> None:
         self._sr_job = None
+        self._apply_fill_height()
         try:
             self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         except tk.TclError:
             pass  # canvas destroyed between the schedule and the pass
+
+    def _apply_fill_height(self) -> None:
+        """Stretch the body window to at least the canvas height so a
+        child packed expand=True fills the viewport even when the content
+        is shorter than the window. The change-guard (target != self._fill_h)
+        is REQUIRED: forcing the window height re-fires the body's
+        <Configure>, and re-applying an unchanged height would loop —
+        reqheight is driven by child requests and is invariant under the
+        forced allocated height, so a single settle converges."""
+        if not self._fill_height:
+            return
+        try:
+            target = max(
+                self.canvas.winfo_height(), self.body.winfo_reqheight()
+            )
+            if target != self._fill_h:
+                self._fill_h = target
+                self.canvas.itemconfigure(self._win, height=target)
+        except tk.TclError:
+            pass  # canvas destroyed between the schedule and the pass
+
+    def refresh(self) -> None:
+        """Re-fit after a structural change (collapse/expand) — coalesced
+        like _on_body so a burst of changes triggers one settle."""
+        if self._sr_job is None:
+            self._sr_job = self.after_idle(self._recompute_sr)
 
     def _on_destroy(self, event) -> None:
         if self._sr_job is not None:
@@ -831,6 +879,7 @@ class ScrollFrame(ttk.Frame):
     def _on_canvas(self, event) -> None:
         if self._stretch:
             self.canvas.itemconfigure(self._win, width=event.width)
+        self._apply_fill_height()
 
     def _bind_wheel(self, _event) -> None:
         self.canvas.bind_all("<MouseWheel>", self._on_wheel)
@@ -843,7 +892,9 @@ class ScrollFrame(ttk.Frame):
 
     def _on_wheel(self, event) -> None:
         try:
-            self.canvas.yview_scroll(int(-event.delta / 120), "units")
+            self.canvas.yview_scroll(
+                int(-event.delta / WHEEL_DELTA_UNIT), "units"
+            )
         except tk.TclError:
             # the canvas was destroyed but the global binding lingered
             self.canvas.unbind_all("<MouseWheel>")
@@ -893,6 +944,8 @@ class AgentPanel(ttk.Labelframe):
     def __init__(self, master, site_key: str, on_start, on_stop):
         super().__init__(master)
         self.site_key = site_key
+        self._on_start = on_start
+        self._on_stop = on_stop
         site = SITES[site_key]
 
         # the labelframe title: the site's logo + name
@@ -974,6 +1027,10 @@ class AgentPanel(ttk.Labelframe):
             kind="danger-outline", width=70,
         )
         self.btn_stop.pack(side="left", padx=6)
+        # every Start/Stop pair this agent owns (the panel's own pair plus
+        # the collapsed-strip pair added by build_compact); set_run_state
+        # styles ALL of them so both views always agree on availability
+        self._button_pairs = [(self.btn_start, self.btn_stop)]
         self.set_run_state(running=False)
 
     def set_run_state(
@@ -981,11 +1038,41 @@ class AgentPanel(ttk.Labelframe):
     ) -> None:
         """Start is available unless the site runs; Stop is available
         while it runs OR while a quota auto-restart is pending (Stop
-        then cancels the pending restart)."""
-        style_action_button(self.btn_start, "success", not running)
-        style_action_button(
-            self.btn_stop, "danger", running or pending_restart
+        then cancels the pending restart). Styles every registered
+        button pair (full panel + collapsed strip)."""
+        for start_btn, stop_btn in self._button_pairs:
+            style_action_button(start_btn, "success", not running)
+            style_action_button(
+                stop_btn, "danger", running or pending_restart
+            )
+
+    def build_compact(self, parent) -> ttk.Frame:
+        """A thin '[logo] Name [Start][Stop]' cluster for the collapsed
+        view. Its Start/Stop reuse the panel's own commands and join
+        _button_pairs so set_run_state keeps them in the same
+        filled/outline availability as the full panel's pair."""
+        cluster = ttk.Frame(parent)
+        ctk.CTkLabel(
+            cluster, text="", image=icon(_SITE_ICON[self.site_key]),
+            width=22, fg_color="transparent", bg_color=theme_pair("bg"),
+        ).pack(side="left", padx=(0, 4))
+        ttk.Label(
+            cluster, text=SITES[self.site_key].name, style="Head.TLabel"
+        ).pack(side="left", padx=(0, 8))
+        start = rounded_button(
+            cluster, "Start",
+            command=partial(self._on_start, self.site_key),
+            kind="success", icon_name="start", width=90,
         )
+        start.pack(side="left")
+        stop = rounded_button(
+            cluster, "Stop",
+            command=partial(self._on_stop, self.site_key),
+            kind="danger-outline", width=70,
+        )
+        stop.pack(side="left", padx=6)
+        self._button_pairs.append((start, stop))
+        return cluster
 
     def pace_floats(self) -> tuple[float, float, float, float]:
         """The four pace numbers — ValueError propagates to the
@@ -1503,7 +1590,7 @@ class PainterGui:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("PromptPainter")
-        root.minsize(900, 640)
+        root.minsize(WINDOW_MIN_W, WINDOW_MIN_H)
 
         # register the custom light theme before anything can apply it
         register_painter_day()
@@ -1535,17 +1622,28 @@ class PainterGui:
         self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
         self._save_job: str | None = None  # debounced settings save
 
-        outer = ttk.Frame(root, padding=8)
+        # the top strip (theme switch + collapse toggle) is PINNED outside
+        # the scroll so the toggle is reachable even when the content
+        # overflows a short window; everything else lives in ONE
+        # fill_height ScrollFrame so the bottom is never unreachable
+        shell = ttk.Frame(root)
+        shell.pack(fill="both", expand=True)
+        self._top_strip = ttk.Frame(shell, padding=(8, 6, 8, 0))
+        self._top_strip.pack(fill="x")
+        self._scroll = ScrollFrame(shell, fill_height=True)
+        self._scroll.pack(fill="both", expand=True)
+        outer = ttk.Frame(self._scroll.body, padding=8)
         outer.pack(fill="both", expand=True)
 
-        # a thin top strip packed FIRST so the Day/Night switch sits
-        # top-right without overlapping the full-width Collections frame
-        self._top_strip = ttk.Frame(outer)
-        self._top_strip.pack(fill="x")
-
-        self._build_queue(outer)
-        self._build_options(outer)
-        self._build_toolbar(outer)
+        # the whole upper control area — collapsed together into the thin
+        # per-agent strip (built but packed by _set_collapsed, so the
+        # order is deterministic regardless of build order)
+        self._collapsed = False
+        self._controls_box = ttk.Frame(outer)
+        self._build_queue(self._controls_box)
+        self._build_options(self._controls_box)
+        self._build_toolbar(self._controls_box)
+        self._build_compact(outer)
         self._build_views(outer)
 
         self.status_var = tk.StringVar(value="idle")
@@ -1556,9 +1654,18 @@ class PainterGui:
         # the mini Day/Night switch — reflects the already-applied theme
         self.switch = DayNightSwitch(self._top_strip, self)
         self.switch.pack(side="right")
+        # the collapse toggle, packed AFTER the switch so side='right'
+        # places it to the switch's LEFT
+        self._collapse_btn = rounded_button(
+            self._top_strip, COLLAPSE_GLYPH_EXPANDED,
+            command=self._toggle_collapsed,
+        )
+        self._collapse_btn.pack(side="right", padx=(0, 8))
 
         self._bind_zoom()
-        self._apply_settings(self._settings)
+        self._bind_wheel_routing()
+        self._set_collapsed(False)  # deterministic initial packing
+        self._apply_settings(self._settings)  # may restore a saved state
         self._wire_persistence()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.after(120, self._drain_queue)
@@ -1601,6 +1708,87 @@ class PainterGui:
                 f"font size {FONT_BASE} (Ctrl+wheel / Ctrl+'+'/'-')"
             )
             self._schedule_save()
+
+    # --- global vertical scroll + collapse -----------------------------
+
+    def _bind_wheel_routing(self) -> None:
+        """Route the wheel so the pointer's widget scrolls, once. The
+        inner scrollables (both dashboard Treeviews, the Log/DocWindow
+        Text, the Collections Listbox) get a PERMANENT class <MouseWheel>
+        that scrolls that widget and returns 'break', halting the
+        bindtag chain BEFORE the outer ScrollFrame's 'all'-tag handler —
+        so the inner widget scrolls and the outer view never also does.
+        Everything else has no class wheel binding, so it bubbles to the
+        outer view. Ctrl+wheel is unaffected: _bind_zoom's
+        <Control-MouseWheel> on these same class tags is more specific
+        than this plain <MouseWheel>, so a Ctrl event fires only zoom."""
+        for cls in ("Treeview", "Text", "Listbox"):
+            self.root.bind_class(cls, "<MouseWheel>", self._inner_wheel)
+
+    def _inner_wheel(self, event):
+        event.widget.yview_scroll(
+            int(-event.delta / WHEEL_DELTA_UNIT), "units"
+        )
+        return "break"
+
+    def _build_compact(self, parent) -> None:
+        """The collapsed strip: one '[logo] Name [Start][Stop]' cluster
+        per site. Built once (unpacked); _set_collapsed swaps it in for
+        the full controls. The freshly-created Start/Stop buttons inherit
+        the correct availability via each panel's set_run_state."""
+        self._compact_box = ttk.Frame(parent)
+        for key in sorted(SITES):
+            cluster = self.agents[key].build_compact(self._compact_box)
+            cluster.pack(side="left", padx=(0, COMPACT_CLUSTER_GAP_PX))
+        for key, panel in self.agents.items():
+            panel.set_run_state(
+                running=key in self._running,
+                pending_restart=key in self._restart_jobs,
+            )
+
+    def _set_collapsed(self, collapsed: bool) -> None:
+        """Swap the full controls for the thin per-agent strip (or back).
+        Nothing is destroyed — every StringVar/BooleanVar/Listbox/Spinner
+        keeps its state; 'before=self.notebook' pins the vertical order
+        [controls|compact] above the notebook regardless of pack order."""
+        self._collapsed = collapsed
+        if collapsed:
+            self._controls_box.pack_forget()
+            self._compact_box.pack(fill="x", before=self.notebook)
+        else:
+            self._compact_box.pack_forget()
+            self._controls_box.pack(fill="x", before=self.notebook)
+        self._collapse_btn.configure(
+            text=COLLAPSE_GLYPH_COLLAPSED if collapsed
+            else COLLAPSE_GLYPH_EXPANDED
+        )
+        self._scroll.refresh()
+
+    def _toggle_collapsed(self) -> None:
+        self._set_collapsed(not self._collapsed)
+        self._schedule_save()
+
+    def _clamp_geometry(self, geo: str) -> str:
+        """Clamp a restored 'WxH' or 'WxH+X+Y' geometry so it never
+        exceeds the screen (minus a margin) or sits off-screen — a stale
+        too-tall geometry can otherwise hide the bottom past the screen
+        edge. Unparseable strings pass through for Tk to try verbatim."""
+        m = re.match(r"(\d+)x(\d+)(?:([+-]\d+)([+-]\d+))?$", geo)
+        if not m:
+            return geo
+        w, h = int(m.group(1)), int(m.group(2))
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        w = max(WINDOW_MIN_W, min(w, max(WINDOW_MIN_W,
+                                         sw - WINDOW_SCREEN_MARGIN_PX)))
+        h = max(WINDOW_MIN_H, min(h, max(WINDOW_MIN_H,
+                                         sh - WINDOW_SCREEN_MARGIN_PX)))
+        if m.group(3) is None:
+            return f"{w}x{h}"
+        x, y = int(m.group(3)), int(m.group(4))
+        x = min(max(x, 0), max(sw - w, 0))
+        y = min(max(y, 0), max(sh - h, 0))
+        return f"{w}x{h}+{x}+{y}"
 
     # --- construction --------------------------------------------------
 
@@ -2540,6 +2728,7 @@ class PainterGui:
             "theme": ACTIVE_THEME,
             "sash": sash,
             "geometry": self.root.geometry(),
+            "controls_collapsed": self._collapsed,
             "agents": {
                 key: panel.get_settings()
                 for key, panel in self.agents.items()
@@ -2566,7 +2755,7 @@ class PainterGui:
         for key, panel in self.agents.items():
             panel.apply_settings(stored.get("agents", {}).get(key, {}))
         if stored.get("geometry"):
-            self.root.geometry(stored["geometry"])
+            self.root.geometry(self._clamp_geometry(stored["geometry"]))
         if stored.get("sash") is not None:
             # the sash needs realised pane widths — apply once mapped
             def place_sash(pos=int(stored["sash"])):
@@ -2577,6 +2766,10 @@ class PainterGui:
                     pass  # single pane right now — position kept stored
 
             self.root.after(300, place_sash)
+
+        # restore the collapsed/expanded view LAST — geometry and sash are
+        # already sane, so the swap fits into a correctly-sized window
+        self._set_collapsed(bool(stored.get("controls_collapsed", False)))
 
     def _wire_persistence(self) -> None:
         """Meaningful changes debounce into a save; the queue buttons,

@@ -50,13 +50,21 @@ AND register them in the `THEMED_TK` role registry so a flip
 re-tints them; the semantic STATUS colours (done, olive one-site,
 advice, superseded, code text) live PER THEME in `THEMES[*].status`
 and are read live through `status(role)`. A reusable `ScrollFrame` backs the selection
-tree and a `ttk.Treeview` is the dashboard's collection table.
+tree, WRAPS the whole main window (see **Collapse & global scroll**),
+and a `ttk.Treeview` is the dashboard's collection table.
 `ScrollFrame` COALESCES its scrollregion: a body `<Configure>`
 only schedules ONE `after_idle` `bbox('all')` pass, so an expand
 that grids dozens of children costs one geometry scan, not one per
 child; `suspend_scrollregion` / `resume_scrollregion` pause even
 that during a bulk build (the Select tree's Expand-all) so the
 O(content) `bbox` scan runs ONCE at the end, not once per chunk.
+An optional `fill_height=True` (the whole-window wrap uses it)
+keeps the body window AT LEAST as tall as the canvas — so a child
+packed `expand=True` (the Dashboard notebook) fills the viewport
+when the content is shorter than the window — behind a change-guard
+that breaks the itemconfigure→`<Configure>`→recompute loop
+(`winfo_reqheight` is invariant under the forced height, so one
+settle converges); `refresh()` re-fits after a collapse/expand.
 The module-level `folder_of(drop_path)` (a drop path's
 POSIX parent, `(root)` fallback) is the shared L2 folder identity
 for both the dashboard tree and the Select window.
@@ -105,6 +113,50 @@ for keyboards without a numpad). The wheel handler returns
 "break" and is also bound on the Text/Listbox/Treeview class tags
 so Ctrl+wheel zooms without ALSO scrolling the widget under the
 pointer.
+
+**Collapse & global scroll** (2026-07-18) — two window-wide
+reachability fixes:
+
+- **Collapsible controls** — a `▾ Controls` toggle (top strip, left
+  of the Day/Night switch) collapses the WHOLE upper control area
+  (the Collections queue, Output row, both `AgentPanel` bodies and
+  the standalone-tools button row — all held in `self._controls_box`)
+  down to a thin per-agent strip (`self._compact_box`): one
+  `[logo] Name [Start][Stop]` cluster per site, so the Dashboard/Log
+  notebook takes the full height while the owner watches a run.
+  Nothing is destroyed — the swap is `pack_forget` ↔
+  `pack(before=self.notebook)`, so every StringVar/Spinner/Listbox
+  keeps its state and `before=` pins the vertical order regardless of
+  build order. `AgentPanel.build_compact()` builds each cluster and
+  appends its Start/Stop to the panel's `_button_pairs`; the
+  unchanged-signature `set_run_state` loops that list so the compact
+  and full buttons ALWAYS share the same filled/outline availability
+  and drive the same `_start_site`/`_stop_site`. The glyph flips to
+  `▸ Controls` when collapsed; the state persists
+  (`controls_collapsed`).
+- **Whole-window vertical scroll** — the entire content lives in ONE
+  `fill_height` `ScrollFrame` (the top strip is pinned OUTSIDE it, so
+  the collapse toggle is always reachable). When the content exceeds
+  the window height (a short window, or the owner's stale too-tall
+  geometry) the outer view scrolls so the bottom buttons / Dashboard
+  bottom are never unreachable. **Wheel routing**: the outer view
+  keeps `ScrollFrame`'s `<Enter>`/`<Leave>` → `bind_all` pattern
+  (per-canvas scoped, correct for the multi-Toplevel app); the inner
+  scrollables get a PERMANENT `bind_class('<MouseWheel>')`
+  (`_inner_wheel`) on Treeview/Text/Listbox that scrolls that widget
+  and returns `"break"`, halting the bindtag chain BEFORE the outer
+  `all`-tag handler — so over a dashboard tree / the Log / the
+  Collections list the INNER widget scrolls once (never a
+  double-scroll), and over anything else the OUTER view scrolls.
+  Ctrl+wheel is untouched: `_bind_zoom`'s `<Control-MouseWheel>` on
+  the same class tags is more specific than the plain `<MouseWheel>`,
+  so a Ctrl event fires only the zoom (no new guard needed).
+- **Geometry cap** — `_clamp_geometry` clamps a restored
+  `WxH(+X+Y)` to the screen minus `WINDOW_SCREEN_MARGIN_PX` and on to
+  an on-screen offset (below `WINDOW_MIN_W/H` it raises to the min;
+  unparseable passes through), applied in `_apply_settings`, so a
+  stale `1381x2061` (taller than the owner's screen) can never again
+  place the window past the screen edge with the bottom unreachable.
 
 ## The window
 
@@ -258,8 +310,8 @@ pointer.
 - **Settings persistence** (`painter/settings.py`) — remembered
   across starts: the output folder, EVERY per-agent panel setting,
   the font zoom base, the **theme** (`day` / `night`), the dashboard
-  sash position and the window geometry (selection ticks stay
-  per-run). The **collection queue is NOT persisted** — the app
+  sash position, the window geometry and the **collapsed/expanded**
+  controls state (selection ticks stay per-run). The **collection queue is NOT persisted** — the app
   starts with an empty list every launch (owner 2026-07-18); and a
   saved output folder that no longer exists is ignored in favour of
   the default `out/`, so done-detection never reads an empty
@@ -269,9 +321,9 @@ pointer.
   keys as current defaults (a missing `theme` = `night`) and drops
   queued files that no longer exist (reported in the log). The
   stored dict: `queue` (list of paths), `output`, `font_base`,
-  `theme`, `sash`, `geometry`, and `agents.<site>` with
-  `background`, `bg_removal`, `crop`, `upscale`, `report`,
-  `safer_retry`, `new_chat`, `pause_min/max`, `act_min/max`.
+  `theme`, `sash`, `geometry`, `controls_collapsed`, and
+  `agents.<site>` with `background`, `bg_removal`, `crop`, `upscale`,
+  `report`, `safer_retry`, `new_chat`, `pause_min/max`, `act_min/max`.
 
 ## The Dashboard
 One `DashPanel` per site, fed ONLY by the runner's structured
@@ -369,10 +421,14 @@ retains each leaf's `advice` + `n_done` to recompute its colour).
 
 **Startup order** (`PainterGui.__init__`) applies the saved theme
 BEFORE building any widget — `register_painter_day()` → load settings
-→ font zoom → `apply_theme(saved_theme)` → build the queue / options /
-toolbar / views → create the switch in a thin top strip packed FIRST
-in `outer` (so it never overlaps the full-width Collections frame).
-Because the theme is live before the first widget is born, CTk tuples
+→ font zoom → `apply_theme(saved_theme)` → pin a thin top strip
+(Day/Night switch + `▾ Controls` toggle) on the `shell`, then wrap
+the rest in ONE `fill_height` `ScrollFrame` whose body holds the
+collapsible controls, compact strip and the Dashboard/Log notebook →
+`_bind_zoom` / `_bind_wheel_routing` / `_set_collapsed(False)` →
+`_apply_settings` (which caps the geometry and may restore the
+collapsed state). Because the theme is live before the first widget
+is born, CTk tuples
 resolve to the right end and tk skinners read the active palette — no
 first-frame flash, no half-theme window. The chosen theme persists in
 `settings.json` (`theme` key, missing = `night`).
