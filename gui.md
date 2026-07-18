@@ -166,9 +166,17 @@ pointer.
   default advice-free, not-done set equals the runner's own
   "never opened Select" rule). Leaf names are COLOR-CODED: green =
   done on both sites (olive = done on one), red = SUPERSEDED
-  advice, orange = other advice, default = pending. Long names
-  WRAP to 2–3 lines (`ttk.Label(wraplength=)`, recomputed on
-  resize/zoom) so they never eat horizontal space; the two
+  advice, orange = other advice, default = pending — and a
+  **colour LEGEND** under the top hint bar spells out those four
+  (BOTH DONE / ONE SITE DONE / SUPERSEDED / ADVICE), each label
+  painted in its own live status colour so a Day/Night flip
+  recolours it too. The window is sized FIT-CONTENT
+  (`_fit_content_width`): a bounded `font.measure` sweep over just
+  the ~30 L1 collection titles (+ their L2 folder paths, never the
+  leaves) picks the width so the widest title stays on ONE line,
+  clamped to `[SELECT_MIN_W, screen*DOC_MAX_FRAC]`; the
+  `ttk.Label(wraplength=)` follows that width so only genuinely
+  over-long names wrap (recomputed on resize/zoom). The two
   fixed-width per-site columns stay aligned however deep a row is.
   **Performance** (the owner's "a collapsible list must not lag"):
   the body is plain ttk only, L1/L2 nodes are always materialised
@@ -187,9 +195,11 @@ pointer.
   fills in progressively and the main thread is never blocked; any
   manual toggle / Collapse-all cancels an in-flight expand cleanly
   (folders are atomic, so the tree is always in a consistent
-  built-or-not state to stop at). The window opens from config
-  constants (no per-item font-measure sweep) with every section
-  COLLAPSED.
+  built-or-not state to stop at). The window opens at the
+  fit-content width above and a screen-tall height
+  (`screen*DOC_HEIGHT_FRAC`, floored at `SELECT_OPEN_H`) with every
+  section COLLAPSED — the L1-title measure is bounded (~30 titles),
+  never the old open-time sweep over every leaf.
 - **BG removal only... / CROP only... / UPSCALE only...** — the
   three standalone in-place tools (one at a time): pick a folder,
   confirm, and the engine function (`remove_background` /
@@ -210,10 +220,21 @@ pointer.
 - **Instructions** — opens the sheet-authoring guide
   (`instructions.md`) in the in-app `DocWindow` — light Markdown
   formatting, selectable read-only text, and a **Copy (for AI)**
-  button — so a non-programmer never needs a code editor. Every
-  `DocWindow` opening (instructions, a collection file, a folder
-  excerpt, a single prompt) sizes its WIDTH to the text content
-  (clamped to 90 % of the screen).
+  button — so a non-programmer never needs a code editor.
+  `DocWindow` sizes in TWO modes (replacing the old longest-line
+  measure that blew the window near full-screen on a ~200-word
+  one-line prompt): the SINGLE-IMAGE prompt viewer (`image_path`
+  set) sizes its WIDTH to the IMAGE — native width + `DOC_IMG_PAD_PX`,
+  clamped to `screen*DOC_MAX_FRAC` — so the picture shows large and
+  the prompt WRAPS into that column above it; every TEXT opening
+  (instructions, a collection file, a folder excerpt) uses a
+  portrait A4 width (`screen*DOC_HEIGHT_FRAC*DOC_A4_RATIO`, clamped
+  `[DOC_MIN_W, screen*DOC_MAX_FRAC]`) so long one-line prompts wrap
+  into a readable column. The HEIGHT is fitted to the rendered
+  content (`_fit_height` measures the Text's `ypixels` on the first
+  `<Map>`, when it is finally laid out) and clamped to
+  `screen*DOC_MAX_FRAC`, so a short excerpt shrinks to content while
+  a tall medallion / long doc scrolls.
 - **Two views** (tabs): the **Dashboard** and the **Log
   (detailed)** (timestamped `[HH:MM:SS]`, both sites interleaved
   with `[gemini]` / `[chatgpt]` prefixes). A SAFETY refusal skips

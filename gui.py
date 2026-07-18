@@ -222,8 +222,7 @@ HOVER_DARKEN = 0.75
 # per-site count/checkbox columns are FIXED width so they stay aligned
 # no matter how deep the row is or how far its name wraps.
 SELECT_MIN_W = 860          # open + minimum width (hint + bar buttons fit)
-SELECT_OPEN_H = 520         # open + minimum height
-SELECT_SCREEN_FRAC = 0.9    # clamp the open width to this fraction of screen
+SELECT_OPEN_H = 520         # minimum height (the open height is screen-tall)
 SELECT_INDENT_PX = 22       # left indent added per tree level (folder, image)
 SELECT_TRI_PX = 22          # width reserved for a row's ▶/▼ triangle glyph
 SELECT_COUNT_COL_PX = 96    # ONE site count/checkbox column (fits 'NNN/NNN'
@@ -240,6 +239,29 @@ SELECT_EXPAND_CHUNK = 8     # leaf rows built per Expand-all tick — bounds the
 #                             Expand-all fills progressively, never a freeze
 SELECT_EXPAND_TICK_MS = 1   # gap between Expand-all chunks — yields to the event
 #                             loop so the tree fills in progressively, non-blocked
+SELECT_FIT_PAD_PX = 24      # slack added to the widest measured name so a title
+#                             that FITS never wraps by a hair (frame borders eat
+#                             a few px of the settled canvas width)
+
+# --- DocWindow + shared window sizing (Rule #4) -----------------------
+# The old DocWindow sized its WIDTH from the single longest line, so a
+# ~200-word prompt on ONE line blew the window to near-full-screen with
+# the text on one enormous line. Two modes replace that:
+#   IMAGE mode (a single image's prompt viewer, image_path set): width
+#     follows the IMAGE — native width + padding, clamped to the screen —
+#     so the picture shows large and the prompt WRAPS into that column.
+#   TEXT mode (instructions / whole collection / folder excerpt): a
+#     portrait A4 proportion, so long one-line prompts wrap into a
+#     readable column instead of stretching the window.
+# DOC_MAX_FRAC also clamps the Select window and every doc window to a
+# fraction of the screen (the single "never bigger than this" rule).
+DOC_A4_RATIO = 210 / 297    # ISO A4 portrait width:height (~0.707)
+DOC_HEIGHT_FRAC = 0.8       # A4 text height (and the Select tall height) = screen_h * this
+DOC_MAX_FRAC = 0.9          # clamp ANY window to this fraction of the screen
+DOC_MIN_W = 520             # never narrower than this (the top button bar fits)
+DOC_MIN_H = 400             # never shorter than this (also the provisional height)
+DOC_IMG_PAD_PX = 60         # horizontal padding around the image column (image mode)
+DOC_CHROME_PAD_PX = 48      # non-text vertical chrome: Text pady + frame margins
 
 
 def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
@@ -2683,6 +2705,28 @@ class SelectWindow(tk.Toplevel):
             bar, "Close", command=self.destroy,
         ).pack(side="right", padx=4)
 
+        # --- the colour legend (own row under the hint bar so it never
+        # crowds the Close/Collapse/Expand buttons off-screen). Each swatch
+        # label is painted in its OWN status colour, pulled LIVE from the
+        # active theme's palette so a Day/Night flip recolours it too.
+        legend = ttk.Frame(self, padding=(8, 0, 8, 2))
+        legend.pack(fill="x")
+        ttk.Label(legend, text="Legend:", style="Muted.TLabel").pack(
+            side="left"
+        )
+        self._legend_labels: list[tuple[str, ttk.Label]] = []
+        for role, text in (
+            ("done", "BOTH DONE"),
+            ("done_soft", "ONE SITE DONE"),
+            ("superseded", "SUPERSEDED"),
+            ("advice", "ADVICE"),
+        ):
+            lbl = ttk.Label(
+                legend, text=text, style="Value.TLabel", foreground=status(role)
+            )
+            lbl.pack(side="left", padx=(14, 0))
+            self._legend_labels.append((role, lbl))
+
         # --- the non-scrolling header: one accent cell per site with
         # the grand selected/total, right-aligned over the body columns
         # (a gutter reserves the body's vertical scrollbar width).
@@ -2716,7 +2760,11 @@ class SelectWindow(tk.Toplevel):
         self._scroll = ScrollFrame(self, horizontal=False)
         self._scroll.pack(fill="both", expand=True)
         self._canvas = self._scroll.canvas
-        self._canvas_width = SELECT_MIN_W - SELECT_SCROLLBAR_PX
+        # FIT CONTENT: size the window to the widest collection title so it
+        # stays on ONE line (computed BEFORE the tree so labels are born at
+        # the right wraplength, no premature 2-3 line wrapping).
+        self._open_width = self._fit_content_width()
+        self._canvas_width = self._open_width - SELECT_SCROLLBAR_PX
         self._wrap = self._wraplength_for(self._canvas_width)
         self._canvas.bind("<Configure>", self._on_canvas_configure, add="+")
 
@@ -2727,14 +2775,16 @@ class SelectWindow(tk.Toplevel):
         for coll in self._collections:
             self._build_collection_widgets(self._scroll.body, coll)
 
-        # first paint of the counts + the open geometry
+        # first paint of the counts + the open geometry (FIT-CONTENT width,
+        # screen-tall height so the whole queue is visible at once)
         self._dirty = True
         self._recount()
         self.bind("<Destroy>", self._on_destroy)
-        width = min(
-            SELECT_MIN_W, int(self.winfo_screenwidth() * SELECT_SCREEN_FRAC)
+        height = min(
+            max(int(self.winfo_screenheight() * DOC_HEIGHT_FRAC), SELECT_OPEN_H),
+            int(self.winfo_screenheight() * DOC_MAX_FRAC),
         )
-        self.geometry(f"{width}x{SELECT_OPEN_H}")
+        self.geometry(f"{self._open_width}x{height}")
 
     # --- data model (no widgets) --------------------------------------
 
@@ -2801,6 +2851,8 @@ class SelectWindow(tk.Toplevel):
         the global recolour_tk_registry; every ttk widget rides the style
         re-run."""
         self._progress_lbl.configure(foreground=tb.Style().colors.info)
+        for role, lbl in self._legend_labels:
+            lbl.configure(foreground=status(role))
         default_fg = tb.Style().colors.fg
         for cnode in self._collection_nodes:
             for fnode in cnode["folders"]:
@@ -3088,7 +3140,30 @@ class SelectWindow(tk.Toplevel):
                 sel = sum(leaf["sites"][key]["var"].get() for leaf in leaves)
                 cnode["count"][key].configure(text=f"{sel}/{tot}")
 
-    # --- wrapping + teardown ------------------------------------------
+    # --- fit-content sizing + wrapping + teardown ---------------------
+
+    def _fit_content_width(self) -> int:
+        """The open width that keeps the widest collection title on ONE
+        line. A BOUNDED measure (only the ~30 L1 titles + their L2 folder
+        paths, NEVER the leaves — the owner's perf rule): widest name +
+        the fixed reserve (indent + triangle + the two count columns) +
+        the scrollbar gutter, clamped to [SELECT_MIN_W, screen*MAX]. The
+        row labels render in the ttk root font ('.' style)."""
+        font = tk_font("root")
+        widest = 0
+        for coll in self._collections:
+            widest = max(widest, font.measure(coll["label"]))
+            for folder in coll["folders"]:
+                widest = max(
+                    widest,
+                    font.measure(folder["folder"]) + SELECT_INDENT_PX,
+                )
+        needed = widest + SELECT_FIT_PAD_PX + SELECT_WRAP_RESERVE_PX
+        needed += SELECT_SCROLLBAR_PX
+        return int(min(
+            max(needed, SELECT_MIN_W),
+            self.winfo_screenwidth() * DOC_MAX_FRAC,
+        ))
 
     @staticmethod
     def _wraplength_for(canvas_width: int) -> int:
@@ -3142,7 +3217,7 @@ class DocWindow(tk.Toplevel):
     ):
         super().__init__(master)
         self.title(title)
-        self.minsize(600, 560)
+        self.minsize(DOC_MIN_W, DOC_MIN_H)
         skin_toplevel(self)  # bg registered so a flip re-tints the window
         THEME_TOPLEVELS.append(self)  # flip coherently with the main window
         self._raw = raw_markdown
@@ -3152,6 +3227,7 @@ class DocWindow(tk.Toplevel):
 
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
+        self._bar = bar  # measured by _fit_height for the non-text chrome
         if hint:
             ttk.Label(bar, text=hint, style="Muted.TLabel").pack(side="left")
         rounded_button(
@@ -3178,12 +3254,24 @@ class DocWindow(tk.Toplevel):
         self.txt.pack(side="left", fill="both", expand=True)
 
         self._configure_tags()
-        self._size_to_content(raw_markdown)
+        self._apply_width()
         self._render(raw_markdown)
         self._append_image()
+        # the PRECISE height needs the Text laid out at its final width,
+        # which only happens once the window is MAPPED — measuring in
+        # __init__ (unmapped) reads a zero-height Text. So the window opens
+        # at a sensible tall provisional and _fit_height snaps it to the
+        # real content on first map (one-shot).
+        self.bind("<Map>", self._on_first_map)
         # read-only, but fully selectable and Ctrl+C / Ctrl+A copyable
         self.txt.bind("<Key>", self._readonly_keys)
         self.bind("<Destroy>", self._on_destroy)
+
+    def _on_first_map(self, event) -> None:
+        if event.widget is not self:
+            return
+        self.unbind("<Map>")
+        self._fit_height()
 
     def _on_destroy(self, event) -> None:
         # <Destroy> bubbles up from every child — act only on our own
@@ -3196,38 +3284,68 @@ class DocWindow(tk.Toplevel):
         styles); the Text body bg/fg rides the global recolour."""
         self._configure_tags()
 
-    def _size_to_content(self, md: str) -> None:
-        """Width follows the text (longest line, roughly per-role
-        fonts), clamped to 90 % of the screen — one rule for every
-        opening (instructions, collection, folder excerpt, prompt)."""
-        widest = 0
-        in_code = False
-        for line in md.split("\n"):
-            if line.startswith("```"):
-                in_code = not in_code
-                continue
-            if in_code:
-                role = "mono"
-            elif line.startswith("# "):
-                role = "doc_h1"
-            elif line.startswith("## "):
-                role = "doc_h2"
-            elif line.startswith("### "):
-                role = "head"
-            else:
-                role = "root"
-            widest = max(
-                widest, tk_font(role).measure(line.lstrip("# ")),
-            )
-        width = widest + 2 * 14 + 40  # text padx + scrollbar/margins
+    def _apply_width(self) -> None:
+        """Set the window WIDTH before rendering, so the Text wraps and
+        the image scales to it. This REPLACES the old longest-line measure
+        that blew the window to near-full-screen when a ~200-word prompt
+        sat on one line. Two modes:
+          IMAGE (a single image's prompt, image_path set): width follows
+            the IMAGE — its native width + padding, clamped to the screen —
+            so the picture shows large and the prompt wraps into that
+            same column above it.
+          TEXT (instructions / whole collection / folder excerpt): a
+            portrait A4 proportion, so long one-line prompts wrap into a
+            readable column instead of stretching the window."""
+        max_w = int(self.winfo_screenwidth() * DOC_MAX_FRAC)
         if self._image_path is not None:
-            try:
-                with Image.open(self._image_path) as img:
-                    width = max(width, min(img.width + 60, 1400))
-            except OSError:
-                pass
-        width = min(max(width, 600), int(self.winfo_screenwidth() * 0.9))
-        self.geometry(f"{width}x{max(560, self.winfo_height())}")
+            width = self._image_native_width() + DOC_IMG_PAD_PX
+        else:
+            width = int(
+                self.winfo_screenheight() * DOC_HEIGHT_FRAC * DOC_A4_RATIO
+            )
+        width = min(max(width, DOC_MIN_W), max_w)
+        self._target_w = width
+        # a tall provisional height (the natural size of a long doc / a
+        # medallion) so the first paint is close to final; _fit_height
+        # snaps it to the real content on the first <Map>.
+        prov_h = min(
+            max(int(self.winfo_screenheight() * DOC_HEIGHT_FRAC), DOC_MIN_H),
+            int(self.winfo_screenheight() * DOC_MAX_FRAC),
+        )
+        self.geometry(f"{width}x{prov_h}")
+        self.update_idletasks()
+
+    def _image_native_width(self) -> int:
+        """The saved image's native pixel width; a sensible min if the
+        file cannot be read (the image section then just shows nothing)."""
+        try:
+            with Image.open(self._image_path) as img:
+                return img.width
+        except OSError:
+            return DOC_MIN_W
+
+    def _fit_height(self) -> None:
+        """Height = the RENDERED content height (wrapped text + the
+        image), clamped to a sensible min and the screen fraction; the
+        vertical scrollbar takes any overflow. Measured AFTER render +
+        append so the real wrapped-line and image extent are known — the
+        window is portrait-ish for a tall medallion, short for a stub."""
+        self.update_idletasks()
+        try:
+            content_h = self.txt.count("1.0", "end", "ypixels")[0]
+        except (tk.TclError, TypeError, IndexError):
+            content_h = 0
+        needed = content_h + self._chrome_height()
+        height = min(
+            max(needed, DOC_MIN_H),
+            int(self.winfo_screenheight() * DOC_MAX_FRAC),
+        )
+        self.geometry(f"{self._target_w}x{height}")
+
+    def _chrome_height(self) -> int:
+        """Everything that is NOT the Text's own line flow: the top button
+        bar plus the Text padding and frame margins (DOC_CHROME_PAD_PX)."""
+        return self._bar.winfo_reqheight() + DOC_CHROME_PAD_PX
 
     def _append_image(self) -> None:
         """The saved image, below the prompt, scaled to fit the window
