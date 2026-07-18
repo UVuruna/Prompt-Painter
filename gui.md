@@ -235,12 +235,16 @@ pointer.
   SYNCHRONOUSLY (coherent instantly) and persists the choice, then
   a ~600 ms smoothstep slide runs as flourish. See **Theming**.
 - **Settings persistence** (`painter/settings.py`) — remembered
-  across starts: the queue file list, the output folder, EVERY
-  per-agent panel setting, the font zoom base, the **theme**
-  (`day` / `night`), the dashboard sash position and the window
-  geometry (selection ticks stay per-run). Saves debounce on every
-  meaningful change (var traces, queue edits, zoom, sash release,
-  theme flip) and always fire on close; loading applies missing
+  across starts: the output folder, EVERY per-agent panel setting,
+  the font zoom base, the **theme** (`day` / `night`), the dashboard
+  sash position and the window geometry (selection ticks stay
+  per-run). The **collection queue is NOT persisted** — the app
+  starts with an empty list every launch (owner 2026-07-18); and a
+  saved output folder that no longer exists is ignored in favour of
+  the default `out/`, so done-detection never reads an empty
+  `_state`. Saves debounce on every meaningful change (var traces,
+  zoom, sash release, theme flip) and always fire on close; loading
+  applies missing
   keys as current defaults (a missing `theme` = `night`) and drops
   queued files that no longer exist (reported in the log). The
   stored dict: `queue` (list of paths), `output`, `font_base`,

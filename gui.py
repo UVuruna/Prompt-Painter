@@ -2513,7 +2513,6 @@ class PainterGui:
             except tk.TclError:
                 pass
         return {
-            "queue": [str(p) for p in self._sheets],
             "output": self.out_var.get(),
             "font_base": FONT_BASE,
             "theme": ACTIVE_THEME,
@@ -2526,18 +2525,22 @@ class PainterGui:
         }
 
     def _apply_settings(self, stored: dict) -> None:
-        """Missing keys keep the current defaults; queued files that
-        no longer exist are reported and dropped."""
-        for raw in stored.get("queue", ()):
-            path = Path(raw)
-            if not path.is_file():
-                self._log(f"saved queue entry gone, dropped: {raw}")
-                continue
-            if path not in self._sheets:
-                self._sheets.append(path)
-                self.sheet_list.insert("end", path.name)
-        if stored.get("output"):
-            self.out_var.set(stored["output"])
+        """Missing keys keep the current defaults. The queue is
+        intentionally NOT restored — the app starts with an empty
+        collection list every launch (owner 2026-07-18); only the
+        output folder, per-agent settings, theme, geometry, zoom and
+        sash persist."""
+        saved_out = stored.get("output")
+        if saved_out and Path(saved_out).is_dir():
+            self.out_var.set(saved_out)
+        elif saved_out:
+            # never leave the field on a folder that does not exist:
+            # done-detection reads <output>/_state and would otherwise
+            # find nothing, offering every already-finished image again
+            self._log(
+                "saved output folder is gone — falling back to the"
+                f" default: {DEFAULT_OUT_DIR}"
+            )
         for key, panel in self.agents.items():
             panel.apply_settings(stored.get("agents", {}).get(key, {}))
         if stored.get("geometry"):
