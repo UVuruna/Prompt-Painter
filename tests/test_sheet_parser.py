@@ -42,8 +42,10 @@ GOLDEN_COUNTS = {
     "one_soul_prompts.md": (8, 0),
     "walks_prompts.md": (16, 0),
     # 4 temperaments + the 4 tetramorph (approved 2026-07-17, moved
-    # to archetype/tetramorph/) + the Throne center (DOMY 0.14.322)
-    "temperaments_prompts.md": (9, 0),
+    # to archetype/tetramorph/) + the 4 evangelist rondels (three-side
+    # second column, SEALED 2026-07-18, archetype/evangelist/) + the
+    # Throne center (DOMY 0.14.322)
+    "temperaments_prompts.md": (13, 0),
     "calendar_prompts.md": (12, 0),
     "life_prompts.md": (16, 0),
 }
