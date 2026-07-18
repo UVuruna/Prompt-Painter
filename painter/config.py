@@ -224,25 +224,37 @@ def status_pair(role: str) -> tuple[str, str]:
     return (THEMES["day"]["status"][role], THEMES["night"]["status"][role])
 
 
-# --- The Day/Night switch (a Canvas pill, ported from the owner's
-# website switch — geometry scales from the switch height H) ----------
+# --- The Day/Night switch (image-based, ported from the owner's website
+# switch — geometry scales from the switch height H) ------------------
+# CRISP art (owner 2026-07-18): tkinter Canvas has no anti-aliasing, so
+# the pill is composited from PIL images instead of raw ovals. The TRACK
+# is the site's own pill SVG (assets/icons/switch_{night,day}.svg)
+# rasterized through the icon SVG->PIL path; the SUN/MOON knobs are
+# rendered anti-aliased with PIL (supersample Nx, then LANCZOS down).
 SWITCH_H = 26               # mini switch height (px) for the top-right corner
 SWITCH_ASPECT = 2.1539      # track width = round(H * this)
 SWITCH_KNOB_FACTOR = 0.85   # knob diameter = round(H * this)
-SWITCH_PAD_PX = 3           # canvas margin around the pill (hover overflow)
+SWITCH_PAD_PX = 5           # canvas margin around the pill (hover + sun glow)
 SWITCH_ANIM_MS = 600        # total knob-slide duration
 SWITCH_FRAME_MS = 16        # ~60 fps -> ~37 smoothstep frames
 SWITCH_HOVER_SCALE = 1.05   # knob grows this much on hover
+SWITCH_SUPERSAMPLE = 4      # render knobs at Nx, then LANCZOS down for crisp edges
 
-# The switch's OWN fixed art colours (independent of the app themes).
-SWITCH_TRACK_NIGHT = "#212736"   # OFF track
-SWITCH_STAR = "#a2aec1"          # silver stars on the night track
-SWITCH_TRACK_DAY = "#5ea7ee"     # ON track
-SWITCH_CLOUD = "#c8e6f8"         # day clouds
-SWITCH_CLOUD_HI = "#ffffff"      # cloud highlight
-SWITCH_MOON = "#cfcfcf"          # moon disc (mid silver)
-SWITCH_MOON_EDGE = "#b8b8b8"     # moon outline
-SWITCH_CRATER = "#6a7280"        # moon craters
+# the two track pill SVGs (stems, resolved in assets/icons) — reused
+# straight from the owner's website switch, so the starfield / sky-clouds
+# art matches the site exactly
+SWITCH_TRACK_NIGHT_SVG = "switch_night"  # OFF track: dark #212736 starfield pill
+SWITCH_TRACK_DAY_SVG = "switch_day"      # ON track: sky #5ea7ee + clouds pill
+
+# both knobs are lit from this point (fraction of the knob box) so the
+# radial gradient reads as a 3D sphere, not a flat disc
+SWITCH_KNOB_HILIGHT = (0.40, 0.36)
+
+# MOON knob — silver radial gradient (bright centre -> dim edge) + 3
+# darker craters; the offset highlight gives the subtle inner shading.
+SWITCH_MOON_CENTER = "#e8e8e8"   # radial-gradient centre (bright silver)
+SWITCH_MOON_EDGE = "#a0a0a0"     # radial-gradient edge (dim silver)
+SWITCH_CRATER = "#6a7280"        # the 3 craters
 # each crater: (diameter, centre-x, centre-y) as fractions of the knob
 # diameter, converted from the spec's edge insets
 SWITCH_CRATERS = (
@@ -250,8 +262,16 @@ SWITCH_CRATERS = (
     (0.25, 0.305, 0.625),
     (0.16, 0.740, 0.610),
 )
-SWITCH_SUN = "#f5a623"           # sun disc (gold)
-SWITCH_SUN_GLOW = "#ffd97a"      # soft glow behind the sun (no alpha in tk)
+
+# SUN knob — gold radial gradient (bright centre -> amber edge) with a
+# soft outer glow: a larger low-alpha gold disc behind, GaussianBlur-ed.
+SWITCH_SUN_CENTER = "#ffd93d"    # radial-gradient centre (bright gold)
+SWITCH_SUN_EDGE = "#e8940c"      # radial-gradient edge (amber)
+SWITCH_SUN_GLOW = "#ffc832"      # the glow disc colour (blurred behind the sun)
+SWITCH_SUN_GLOW_SCALE = 1.35     # glow disc diameter = knob d * this
+SWITCH_SUN_GLOW_ALPHA = 140      # glow disc peak alpha (0-255) before blur
+SWITCH_SUN_GLOW_BLUR = 0.14      # GaussianBlur radius = knob d * this
+SWITCH_SUN_CELL_SCALE = 1.9      # knob image size = knob d * this (holds the glow)
 
 
 # --- Prompt rules appended per site (owner 2026-07-17) ---------------

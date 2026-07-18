@@ -301,12 +301,16 @@ reachability fixes:
   (cancelling the timer); an unparseable reset keeps the plain
   stop behaviour.
 - **Day/Night switch** (top-right, `DayNightSwitch`) — a mini
-  Canvas pill ported from the owner's website switch: OFF/left =
-  MOON on a dark-blue track with silver stars (NIGHT = the dark
-  theme), ON/right = SUN with a soft glow on a light-blue track
-  with a cloud (DAY = the light theme). A click flips the WHOLE app
-  SYNCHRONOUSLY (coherent instantly) and persists the choice, then
-  a ~600 ms smoothstep slide runs as flourish. See **Theming**.
+  image pill ported from the owner's website switch: OFF/left =
+  MOON on the dark starfield track (NIGHT = the dark theme),
+  ON/right = SUN with a soft glow on the sky-and-clouds track
+  (DAY = the light theme). CRISP (owner 2026-07-18): the pill is
+  composited from ANTI-ALIASED PIL images — the two tracks straight
+  from the website SVGs, the sun/moon knobs rendered supersampled
+  with a radial gradient — because tkinter Canvas cannot anti-alias
+  raw ovals. A click flips the WHOLE app SYNCHRONOUSLY (coherent
+  instantly) and persists the choice, then a ~600 ms smoothstep
+  slide runs as flourish. See **Theming**.
 - **Settings persistence** (`painter/settings.py`) — remembered
   across starts: the output folder, EVERY per-agent panel setting,
   the font zoom base, the **theme** (`day` / `night`), the dashboard
@@ -433,14 +437,25 @@ resolve to the right end and tk skinners read the active palette — no
 first-frame flash, no half-theme window. The chosen theme persists in
 `settings.json` (`theme` key, missing = `night`).
 
-**The switch** (`DayNightSwitch(tk.Canvas)`) draws the whole pill
-each animation frame from the `SWITCH_*` config (geometry scales from
-the height `H`; the switch's OWN art colours are independent of the
-app palettes). A click toggles state, calls `apply_theme` +
-`_schedule_save` synchronously, then runs a ~36-frame smoothstep
-`after()` slide (cancel/restart if re-clicked); hover redraws the
-knob at 1.05 scale. Its canvas is registered as a `canvas` surface so
-its background re-tints with the window.
+**The switch** (`DayNightSwitch(tk.Canvas)`) composites the whole
+pill from ANTI-ALIASED PIL images (owner 2026-07-18 — raw tkinter
+ovals stair-step). Six images are rendered ONCE at construction and
+held on `self._imgs` (so tkinter cannot garbage-collect them): the
+two track pills via the icon SVG->PIL path (`_render_switch_track`
+rasterizes `switch_night`/`switch_day` from `assets/icons/`), and the
+sun/moon knobs in a rest + a 1.05x hover size (`_render_sun_knob` /
+`_render_moon_knob` draw a supersampled RGBA radial-gradient disc via
+`_radial_disc` — silver moon + 3 craters, gold sun over a blurred
+glow — then LANCZOS-down). It is a FIXED size (it does not follow the
+font zoom), so once is enough. Each `_redraw` just re-places the track
+`create_image` (hard-swapped night/day at the knob's midpoint) and the
+knob `create_image` at the animated x. A click toggles state, calls
+`apply_theme` + `_schedule_save` synchronously, then runs a ~36-frame
+smoothstep `after()` slide (cancel/restart if re-clicked); hover swaps
+in the 1.05x knob. A missing track SVG is a loud `FileNotFoundError`
+(Rule #1). Its canvas is registered as a `canvas` surface so its
+background re-tints with the window — the pill's transparent corners
+blend into the top strip in both themes.
 
 ## Threading
 One worker thread per site, started and stopped INDEPENDENTLY by

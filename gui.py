@@ -37,7 +37,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 import ttkbootstrap as tb
-from PIL import Image, ImageTk
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageTk
 
 from painter.config import (
     BACKGROUND_CHOICES,
@@ -48,22 +48,26 @@ from painter.config import (
     STATE_DIRNAME,
     SWITCH_ANIM_MS,
     SWITCH_ASPECT,
-    SWITCH_CLOUD,
-    SWITCH_CLOUD_HI,
     SWITCH_CRATER,
     SWITCH_CRATERS,
     SWITCH_FRAME_MS,
     SWITCH_H,
     SWITCH_HOVER_SCALE,
     SWITCH_KNOB_FACTOR,
-    SWITCH_MOON,
+    SWITCH_KNOB_HILIGHT,
+    SWITCH_MOON_CENTER,
     SWITCH_MOON_EDGE,
     SWITCH_PAD_PX,
-    SWITCH_STAR,
-    SWITCH_SUN,
+    SWITCH_SUN_CELL_SCALE,
+    SWITCH_SUN_CENTER,
+    SWITCH_SUN_EDGE,
     SWITCH_SUN_GLOW,
-    SWITCH_TRACK_DAY,
-    SWITCH_TRACK_NIGHT,
+    SWITCH_SUN_GLOW_ALPHA,
+    SWITCH_SUN_GLOW_BLUR,
+    SWITCH_SUN_GLOW_SCALE,
+    SWITCH_SUPERSAMPLE,
+    SWITCH_TRACK_DAY_SVG,
+    SWITCH_TRACK_NIGHT_SVG,
     PROGRESS_SUFFIX,
     THEMES,
     TIMING,
@@ -357,6 +361,103 @@ def icon(name: str, size: int = ICON_TARGET_PX) -> ctk.CTkImage:
             light_image=img, dark_image=img, size=img.size
         )
     return _ICONS[key]
+
+
+# --- Day/Night switch art — anti-aliased PIL images (owner 2026-07-18)
+# tkinter Canvas has no anti-aliasing, so the switch composites PIL
+# images instead of raw ovals: the TWO track pills come straight from the
+# owner's website SVGs (reusing the _svg_to_pil path above), the SUN/MOON
+# knobs are rendered here as RGBA discs with a radial gradient, at
+# SWITCH_SUPERSAMPLE x the final size then LANCZOS-downscaled for smooth
+# edges. All four are built ONCE per switch (the switch is a fixed size —
+# it does not follow the font zoom) and held on the widget.
+
+
+def _radial_disc(
+    px: int, center_hex: str, edge_hex: str, hilite: tuple[float, float]
+) -> Image.Image:
+    """A supersampled RGBA disc (``px`` square): a radial gradient from
+    ``center_hex`` at the ``hilite`` point (fraction of the box) to
+    ``edge_hex`` at the rim, opaque inside the inscribed circle and fully
+    transparent outside. Rendered at native ``px`` — the caller LANCZOS-
+    downscales the whole knob so the rim anti-aliases smoothly."""
+    import numpy as np
+
+    yy, xx = np.mgrid[0:px, 0:px].astype(np.float32)
+    r = px / 2.0
+    hx, hy = hilite[0] * px, hilite[1] * px
+    # distance from the highlight, normalised so the farthest rim point
+    # (opposite the highlight) maps to 1.0 — keeps the ramp inside [0, 1]
+    dist = np.sqrt((xx - hx) ** 2 + (yy - hy) ** 2)
+    far = r + np.sqrt((hx - r) ** 2 + (hy - r) ** 2)
+    t = np.clip(dist / far, 0.0, 1.0)[..., None]
+    c0 = np.array(ImageColor.getrgb(center_hex), np.float32)
+    c1 = np.array(ImageColor.getrgb(edge_hex), np.float32)
+    rgb = c0 * (1.0 - t) + c1 * t
+    # circular alpha mask (hard here; the downscale smooths the rim)
+    dc = np.sqrt((xx - r + 0.5) ** 2 + (yy - r + 0.5) ** 2)
+    alpha = np.where(dc <= r, 255.0, 0.0)[..., None]
+    out = np.concatenate([rgb, alpha], axis=2).astype(np.uint8)
+    return Image.fromarray(out, "RGBA")
+
+
+def _render_moon_knob(d_px: int, ss: int) -> Image.Image:
+    """The MOON: a silver radial-gradient sphere with 3 darker craters,
+    anti-aliased. ``d_px`` = final diameter, ``ss`` = supersample factor."""
+    s = d_px * ss
+    disc = _radial_disc(
+        s, SWITCH_MOON_CENTER, SWITCH_MOON_EDGE, SWITCH_KNOB_HILIGHT
+    )
+    draw = ImageDraw.Draw(disc)
+    crater = (*ImageColor.getrgb(SWITCH_CRATER), 255)
+    for cf, cxf, cyf in SWITCH_CRATERS:
+        cd = s * cf
+        ccx, ccy = cxf * s, cyf * s
+        draw.ellipse(
+            [ccx - cd / 2, ccy - cd / 2, ccx + cd / 2, ccy + cd / 2],
+            fill=crater,
+        )
+    return disc.resize((d_px, d_px), Image.LANCZOS)
+
+
+def _render_sun_knob(d_px: int, ss: int) -> Image.Image:
+    """The SUN: a gold radial-gradient sphere over a soft blurred gold
+    glow. The image is SWITCH_SUN_CELL_SCALE x the knob so the glow has
+    room to fade; the sun disc sits centred. ``d_px`` = knob diameter."""
+    cell = round(d_px * SWITCH_SUN_CELL_SCALE)
+    s = cell * ss
+    # glow: a low-alpha gold disc behind, GaussianBlur-ed to a soft halo
+    glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    gd = d_px * SWITCH_SUN_GLOW_SCALE * ss
+    gc = s / 2.0
+    ImageDraw.Draw(glow).ellipse(
+        [gc - gd / 2, gc - gd / 2, gc + gd / 2, gc + gd / 2],
+        fill=(*ImageColor.getrgb(SWITCH_SUN_GLOW), SWITCH_SUN_GLOW_ALPHA),
+    )
+    glow = glow.filter(
+        ImageFilter.GaussianBlur(SWITCH_SUN_GLOW_BLUR * d_px * ss)
+    )
+    disc = _radial_disc(
+        d_px * ss, SWITCH_SUN_CENTER, SWITCH_SUN_EDGE, SWITCH_KNOB_HILIGHT
+    )
+    off = round((s - d_px * ss) / 2)
+    glow.alpha_composite(disc, (off, off))
+    return glow.resize((cell, cell), Image.LANCZOS)
+
+
+def _render_switch_track(stem: str, w: int, h: int) -> Image.Image:
+    """One track pill: the owner's website switch SVG (in assets/icons),
+    rasterized anti-aliased through the icon SVG->PIL path and sized to
+    the exact pill box. A missing SVG is a loud error (Rule #1)."""
+    svg_path = ICON_DIR / f"{stem}.svg"
+    if not svg_path.is_file():
+        raise FileNotFoundError(
+            f"Day/Night switch track SVG missing: {svg_path}"
+        )
+    pil = _svg_to_pil(svg_path, w)
+    if pil.size != (w, h):
+        pil = pil.resize((w, h), Image.LANCZOS)
+    return pil
 
 
 def _darken(hex_color: str, factor: float = HOVER_DARKEN) -> str:
@@ -3642,18 +3743,23 @@ class DocWindow(tk.Toplevel):
 
 
 class DayNightSwitch(tk.Canvas):
-    """The mini Day/Night toggle, top-right — a Canvas pill ported from
-    the owner's website switch (geometry/colours in the SWITCH_*
-    config). OFF/left = MOON on a dark-blue track with silver stars;
-    ON/right = SUN (with a soft glow) on a light-blue track with clouds.
-    A click flips the theme SYNCHRONOUSLY (the app is coherent instantly)
-    and persists it, then a ~600 ms smoothstep slide runs as flourish.
+    """The mini Day/Night toggle, top-right — an image pill ported from
+    the owner's website switch (geometry/colours in the SWITCH_* config).
+    OFF/left = MOON on the dark starfield track; ON/right = SUN (with a
+    soft glow) on the sky-and-clouds track. A click flips the theme
+    SYNCHRONOUSLY (the app is coherent instantly) and persists it, then a
+    ~600 ms smoothstep slide runs as flourish.
 
-    The whole pill is redrawn each animation frame (a handful of ovals on
-    a tiny canvas — cheaper and simpler than moving a dozen items); the
-    track colour + decorations hard-swap at the knob's midpoint (tk
-    Canvas has no alpha, so no cross-fade). The canvas is registered as a
-    'canvas' surface so its own background re-tints with the window."""
+    CRISP art (owner 2026-07-18): tkinter Canvas has no anti-aliasing, so
+    the pill is composited from anti-aliased PIL images — the two track
+    pills straight from the website SVGs, the sun/moon knobs rendered with
+    a supersampled radial gradient (see the render helpers). The four
+    images (+ two hover variants) are built ONCE at construction and held
+    on ``self._imgs`` so tkinter cannot garbage-collect them; each redraw
+    just re-places the track + knob at the animated x. The track hard-
+    swaps at the knob's midpoint. The canvas is registered as a 'canvas'
+    surface so its own background re-tints with the window (the pill's
+    transparent corners then blend into the top strip in both themes)."""
 
     def __init__(self, master, gui: "PainterGui"):
         self._h = SWITCH_H
@@ -3673,12 +3779,37 @@ class DayNightSwitch(tk.Canvas):
         self._x_on = self._pad + self._track_w - self._knob_d - inset
         self._hover = False
         self._anim_job: str | None = None
+        self._imgs = self._build_images()  # held so tk can't GC them
         self._on = THEMES[ACTIVE_THEME]["switch_on"]  # reflect the theme
         self._knob_x = self._x_on if self._on else self._x_off
         self.bind("<Button-1>", self._on_click)
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
         self._redraw()
+
+    def _build_images(self) -> dict[str, ImageTk.PhotoImage]:
+        """Render the two track pills and the sun/moon knobs (each in a
+        rest + a 1.05x hover size) ONCE — the switch is a fixed size, so
+        this never needs re-running (it does not follow the font zoom)."""
+        ss = SWITCH_SUPERSAMPLE
+        d = self._knob_d
+        dh = max(round(d * SWITCH_HOVER_SCALE), d + 1)
+        return {
+            "track_night": ImageTk.PhotoImage(
+                _render_switch_track(
+                    SWITCH_TRACK_NIGHT_SVG, self._track_w, self._h
+                )
+            ),
+            "track_day": ImageTk.PhotoImage(
+                _render_switch_track(
+                    SWITCH_TRACK_DAY_SVG, self._track_w, self._h
+                )
+            ),
+            "moon": ImageTk.PhotoImage(_render_moon_knob(d, ss)),
+            "moon_hover": ImageTk.PhotoImage(_render_moon_knob(dh, ss)),
+            "sun": ImageTk.PhotoImage(_render_sun_knob(d, ss)),
+            "sun_hover": ImageTk.PhotoImage(_render_sun_knob(dh, ss)),
+        }
 
     # --- public API ----------------------------------------------------
 
@@ -3744,79 +3875,20 @@ class DayNightSwitch(tk.Canvas):
     def _redraw(self) -> None:
         self.delete("all")
         day = self._knob_x > (self._x_off + self._x_on) / 2
-        self._draw_track(SWITCH_TRACK_DAY if day else SWITCH_TRACK_NIGHT)
-        if day:
-            self._draw_clouds()
-        else:
-            self._draw_stars()
-        self._draw_knob(self._knob_x, day)
-
-    def _draw_track(self, fill: str) -> None:
-        p, h, tw = self._pad, self._h, self._track_w
-        # a rounded pill = two end-cap circles + a joining rectangle
-        self.create_oval(p, p, p + h, p + h, fill=fill, outline=fill)
-        self.create_oval(p + tw - h, p, p + tw, p + h, fill=fill, outline=fill)
-        self.create_rectangle(
-            p + h / 2, p, p + tw - h / 2, p + h, fill=fill, outline=fill
+        # the track pill fills the canvas centre (transparent corners show
+        # the strip bg); it hard-swaps night<->day at the knob's midpoint
+        self.create_image(
+            self._pad + self._track_w / 2, self._pad + self._h / 2,
+            image=self._imgs["track_day" if day else "track_night"],
+            anchor="center",
         )
-
-    def _draw_stars(self) -> None:
-        # scattered over the empty RIGHT side (the knob sits left in night)
-        p, h, tw = self._pad, self._h, self._track_w
-        for fx, fy, rr in (
-            (0.62, 0.32, 1.4), (0.72, 0.60, 1.1),
-            (0.82, 0.38, 1.3), (0.70, 0.30, 0.9),
-        ):
-            cx, cy = p + fx * tw, p + fy * h
-            self.create_oval(
-                cx - rr, cy - rr, cx + rr, cy + rr,
-                fill=SWITCH_STAR, outline=SWITCH_STAR,
-            )
-
-    def _draw_clouds(self) -> None:
-        # over the empty LEFT side (the knob sits right in day)
-        p, h, tw = self._pad, self._h, self._track_w
-        cx, cy = p + 0.30 * tw, p + 0.62 * h
-        for dx, dy, rr, col in (
-            (-3.5, 1.0, 2.2, SWITCH_CLOUD_HI),
-            (0.0, 0.0, 3.3, SWITCH_CLOUD),
-            (3.5, 1.0, 2.5, SWITCH_CLOUD),
-        ):
-            self.create_oval(
-                cx + dx - rr, cy + dy - rr, cx + dx + rr, cy + dy + rr,
-                fill=col, outline=col,
-            )
-
-    def _draw_knob(self, x: float, day: bool) -> None:
-        d = self._knob_d * (SWITCH_HOVER_SCALE if self._hover else 1.0)
-        cx = x + self._knob_d / 2
+        # the knob, centred on its animated x — the sun/moon image already
+        # carries the gradient, craters and glow, so this is one placement
+        base = "sun" if day else "moon"
+        key = f"{base}_hover" if self._hover else base
+        cx = self._knob_x + self._knob_d / 2
         cy = self._pad + self._h / 2
-        if day:
-            g = d * 1.3  # solid glow disc behind the sun (no tk alpha)
-            self.create_oval(
-                cx - g / 2, cy - g / 2, cx + g / 2, cy + g / 2,
-                fill=SWITCH_SUN_GLOW, outline=SWITCH_SUN_GLOW,
-            )
-            self.create_oval(
-                cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2,
-                fill=SWITCH_SUN, outline=SWITCH_SUN,
-            )
-        else:
-            self.create_oval(
-                cx - d / 2, cy - d / 2, cx + d / 2, cy + d / 2,
-                fill=SWITCH_MOON, outline=SWITCH_MOON_EDGE,
-            )
-            # craters, positioned within the UNSCALED knob for stability
-            top = cy - self._knob_d / 2
-            left = x
-            for cf, cxf, cyf in SWITCH_CRATERS:
-                cd = self._knob_d * cf
-                ccx = left + cxf * self._knob_d
-                ccy = top + cyf * self._knob_d
-                self.create_oval(
-                    ccx - cd / 2, ccy - cd / 2, ccx + cd / 2, ccy + cd / 2,
-                    fill=SWITCH_CRATER, outline=SWITCH_CRATER,
-                )
+        self.create_image(cx, cy, image=self._imgs[key], anchor="center")
 
 
 def main() -> None:

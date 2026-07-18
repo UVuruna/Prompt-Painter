@@ -76,11 +76,18 @@ match.
   returns the `(day, night)` tuple every customtkinter colour kwarg
   passes so `set_appearance_mode()` flips them; `status_pair` does
   the same for the status block. The `SWITCH_*` constants are the
-  Day/Night switch geometry (scaled from `SWITCH_H`) and its own
-  fixed art colours (moon/sun/track/stars/clouds). This block is
-  PURE hex data — no tkinter/ttkbootstrap import — so the engine and
-  tests stay framework-free; [GUI](../gui.md) turns it into the live
-  themes.
+  Day/Night switch geometry (scaled from `SWITCH_H`) and its
+  IMAGE-BASED art (owner 2026-07-18 — tkinter Canvas has no
+  anti-aliasing, so the switch composites PIL images, not raw ovals):
+  the two track pills are the owner's website SVGs
+  (`SWITCH_TRACK_NIGHT_SVG` / `SWITCH_TRACK_DAY_SVG`, in
+  `assets/icons/`), and the moon/sun knobs are PIL radial-gradient
+  colours — silver moon (`SWITCH_MOON_CENTER`/`_EDGE`) + 3 craters,
+  gold sun (`SWITCH_SUN_CENTER`/`_EDGE`) + a blurred glow
+  (`SWITCH_SUN_GLOW*`) — rendered at `SWITCH_SUPERSAMPLE`x and
+  LANCZOS-downscaled. This block is PURE hex/number data — no
+  tkinter/ttkbootstrap/PIL import — so the engine and tests stay
+  framework-free; [GUI](../gui.md) rasterizes it into the live art.
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text)` — the rule
   block appended to every prompt: the chosen background (each
