@@ -66,7 +66,30 @@ The module-level `icon(name, size=20)` loader resolves beside
 (name, size) in `_ICONS` for the process lifetime. A missing icon
 — or a Tiny-unrenderable svg with no png sibling — raises
 `FileNotFoundError` loudly (root Rule #1); buttons keep their text
-(`compound="left"`).
+(`compound="left"`). The five PNGs the svgs replaced
+(add/clear/remove/right/start) were DELETED (2026-07-18);
+`assets/icons/` now holds only the svgs plus `web.png`, `ai.png`
+and the `gemini.png` sibling.
+
+**Global font zoom** (2026-07-18) — CSS-rem style: ONE root size
+(`FONT_BASE`, default 10, clamped 7–20) and a role table of
+multipliers (`FONT_ROLES`: root 1.0, bold 1.0, head 1.1, title
+1.6, spin 1.2, mono 0.9, doc_h1 1.5, doc_h2 1.2 — the exact
+pre-zoom ratios). Every font in the GUI — the ttk styles, all CTk
+factories/Spinner, the Treeview body+heading fonts, the queue
+Listbox, the log Text, DocWindow's body and tags — pulls a SHARED
+font object per role from the registry (`tk_font(role)` named tk
+fonts / `ctk_font(role)` CTkFonts), so `set_font_base` rescales
+the whole window with one `.configure(size=…)` per role; only the
+Treeview rowheight (root x 2.4) is re-applied explicitly.
+Shortcuts, bound on `all` (SelectWindow/DocWindow answer too, and
+new Toplevels open at the current zoom because the shared fonts
+ARE the current zoom): **Ctrl+MouseWheel** up/down,
+**Ctrl+Numpad +/-**, plain **Ctrl+plus/minus** (and Ctrl+equal
+for keyboards without a numpad). The wheel handler returns
+"break" and is also bound on the Text/Listbox/Treeview class tags
+so Ctrl+wheel zooms without ALSO scrolling the widget under the
+pointer.
 
 ## The window
 
@@ -137,8 +160,14 @@ The module-level `icon(name, size=20)` loader resolves beside
   other continues; the next Start resumes what remains.
 
 ## The Dashboard
-Two scrollable columns, one `DashPanel` per site, fed ONLY by the
-runner's structured events (never by log-parsing):
+One `DashPanel` per site, fed ONLY by the runner's structured
+events (never by log-parsing). The tab is ADAPTIVE (2026-07-18):
+it grids a panel only for sites whose switch is ON — one active
+site means ONE full-width panel — reacting live to the site
+switches (`trace_add` on the BooleanVars → `_update_dash_layout`
+re-grids and re-weights the columns). Hidden panels keep all
+their state, they are just `grid_remove`d; with BOTH switches off
+both panels show (such a run cannot Start anyway). Each panel:
 
 - **Task** — a whole-run progress bar and `done / total
   (done/collections)` across every queued collection (pre-counted

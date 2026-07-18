@@ -23,6 +23,7 @@ import threading
 import time
 import tkinter as tk
 from dataclasses import replace
+from tkinter import font as tkfont
 from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
@@ -90,6 +91,86 @@ _QT_APP = None
 # the site-switch logos: SITES key -> icon file stem (the owner's
 # capitalisation in assets/icons/)
 _SITE_ICON = {"chatgpt": "chatGPT", "gemini": "gemini"}
+
+# ---------------------------------------------------------------------
+# the font registry — CSS-rem style: ONE root size, every role a
+# multiplier of it. Ctrl+MouseWheel / Ctrl+(+/-) zoom the root and the
+# whole window rescales proportionally (set_font_base).
+# ---------------------------------------------------------------------
+
+FONT_SANS = "Segoe UI"
+FONT_MONOSPACE = "Consolas"
+FONT_BASE_DEFAULT = 10  # the root ("rem") size the GUI ships with
+FONT_MIN, FONT_MAX = 7, 20  # zoom clamp
+FONT_BASE = FONT_BASE_DEFAULT  # the LIVE root size (zoom mutates it)
+
+# role -> (multiplier, family, weight). The multipliers reproduce the
+# pre-zoom look exactly (Big 16/root 10 = 1.6 and so on).
+FONT_ROLES: dict[str, tuple[float, str, str]] = {
+    "root": (1.0, FONT_SANS, "normal"),   # body text, entries, combos
+    "bold": (1.0, FONT_SANS, "bold"),     # buttons, Value labels, **bold**
+    "head": (1.1, FONT_SANS, "bold"),     # section headers, doc h3
+    "title": (1.6, FONT_SANS, "bold"),    # the site panel titles
+    "spin": (1.2, FONT_SANS, "bold"),     # the Spinner +/- glyphs
+    "mono": (0.9, FONT_MONOSPACE, "normal"),  # log, queue list, code
+    "doc_h1": (1.5, FONT_SANS, "bold"),   # DocWindow headings
+    "doc_h2": (1.2, FONT_SANS, "bold"),
+}
+TREE_ROW_FACTOR = 2.4  # Treeview rowheight = root size * this
+
+# one SHARED font object per role — tk named fonts and CTkFonts both
+# propagate a .configure(size=...) to every widget/style/tag that
+# references them, so re-applying a zoom is automatic
+_TK_FONTS: dict[str, tkfont.Font] = {}
+_CTK_FONTS: dict[str, ctk.CTkFont] = {}
+
+
+def font_size(role: str) -> int:
+    """The role's CURRENT pixel size (root size x its multiplier)."""
+    return max(round(FONT_BASE * FONT_ROLES[role][0]), 5)
+
+
+def tk_font(role: str) -> tkfont.Font:
+    """The role's shared named tk font — for ttk styles, tk widgets
+    and Text tags (created lazily; needs the root window)."""
+    if role not in _TK_FONTS:
+        _mult, family, weight = FONT_ROLES[role]
+        _TK_FONTS[role] = tkfont.Font(
+            family=family, size=font_size(role), weight=weight
+        )
+    return _TK_FONTS[role]
+
+
+def ctk_font(role: str) -> ctk.CTkFont:
+    """The role's shared CTkFont — for every customtkinter widget."""
+    if role not in _CTK_FONTS:
+        _mult, family, weight = FONT_ROLES[role]
+        _CTK_FONTS[role] = ctk.CTkFont(
+            family=family, size=font_size(role), weight=weight
+        )
+    return _CTK_FONTS[role]
+
+
+def set_font_base(size: int) -> bool:
+    """Zoom: move the root size (clamped) and rescale EVERY role.
+
+    Both font families are shared objects, so one .configure(size=...)
+    per role updates every widget, ttk style and Text tag at once;
+    only the Treeview row height needs an explicit re-apply. Returns
+    False when the clamp made it a no-op."""
+    global FONT_BASE
+    size = min(max(size, FONT_MIN), FONT_MAX)
+    if size == FONT_BASE:
+        return False
+    FONT_BASE = size
+    for role, f in _TK_FONTS.items():
+        f.configure(size=font_size(role))
+    for role, f in _CTK_FONTS.items():
+        f.configure(size=font_size(role))
+    tb.Style().configure(
+        "Treeview", rowheight=round(FONT_BASE * TREE_ROW_FACTOR)
+    )
+    return True
 
 # the rounded-control geometry — one place so every control matches
 # (RHMH runs CTkButton corner_radius 10–12; hover = colour * 0.75)
@@ -275,7 +356,7 @@ def rounded_button(
     return cls(
         parent, text=text, command=command, width=width,
         height=BTN_HEIGHT, corner_radius=BTN_RADIUS,
-        font=("Segoe UI", 10, "bold"),
+        font=ctk_font("bold"),
         image=icon(icon_name) if icon_name else None,
         compound=compound, **opts,
     )
@@ -317,7 +398,7 @@ def rounded_entry(parent, width: int = 140, **kwargs) -> ctk.CTkEntry:
     field = ctk.CTkEntry(
         parent, width=width, height=INPUT_HEIGHT,
         corner_radius=INPUT_RADIUS, border_width=1,
-        font=("Segoe UI", 10), **opts,
+        font=ctk_font("root"), **opts,
     )
     _untheme_inner_entry(field)
     return field
@@ -340,8 +421,8 @@ def rounded_combo(
     field = ctk.CTkComboBox(
         parent, values=list(values), variable=variable, width=width,
         height=INPUT_HEIGHT, corner_radius=INPUT_RADIUS, border_width=1,
-        state="readonly", font=("Segoe UI", 10),
-        dropdown_font=("Segoe UI", 10), **opts,
+        state="readonly", font=ctk_font("root"),
+        dropdown_font=ctk_font("root"), **opts,
     )
     _untheme_inner_entry(field)
     return field
@@ -372,7 +453,7 @@ class Spinner(ctk.CTkFrame):
         btn = dict(
             width=24, height=20, corner_radius=INPUT_RADIUS - 2,
             fg_color="transparent", hover_color=c.selectbg,
-            text_color=c.fg, font=("Segoe UI", 12, "bold"),
+            text_color=c.fg, font=ctk_font("spin"),
         )
         ctk.CTkButton(
             self, text="−", command=partial(self._bump, -1.0), **btn
@@ -381,7 +462,7 @@ class Spinner(ctk.CTkFrame):
             self, width=entry_width, height=INPUT_HEIGHT - 10,
             corner_radius=0, border_width=0, fg_color="transparent",
             text_color=c.inputfg, justify="center",
-            font=("Segoe UI", 10), textvariable=variable,
+            font=ctk_font("root"), textvariable=variable,
         )
         _untheme_inner_entry(entry)
         entry.pack(side="left", fill="x", expand=True, pady=4)
@@ -404,25 +485,31 @@ def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
     return ctk.CTkSwitch(
         parent, text=text, variable=variable,
         onvalue=True, offvalue=False,
-        font=("Segoe UI", 10),
+        font=ctk_font("root"),
         fg_color=c.secondary, progress_color=c.success,
         text_color=c.fg, bg_color=c.bg,
     )
 
 
 def setup_style(root: tk.Tk) -> None:
-    """The few named styles the darkly theme does not ship."""
+    """The few named styles the darkly theme does not ship.
+
+    Every font comes from the registry's shared named fonts, so a
+    zoom (set_font_base) re-renders all of them without touching the
+    styles again."""
     style = tb.Style()
     colors = style.colors
-    style.configure(".", font=("Segoe UI", 10))
-    style.configure("Head.TLabel", font=("Segoe UI", 11, "bold"),
+    style.configure(".", font=tk_font("root"))
+    style.configure("Head.TLabel", font=tk_font("head"),
                     foreground=colors.info)
-    style.configure("Big.TLabel", font=("Segoe UI", 16, "bold"))
-    style.configure("Value.TLabel", font=("Segoe UI", 10, "bold"))
+    style.configure("Big.TLabel", font=tk_font("title"))
+    style.configure("Value.TLabel", font=tk_font("bold"))
     style.configure("Muted.TLabel", foreground=colors.light)
-    style.configure("Mono.TLabel", font=("Consolas", 9),
+    style.configure("Mono.TLabel", font=tk_font("mono"),
                     foreground=colors.light)
-    style.configure("Treeview", rowheight=24)
+    style.configure("Treeview", font=tk_font("root"),
+                    rowheight=round(FONT_BASE * TREE_ROW_FACTOR))
+    style.configure("Treeview.Heading", font=tk_font("bold"))
 
 
 def dark_text(widget: tk.Text) -> None:
@@ -1004,7 +1091,46 @@ class PainterGui:
             outer, textvariable=self.status_var, style="Muted.TLabel"
         ).pack(fill="x", pady=(4, 0))
 
+        self._bind_zoom()
         root.after(120, self._drain_queue)
+
+    # --- global font zoom (CSS-rem style, see the font registry) -------
+
+    def _bind_zoom(self) -> None:
+        """Ctrl+MouseWheel and Ctrl+(numpad or plain) +/- zoom EVERY
+        font from the one root size — bound on 'all', so SelectWindow
+        and DocWindow answer too. The scrollable classes get the same
+        wheel binding on their CLASS tag: their class <MouseWheel>
+        handler would otherwise scroll BEFORE the 'all' handler runs
+        (class tags come first), and within one tag the Control-
+        qualified binding wins over the plain one."""
+        self.root.bind_all("<Control-MouseWheel>", self._zoom_wheel)
+        for cls in ("Text", "Listbox", "Treeview"):
+            self.root.bind_class(
+                cls, "<Control-MouseWheel>", self._zoom_wheel
+            )
+        for seq, step in (
+            ("<Control-KP_Add>", 1),
+            ("<Control-KP_Subtract>", -1),
+            ("<Control-plus>", 1),
+            ("<Control-minus>", -1),
+            ("<Control-equal>", 1),  # the un-shifted + on main keyboards
+        ):
+            self.root.bind_all(seq, partial(self._zoom_key, step))
+
+    def _zoom_wheel(self, event):
+        self._zoom_step(1 if event.delta > 0 else -1)
+        return "break"  # never ALSO scroll whatever is under the mouse
+
+    def _zoom_key(self, step: int, _event):
+        self._zoom_step(step)
+        return "break"
+
+    def _zoom_step(self, step: int) -> None:
+        if set_font_base(FONT_BASE + step):
+            self.status_var.set(
+                f"font size {FONT_BASE} (Ctrl+wheel / Ctrl+'+'/'-')"
+            )
 
     # --- construction --------------------------------------------------
 
@@ -1014,7 +1140,7 @@ class PainterGui:
         )
         lf.pack(fill="x", pady=(0, 6))
         self.sheet_list = tk.Listbox(
-            lf, height=5, activestyle="none", font=("Consolas", 9)
+            lf, height=5, activestyle="none", font=tk_font("mono")
         )
         dark_listbox(self.sheet_list)
         self.sheet_list.pack(side="left", fill="x", expand=True)
@@ -1159,18 +1285,25 @@ class PainterGui:
 
         dash_tab = ttk.Frame(notebook)
         notebook.add(dash_tab, text="Dashboard")
+        self._dash_tab = dash_tab
         self.dash: dict[str, DashPanel] = {}
-        for i, key in enumerate(sorted(SITES)):
-            panel = DashPanel(dash_tab, SITES[key].name, on_show=self._show_node)
-            panel.grid(row=0, column=i, sticky="nsew", padx=4, pady=4)
-            dash_tab.columnconfigure(i, weight=1)
-            self.dash[key] = panel
+        for key in sorted(SITES):
+            self.dash[key] = DashPanel(
+                dash_tab, SITES[key].name, on_show=self._show_node
+            )
         dash_tab.rowconfigure(0, weight=1)
+        # only switched-ON sites show a panel; react live to the
+        # switches (hidden panels keep their state, just un-gridded)
+        for key in sorted(SITES):
+            self.site_vars[key].trace_add(
+                "write", lambda *_: self._update_dash_layout()
+            )
+        self._update_dash_layout()
 
         log_tab = ttk.Frame(notebook)
         notebook.add(log_tab, text="Log (detailed)")
         self.log_box = tk.Text(
-            log_tab, height=16, state="disabled", font=("Consolas", 9)
+            log_tab, height=16, state="disabled", font=tk_font("mono")
         )
         dark_text(self.log_box)
         log_vsb = ttk.Scrollbar(
@@ -1180,6 +1313,29 @@ class PainterGui:
         self.log_box.configure(yscrollcommand=log_vsb.set)
         log_vsb.pack(side="right", fill="y")
         self.log_box.pack(side="left", fill="both", expand=True)
+
+    def _update_dash_layout(self) -> None:
+        """The Dashboard shows a DashPanel ONLY for sites whose switch
+        is ON; a single visible panel takes the FULL width. With both
+        switches off, both panels show (such a run cannot Start
+        anyway, and an empty tab helps nobody)."""
+        shown = [k for k in sorted(SITES) if self.site_vars[k].get()]
+        if not shown:
+            shown = sorted(SITES)
+        col = 0
+        for key in sorted(SITES):
+            panel = self.dash[key]
+            if key in shown:
+                panel.grid(
+                    row=0, column=col, sticky="nsew", padx=4, pady=4
+                )
+                col += 1
+            else:
+                panel.grid_remove()
+        for i in range(len(SITES)):
+            self._dash_tab.columnconfigure(
+                i, weight=1 if i < col else 0
+            )
 
     def _open_instructions(self) -> None:
         path = Path(__file__).resolve().parent / "instructions.md"
@@ -1925,7 +2081,7 @@ class DocWindow(tk.Toplevel):
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, padx=6, pady=(0, 6))
         self.txt = tk.Text(
-            wrap, wrap="word", font=("Segoe UI", 10), padx=14, pady=12,
+            wrap, wrap="word", font=tk_font("root"), padx=14, pady=12,
             spacing1=2, spacing3=2, cursor="arrow",
         )
         dark_text(self.txt)
@@ -1944,20 +2100,20 @@ class DocWindow(tk.Toplevel):
 
     def _configure_tags(self) -> None:
         colors = tb.Style().colors
-        self.txt.tag_configure("h1", font=("Segoe UI", 15, "bold"),
+        self.txt.tag_configure("h1", font=tk_font("doc_h1"),
                                foreground=colors.info,
                                spacing1=10, spacing3=6)
-        self.txt.tag_configure("h2", font=("Segoe UI", 12, "bold"),
+        self.txt.tag_configure("h2", font=tk_font("doc_h2"),
                                foreground=colors.info,
                                spacing1=8, spacing3=4)
-        self.txt.tag_configure("h3", font=("Segoe UI", 11, "bold"),
+        self.txt.tag_configure("h3", font=tk_font("head"),
                                foreground=C_DONE,
                                spacing1=6, spacing3=3)
         self.txt.tag_configure(
-            "code", font=("Consolas", 9), background=colors.dark,
+            "code", font=tk_font("mono"), background=colors.dark,
             foreground="#a5d6ff", lmargin1=16, lmargin2=16,
         )
-        self.txt.tag_configure("bold", font=("Segoe UI", 10, "bold"))
+        self.txt.tag_configure("bold", font=tk_font("bold"))
         self.txt.tag_configure("bullet", lmargin1=16, lmargin2=30)
 
     def _render(self, md: str) -> None:
