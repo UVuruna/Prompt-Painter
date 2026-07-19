@@ -10,6 +10,9 @@ chrome-profile/
 # Downloaded external binaries (Real-ESRGAN) — never committed
 tools/
 
+# Tool before/after backups (restore engine) — transient, never committed
+.painter_tmp/
+
 # The owner's local GUI settings
 settings.json
 

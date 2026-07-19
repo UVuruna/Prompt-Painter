@@ -30,6 +30,8 @@ match.
   plus `BLACK_VOID_MAX` and the two SAFETY guards, imported
   package-or-standalone
 - [Upscale](upscale.md) — the `UPSCALE_*` block
+- [Job Temp](jobtemp.md) — `PROJECT_ROOT`, `JOBTEMP_DIRNAME`,
+  `JOBTEMP_REMOVED_ALPHA`, `JOB_METRIC`
 - [Settings](settings.md) — `SETTINGS_PATH`
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
   `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
@@ -96,6 +98,28 @@ match.
   count as already-at-ratio (left byte-unchanged, no write);
   `ASPECT_DEFAULT_W`/`ASPECT_DEFAULT_H` (16 / 9) preselect the GUI's
   ratio prompt.
+- `JOB_ORDER`, `JOB_TOOL_KINDS`, `JOB_LABEL`, `JOB_LOGO`, `JOB_EMOJI`,
+  `JOB_COLORS`, `JOB_METRIC`, `job_color_pair(kind)`,
+  `GRID_COLS_BY_COUNT` — the dashboard per-JOB panels (owner
+  2026-07-19). The dashboard shows one panel PER RUNNING JOB — the two
+  gen SITES plus the four in-place TOOLS, up to six in parallel.
+  `JOB_ORDER` is the fixed priority (gen first) that row-major places
+  panels so ChatGPT + Gemini always take the top cells;
+  `GRID_COLS_BY_COUNT` (1→1, 2→2, 3→3, 4→2, 5→2, 6→2, rows =
+  ceil(N/cols)) is the responsive shape. Each job carries a `JOB_LABEL`
+  (the three tool buttons drop "only"), a mark — the two sites an SVG
+  `JOB_LOGO` (supersedes the old `gui._SITE_ICON`), the four tools a
+  `JOB_EMOJI` — a `(day, night)` `JOB_COLORS` pair (`job_color_pair`
+  returns it, auto-flipping on `set_appearance_mode`), and a
+  `JOB_METRIC` word (removed / reduction / increase / deformation) the
+  tool panel shows. Pure strings/numbers, so the tests import it
+  without tkinter.
+- `JOBTEMP_DIRNAME`, `JOBTEMP_REMOVED_ALPHA` — the tool temp/restore
+  store (owner 2026-07-19). `JOBTEMP_DIRNAME` (`.painter_tmp`,
+  gitignored) is the PROJECT_ROOT-relative backup root
+  [Job Temp](jobtemp.md) uses; `JOBTEMP_REMOVED_ALPHA` (40) is the
+  alpha below which a pixel counts as "removed" for the BG metric (the
+  same opacity notion as `CROP_INK_ALPHA` / `CLEAN_EDGE_ALPHA`).
 - `QUOTA_RESET_PATTERNS`, `parse_quota_reset(text) -> float | None`
   — the quota reset time (owner's #2): each pattern captures one
   number ("resets in 27 minutes", "in 14 hours", Serbian "za 27

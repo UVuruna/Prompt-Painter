@@ -120,7 +120,7 @@ reachability fixes:
 - **Collapsible controls** — a `▾ Controls` toggle (top strip, left
   of the Day/Night switch) collapses the WHOLE upper control area
   (the Collections queue, Output row, both `AgentPanel` bodies and
-  the standalone-tools button row — all held in `self._controls_box`)
+  the in-place-tools button row — all held in `self._controls_box`)
   down to a thin per-agent strip (`self._compact_box`): one
   `[logo] Name [Start][Stop]` cluster per site, so the Dashboard/Log
   notebook takes the full height while the owner watches a run.
@@ -252,23 +252,29 @@ reachability fixes:
   (`screen*DOC_HEIGHT_FRAC`, floored at `SELECT_OPEN_H`) with every
   section COLLAPSED — the L1-title measure is bounded (~30 titles),
   never the old open-time sweep over every leaf.
-- **Aspect ratio... / BG removal only... / CROP only... /
-  UPSCALE only...** — the standalone in-place tools (one at a time):
-  pick a folder, confirm, and the engine function
-  (`change_aspect` / `remove_background` / `crop_transparent` /
-  `upscale_if_small`) runs over every image under it, in order. They
-  are site-less, so progress reports on the FIRST VISIBLE dashboard
-  panel (its counters restart for the run): done = the file was
-  changed, REFUSED = the engine said "nothing"/"unclear" — nothing to
-  do for that file (for Upscale: failed the gate — aspect outside
-  0.9–1.1 or both sides already ≥ 800; for Aspect: already at the
-  target ratio, left byte-unchanged). **Aspect ratio…** first opens an
-  `AspectRatioDialog` — a tiny modal prompt with two positive-integer
-  fields **W** and **H** (default 16 : 9); its **Run** binds the ratio
-  into `change_aspect` and hands off to the SAME generic
-  `_standalone_tool` plumbing (folder pick + confirm + in-place loop +
-  dashboard reporting) the other three use, with a DESTRUCTIVE-deform
-  confirmation (non-proportional stretch, overwritten in place).
+- **BG removal / Crop / Upscale / Aspect ratio** — the four in-place
+  tools (owner 2026-07-19; the three renamed buttons DROPPED "only"),
+  each its OWN CONCURRENT JOB with its own worker thread and its own
+  dashboard panel — up to all four plus both sites (6 panels) run at
+  once. Each button carries the panel's COLOUR + emoji (BG removal
+  cyan/teal 🫧, Crop amber ✂, Upscale violet 🔍, Aspect ratio magenta
+  📐, all in `config.JOB_COLORS`/`JOB_EMOJI`). A click (`_start_tool`)
+  refuses a second job of the SAME kind (a messagebox — one job per
+  kind), opens the folder pick + a confirm, then spawns
+  `_run_tool_job` on a daemon thread; the engine function
+  (`remove_background` / `crop_transparent` / `upscale_if_small` /
+  `change_aspect`) runs over every image under the folder, in order.
+  **Aspect ratio** first opens an `AspectRatioDialog` — a tiny modal
+  with two positive-integer fields **W** and **H** (default 16 : 9) —
+  and warns it DEFORMS (a non-proportional stretch written in place).
+  Each image's ORIGINAL is BACKED UP first (`painter/jobtemp.py`, see
+  **Temp / before-after / restore**), so `done` = the file was changed
+  (its backup kept, before→after measured and shown), REFUSED = the
+  engine said "nothing"/"unclear" — nothing to do, its no-op backup
+  dropped (for Upscale: failed the gate — aspect outside 0.9–1.1 or
+  both sides already ≥ 800; for Aspect: already at the target ratio,
+  left byte-unchanged). The panel shows the tool's own PARAMETER
+  (below).
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause / Action delay** — both are random FROM–TO ranges: the
@@ -320,64 +326,95 @@ reachability fixes:
   slide runs as flourish. See **Theming**.
 - **Settings persistence** (`painter/settings.py`) — remembered
   across starts: the output folder, EVERY per-agent panel setting,
-  the font zoom base, the **theme** (`day` / `night`), the dashboard
-  sash position, the window geometry and the **collapsed/expanded**
-  controls state (selection ticks stay per-run). The **collection queue is NOT persisted** — the app
+  the font zoom base, the **theme** (`day` / `night`), the window
+  geometry and the **collapsed/expanded** controls state (selection
+  ticks stay per-run; the old dashboard `sash` is gone with the
+  PanedWindow — a stale key is ignored). The **collection queue is NOT persisted** — the app
   starts with an empty list every launch (owner 2026-07-18); and a
   saved output folder that no longer exists is ignored in favour of
   the default `out/`, so done-detection never reads an empty
   `_state`. Saves debounce on every meaningful change (var traces,
-  zoom, sash release, theme flip) and always fire on close; loading
-  applies missing
+  zoom, theme flip) and always fire on close; loading applies missing
   keys as current defaults (a missing `theme` = `night`) and drops
   queued files that no longer exist (reported in the log). The
-  stored dict: `queue` (list of paths), `output`, `font_base`,
-  `theme`, `sash`, `geometry`, `controls_collapsed`, and
-  `agents.<site>` with `background`, `bg_removal`, `crop`, `upscale`,
-  `report`, `safer_retry`, `new_chat`, `pause_min/max`, `act_min/max`.
+  stored dict: `output`, `font_base`, `theme`, `geometry`,
+  `controls_collapsed`, and `agents.<site>` with `background`,
+  `bg_removal`, `crop`, `upscale`, `report`, `safer_retry`,
+  `new_chat`, `pause_min/max`, `act_min/max`.
 
-## The Dashboard
-One `DashPanel` per site, fed ONLY by the runner's structured
-events (never by log-parsing). The panels live in a horizontal
-`ttk.PanedWindow` — DRAG the divider to give one panel more width
-(the sash position persists in the settings). The tab is
-ADAPTIVE: a panel shows only while its site is RUNNING (or
-waiting on a quota restart) or once it HAS DATA — a single
-visible panel takes the full width, no sash; when nothing runs
-and nothing has data yet, both show. Hidden panels keep all their
-state. Each panel (title, then the state line — the quota
-countdown lives there):
+## The Dashboard — per-JOB panels (owner 2026-07-19)
+The dashboard shows one panel PER RUNNING JOB, up to SIX in parallel:
+the two generation SITES (ChatGPT, Gemini) plus the four in-place TOOLS
+(BG removal, Crop, Upscale, Aspect ratio). Panels are no longer fixed —
+a panel APPEARS when its job STARTS (a site Start / a tool button) and
+gets a **✕ Close** button when the job FINISHES; Close removes the
+panel from the grid AND clears that job's temp backups. Only
+running-or-ran jobs show.
 
+**`JobPanel`** is the shared base: a coloured header (an SVG
+`config.JOB_LOGO` for the two sites, a `config.JOB_EMOJI` for the four
+tools, plus the job NAME in the job's `(day, night)` `JOB_COLORS`
+pair), the muted state line (quota countdown / current item), and the
+hidden CLOSE button `finish()` reveals / `reset_finished()` hides.
+`DashPanel(JobPanel)` is one gen site's view; `ToolPanel(JobPanel)` is
+one tool's. Both are BUILT ONCE (never destroyed) and fed ONLY by the
+runner/worker's structured events on the main thread.
+
+**`DashGrid`** replaces the old draggable `ttk.PanedWindow`. It holds
+the six build-once panels and re-flows them by ACTIVE COUNT via
+`config.GRID_COLS_BY_COUNT` (1→1 col, 2→2, 3→3, 4→2×2, 5→2×3, 6→2×3;
+rows = ceil(N/cols)), row-major over `JOB_ORDER` (gen FIRST) so ChatGPT
++ Gemini always fill the TOP row — at N=5 the 6th cell stays empty.
+Cells share a `uniform` group so they are equal and evenly fill the
+area; `add(kind)` / `remove(kind)` re-grid live as jobs start / close;
+a muted placeholder shows when no job has run yet. The `sash` setting
+key is gone (a stale one in an old settings.json is ignored).
+
+**`DashPanel`** (one gen site), header + state line then:
 - **Task** — a whole-run progress bar and `done / total
-  (done/collections)` across every queued collection (pre-counted
-  at Start by `_plan`, which mirrors the runner's queue rule).
-- **File / Image** — the current collection file, the current
-  image, and a per-collection progress bar.
+  (done/collections)` across every queued collection (pre-counted at
+  Start by `_plan`, which mirrors the runner's queue rule).
+- **File / Image** — the current collection file, the current image,
+  and a per-collection progress bar.
 - **Stats table** — two columns, `This one` and `Whole run`. Rows:
   Done, Refused, a collapsible **Average** (its value is the total
   per-image time; click ▶ to break it into **AI generation**, **Our
-  processing** (save+bgfix+pause), **Minimum** and **Maximum**),
-  then Tempo (/h) and ETA. Title/value pairs, not one crammed line.
-- **Collections (running + done)** — a `ttk.Treeview` TABLE, three
-  levels deep, column headers (Name · Done · AI · Ours · Res · Time
-  · Size), both scrollbars, everything column-aligned; every column
-  (Name included) has `stretch=False`, so widening Name grows the
-  tree's content width and the horizontal scrollbar takes over
-  instead of squeezing the other columns:
-  1. **Collection** — `Done` (done/total), `Time` (wall), `Size`.
-  2. **Folder** (the drop-path directory) — `Done` (count in that
-     folder), `Time`, `Size`, same columns as the collection.
-  3. **Image** — `AI` (generate), `Ours` (fills after its pause),
-     `Res`, `Size`.
-  The RUNNING collection appears live and open, images streaming in
-  under their folder as they save; it collapses when done. **Show**
-  (with its right-arrow icon; or double-click a row) opens, in the
-  same formatted viewer: a COLLECTION row — its whole file; a
-  FOLDER row — only that folder's excerpt of the sheet (from the
-  first member entry through the last one's prompt fence, titled
-  with the folder name); an IMAGE row — its own prompt AND, when
-  the destination file already exists, the saved image below it,
-  scaled to fit the window width.
+  processing** (save+bgfix+pause), **Minimum** and **Maximum**), then
+  Tempo (/h) and ETA.
+- **Collections (running + done)** — a three-level `ttk.Treeview`
+  (Name · Done · AI · Ours · Res · Time · Size, both scrollbars,
+  `stretch=False` everywhere): **Collection** → **Folder** →
+  **Image**. The running collection appears live and open; **Show**
+  (or double-click a row) opens the same formatted viewer — a
+  collection's whole file, a folder's sheet excerpt, or an image's
+  prompt + the saved image.
+
+**`ToolPanel`** (one in-place tool), header + state line then:
+- a progress bar and an aggregate metric label — `avg N% <metric> ·
+  X changed, Y skipped`, where the metric is the tool's own PARAMETER
+  (`config.JOB_METRIC`): BG removal `removed` (% removed pixels), Crop
+  `reduction` (% area), Upscale `increase` (% area), Aspect ratio
+  `deformation` (% growth of the stretched axis).
+- a **collection → folder → image** `ttk.Treeview` (Name · Before ·
+  After · % · Size): each image row shows its BEFORE / AFTER resolution
+  and the tool's %; a refused (no-op) row shows `—`.
+- **Double-click an image row** opens a `BeforeAfterWindow` for that
+  image with a **Restore** (reverts ONLY it); **double-click the
+  collection / folder node** opens a viewer of ALL the job's changed
+  images with **RESTORE ALL** (reverts the whole job). A restore marks
+  the row(s) restored and puts the ORIGINAL back on disk (see below).
+
+### Temp / before-after / restore
+Every tool job holds a `painter.jobtemp.JobTemp` (a per-slot subdir
+under the gitignored `.painter_tmp/` project temp). The worker
+`backup`s each ORIGINAL before the op; on `done` it `measure`s
+before→after (the metric shown), on a no-op it `drop`s the backup. The
+`BeforeAfterWindow` (a themed Toplevel like DocWindow — skinned,
+registered in `THEME_TOPLEVELS`, holding its scaled PhotoImages via the
+shared `_scaled_photo` helper) stacks each image's before + after;
+Restore / RESTORE ALL delegate to the `JobTemp`. Temp is CLEARED on the
+panel's CLOSE, on app exit (`_on_close`) and swept at startup —
+gen jobs make NEW files, so they need no restore.
 
 ## Theming
 Two coordinated palettes — **night** (the built-in `darkly`, kept
@@ -495,13 +532,21 @@ blend into the top strip in both themes.
 One worker thread per site, started and stopped INDEPENDENTLY by
 its panel's buttons (per-site stop events); each creates its own
 Playwright instance and `SiteDriver` (sync Playwright is
-per-thread) and walks the theme queue sequentially. Workers touch
-the window ONLY through a queue drained on the tk timer
-(`_drain_queue` via `root.after`) — every widget mutation runs on
-the main thread; a quota `TerminalState` posts its
-`retry_after_s` the same way and the main thread schedules the
-auto-restart via `root.after`. The standalone tools run on one
-extra worker (one at a time).
+per-thread) and walks the theme queue sequentially. The four TOOLS
+add up to four MORE daemon workers (`_run_tool_job`), one per kind
+(one job per kind — a second click is refused), so up to six jobs run
+CONCURRENTLY; each tool worker only backs up + processes files under
+its own picked folder and its own `JobTemp` subdir (disjoint writes).
+Every worker touches the window ONLY through the single `self._q`
+queue drained on the tk timer (`_drain_queue` via `root.after`) — so
+every widget mutation runs on the main thread. Queue messages:
+`('__event__', slot, ev)` routes to `self.panels.get(slot).handle(ev)`
+(`.get` is the defensive guard for a late event after a panel closed),
+`('__tool_done__', slot)` and `('__worker_done__', key)` reveal the
+panel's CLOSE and clear the worker bookkeeping, a quota
+`TerminalState` posts its `retry_after_s` the same way and the main
+thread schedules the auto-restart via `root.after` (the panel keeps its
+countdown, no CLOSE, until the restart or a Stop).
 
 ## Connections
 
@@ -509,6 +554,7 @@ extra worker (one at a time).
 - [Sheet Parser](painter/sheet_parser.md), [CDP Driver](painter/driver.md),
   [Run Loop](painter/runner.md), [Chrome Launcher](painter/chrome.md),
   [Postprocess](painter/postprocess.md), [Upscale](painter/upscale.md),
+  [Change Aspect Ratio](painter/aspect.md), [Job Temp](painter/jobtemp.md),
   [Settings](painter/settings.md), [Config](painter/config.md)
 
 ### Used by

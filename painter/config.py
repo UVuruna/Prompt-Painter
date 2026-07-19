@@ -305,6 +305,88 @@ def status_pair(role: str) -> tuple[str, str]:
     return (THEMES["day"]["status"][role], THEMES["night"]["status"][role])
 
 
+# --- Dashboard per-JOB panels (owner 2026-07-19) ---------------------
+#
+# The dashboard shows one panel PER RUNNING JOB (up to 6 in parallel):
+# the two image-generation SITES plus the four in-place TOOLS, each its
+# own worker thread and its own panel. A panel appears when its job
+# starts and gets a CLOSE button when it finishes; the grid re-flows by
+# how many are active. JOB_ORDER is the FIXED priority (gen first) that
+# places panels row-major into the grid, so ChatGPT + Gemini always take
+# the top cells. All of this is PURE data (strings/numbers only) so the
+# engine and tests import config.py without tkinter.
+JOB_ORDER = ("chatgpt", "gemini", "bg", "crop", "upscale", "aspect")
+JOB_TOOL_KINDS = ("bg", "crop", "upscale", "aspect")
+
+# button + panel-header label per job (the three tool buttons drop the
+# old "only…" wording, owner 2026-07-19)
+JOB_LABEL = {
+    "chatgpt": "ChatGPT",
+    "gemini": "Gemini",
+    "bg": "BG removal",
+    "crop": "Crop",
+    "upscale": "Upscale",
+    "aspect": "Aspect ratio",
+}
+
+# the two gen sites carry an SVG logo (assets/icons/<stem>.svg);
+# supersedes the old gui._SITE_ICON map (Rule #5, one home)
+JOB_LOGO = {"chatgpt": "chatGPT", "gemini": "gemini"}
+
+# the four tools carry an emoji "logo" (owner can swap later): bubbles /
+# scissors / magnifier / ruler. Colour emoji render in their own glyph
+# colours — the panel/button NAME carries the job colour, the emoji is
+# the mark.
+JOB_EMOJI = {"bg": "🫧", "crop": "✂️", "upscale": "🔍", "aspect": "📐"}
+
+# per-job (day, night) colour pair — the header name + the tool button
+# fill. CTk stores the tuple and re-resolves it per appearance mode, so
+# a Day/Night flip recolours them with no re-walk.
+JOB_COLORS = {
+    "chatgpt": ("#1a8f6a", "#00bc8c"),  # green
+    "gemini": ("#2f6fb0", "#4a9eff"),   # blue
+    "bg": ("#0f8f8f", "#2fd4d4"),       # cyan / teal
+    "crop": ("#b9770e", "#f0a835"),     # amber
+    "upscale": ("#7a4fc0", "#b088f0"),  # violet
+    "aspect": ("#b03080", "#e05ab0"),   # magenta
+}
+
+# the aggregate metric each TOOL panel reports (its per-image % means):
+#   bg = removed pixels, crop = area reduction, upscale = area increase,
+#   aspect = deformation (growth of the stretched axis). measure() tags
+#   every item with the same word so the panel header and the rows agree.
+JOB_METRIC = {
+    "bg": "removed",
+    "crop": "reduction",
+    "upscale": "increase",
+    "aspect": "deformation",
+}
+
+
+def job_color_pair(kind: str) -> tuple[str, str]:
+    """The (day, night) colour pair for one job kind — a CTk light/dark
+    tuple that auto-flips on set_appearance_mode()."""
+    return JOB_COLORS[kind]
+
+
+# how many grid COLUMNS for N active panels; rows = ceil(N / cols). The
+# owner's chosen shape: 1→1, 2→2, 3→3, 4→2x2, 5→2x3 (ChatGPT+Gemini in
+# the top row, 6th cell empty), 6→2x3.
+GRID_COLS_BY_COUNT = {1: 1, 2: 2, 3: 3, 4: 2, 5: 2, 6: 2}
+
+# --- Tool temp / before-after / restore (owner 2026-07-19) -----------
+#
+# The four in-place tools back the ORIGINAL of every file up before they
+# touch it, so a job's whole folder (or one image) can be RESTORED and a
+# before/after viewer can show both. Backups live under a gitignored
+# project-local temp root, one subdir per job slot; cleared on the
+# panel's CLOSE, on app exit, and swept at startup.
+JOBTEMP_DIRNAME = ".painter_tmp"  # PROJECT_ROOT-relative temp/backup root
+# alpha below this counts as a "removed" (transparent) pixel for the BG
+# metric — the same opacity notion as CROP_INK_ALPHA / CLEAN_EDGE_ALPHA.
+JOBTEMP_REMOVED_ALPHA = 40
+
+
 # --- The Day/Night switch (image-based, ported from the owner's website
 # switch — geometry scales from the switch height H) ------------------
 # CRISP art (owner 2026-07-18): tkinter Canvas has no anti-aliasing, so

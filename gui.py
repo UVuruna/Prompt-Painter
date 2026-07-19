@@ -13,15 +13,17 @@ beside the images, every run resumes, and a quota stop with a known
 reset time auto-restarts that site (countdown on its panel). All
 remembered choices persist in settings.json.
 
-Two views (tabs): a **Dashboard** (per-site panels in a draggable
-paned layout — progress for the current collection AND the whole
-task, timings, and the collections table) and the detailed **Log**.
+Two views (tabs): a **Dashboard** (up to six per-JOB panels — the two
+sites plus the four in-place tools — in a responsive grid that
+re-flows as jobs start and close, each with its own progress, timings
+and table) and the detailed **Log**.
 """
 
 from __future__ import annotations
 
 import io
 import json
+import math
 import queue
 import random
 import re
@@ -45,6 +47,13 @@ from painter.config import (
     BACKGROUND_CHOICES,
     CDP_URL,
     DEFAULT_OUT_DIR,
+    GRID_COLS_BY_COUNT,
+    JOB_EMOJI,
+    JOB_LABEL,
+    JOB_LOGO,
+    JOB_METRIC,
+    JOB_ORDER,
+    JOB_TOOL_KINDS,
     NEW_CHAT_CHOICES,
     SITES,
     STATE_DIRNAME,
@@ -78,10 +87,12 @@ from painter.config import (
     dest_for,
     fmt_duration,
     fmt_size,
+    job_color_pair,
     prompt_suffix,
     status_pair,
     theme_pair,
 )
+from painter import jobtemp
 from painter.settings import load_settings, save_settings
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
@@ -133,9 +144,8 @@ _ICONS: dict[tuple[str, int], ctk.CTkImage] = {}
 # only serves offscreen painting, tkinter keeps the event loop).
 _QT_APP = None
 
-# the site-switch logos: SITES key -> icon file stem (the owner's
-# capitalisation in assets/icons/)
-_SITE_ICON = {"chatgpt": "chatGPT", "gemini": "gemini"}
+# the site logos (assets/icons stems) now live in config.JOB_LOGO —
+# one home shared by the agent panels, dashboard panels and buttons.
 
 # ---------------------------------------------------------------------
 # the font registry — CSS-rem style: ONE root size, every role a
@@ -271,6 +281,10 @@ DOC_MIN_W = 520             # never narrower than this (the top button bar fits)
 DOC_MIN_H = 400             # never shorter than this (also the provisional height)
 DOC_IMG_PAD_PX = 60         # horizontal padding around the image column (image mode)
 DOC_CHROME_PAD_PX = 48      # non-text vertical chrome: Text pady + frame margins
+
+# --- Before/after viewer (the tool panels' Restore viewer) ------------
+BEFORE_AFTER_W = 760          # viewer width; before/after images scale into it
+BEFORE_AFTER_IMG_PAD_PX = 60  # slack subtracted from the width for the images
 
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
 ASPECT_DIALOG_ENTRY_W = 64  # px width of each W / H field in the ratio dialog
@@ -1152,7 +1166,7 @@ class AgentPanel(ttk.Labelframe):
         # the labelframe title: the site's logo + name
         head = ttk.Frame(self)
         ctk.CTkLabel(
-            head, text="", image=icon(_SITE_ICON[site_key]), width=22,
+            head, text="", image=icon(JOB_LOGO[site_key]), width=22,
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(head, text=site.name, style="Head.TLabel").pack(side="left")
@@ -1254,7 +1268,7 @@ class AgentPanel(ttk.Labelframe):
         filled/outline availability as the full panel's pair."""
         cluster = ttk.Frame(parent)
         ctk.CTkLabel(
-            cluster, text="", image=icon(_SITE_ICON[self.site_key]),
+            cluster, text="", image=icon(JOB_LOGO[self.site_key]),
             width=22, fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(
@@ -1362,25 +1376,86 @@ def _scope_stats(
     }
 
 
-class DashPanel(ttk.Frame):
-    """One site's live view: current theme, whole-task totals, history.
+class JobPanel(ttk.Frame):
+    """Base for a per-JOB dashboard panel — a generation site or an
+    in-place tool.
 
-    Driven only by the runner's structured events (main thread).
+    Owns the coloured header (an SVG logo for the two gen sites / an
+    emoji for the four tools, plus the job NAME in the job colour), the
+    muted state line (the quota countdown / current item), and the
+    CLOSE button that is hidden until the job FINISHES and then removes
+    the panel. The body (progress / stats / table) is built by the
+    subclass. A panel appears when its job STARTS and disappears when
+    the owner clicks CLOSE (owner 2026-07-19: only running-or-ran jobs
+    show).
     """
 
-    def __init__(self, master, site_name: str, on_show=None):
+    def __init__(self, master, kind: str, on_show=None, on_close=None):
         super().__init__(master, padding=6)
-        self._name = site_name
-        self._on_show = on_show  # called with a node-info dict on 'Show'
+        self.slot_key = kind
+        self._on_show = on_show   # called with a node-info dict on 'Show'
+        self._on_close = on_close  # called with the slot key on CLOSE
+        self._finished = False
         self._node_info: dict[str, dict] = {}  # tree item id -> info
+        self._build_header(kind)
 
-        ttk.Label(self, text=site_name, style="Big.TLabel").pack(anchor="w")
+    def _build_header(self, kind: str) -> None:
+        header = ttk.Frame(self)
+        header.pack(fill="x")
+        if kind in JOB_LOGO:  # a gen site — its SVG logo
+            ctk.CTkLabel(
+                header, text="", image=icon(JOB_LOGO[kind]), width=24,
+                fg_color="transparent", bg_color=theme_pair("bg"),
+            ).pack(side="left", padx=(0, 6))
+        else:  # a tool — its emoji mark
+            ctk.CTkLabel(
+                header, text=JOB_EMOJI[kind], width=24, font=ctk_font("title"),
+                fg_color="transparent", bg_color=theme_pair("bg"),
+            ).pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(
+            header, text=JOB_LABEL[kind], font=ctk_font("title"),
+            text_color=job_color_pair(kind),
+            fg_color="transparent", bg_color=theme_pair("bg"),
+        ).pack(side="left")
+        # revealed by finish(); removes the panel + clears its temp
+        self._close_btn = rounded_button(
+            header, "✕ Close", command=self._do_close,
+            kind="danger-outline", width=76,
+        )
 
-        # the site's state line — quota auto-restart countdown etc.
+        # the state line — quota auto-restart countdown / current item
         self.state_var = tk.StringVar(value="")
         ttk.Label(
             self, textvariable=self.state_var, style="Muted.TLabel"
         ).pack(anchor="w")
+
+    def finish(self) -> None:
+        """The job ended — reveal the CLOSE button."""
+        if self._finished:
+            return
+        self._finished = True
+        self._close_btn.pack(side="right")
+
+    def reset_finished(self) -> None:
+        """Hide the CLOSE button again (a slot reused for a new run)."""
+        self._finished = False
+        self._close_btn.pack_forget()
+
+    def _do_close(self) -> None:
+        if self._on_close is not None:
+            self._on_close(self.slot_key)
+
+
+class DashPanel(JobPanel):
+    """One generation site's live view: current collection, whole-task
+    totals, timings and the collections history table.
+
+    Driven only by the runner's structured events (main thread).
+    """
+
+    def __init__(self, master, kind: str, on_show=None, on_close=None):
+        super().__init__(master, kind, on_show=on_show, on_close=on_close)
+        self._name = JOB_LABEL[kind]
 
         # whole-task progress
         task = ttk.Frame(self)
@@ -1535,12 +1610,6 @@ class DashPanel(ttk.Frame):
         if info and self._on_show is not None:
             self._on_show(info)
 
-    @property
-    def has_data(self) -> bool:
-        """True once the panel shows anything worth screen space —
-        the adaptive dashboard hides data-less panels of idle sites."""
-        return self._task_total > 0 or bool(self.tree.get_children())
-
     # --- the collapsible Average group ---------------------------------
 
     def _render_avg_btn(self) -> None:
@@ -1568,6 +1637,7 @@ class DashPanel(ttk.Frame):
     def reset(
         self, active: bool = True, task_total: int = 0, task_themes: int = 0
     ) -> None:
+        self.reset_finished()  # a fresh run hides the CLOSE button again
         now = time.monotonic()
         self._task_total = task_total
         self._task_themes = task_themes
@@ -1783,6 +1853,329 @@ class DashPanel(ttk.Frame):
             self.cells[("task", key)].set(task[key])
 
 
+def _scaled_photo(path: Path, avail_px: int) -> ImageTk.PhotoImage:
+    """One image loaded and scaled to fit ``avail_px`` wide (never
+    upscaled), as a live PhotoImage the caller must keep a ref to.
+    Shared by DocWindow's prompt image and the BeforeAfterWindow viewer
+    (Rule #5). Raises OSError on an unreadable file (the caller reports
+    it)."""
+    img = Image.open(path)
+    img.load()
+    if img.width > avail_px:
+        scale = avail_px / img.width
+        img = img.resize(
+            (avail_px, max(round(img.height * scale), 1)), Image.LANCZOS
+        )
+    return ImageTk.PhotoImage(img)
+
+
+class ToolPanel(JobPanel):
+    """One in-place tool's live view (BG removal / Crop / Upscale /
+    Aspect ratio): a progress bar, an aggregate metric label, and a
+    collection > folder > image table where each image row shows its
+    BEFORE / AFTER resolution and the tool's own % (removed / reduction
+    / increase / deformation).
+
+    Double-click an image row for a BEFORE/AFTER viewer with Restore;
+    double-click the collection / folder node for a viewer of all the
+    job's changed images with RESTORE ALL. The job's originals are
+    backed up per file (``self.jobtemp``) before the op, so a restore
+    always puts the original back.
+    """
+
+    def __init__(self, master, kind: str, on_close=None):
+        super().__init__(master, kind, on_show=None, on_close=on_close)
+        self._metric_name = JOB_METRIC[kind]
+        self.folder: Path | None = None       # the picked folder
+        self.jobtemp = None                    # painter.jobtemp.JobTemp
+
+        self.prog = ttk.Progressbar(
+            self, bootstyle="info-striped", maximum=1, value=0
+        )
+        self.prog.pack(fill="x", pady=(6, 4))
+        self.metric_var = tk.StringVar(value="—")
+        ttk.Label(
+            self, textvariable=self.metric_var, style="Value.TLabel"
+        ).pack(anchor="w", pady=(0, 4))
+
+        wrap = ttk.Frame(self)
+        wrap.pack(fill="both", expand=True, pady=(2, 0))
+        cols = ("before", "after", "pct", "size")
+        self.tree = ttk.Treeview(wrap, columns=cols, height=8)
+        self.tree.heading("#0", text="Name")
+        self.tree.column("#0", width=200, minwidth=120, stretch=False)
+        for cid, txt, w, anc in (
+            ("before", "Before", 92, "center"),
+            ("after", "After", 92, "center"),
+            ("pct", "%", 72, "e"),
+            ("size", "Size", 72, "e"),
+        ):
+            self.tree.heading(cid, text=txt)
+            self.tree.column(cid, width=w, minwidth=w, anchor=anc,
+                             stretch=False)
+        vsb = ttk.Scrollbar(
+            wrap, orient="vertical", command=self.tree.yview,
+            bootstyle="round",
+        )
+        hsb = ttk.Scrollbar(
+            wrap, orient="horizontal", command=self.tree.xview,
+            bootstyle="round",
+        )
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+        wrap.rowconfigure(0, weight=1)
+        wrap.columnconfigure(0, weight=1)
+        self.tree.bind("<Double-1>", self._on_activate)
+
+        self.reset(active=False, total=0)
+
+    # --- state ---------------------------------------------------------
+
+    def reset(self, active: bool = True, total: int = 0) -> None:
+        self.reset_finished()
+        self._total = total
+        self._changed = 0
+        self._skipped = 0
+        self._pcts: list[float] = []
+        self._tree_root: str | None = None
+        self._folder_nodes: dict[str, str] = {}
+        self._image_rows: dict[str, str] = {}
+        self.tree.delete(*self.tree.get_children())
+        self._node_info.clear()
+        self.prog.configure(maximum=max(total, 1), value=0)
+        self.state_var.set("running …" if active else "idle")
+        self._update_metric()
+
+    # --- events (main thread, via the queue pump) ----------------------
+
+    def handle(self, event: dict) -> None:
+        kind = event["type"]
+        if kind == "sheet_start":
+            self._total = event["total"]
+            self.prog.configure(
+                maximum=max(self._total, 1),
+                value=self._changed + self._skipped,
+            )
+        elif kind == "item_start":
+            self.state_var.set(
+                f"({event['idx']}/{event['of']}) {event['title'][:50]}"
+            )
+        elif kind == "item_done":
+            self._changed += 1
+            self._pcts.append(event["pct"])
+            self._insert_image_row(event["rel"], event)
+            self._advance()
+        elif kind == "item_refused":
+            self._skipped += 1
+            self._insert_refused_row(event["rel"])
+            self._advance()
+        elif kind == "sheet_done":
+            self.state_var.set(
+                f"done — {self._changed} changed, {self._skipped} skipped"
+            )
+            self._update_metric()
+
+    def _advance(self) -> None:
+        self.prog.configure(value=self._changed + self._skipped)
+        self._update_metric()
+
+    def _update_metric(self) -> None:
+        counts = f"{self._changed} changed, {self._skipped} skipped"
+        if self._pcts:
+            avg = sum(self._pcts) / len(self._pcts)
+            self.metric_var.set(f"avg {avg:.0f}% {self._metric_name}   ·   {counts}")
+        else:
+            self.metric_var.set(f"{self._metric_name}: —   ·   {counts}")
+
+    # --- tree building -------------------------------------------------
+
+    def _ensure_root(self) -> str:
+        if self._tree_root is None:
+            name = self.folder.name if self.folder else JOB_LABEL[self.slot_key]
+            self._tree_root = self.tree.insert(
+                "", "end", text=f"{name}   · {JOB_LABEL[self.slot_key]}",
+                open=True, values=("", "", "", ""),
+            )
+            self._node_info[self._tree_root] = {"level": "collection"}
+        return self._tree_root
+
+    def _ensure_folder(self, folder: str) -> str:
+        node = self._folder_nodes.get(folder)
+        if node is None:
+            node = self.tree.insert(
+                self._ensure_root(), "end", text=folder, open=True,
+                values=("", "", "", ""),
+            )
+            self._folder_nodes[folder] = node
+            self._node_info[node] = {"level": "folder", "folder": folder}
+        return node
+
+    def _insert_image_row(self, rel: str, event: dict) -> None:
+        fnode = self._ensure_folder(folder_of(rel))
+        row = self.tree.insert(
+            fnode, "end", text=PurePosixPath(rel).name,
+            values=(
+                event["before"], event["after"],
+                f"{event['pct']:.0f}%", fmt_size(event["size"]),
+            ),
+        )
+        self._node_info[row] = {"level": "image", "rel": rel, "has_backup": True}
+        self._image_rows[rel] = row
+
+    def _insert_refused_row(self, rel: str) -> None:
+        fnode = self._ensure_folder(folder_of(rel))
+        self.tree.insert(
+            fnode, "end", text=PurePosixPath(rel).name,
+            values=("", "", "—", ""),
+        )
+
+    # --- before/after viewer + restore ---------------------------------
+
+    def _on_activate(self, _event) -> None:
+        info = self._node_info.get(self.tree.focus())
+        if not info:
+            return
+        if info["level"] == "image":
+            self._show_image_beforeafter(info["rel"])
+        else:
+            self._show_all_beforeafter()
+
+    def _pair_for(self, rel: str) -> dict | None:
+        """The {rel, before, after} pair for one image, or None when
+        there is no backup / result on disk (a no-op or a restored
+        image)."""
+        if self.jobtemp is None or self.folder is None:
+            return None
+        before = self.jobtemp.before_path(rel)
+        after = self.folder / rel
+        if before is None or not after.exists():
+            return None
+        return {"rel": rel, "before": before, "after": after}
+
+    def _show_image_beforeafter(self, rel: str) -> None:
+        pair = self._pair_for(rel)
+        if pair is None:
+            messagebox.showinfo(
+                "PromptPainter",
+                "No before/after for this image — nothing was changed,"
+                " or it was already restored.",
+            )
+            return
+        BeforeAfterWindow(
+            self.winfo_toplevel(),
+            f"{JOB_LABEL[self.slot_key]} — {PurePosixPath(rel).name}",
+            [pair], restore_label="Restore",
+            restore_cb=lambda: self.restore_one(rel),
+        )
+
+    def _show_all_beforeafter(self) -> None:
+        pairs = [
+            pair for rel in self._image_rows
+            if (pair := self._pair_for(rel)) is not None
+        ]
+        if not pairs:
+            messagebox.showinfo(
+                "PromptPainter",
+                "No changed images to show — nothing was changed, or all"
+                " were already restored.",
+            )
+            return
+        BeforeAfterWindow(
+            self.winfo_toplevel(),
+            f"{JOB_LABEL[self.slot_key]} — all changed images ({len(pairs)})",
+            pairs, restore_label="RESTORE ALL",
+            restore_cb=self.restore_all,
+        )
+
+    def restore_one(self, rel: str) -> None:
+        if self.jobtemp is not None and self.jobtemp.restore_one(rel):
+            self._mark_restored(rel)
+
+    def restore_all(self) -> int:
+        if self.jobtemp is None:
+            return 0
+        count = self.jobtemp.restore_all()
+        for rel in list(self._image_rows):
+            self._mark_restored(rel)
+        return count
+
+    def _mark_restored(self, rel: str) -> None:
+        row = self._image_rows.get(rel)
+        if row is not None:
+            self.tree.set(row, "pct", "restored")
+            info = self._node_info.get(row)
+            if info is not None:
+                info["has_backup"] = False
+
+
+class DashGrid(ttk.Frame):
+    """The dashboard's up-to-6 per-job panels in a responsive grid, gen
+    sites FIRST.
+
+    Panels are added on job START and removed on CLOSE; the grid
+    re-flows by the active count (``GRID_COLS_BY_COUNT``, row-major over
+    ``JOB_ORDER`` — so ChatGPT + Gemini always fill the top row and, at
+    N=5, the 6th cell stays empty). Cells share a ``uniform`` group so
+    they are equal and evenly fill the area. A muted placeholder shows
+    when no job has run yet.
+    """
+
+    def __init__(self, master):
+        super().__init__(master)
+        self._panels: dict[str, JobPanel] = {}
+        self._active: list[str] = []  # gridded slots (rendered in JOB_ORDER)
+        self._placeholder = ttk.Label(
+            self,
+            text="No jobs yet — press a site Start, or a tool button above.",
+            style="Muted.TLabel", anchor="center",
+        )
+
+    def attach(self, panels: dict) -> None:
+        self._panels = panels
+        self.relayout()
+
+    def active(self) -> list[str]:
+        return [k for k in JOB_ORDER if k in self._active]
+
+    def add(self, kind: str) -> None:
+        if kind not in self._active:
+            self._active.append(kind)
+        self.relayout()
+
+    def remove(self, kind: str) -> None:
+        if kind in self._active:
+            self._active.remove(kind)
+        self.relayout()
+
+    def relayout(self) -> None:
+        self._placeholder.grid_forget()
+        for panel in self._panels.values():
+            panel.grid_forget()
+        for i in range(3):  # reset every row/col this grid can ever use
+            self.rowconfigure(i, weight=0, uniform="")
+            self.columnconfigure(i, weight=0, uniform="")
+        slots = self.active()
+        n = len(slots)
+        if n == 0:
+            self._placeholder.grid(row=0, column=0, sticky="nsew")
+            self.rowconfigure(0, weight=1)
+            self.columnconfigure(0, weight=1)
+            return
+        cols = GRID_COLS_BY_COUNT[n]
+        rows = math.ceil(n / cols)
+        for idx, kind in enumerate(slots):
+            r, c = divmod(idx, cols)
+            self._panels[kind].grid(
+                row=r, column=c, sticky="nsew", padx=4, pady=4
+            )
+        for c in range(cols):
+            self.columnconfigure(c, weight=1, uniform="dashcol")
+        for r in range(rows):
+            self.rowconfigure(r, weight=1, uniform="dashrow")
+
+
 # ---------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------
@@ -1818,7 +2211,13 @@ class PainterGui:
         self._running: set[str] = set()
         self._restart_jobs: dict[str, str] = {}  # site -> after id
         self._restart_deadline: dict[str, float] = {}  # site -> monotonic
-        self._standalone_busy = False  # one standalone tool at a time
+        # the four in-place tools each run as their OWN job (one worker
+        # thread + one dashboard panel per kind; one job per kind at a
+        # time). Each holds a JobTemp of the originals it backed up.
+        self._tool_workers: dict[str, threading.Thread] = {}
+        self._tool_temps: dict[str, jobtemp.JobTemp] = {}
+        # sweep any crash-orphaned tool backups from a previous session
+        jobtemp.clear_all()
         # (site, source-path, drop-path) -> BooleanVar; missing = ticked
         self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
         self._save_job: str | None = None  # debounced settings save
@@ -2066,26 +2465,17 @@ class PainterGui:
         rounded_button(
             row, "Instructions", command=self._open_instructions,
         ).pack(side="right")
-        # the standalone in-place tools (site-less; run one at a time,
-        # reported on the first visible dashboard panel)
-        rounded_button(
-            row, "UPSCALE only…", command=partial(
-                self._standalone_tool, "Upscale", "upscale"
-            ),
-        ).pack(side="right", padx=4)
-        rounded_button(
-            row, "CROP only…", command=partial(
-                self._standalone_tool, "Crop", "crop"
-            ),
-        ).pack(side="right")
-        rounded_button(
-            row, "BG removal only…", command=partial(
-                self._standalone_tool, "BG removal", "bg_removal"
-            ),
-        ).pack(side="right", padx=4)
-        rounded_button(
-            row, "Aspect ratio…", command=self._aspect_tool,
-        ).pack(side="right")
+        # the four in-place tools — each its OWN concurrent job + panel,
+        # carrying the panel's colour + emoji. Packed reversed so they
+        # read BG removal / Crop / Upscale / Aspect ratio left→right.
+        for slot in reversed(JOB_TOOL_KINDS):
+            color = job_color_pair(slot)
+            rounded_button(
+                row, f"{JOB_EMOJI[slot]}  {JOB_LABEL[slot]}",
+                command=partial(self._start_tool, slot),
+                fg_color=color, hover_color=_darken_pair(color),
+                text_color=status_pair("btn_text"),
+            ).pack(side="right", padx=4)
 
     def _build_views(self, parent) -> None:
         self.notebook = ttk.Notebook(parent)
@@ -2093,21 +2483,24 @@ class PainterGui:
 
         dash_tab = ttk.Frame(self.notebook)
         self.notebook.add(dash_tab, text="Dashboard")
-        # the two site panels live in a horizontal PanedWindow so the
-        # owner can DRAG the divider to give one panel more width; the
-        # sash position persists in the settings
-        self.dash_pane = ttk.PanedWindow(dash_tab, orient="horizontal")
-        self.dash_pane.pack(fill="both", expand=True, padx=4, pady=4)
-        self.dash_pane.bind(
-            "<ButtonRelease-1>", lambda _e: self._schedule_save()
-        )
-        self.dash: dict[str, DashPanel] = {}
-        for key in sorted(SITES):
-            self.dash[key] = DashPanel(
-                self.dash_pane, SITES[key].name,
+        # BUILD-ONCE per-JOB panels in a responsive DashGrid: the two gen
+        # sites plus the four tools, NONE gridded until its job starts.
+        # A panel appears on Start / a tool click, gets CLOSE when done,
+        # and the grid re-flows by active count (gen sites first).
+        self._dashgrid = DashGrid(dash_tab)
+        self.panels: dict[str, JobPanel] = {}
+        for key in ("chatgpt", "gemini"):
+            self.panels[key] = DashPanel(
+                self._dashgrid, key,
                 on_show=partial(self._show_node, key),
+                on_close=self._close_panel,
             )
-        self._update_dash_layout()
+        for kind in JOB_TOOL_KINDS:
+            self.panels[kind] = ToolPanel(
+                self._dashgrid, kind, on_close=self._close_panel,
+            )
+        self._dashgrid.attach(self.panels)
+        self._dashgrid.pack(fill="both", expand=True, padx=4, pady=4)
 
         log_tab = ttk.Frame(self.notebook)
         self.notebook.add(log_tab, text="Log (detailed)")
@@ -2124,25 +2517,16 @@ class PainterGui:
         log_vsb.pack(side="right", fill="y")
         self.log_box.pack(side="left", fill="both", expand=True)
 
-    def _update_dash_layout(self) -> None:
-        """Adaptive dashboard: a site's panel shows only while the
-        site is RUNNING (or waiting on a quota restart) or once it HAS
-        DATA; a single visible panel takes the full width (no sash).
-        When nothing runs and nothing has data yet, both show."""
-        shown = [
-            k for k in sorted(SITES)
-            if k in self._running or k in self._restart_jobs
-            or self.dash[k].has_data
-        ]
-        if not shown:
-            shown = sorted(SITES)
-        current = list(self.dash_pane.panes())
-        wanted = [str(self.dash[k]) for k in shown]
-        if current != wanted:
-            for pane in current:
-                self.dash_pane.forget(pane)
-            for key in shown:
-                self.dash_pane.add(self.dash[key], weight=1)
+    def _close_panel(self, kind: str) -> None:
+        """A finished panel's CLOSE button: remove it from the grid and
+        clear that job's temp backups (tools only). The panel widget
+        survives (build-once) — reset_finished hides its CLOSE for the
+        next run, and the next Start re-adds it."""
+        self._dashgrid.remove(kind)
+        self.panels[kind].reset_finished()
+        temp = self._tool_temps.pop(kind, None)
+        if temp is not None:
+            temp.clear()
 
     def _open_instructions(self) -> None:
         path = Path(__file__).resolve().parent / "instructions.md"
@@ -2420,13 +2804,14 @@ class PainterGui:
             return
         SelectWindow(self, sheets)
 
-    # --- the standalone in-place tools ---------------------------------
+    # --- the in-place tools (each its own concurrent job + panel) ------
 
     @staticmethod
-    def _standalone_func(kind: str):
-        """The engine function behind one standalone tool. Lazy import:
-        the GUI opens even while the engine modules are being built."""
-        if kind == "bg_removal":
+    def _tool_func(kind: str):
+        """The engine function behind a FIXED tool (bg / crop /
+        upscale). Aspect binds its ratio in _start_tool. Lazy import so
+        the GUI opens even while the engine modules build."""
+        if kind == "bg":
             from painter.postprocess import remove_background
             return remove_background
         if kind == "crop":
@@ -2442,144 +2827,134 @@ class PainterGui:
             if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
         )
 
-    def _standalone_tool(
-        self, label: str, kind: str, *, func=None, confirm=None
-    ) -> None:
-        """One standalone run (BG removal / Crop / Upscale / Aspect):
-        pick a folder, confirm, process IN PLACE in filename order.
-        Site-less — progress and the done/refused counts feed the
-        FIRST VISIBLE dashboard panel ("refused" = the engine said
-        "nothing"/"unclear": nothing to do for that file).
-
-        ``func`` overrides the engine function (``func(path, log) ->
-        str``) — the aspect tool passes one with its ratio bound, so
-        every tool shares this one loop. ``confirm`` overrides the
-        confirmation text with a ``confirm(folder) -> str`` callable
-        (the aspect tool warns it DEFORMS destructively)."""
-        if self._standalone_busy:
+    def _start_tool(self, slot: str) -> None:
+        """Start ONE in-place tool as its OWN job: pick a folder (aspect
+        asks for a ratio first), confirm, then back up + process every
+        image under it on a dedicated worker thread, reporting into the
+        slot's own dashboard panel. One job per kind — a second click
+        while it runs is refused; up to all four tools + both sites run
+        in parallel (6 panels)."""
+        if slot in self._tool_workers:
             messagebox.showerror(
-                "PromptPainter", "A standalone tool is already running."
+                "PromptPainter",
+                f"{JOB_LABEL[slot]} is already running — wait for it to"
+                " finish, or Close its panel.",
             )
             return
-        folder = filedialog.askdirectory(
-            title=f"Folder with images — {label} runs IN PLACE"
-        )
-        if not folder:
-            return
-        message = (
-            confirm(folder) if confirm is not None else
-            f"{label} IN PLACE for every image under:\n{folder}?\n\n"
-            "(files with nothing to do are skipped untouched and"
-            " counted as Refused)"
-        )
-        if not messagebox.askyesno("PromptPainter", message):
-            return
-        # the reporting panel: the first visible one (they're site-less)
-        panes = self.dash_pane.panes()
-        target = next(
-            (k for k in sorted(SITES) if str(self.dash[k]) in panes),
-            sorted(SITES)[0],
-        )
-        self._standalone_busy = True
-        self.status_var.set(f"{label} running …")
-        self.notebook.select(0)
 
-        def work():
-            emit = lambda ev: self._q.put(("__event__", target, ev))
-            try:
-                run_func = func if func is not None else self._standalone_func(kind)
-                files = self._iter_images(Path(folder))
-                self._q.put(
-                    f"{label}: {len(files)} image(s) under {folder}"
-                )
-                # the borrowed panel restarts its counters so the
-                # done/refused totals read x / N for THIS run
-                self._q.put(("__reset_panel__", target, len(files)))
-                emit({
-                    "type": "sheet_start",
-                    "sheet": f"{label} (standalone)",
-                    "pending": len(files),
-                })
-                log = lambda msg: self._q.put(f"  {msg}")
-                counts: dict[str, int] = {}
-                t0 = time.time()
-                for i, src in enumerate(files, start=1):
-                    drop = src.relative_to(folder).as_posix()
-                    emit({
-                        "type": "item_start", "idx": i, "of": len(files),
-                        "title": src.name,
-                    })
-                    t_item = time.time()
-                    try:
-                        status = run_func(src, log)
-                    except Exception as exc:
-                        status = "FAILED"
-                        self._q.put(f"  {label} FAIL {src.name}: {exc}")
-                    counts[status] = counts.get(status, 0) + 1
-                    if status == "done":
-                        emit({
-                            "type": "item_progress",
-                            "drop_path": drop,
-                            "gen_s": time.time() - t_item,
-                            "size": src.stat().st_size,
-                            "orig_res": "", "final_res": "",
-                        })
-                        emit({
-                            "type": "item_done", "drop_path": drop,
-                            "gen_s": time.time() - t_item, "over_s": 0.0,
-                        })
-                    else:  # nothing / unclear / FAILED -> the
-                        emit({  # refused (nothing-to-do) bucket
-                            "type": "item_refused", "drop_path": drop,
-                        })
-                    if i % 25 == 0:
-                        self._q.put(
-                            f"{label}: [{time.time() - t0:.0f}s]"
-                            f" {i}/{len(files)}"
-                        )
-                emit({"type": "sheet_done"})
-                summary = ", ".join(
-                    f"{k}={v}" for k, v in sorted(counts.items())
-                )
-                self._q.put(f"{label} done: {summary or 'no images'}")
-            finally:
-                self._q.put(("__standalone_done__",))
-                self._q.put(("__status__", "idle"))
+        label = JOB_LABEL[slot]
+        if slot == "aspect":
+            ratio = AspectRatioDialog(self.root).result
+            if ratio is None:
+                return
+            ratio_w, ratio_h = ratio
+            from painter.aspect import change_aspect
 
-        threading.Thread(target=work, daemon=True).start()
-
-    def _aspect_tool(self) -> None:
-        """The standalone 'Aspect ratio…' run: ask for a target ratio
-        (W : H), then DEFORM every image in a folder to it in place.
-        Reuses ``_standalone_tool`` (folder pick + confirm + in-place
-        loop + dashboard reporting) with the ratio bound into the
-        engine func and a DESTRUCTIVE-deform confirmation."""
-        if self._standalone_busy:
-            messagebox.showerror(
-                "PromptPainter", "A standalone tool is already running."
+            func = (
+                lambda path, log: change_aspect(path, ratio_w, ratio_h, log)
             )
-            return
-        ratio = AspectRatioDialog(self.root).result
-        if ratio is None:
-            return
-        ratio_w, ratio_h = ratio
-        from painter.aspect import change_aspect
-
-        def confirm(folder: str) -> str:
-            return (
+            label = f"Aspect {ratio_w}:{ratio_h}"
+            folder = filedialog.askdirectory(
+                title=f"Folder with images — {label} runs IN PLACE"
+            )
+            if not folder:
+                return
+            message = (
                 f"DEFORM every image under:\n{folder}\n\n"
                 f"to a {ratio_w}:{ratio_h} aspect ratio?\n\n"
-                "This is a non-proportional STRETCH written IN PLACE"
-                " (destructive — the originals are overwritten). Images"
-                f" already at {ratio_w}:{ratio_h} are skipped untouched"
-                " and counted as Refused."
+                "A non-proportional STRETCH written IN PLACE — the"
+                " originals are backed up so you can Restore. Images"
+                f" already at {ratio_w}:{ratio_h} are skipped untouched."
             )
+        else:
+            func = self._tool_func(slot)
+            folder = filedialog.askdirectory(
+                title=f"Folder with images — {label} runs IN PLACE"
+            )
+            if not folder:
+                return
+            message = (
+                f"{label} IN PLACE for every image under:\n{folder}?\n\n"
+                "(the originals are backed up so you can Restore; files"
+                " with nothing to do are skipped untouched)"
+            )
+        if not messagebox.askyesno("PromptPainter", message):
+            return
 
-        self._standalone_tool(
-            f"Aspect {ratio_w}:{ratio_h}", "aspect",
-            func=lambda path, log: change_aspect(path, ratio_w, ratio_h, log),
-            confirm=confirm,
+        folder_path = Path(folder)
+        # a finished panel for this slot may still be on screen — clear
+        # its old temp before the new job takes the slot
+        old = self._tool_temps.pop(slot, None)
+        if old is not None:
+            old.clear()
+        temp = jobtemp.JobTemp(slot, folder_path)
+        self._tool_temps[slot] = temp
+
+        files = self._iter_images(folder_path)
+        panel = self.panels[slot]
+        panel.folder = folder_path
+        panel.jobtemp = temp
+        panel.reset(active=True, total=len(files))
+        self._dashgrid.add(slot)
+        self.notebook.select(0)
+        self.status_var.set(f"{label} running …")
+
+        worker = threading.Thread(
+            target=self._run_tool_job,
+            args=(slot, label, func, folder_path, files, temp),
+            daemon=True,
         )
+        self._tool_workers[slot] = worker
+        worker.start()
+
+    def _run_tool_job(self, slot, label, func, folder, files, temp) -> None:
+        """One tool job on its own thread: back up each original, run
+        the engine func in place, measure BEFORE→AFTER, and stream item
+        events to the slot's panel. A crash on one file is loud and
+        counted FAILED (its no-op backup dropped), never kills the job.
+        The measure is computed OUTSIDE the engine, from the backup vs
+        the in-place result (Rule #10 progress every 25)."""
+        emit = lambda ev: self._q.put(("__event__", slot, ev))
+        log = lambda msg: self._q.put(f"[{label}]     {msg}")
+        try:
+            self._q.put(f"[{label}] {len(files)} image(s) under {folder}")
+            emit({"type": "sheet_start", "total": len(files)})
+            counts: dict[str, int] = {}
+            t0 = time.time()
+            for i, src in enumerate(files, start=1):
+                rel = src.relative_to(folder).as_posix()
+                emit({
+                    "type": "item_start", "idx": i, "of": len(files),
+                    "title": src.name,
+                })
+                temp.backup(src, rel)  # the ORIGINAL, before the op
+                try:
+                    status = func(src, log)
+                except Exception as exc:
+                    status = "FAILED"
+                    self._q.put(f"[{label}] FAIL {src.name}: {exc}")
+                counts[status] = counts.get(status, 0) + 1
+                if status == "done":
+                    metric = jobtemp.measure(
+                        slot, temp.before_path(rel), src
+                    )
+                    emit({
+                        "type": "item_done", "rel": rel,
+                        "size": src.stat().st_size, **metric,
+                    })
+                else:  # nothing / unclear / FAILED -> unchanged file
+                    temp.drop(rel)  # no restore point for a no-op
+                    emit({"type": "item_refused", "rel": rel})
+                if i % 25 == 0:
+                    self._q.put(
+                        f"[{label}] [{time.time() - t0:.0f}s]"
+                        f" {i}/{len(files)}"
+                    )
+            emit({"type": "sheet_done"})
+            summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+            self._q.put(f"[{label}] done: {summary or 'no images'}")
+        finally:
+            self._q.put(("__tool_done__", slot))
 
     def _compose_post_save(self, key: str):
         """The site's post-save hook per ITS panel switches — the same
@@ -2728,10 +3103,10 @@ class PainterGui:
         self._running.add(key)
         panel.set_run_state(running=True)
         total, themes = self._plan(key, sheets, selection)
-        self.dash[key].reset(
+        self.panels[key].reset(
             active=True, task_total=total, task_themes=themes
         )
-        self._update_dash_layout()
+        self._dashgrid.add(key)  # reveal the panel (idempotent on restart)
         self._update_status()
         background = panel.background_var.get()
         self._log(
@@ -2867,7 +3242,9 @@ class PainterGui:
             self._cancel_restart(key)
             self.agents[key].set_run_state(running=key in self._running)
             self._log(f"[{key}] pending auto-restart cancelled")
-            self._update_dash_layout()
+            # the site is done now — reveal the panel's CLOSE button
+            self.panels[key].finish()
+            self._dashgrid.relayout()
             return
         if key in self._running:
             self._stop_events[key].set()
@@ -2902,7 +3279,7 @@ class PainterGui:
         if key not in self._restart_jobs:
             return  # cancelled — the countdown loop dies with it
         left = max(self._restart_deadline[key] - time.monotonic(), 0.0)
-        self.dash[key].state_var.set(
+        self.panels[key].state_var.set(
             f"quota — auto-restart in {int(left // 60):02d}:"
             f"{int(left % 60):02d}"
         )
@@ -2913,11 +3290,11 @@ class PainterGui:
         if job is not None:
             self.root.after_cancel(job)
         self._restart_deadline.pop(key, None)
-        self.dash[key].state_var.set("")
+        self.panels[key].state_var.set("")
 
     def _auto_restart(self, key: str) -> None:
         self._restart_jobs.pop(key, None)
-        self.dash[key].state_var.set("")
+        self.panels[key].state_var.set("")
         self._log(f"[{key}] quota window elapsed — auto-restarting")
         self._start_site(key)
 
@@ -2931,15 +3308,19 @@ class PainterGui:
                     if msg[0] == "__status__":
                         self.status_var.set(msg[1])
                     elif msg[0] == "__event__":
-                        self.dash[msg[1]].handle(msg[2])
+                        # .get is the defensive guard for a late event
+                        # arriving after its panel was closed
+                        panel = self.panels.get(msg[1])
+                        if panel is not None:
+                            panel.handle(msg[2])
                     elif msg[0] == "__terminal__":
                         self._handle_terminal(msg[1], msg[2])
-                    elif msg[0] == "__reset_panel__":
-                        self.dash[msg[1]].reset(
-                            active=True, task_total=msg[2], task_themes=1
-                        )
-                    elif msg[0] == "__standalone_done__":
-                        self._standalone_busy = False
+                    elif msg[0] == "__tool_done__":
+                        slot = msg[1]
+                        self.panels[slot].finish()  # reveal CLOSE
+                        self._tool_workers.pop(slot, None)
+                        if not self._tool_workers and not self._running:
+                            self._update_status()
                     elif msg[0] == "__worker_done__":
                         key = msg[1]
                         self._log(f"[{key}] worker finished")
@@ -2951,7 +3332,11 @@ class PainterGui:
                             running=False,
                             pending_restart=key in self._restart_jobs,
                         )
-                        self._update_dash_layout()
+                        # a pending quota auto-restart keeps the panel
+                        # alive (countdown, no CLOSE yet); otherwise the
+                        # site is done — reveal its CLOSE button
+                        if key not in self._restart_jobs:
+                            self.panels[key].finish()
                         self._update_status()
                 else:
                     self._log(str(msg))
@@ -2962,17 +3347,10 @@ class PainterGui:
     # --- settings persistence ------------------------------------------
 
     def _collect_settings(self) -> dict:
-        sash = self._settings.get("sash")
-        if len(self.dash_pane.panes()) > 1:
-            try:
-                sash = self.dash_pane.sashpos(0)
-            except tk.TclError:
-                pass
         return {
             "output": self.out_var.get(),
             "font_base": FONT_BASE,
             "theme": ACTIVE_THEME,
-            "sash": sash,
             "geometry": self.root.geometry(),
             "controls_collapsed": self._collapsed,
             "agents": {
@@ -2986,7 +3364,8 @@ class PainterGui:
         intentionally NOT restored — the app starts with an empty
         collection list every launch (owner 2026-07-18); only the
         output folder, per-agent settings, theme, geometry, zoom and
-        sash persist."""
+        the collapsed state persist (a stale ``sash`` key from an older
+        settings.json is simply ignored)."""
         saved_out = stored.get("output")
         if saved_out and Path(saved_out).is_dir():
             self.out_var.set(saved_out)
@@ -3002,24 +3381,14 @@ class PainterGui:
             panel.apply_settings(stored.get("agents", {}).get(key, {}))
         if stored.get("geometry"):
             self.root.geometry(self._clamp_geometry(stored["geometry"]))
-        if stored.get("sash") is not None:
-            # the sash needs realised pane widths — apply once mapped
-            def place_sash(pos=int(stored["sash"])):
-                try:
-                    if len(self.dash_pane.panes()) > 1:
-                        self.dash_pane.sashpos(0, pos)
-                except tk.TclError:
-                    pass  # single pane right now — position kept stored
 
-            self.root.after(300, place_sash)
-
-        # restore the collapsed/expanded view LAST — geometry and sash are
-        # already sane, so the swap fits into a correctly-sized window
+        # restore the collapsed/expanded view LAST — geometry is already
+        # sane, so the swap fits into a correctly-sized window
         self._set_collapsed(bool(stored.get("controls_collapsed", False)))
 
     def _wire_persistence(self) -> None:
         """Meaningful changes debounce into a save; the queue buttons,
-        zoom and the sash release hook in at their own sites."""
+        zoom and the theme flip hook in at their own sites."""
         self.out_var.trace_add("write", lambda *_: self._schedule_save())
         for panel in self.agents.values():
             for var in panel.persist_vars():
@@ -3042,6 +3411,12 @@ class PainterGui:
 
     def _on_close(self) -> None:
         self._save_now()
+        # drop every live tool job's backups, then sweep the whole temp
+        # root (belt-and-braces for any orphan)
+        for temp in list(self._tool_temps.values()):
+            temp.clear()
+        self._tool_temps.clear()
+        jobtemp.clear_all()
         self.root.destroy()
 
 
@@ -3882,20 +4257,13 @@ class DocWindow(tk.Toplevel):
         file — no section, the prompt stands alone as before."""
         if self._image_path is None:
             return
+        self.update_idletasks()
+        avail = max(self.winfo_width() - 80, 320)
         try:
-            img = Image.open(self._image_path)
-            img.load()
+            self._img_ref = _scaled_photo(self._image_path, avail)
         except OSError as exc:
             self._log_line(f"(image unreadable: {exc})")
             return
-        self.update_idletasks()
-        avail = max(self.winfo_width() - 80, 320)
-        if img.width > avail:
-            scale = avail / img.width
-            img = img.resize(
-                (avail, max(round(img.height * scale), 1)), Image.LANCZOS
-            )
-        self._img_ref = ImageTk.PhotoImage(img)
         self.txt.configure(state="normal")
         self.txt.insert("end", "\n")
         self.txt.image_create("end", image=self._img_ref, padx=8, pady=8)
@@ -3975,6 +4343,103 @@ class DocWindow(tk.Toplevel):
             " document.",
             parent=self,
         )
+
+
+class BeforeAfterWindow(tk.Toplevel):
+    """A BEFORE/AFTER viewer for one in-place tool job.
+
+    SINGLE mode (one image) stacks its before + after with a **Restore**
+    button; MULTI mode scrolls every changed image of the job with a
+    **RESTORE ALL** button. The same viewer style as DocWindow's
+    single-image prompt view (a double-click opens it). Themed like the
+    app (skinned Toplevel + registered in ``THEME_TOPLEVELS`` so a
+    Day/Night flip re-tints it, unregistered on ``<Destroy>``); every
+    scaled PhotoImage is held on ``self._photos`` so tk cannot GC it.
+    """
+
+    def __init__(self, master, title, pairs, *, restore_label, restore_cb):
+        super().__init__(master)
+        self.title(title)
+        self.minsize(DOC_MIN_W, DOC_MIN_H)
+        skin_toplevel(self)  # bg registered so a flip re-tints the window
+        THEME_TOPLEVELS.append(self)
+        self._restore_cb = restore_cb
+        self._photos: list = []  # keep the PhotoImages alive
+
+        width = min(
+            int(self.winfo_screenwidth() * DOC_MAX_FRAC),
+            max(BEFORE_AFTER_W, DOC_MIN_W),
+        )
+        height = min(
+            max(int(self.winfo_screenheight() * DOC_HEIGHT_FRAC), DOC_MIN_H),
+            int(self.winfo_screenheight() * DOC_MAX_FRAC),
+        )
+        self.geometry(f"{width}x{height}")
+
+        bar = ttk.Frame(self, padding=6)
+        bar.pack(fill="x")
+        ttk.Label(
+            bar,
+            text=(
+                "Before / after — Restore reverts this image to the"
+                " original." if len(pairs) == 1 else
+                "Before / after of every changed image — RESTORE ALL"
+                " reverts the whole job."
+            ),
+            style="Muted.TLabel",
+        ).pack(side="left")
+        self._restore_btn = rounded_button(
+            bar, restore_label, command=self._do_restore, kind="danger",
+        )
+        self._restore_btn.pack(side="right")
+        rounded_button(bar, "Close", command=self.destroy).pack(
+            side="right", padx=4
+        )
+
+        self._scroll = ScrollFrame(self, horizontal=False)
+        self._scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        avail = max(width - BEFORE_AFTER_IMG_PAD_PX, 320)
+        self.update_idletasks()
+        for pair in pairs:
+            self._add_pair(pair, avail)
+
+        self.bind("<Destroy>", self._on_destroy)
+
+    def _add_pair(self, pair: dict, avail: int) -> None:
+        block = ttk.Frame(self._scroll.body, padding=(4, 8))
+        block.pack(fill="x", anchor="w")
+        ttk.Label(block, text=pair["rel"], style="Head.TLabel").pack(
+            anchor="w", pady=(0, 4)
+        )
+        for tag, path in (
+            ("Before", pair["before"]), ("After", pair["after"])
+        ):
+            ttk.Label(block, text=tag, style="Muted.TLabel").pack(anchor="w")
+            try:
+                photo = _scaled_photo(path, avail)
+            except OSError as exc:
+                ttk.Label(
+                    block, text=f"({tag} unreadable: {exc})"
+                ).pack(anchor="w")
+                continue
+            self._photos.append(photo)
+            lbl = ttk.Label(block, image=photo)
+            lbl.image = photo  # belt-and-braces ref
+            lbl.pack(anchor="w", pady=(0, 6))
+        ttk.Separator(block).pack(fill="x", pady=(2, 0))
+
+    def _do_restore(self) -> None:
+        self._restore_cb()
+        self._restore_btn.configure(state="disabled", text="Restored ✓")
+
+    def apply_theme(self) -> None:
+        # ttk children flip via styles; the toplevel + scroll canvas ride
+        # the global recolour — nothing per-widget to redo here.
+        pass
+
+    def _on_destroy(self, event) -> None:
+        if event.widget is self and self in THEME_TOPLEVELS:
+            THEME_TOPLEVELS.remove(self)
 
 
 class DayNightSwitch(tk.Canvas):

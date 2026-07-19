@@ -61,6 +61,14 @@ non-proportional LANCZOS stretch that never shrinks either axis and
 leaves an already-at-ratio image byte-unchanged. Loud but catchable.
 See [Change Aspect Ratio](aspect.md).
 
+### `jobtemp.py` — Job Temp / Restore
+The four in-place tools' safety net (owner 2026-07-19): back up the
+ORIGINAL of every file before the op, so the dashboard's before/after
+viewer can RESTORE one image or the whole job, plus `measure` — the
+before→after % each tool panel shows (removed / reduction / increase /
+deformation), derived OUTSIDE the engine functions. Cleared on panel
+CLOSE, on app exit and swept at startup. See [Job Temp](jobtemp.md).
+
 ### `settings.py` — Settings Persistence
 Loads/saves the GUI's remembered choices as `settings.json` at the
 project root (gitignored); a corrupt file is loud but never crashes

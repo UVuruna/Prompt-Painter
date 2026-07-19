@@ -53,6 +53,16 @@ the target, tiny sources stay honestly below. The last test drives
 the REAL downloaded binary (skipped when `tools/realesrgan/` is
 absent).
 
+### `test_jobtemp.py` — Job Temp / Restore + Measure
+Synthetic PNGs through [Job Temp](../painter/jobtemp.md): a
+backup→restore_one byte round-trip, `drop` removing a no-op backup,
+`restore_all` reverting every backed-up file, `clear`/`clear_all`
+wiping the slot / whole root, a fresh `JobTemp` wiping a stale slot,
+and `measure` for all four kinds — bg (% removed pixels), crop (% area
+reduction), upscale (% area increase) and aspect (% deformation),
+including the LARGER-axis stretch case where a naive "smaller side
+only" reading would wrongly report 0.
+
 ### `test_settings.py` — Settings Persistence
 Missing file → `{}`, atomic roundtrip, corrupt and non-object JSON
 → loud stderr but `{}`, never a crash.
