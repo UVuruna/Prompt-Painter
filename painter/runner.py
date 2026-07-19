@@ -2,27 +2,25 @@
 
 Per pending item: paste (prompt + the site's rule suffix) -> submit
 -> await the done edge -> extract bytes -> save DIRECTLY under
-``<out_root>/<drop-path>`` -> background fix -> report line -> mark
-done in the sidecar ``.progress.json`` -> pause -> next. A crash or
-a quota stop costs nothing: the next run resumes past every marked
-item, and the report keeps every finished line.
+``<out_root>/<drop-path>`` -> background fix -> report line -> pause
+-> next. A crash or a quota stop costs nothing: "done" is the SAVED
+FILE itself, so the next unattended run resumes past every image
+already on disk, and the report keeps every finished line.
 
-The loop only ever writes under ``out_root`` (images, progress,
-report, background fixes) — sheets are READ ONLY by construction.
+The loop only ever writes under ``out_root`` (images, report,
+background fixes) — sheets are READ ONLY by construction.
 """
 
 from __future__ import annotations
 
-import json
 import random
 import struct
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 from painter.config import (
-    PROGRESS_SUFFIX,
     REPORT_SUFFIX,
     SAFER_PREAMBLE,
     STATE_DIRNAME,
@@ -72,30 +70,6 @@ def _pause(timing: Timing, should_stop: ShouldStop | None, log: Log) -> None:
         if should_stop is not None and should_stop():
             break
         time.sleep(0.5)
-
-
-class Progress:
-    """Sidecar state file: ``<out_root>/<sheet-stem>.progress.json``."""
-
-    def __init__(self, path: Path):
-        self.path = path
-        self._done: dict[str, dict] = {}
-        if path.exists():
-            self._done = json.loads(path.read_text(encoding="utf-8"))["done"]
-
-    def is_done(self, drop_path: str) -> bool:
-        return drop_path in self._done
-
-    def mark_done(self, drop_path: str, out_file: Path) -> None:
-        self._done[drop_path] = {
-            "file": str(out_file),
-            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        }
-        tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(
-            json.dumps({"done": self._done}, indent=2), encoding="utf-8"
-        )
-        tmp.replace(self.path)
 
 
 class RunReport:
@@ -202,15 +176,17 @@ def run_sheet(
     """Generate every pending item of a clean sheet; returns the count.
 
     Saves land at ``out_base / dest_for(drop, site_key)`` — the
-    assets-mirroring layout. Run state and the report live under
+    assets-mirroring layout. The report lives under
     ``out_base/_state/<site>/`` so the image tree stays copy-ready.
     The caller has already refused sheets with problems; skipped
-    entries are logged here and never driven. ``only`` narrows the
-    run to the owner's ticked drop paths (None = everything).
+    entries are logged here and never driven. ``only`` (the owner's
+    ticked drop paths) generates EXACTLY those, OVERWRITING any that
+    already exist — the regenerate path; None resumes by FILE
+    EXISTENCE (skip every image already on disk) and sits sheet-advised
+    items out.
     """
     state_dir = out_base / STATE_DIRNAME / site_key
     state_dir.mkdir(parents=True, exist_ok=True)
-    progress = Progress(state_dir / (sheet.source.stem + PROGRESS_SUFFIX))
     run_report = (
         RunReport(
             state_dir / (sheet.source.stem + REPORT_SUFFIX),
@@ -224,25 +200,33 @@ def run_sheet(
     for sk in sheet.skipped:
         log(f"  SKIP {sk.title} — {sk.reason}")
 
-    queue = [it for it in sheet.items if not progress.is_done(it.drop_path)]
-    already = len(sheet.items) - len(queue)
-    if already:
-        log(
-            f"  RESUME: {already}/{len(sheet.items)} already done per"
-            f" {progress.path.name}"
-        )
+    # "Done" is the SAVED FILE itself, not a sidecar record (owner
+    # 2026-07-19): an item is already done exactly when its dest file
+    # exists on disk. A ticked ``only`` OVERRIDES this — it generates
+    # (overwrites) precisely those items, so a bad image can be redone.
     report_skips = list(sheet.skipped)
     if only is not None:
-        # the owner's ticks decide everything — advice included
-        selected = [it for it in queue if it.drop_path in only]
-        if len(selected) != len(queue):
+        # the owner's ticks decide everything — advice AND already-saved
+        # files included: ticking a done image REGENERATES (overwrites) it
+        queue = [it for it in sheet.items if it.drop_path in only]
+        if len(queue) != len(sheet.items):
             log(
-                f"  SELECTION: {len(selected)}/{len(queue)} pending"
+                f"  SELECTION: {len(queue)}/{len(sheet.items)}"
                 " item(s) ticked for this run"
             )
-        queue = selected
     else:
-        # no explicit selection: sheet-advised items sit out by default
+        # no explicit selection: resume by FILE EXISTENCE — skip every
+        # item already saved on disk; sheet-advised items sit out too
+        def _on_disk(item) -> bool:
+            return (out_base / dest_for(item.drop_path, site_key)).exists()
+
+        queue = [it for it in sheet.items if not _on_disk(it)]
+        already = len(sheet.items) - len(queue)
+        if already:
+            log(
+                f"  RESUME: {already}/{len(sheet.items)} already saved"
+                f" on disk under {site_key}/"
+            )
         for it in (adv := [it for it in queue if it.advice]):
             log(f"  NOT RUN (sheet advice): {it.title} — {it.advice}")
             report_skips.append(
@@ -391,7 +375,6 @@ def run_sheet(
             saved_bytes = dest.read_bytes()
             size = len(saved_bytes)
             final_res = _png_size(saved_bytes)
-            progress.mark_done(item.drop_path, dest)  # resume-safe now
             generated += 1
             log(f"    saved {dest} ({size:,} bytes)")
             # count it live right away (dashboard progress + generate

@@ -257,14 +257,16 @@ reachability fixes:
   `ChatGPT 49/55`), and each collection and folder row shows its
   own `sel/tot`. **Clicking any count is all/none** for that
   scope+site (header = whole site, collection, or folder); it
-  flips only the ENABLED (non-done) leaves, and every count
-  re-derives live. Already-done items (per the site's progress
-  under the current output folder) show disabled + unticked;
+  flips only the non-done leaves, and every count
+  re-derives live. Already-done items — their SAVED FILE exists
+  under the current output folder (owner 2026-07-19: file existence,
+  no longer a sidecar record) — show green/olive + unticked but
+  ENABLED, so re-ticking one REGENERATES (overwrites) a bad image;
   sheet-ADVISED items (REUSE / not-approved sections) show
   unticked with the ⚠ reason truncated — tick them to generate
   them anyway. Without any explicit ticks a run skips advised
   items by default (eager var materialisation is run-safe: the
-  default advice-free, not-done set equals the runner's own
+  default advice-free, not-on-disk set equals the runner's own
   "never opened Select" rule). Leaf names are COLOR-CODED: green =
   done on both sites (olive = done on one), red = SUPERSEDED
   advice, orange = other advice, default = pending — and a
@@ -417,8 +419,8 @@ reachability fixes:
   stale key is ignored). The **collection queue is NOT persisted** — the app
   starts with an empty list every launch (owner 2026-07-18); and a
   saved output folder that no longer exists is ignored in favour of
-  the default `out/`, so done-detection never reads an empty
-  `_state`. Saves debounce on every meaningful change (var traces —
+  the default `out/`, so done-detection checks the real output tree
+  instead of a stale path. Saves debounce on every meaningful change (var traces —
   the per-agent gear collapse rides a BooleanVar so it saves like every
   other field —, zoom, theme flip, the Controls collapse, the two
   remembered dialogs) and always fire on close; loading applies missing

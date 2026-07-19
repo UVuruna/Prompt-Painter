@@ -19,7 +19,8 @@ match.
 - [Sheet Parser](sheet_parser.md) — `IMAGE_EXTENSIONS`,
   `SKIP_MARKER_PATTERN`
 - [CDP Driver](driver.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
-- [Run Loop](runner.md) — `Timing`, `PROGRESS_SUFFIX`
+- [Run Loop](runner.md) — `Timing`, `STATE_DIRNAME`,
+  `REPORT_SUFFIX`, `SAFER_PREAMBLE`, `dest_for`
 - [Chrome Launcher](chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 - [Postprocess](postprocess.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
@@ -47,7 +48,7 @@ match.
 - `CHROME_PROFILE_DIR` — the dedicated automation profile
   (`chrome-profile/`, gitignored; Chrome 136+ refuses CDP on the
   default profile). Log in once there; sessions persist.
-- `DEFAULT_OUT_DIR`, `STATE_DIRNAME`, `PROGRESS_SUFFIX`,
+- `DEFAULT_OUT_DIR`, `STATE_DIRNAME`,
   `REPORT_SUFFIX`, `dest_for(drop, site)` — the out/ tree MIRRORS
   DOMY's assets/: sheets carry site-agnostic
   `assets/<category>/<rest>` paths and `dest_for` injects the site

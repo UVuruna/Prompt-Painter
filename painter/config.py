@@ -79,7 +79,6 @@ CHROME_LAUNCH_TIMEOUT_S = 30.0
 # <out>/_state/<site>/; backup variants land under <out>/EXTRA/.
 DEFAULT_OUT_DIR = PROJECT_ROOT / "out"
 STATE_DIRNAME = "_state"
-PROGRESS_SUFFIX = ".progress.json"
 REPORT_SUFFIX = "_report.txt"
 
 

@@ -22,7 +22,6 @@ and table) and the detailed **Log**.
 from __future__ import annotations
 
 import io
-import json
 import math
 import queue
 import random
@@ -64,7 +63,6 @@ from painter.config import (
     NEW_CHAT_CHOICES,
     RESIZE_SETTLE_MS,
     SITES,
-    STATE_DIRNAME,
     STYLE_CHOICES,
     STYLE_DEFAULT,
     SWITCH_ANIM_MS,
@@ -93,7 +91,6 @@ from painter.config import (
     SWITCH_SUPERSAMPLE,
     SWITCH_TRACK_DAY_SVG,
     SWITCH_TRACK_NIGHT_SVG,
-    PROGRESS_SUFFIX,
     THEMES,
     TIMING,
     UPSCALE_ASPECT_DECIMALS,
@@ -3015,17 +3012,19 @@ class PainterGui:
             self.out_var.get().strip() or str(DEFAULT_OUT_DIR)
         ).resolve()
 
-    def _progress_done(self, site: str, sheet: Sheet) -> set:
-        """Drop paths already generated for one site+collection."""
-        progress_file = (
-            self._out_base() / STATE_DIRNAME / site
-            / (sheet.source.stem + PROGRESS_SUFFIX)
-        )
-        if progress_file.exists():
-            return set(
-                json.loads(progress_file.read_text(encoding="utf-8"))["done"]
-            )
-        return set()
+    def _done_on_disk(self, site: str, sheet: Sheet) -> set:
+        """Drop paths whose saved FILE already exists for one
+        site+collection — the SAME dest the runner writes to
+        (``out_base / dest_for``). "Done" means the image is really on
+        disk (owner 2026-07-19), not merely recorded in a sidecar: a
+        done item can be re-ticked to regenerate, and an item only
+        recorded elsewhere never falsely reads as done."""
+        out_base = self._out_base()
+        return {
+            item.drop_path
+            for item in sheet.items
+            if (out_base / dest_for(item.drop_path, site)).exists()
+        }
 
     def _parse_all(self) -> list[Sheet]:
         """Parse every queued sheet; broken ones are reported and
@@ -3073,17 +3072,22 @@ class PainterGui:
         selection: dict[str, set[str] | None],
     ) -> tuple[int, int]:
         """Mirror run_sheet's queue rule to pre-count this run's scope:
-        (total images to generate, number of themes with work)."""
+        (total images to generate, number of themes with work). A
+        ticked selection generates EXACTLY those items (regenerate
+        included — file existence ignored); with no selection the
+        runner resumes by FILE EXISTENCE and sits advice out."""
         total = 0
         themes = 0
         for sheet in sheets:
-            done = self._progress_done(site, sheet)
-            pending = [it for it in sheet.items if it.drop_path not in done]
             sel = selection.get(str(sheet.source))
             if sel is not None:
-                pending = [it for it in pending if it.drop_path in sel]
+                pending = [it for it in sheet.items if it.drop_path in sel]
             else:
-                pending = [it for it in pending if not it.advice]
+                done = self._done_on_disk(site, sheet)
+                pending = [
+                    it for it in sheet.items
+                    if it.drop_path not in done and not it.advice
+                ]
             if pending:
                 total += len(pending)
                 themes += 1
@@ -3942,7 +3946,7 @@ class SelectWindow(tk.Toplevel):
 
         done = {
             key: {
-                str(sheet.source): gui._progress_done(key, sheet)
+                str(sheet.source): gui._done_on_disk(key, sheet)
                 for sheet in sheets
             }
             for key in self._site_keys
@@ -3977,8 +3981,8 @@ class SelectWindow(tk.Toplevel):
         bar.pack(fill="x")
         ttk.Label(
             bar,
-            text="Tick = generate.  Done = disabled.  ⚠ advice off."
-            "  Click a count = all/none.",
+            text="Tick = generate.  Done = green (re-tick to redo)."
+            "  ⚠ advice off.  Click a count = all/none.",
             style="Muted.TLabel",
         ).pack(side="left")
         rounded_button(
@@ -4079,8 +4083,8 @@ class SelectWindow(tk.Toplevel):
     def _build_collection_data(self, sheet: Sheet, done: dict) -> dict:
         """One collection's leaf records + its folders (first-seen
         order). Materialises the shared BooleanVars — run-safe: the
-        default (advice-free, not-done) set equals the runner's own
-        'never opened Select' rule."""
+        default (advice-free, not-yet-on-disk) set equals the runner's
+        own 'never opened Select' rule (file-existence resume)."""
         src = str(sheet.source)
         folders: dict[str, dict] = {}
         leaves: list[dict] = []
@@ -4103,7 +4107,9 @@ class SelectWindow(tk.Toplevel):
                 )
                 is_done = drop in done[key][src]
                 if is_done:
-                    var.set(False)  # done -> never ticked, always disabled
+                    # done -> unticked by DEFAULT, but re-tickable so a
+                    # bad image can be regenerated (owner 2026-07-19)
+                    var.set(False)
                 leaf["sites"][key] = {"var": var, "done": is_done}
             leaves.append(leaf)
             self._all_leaves.append(leaf)
@@ -4238,9 +4244,10 @@ class SelectWindow(tk.Toplevel):
             row = self._new_row(fnode["children"], level=2)
             for i, key in enumerate(self._site_keys):
                 info = leaf["sites"][key]
+                # done items stay ENABLED and re-tickable (owner
+                # 2026-07-19) — coloured green/olive, unticked by default,
+                # but the owner can tick one to REGENERATE a bad image
                 cb = ttk.Checkbutton(row, variable=info["var"])
-                if info["done"]:
-                    cb.state(["disabled"])
                 cb.grid(row=0, column=3 + i, sticky="n")
             text = leaf["name"]
             if leaf["advice"]:

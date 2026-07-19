@@ -26,8 +26,9 @@ straight from the DOM. See [CDP Driver](driver.md).
 
 ### `runner.py` — Run Loop
 The paced, resumable per-item loop: background suffix, save under
-`<out>/<site>/<drop-path>`, background fix, `.progress.json`
-sidecar, graceful stop. See [Run Loop](runner.md).
+`<out>/<site>/<drop-path>`, background fix, FILE-EXISTENCE resume
+(no sidecar — "done" is the saved file), graceful stop. See
+[Run Loop](runner.md).
 
 ### `chrome.py` — Chrome Launcher
 Probes CDP and, when nothing answers, launches the automation
@@ -96,9 +97,11 @@ the app. See [Settings](settings.md).
   per-source asset trees.
 - **Direct save, closed folders.** Images land straight in
   `<out>/<site>/<drop-path>` (owner 2026-07-17: no approval step);
-  the per-sheet progress sidecar and report txt live beside them,
+  the per-sheet report txt lives under `_state/<site>/`, and "done"
+  is the SAVED FILE itself (owner 2026-07-19: no progress sidecar),
   so every sheet CLOSES as a unit — a quota stop mid-batch never
-  costs finished work and the next run resumes the rest.
+  costs finished work and the next run resumes past every image
+  already on disk.
 - **Skip markers work at three levels** (all case-insensitive, and
   only inside `**bold**` spans, so prose mentions never trigger):
   a marker in a span after an entry's title skips that entry; a

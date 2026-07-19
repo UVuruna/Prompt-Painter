@@ -1,12 +1,12 @@
 """Offline tests for the run loop — a fake driver, a temp out folder.
 
 Covers what needs no browser: the per-site rule suffix, the
-assets-mirroring output layout, the report txt, resume via the
-progress sidecar (under _state/), the stop flag, and the
-loud-but-not-fatal background-fix hook.
+assets-mirroring output layout, the report txt, resume by FILE
+EXISTENCE (a saved dest file = done; `only` overrides it to
+regenerate), the stop flag, and the loud-but-not-fatal
+background-fix hook.
 """
 
-import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -145,8 +145,9 @@ def test_suffix_layout_report_and_resume(tmp_path):
     assert driver.submitted[0] == "prompt 0" + suffix
     # legacy drops keep the <site>/<drop> layout
     assert (out / "gemini" / "fake" / "img_0.png").read_bytes() == PNG_1PX
-    # sidecars live under _state/, out of the copy-ready tree
-    assert state(out, "gemini", "fake_prompts.progress.json").exists()
+    # NO progress sidecar any more — "done" is the saved file itself;
+    # only the report lives under _state/ (asserted below)
+    assert not state(out, "gemini", "fake_prompts.progress.json").exists()
     # skipped entries are logged, never driven
     assert any("Old Seat" in line for line in logs)
 
@@ -162,7 +163,8 @@ def test_suffix_layout_report_and_resume(tmp_path):
     assert " B" in report or "KB" in report  # a size column per image
     assert "Run finished" in report
 
-    # resume: a second run drives nothing
+    # resume by FILE EXISTENCE: the saved files are on disk, so a
+    # second unattended run (only=None) drives nothing
     driver2 = FakeDriver(SITES["gemini"])
     assert run_sheet(sheet, driver2, out, "gemini", FAST) == 0
     assert driver2.submitted == []
@@ -180,13 +182,8 @@ def test_assets_paths_save_into_the_mirrored_tree(tmp_path):
     run_sheet(sheet, FakeDriver(SITES["chatgpt"]), out, "chatgpt", FAST)
     # assets/emblem/mood/Glory.png -> out/emblem/chatgpt/mood/Glory.png
     assert (out / "emblem" / "chatgpt" / "mood" / "Glory.png").exists()
-    # progress keys stay the SHEET's drop path (stable across layouts)
-    progress = json.loads(
-        state(out, "chatgpt", "mood_prompts.progress.json").read_text(
-            encoding="utf-8"
-        )
-    )["done"]
-    assert list(progress) == ["assets/emblem/mood/Glory.png"]
+    # no progress sidecar — resume is by the saved file's existence
+    assert not state(out, "chatgpt", "mood_prompts.progress.json").exists()
 
 
 def test_events_carry_both_timings_and_size(tmp_path):
@@ -283,14 +280,11 @@ def test_refusal_skips_the_item_and_the_run_continues(tmp_path):
 
     assert generated == 2  # items 0 and 2 made it
     assert len(driver.submitted) == 3  # the refusal did not stop the run
+    # the refused item left NO file, so a rerun retries it by
+    # file-existence; the two generated items ARE on disk
     assert not (out / "gemini" / "fake" / "img_1.png").exists()
-    progress = json.loads(
-        state(out, "gemini", "fake_prompts.progress.json").read_text(
-            encoding="utf-8"
-        )
-    )["done"]
-    assert "fake/img_1.png" not in progress  # a rerun retries it
-    assert len(progress) == 2
+    assert (out / "gemini" / "fake" / "img_0.png").exists()
+    assert (out / "gemini" / "fake" / "img_2.png").exists()
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
@@ -350,6 +344,55 @@ def test_only_filter_drives_just_the_ticked_items(tmp_path):
     assert generated == 1
     assert (out / "chatgpt" / "fake" / "img_2.png").exists()
     assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+
+
+def test_file_existence_resume_skips_saved_and_runs_missing(tmp_path):
+    """No `only` (unattended/CLI): an item whose dest FILE already
+    exists is skipped and left UNTOUCHED; the missing ones generate —
+    resume is by the files on disk, not a sidecar record."""
+    sheet = make_sheet(tmp_path, n=3)
+    out = tmp_path / "out"
+    # pre-place img_0's dest file (the "already done" one)
+    dest0 = out / dest_for("fake/img_0.png", "chatgpt")
+    dest0.parent.mkdir(parents=True, exist_ok=True)
+    dest0.write_bytes(b"OLD")
+
+    driver = FakeDriver(SITES["chatgpt"])
+    logs: list[str] = []
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, log=logs.append
+    )
+    # img_0 already on disk -> skipped and NOT overwritten; 1 & 2 run
+    assert generated == 2
+    assert dest0.read_bytes() == b"OLD"  # a done item is never touched
+    assert (out / dest_for("fake/img_1.png", "chatgpt")).read_bytes() == PNG_1PX
+    assert (out / dest_for("fake/img_2.png", "chatgpt")).read_bytes() == PNG_1PX
+    assert len(driver.submitted) == 2  # only the two missing ones ran
+    assert any("RESUME: 1/3 already saved" in line for line in logs)
+
+
+def test_only_regenerates_an_existing_file(tmp_path):
+    """A ticked `only` OVERRIDES file existence: a done image (dest
+    file already present) IS regenerated (overwritten) when ticked,
+    while a done image NOT ticked is left alone."""
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    # both dests already exist from a prior run, with stale bytes
+    for k in (0, 1):
+        d = out / dest_for(f"fake/img_{k}.png", "gemini")
+        d.parent.mkdir(parents=True, exist_ok=True)
+        d.write_bytes(b"STALE")
+
+    driver = FakeDriver(SITES["gemini"])
+    # tick ONLY img_0 -> its queue includes it despite the file existing
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST, only={"fake/img_0.png"}
+    )
+    assert generated == 1
+    assert len(driver.submitted) == 1  # only the ticked item ran
+    # img_0 overwritten with the fresh PNG; img_1 left as the stale bytes
+    assert (out / dest_for("fake/img_0.png", "gemini")).read_bytes() == PNG_1PX
+    assert (out / dest_for("fake/img_1.png", "gemini")).read_bytes() == b"STALE"
 
 
 def test_stop_flag_stops_between_items(tmp_path):

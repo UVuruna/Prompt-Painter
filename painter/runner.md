@@ -8,30 +8,37 @@ paste (prompt + the site's rule suffix) → submit → await the done
 edge → extract bytes → save at `out_base / dest_for(drop, site)`
 (the assets-mirroring layout) → the `post_save` hook (the caller's
 composed postprocess: bg removal / crop / upscale) → report line →
-mark done in the sidecar state (under `_state/<site>/`) → pause →
-next. A crash or a quota stop costs nothing — the next run resumes
-past every marked item and the report keeps every finished line.
-The loop writes ONLY under `out_base`; sheets are READ ONLY by
-construction.
+pause → next. A crash or a quota stop costs nothing — **"done" is
+the SAVED FILE itself** (owner 2026-07-19: no progress sidecar), so
+an unattended rerun resumes past every image already on disk and the
+report keeps every finished line. The loop writes ONLY under
+`out_base`; sheets are READ ONLY by construction.
 
 ## Connections
 
 ### Uses
 - [Sheet Parser](sheet_parser.md) — consumes `Sheet`
 - [CDP Driver](driver.md) — the per-item protocol, `sniff_format`
-- [Config](config.md) — `Timing`, `PROGRESS_SUFFIX`,
-  `REPORT_SUFFIX`, `SAFER_PREAMBLE`, `fmt_duration`, `fmt_size`
+- [Config](config.md) — `Timing`, `REPORT_SUFFIX`,
+  `SAFER_PREAMBLE`, `dest_for`, `fmt_duration`, `fmt_size`
 
 ### Used by
 - [Main (Entry Point)](../main.md) and [GUI](../gui.md)
 
-## Classes
+## Resume model (owner 2026-07-19)
 
-### Progress
-The sidecar state file `<out_root>/<sheet-stem>.progress.json`: a
-map of done drop paths to saved file + UTC timestamp. Writes are
-atomic (temp file + replace). A corrupt file raises loudly — never
-silently restarts a run.
+"Done" is the SAVED FILE itself — there is NO progress sidecar. An
+unattended rerun (`only=None`) skips every item whose dest file
+`out_base / dest_for(drop, site)` already exists and generates the
+rest (sheet-advised items sit out). A ticked `only` set OVERRIDES
+this: it generates EXACTLY those drop paths, OVERWRITING any that
+already exist — the regenerate path, so a bad image can be redone by
+re-ticking it in the GUI's Select window. This replaces the old
+`.progress.json` reading, which could disagree with the real files
+on disk (an item recorded done whose file was never at the output
+location showed as done yet could not be regenerated).
+
+## Classes
 
 ### RunReport
 The per-sheet report `<out_root>/<sheet-stem>_report.txt`,
@@ -72,19 +79,22 @@ event) so the dashboard never stalls; the `item_done` event with
   count), `item_done` (title, drop_path, gen_s, over_s, orig_res,
   final_res, size), `item_refused`, `sheet_done` (generated) — the
   GUI dashboard is built from these. Logs the
-  sheet's skipped entries, filters the queue through `Progress`,
+  sheet's skipped entries, resumes by FILE EXISTENCE (or drives the
+  ticked `only` set, which overrides existence to regenerate),
   drives every pending item, appends `prompt_suffix` (the caller
   resolves the per-site rules), runs the `post_save` hook — the
   caller composes the postprocess steps by flags and returns the
   full action description; failures are loud, counted, never fatal
   — paces between prompts,
   honors `should_stop`, and feeds `RunReport` when `report` is on.
-  `only` narrows the queue to the owner's ticked drop paths. A
+  `only` narrows the queue to the owner's ticked drop paths,
+  generating EXACTLY those and OVERWRITING any that already exist
+  (the regenerate path). A
   SAFETY refusal (`ItemRefused`) skips just that item and the run
   continues; when `safer_retry` is on the item is re-sent ONCE with
   `SAFER_PREAMBLE` first, and only a second refusal counts as
-  REFUSED. Terminal/driver errors propagate to the caller —
-  progress and report stay saved. A `TerminalState` is re-raised
+  REFUSED. Terminal/driver errors propagate to the caller — the
+  report stays saved (resume is by the files already on disk). A `TerminalState` is re-raised
   UNCHANGED, so callers read its `retry_after_s` (the quota reset
   time the site named, parsed by the driver); the runner logs it
   first (`quota — reset in ~N min`) and stamps it into the report's

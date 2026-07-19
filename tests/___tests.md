@@ -25,8 +25,9 @@ folder — no browser: the per-site rule suffix on every submitted
 prompt (Gemini's three laws, ChatGPT without them), the direct
 `<out>/<drop-path>` layout, the report txt (header, per-image
 lines with resolution and postprocess actions, averages, totals,
-stop reason), resume via the progress sidecar (a second run drives
-nothing), the graceful stop flag, the `post_save` hook (a failure
+stop reason), resume by FILE EXISTENCE (a second unattended run
+drives nothing; a ticked `only` REGENERATES an already-saved file),
+the graceful stop flag, the `post_save` hook (a failure
 is loud, counted, and never kills the run), and `TerminalState`
 propagation — the runner logs the parsed quota reset time, stamps
 it into the report and re-raises the exception unchanged.
