@@ -307,6 +307,7 @@ THEMES = {
             "code_fg": "#a5d6ff",    # DocWindow code text on dark box
             "btn_text": "#ffffff",   # solid-button label
             "skip": "#adb5bd",       # muted grey — SKIPPED tool rows (dimmed)
+            "toolchanged": "#2ee59d",  # bright mint-teal — CHANGED tool rows (POPS)
         },
     },
     "day": {
@@ -339,6 +340,7 @@ THEMES = {
             "code_fg": "#1f5b9e",    # legible on the light code surface
             "btn_text": "#ffffff",
             "skip": "#8a8578",       # muted warm grey — SKIPPED tool rows
+            "toolchanged": "#0a9d6e",  # vivid emerald — CHANGED tool rows (POPS on cream)
         },
     },
 }

@@ -504,24 +504,32 @@ key is gone (a stale one in an old settings.json is ignored).
   and its per-image op time. **BG removal DROPS the Before/After
   columns** (owner 2026-07-19): it changes ALPHA, not dimensions, so
   before == after resolution is meaningless — its panel shows Name · % ·
-  Time · Size only (`self._is_bg` picks the column set). A refused
-  (no-op) row shows `—` in % and BLANK Time, and is TINTED a muted grey
-  (owner 2026-07-19): a `TOOL_SKIP_TAG` Treeview tag whose foreground is
-  the theme's `status["skip"]` (`#adb5bd` night / `#8a8578` day) so
-  SKIPPED rows read as dimmed against the full-contrast changed rows.
-  The tag is theme-aware — `skin_tree` registers it in the plain-tk skin
-  registry so it re-tints on a Day/Night flip. This bucket now also holds
-  the many 0px crops the crop-fix (SKIPPED iff output resolution ==
-  input) correctly routes to skipped.
+  Time · Size only (`self._is_bg` picks the column set). CHANGED vs
+  SKIPPED rows are tinted by TWO theme-aware Treeview tags (owner
+  2026-07-19), so they NEVER blur together:
+    - a CHANGED (restorable) row carries `TOOL_CHANGED_TAG`, a BOLD
+      striking green/teal (`status["toolchanged"]` — `#2ee59d` mint on
+      night, `#0a9d6e` emerald on the cream day) that POPS off both
+      backgrounds;
+    - a refused (no-op) row shows `—` in % and BLANK Time and carries
+      `TOOL_SKIP_TAG`, the muted `status["skip"]` (`#adb5bd` night /
+      `#8a8578` day). This bucket also holds the many 0px crops the
+      crop-fix (SKIPPED iff output resolution == input) routes to skipped.
+  Both tags are theme-aware — `skin_tree` registers them in the plain-tk
+  skin registry (`_apply_tree_skin`) so they re-tint on a Day/Night flip.
 - **Double-click an image row** opens a `BeforeAfterWindow` for that
-  image with a **Restore** (reverts ONLY it); **double-click the
-  collection / folder node** opens a viewer of ALL the job's changed
-  images with **RESTORE ALL** (reverts the whole job). A restore marks
-  the row(s) restored and puts the ORIGINAL back on disk (see below).
-  Works for ALL four tools — BG removal included: it changes ALPHA, not
-  dimensions, and the viewer keys off the BACKUP existing (never a
-  resolution change), so a cleared-background image shows before/after
-  just like a resized one.
+  image with a **Restore** (reverts ONLY it); **double-click a FOLDER
+  node** opens a viewer of ONLY that folder's changed images (title names
+  the folder + count) with **RESTORE ALL** reverting JUST that folder
+  (`rels_in_folder` filters `_image_rows` by `folder_of`; `restore_folder`
+  restores only those rels — owner 2026-07-19, the fix for a folder click
+  that used to revert the WHOLE job); **double-click the collection (top)
+  node** still opens ALL the job's changed images with a whole-job RESTORE
+  ALL. A restore marks the row(s) restored and puts the ORIGINAL back on
+  disk (see below). Works for ALL four tools — BG removal included: it
+  changes ALPHA, not dimensions, and the viewer keys off the BACKUP
+  existing (never a resolution change), so a cleared-background image
+  shows before/after just like a resized one.
 
 ### Temp / before-after / restore
 Every tool job holds a `painter.jobtemp.JobTemp` (a per-slot subdir

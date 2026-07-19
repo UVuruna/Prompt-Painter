@@ -63,3 +63,49 @@ def test_checker_composite_replaces_cleared_pixels():
     board.paste(img, (0, 0), img)
     # transparent everywhere -> the checker shows through untouched
     assert board.getpixel((0, 0)) == CHECKER_LIGHT
+
+
+# --- folder-scoped restore set (the ToolPanel folder double-click) ----
+# rels_in_folder backs _show_folder_beforeafter / restore_folder: a folder
+# node must open ONLY that folder's changed images, never every folder's.
+
+_ROWS = [
+    "chatgpt/greek/pantheon/Zeus.png",
+    "chatgpt/greek/pantheon/Hera.png",
+    "chatgpt/greek/pantheon/Ares.png",
+    "chatgpt/norse/aesir/Odin.png",
+    "chatgpt/norse/aesir/Thor.png",
+    "Loose.png",  # a root-level image -> folder_of == '(root)'
+]
+
+
+def test_rels_in_folder_returns_only_that_folders_images():
+    got = gui.rels_in_folder(_ROWS, "chatgpt/greek/pantheon")
+    assert got == [
+        "chatgpt/greek/pantheon/Zeus.png",
+        "chatgpt/greek/pantheon/Hera.png",
+        "chatgpt/greek/pantheon/Ares.png",
+    ]
+
+
+def test_rels_in_folder_second_folder_is_disjoint_not_the_union():
+    """The bug's crux: a second folder yields ITS OWN set — and the two
+    folders' sets are disjoint (never the whole-job union)."""
+    a = gui.rels_in_folder(_ROWS, "chatgpt/greek/pantheon")
+    b = gui.rels_in_folder(_ROWS, "chatgpt/norse/aesir")
+    assert b == ["chatgpt/norse/aesir/Odin.png", "chatgpt/norse/aesir/Thor.png"]
+    assert set(a).isdisjoint(b)
+    assert len(a) + len(b) < len(_ROWS)  # neither is the full job
+
+
+def test_rels_in_folder_accepts_a_dict_of_rows_like_image_rows():
+    """ToolPanel passes ``self._image_rows`` (a {rel: node} dict); iterating
+    it yields the rel keys, so the filter works on the dict directly."""
+    image_rows = {rel: f"node-{i}" for i, rel in enumerate(_ROWS)}
+    got = gui.rels_in_folder(image_rows, "chatgpt/norse/aesir")
+    assert got == ["chatgpt/norse/aesir/Odin.png", "chatgpt/norse/aesir/Thor.png"]
+
+
+def test_rels_in_folder_root_level_images_group_under_root():
+    got = gui.rels_in_folder(_ROWS, gui.folder_of("Loose.png"))
+    assert got == ["Loose.png"]

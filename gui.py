@@ -330,8 +330,11 @@ COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
 # stays compact. The gear carries settings.png (a gear icon) + this caret.
 SETTINGS_GLYPH_EXPANDED = "▾  Settings"   # gear label while fine-tune shows
 SETTINGS_GLYPH_COLLAPSED = "▸  Settings"  # gear label while hidden
-# the Treeview row tag tinting a SKIPPED tool row (its foreground comes
-# from the theme's status["skip"], re-applied on a flip via skin_tree)
+# the Treeview row tags for a tool panel's image rows — their foregrounds
+# come from the theme's status colours, re-applied on a flip via skin_tree.
+# CHANGED (restorable) rows get a BOLD striking green/teal so they POP;
+# SKIPPED (unchanged) rows a muted grey so the two never blur together.
+TOOL_CHANGED_TAG = "toolchanged"
 TOOL_SKIP_TAG = "skip"
 
 
@@ -840,10 +843,12 @@ def _apply_surface_skin(widget: tk.Misc) -> None:
 
 
 def _apply_tree_skin(widget: ttk.Treeview) -> None:
-    """A tool-panel Treeview: (re-)tint the SKIPPED-row tag from the
-    active theme's muted status colour. The base row colours follow the
-    ttk 'Treeview' style, but a per-widget TAG foreground does not — so it
-    is registered here and re-applied on every flip (owner 2026-07-19)."""
+    """A tool-panel Treeview: (re-)tint the CHANGED- and SKIPPED-row tags
+    from the active theme's status colours. The base row colours follow
+    the ttk 'Treeview' style, but a per-widget TAG foreground does not — so
+    both are registered here and re-applied on every flip (owner
+    2026-07-19): CHANGED rows a striking green/teal, SKIPPED rows muted."""
+    widget.tag_configure(TOOL_CHANGED_TAG, foreground=status("toolchanged"))
     widget.tag_configure(TOOL_SKIP_TAG, foreground=status("skip"))
 
 
@@ -1056,6 +1061,14 @@ def folder_of(drop_path: str) -> str:
     trinity'). A path with no directory collapses to '(root)'."""
     folder = PurePosixPath(drop_path).parent.as_posix()
     return "(root)" if folder in (".", "") else folder
+
+
+def rels_in_folder(rels, folder: str) -> list[str]:
+    """The subset of drop paths whose parent folder is exactly ``folder``
+    (by ``folder_of``) — backs the ToolPanel's folder-scoped before/after
+    viewer + RESTORE, so double-clicking one folder node touches ONLY that
+    folder's images, never the whole job (owner 2026-07-19)."""
+    return [rel for rel in rels if folder_of(rel) == folder]
 
 
 class ScrollFrame(ttk.Frame):
@@ -2146,11 +2159,13 @@ class ToolPanel(JobPanel):
     BEFORE / AFTER resolution and the tool's own % (removed / reduction
     / increase / deformation).
 
-    Double-click an image row for a BEFORE/AFTER viewer with Restore;
-    double-click the collection / folder node for a viewer of all the
-    job's changed images with RESTORE ALL. The job's originals are
-    backed up per file (``self.jobtemp``) before the op, so a restore
-    always puts the original back.
+    CHANGED (restorable) rows show in a striking green/teal; SKIPPED
+    (unchanged) rows in muted grey. Double-click an image row for a
+    BEFORE/AFTER viewer with Restore; double-click a FOLDER node for a
+    viewer of ONLY that folder's changed images with RESTORE ALL; double-
+    click the collection (top) node for ALL the job's changed images. The
+    job's originals are backed up per file (``self.jobtemp``) before the
+    op, so a restore always puts the original back.
     """
 
     def __init__(self, master, kind: str, on_close=None):
@@ -2327,8 +2342,11 @@ class ToolPanel(JobPanel):
         values = metric if self._is_bg else (
             event["before"], event["after"], *metric
         )
+        # a CHANGED (restorable) row gets the striking green/teal tag so it
+        # POPS against the muted-grey SKIPPED rows (owner 2026-07-19)
         row = self.tree.insert(
             fnode, "end", text=PurePosixPath(rel).name, values=values,
+            tags=(TOOL_CHANGED_TAG,),
         )
         self._node_info[row] = {"level": "image", "rel": rel, "has_backup": True}
         self._image_rows[rel] = row
@@ -2350,9 +2368,13 @@ class ToolPanel(JobPanel):
         info = self._node_info.get(self.tree.focus())
         if not info:
             return
-        if info["level"] == "image":
+        level = info["level"]
+        if level == "image":
             self._show_image_beforeafter(info["rel"])
-        else:
+        elif level == "folder":
+            # ONLY this folder's images (owner 2026-07-19) — not the union
+            self._show_folder_beforeafter(info["folder"])
+        else:  # the collection (top) node — the whole job's changed images
             self._show_all_beforeafter()
 
     def _pair_for(self, rel: str) -> dict | None:
@@ -2383,6 +2405,32 @@ class ToolPanel(JobPanel):
             restore_cb=lambda: self.restore_one(rel),
         )
 
+    def _show_folder_beforeafter(self, folder: str) -> None:
+        """The before/after viewer scoped to ONE folder's changed images —
+        double-clicking a folder node restores JUST that folder, never the
+        whole job (owner 2026-07-19)."""
+        pairs = [
+            pair for rel in rels_in_folder(self._image_rows, folder)
+            if (pair := self._pair_for(rel)) is not None
+        ]
+        if not pairs:
+            messagebox.showinfo(
+                "PromptPainter",
+                "No changed images in this folder — nothing was changed,"
+                " or all were already restored.",
+            )
+            return
+        BeforeAfterWindow(
+            self.winfo_toplevel(),
+            f"{JOB_LABEL[self.slot_key]} — {folder} ({len(pairs)})",
+            pairs, restore_label="RESTORE ALL",
+            restore_cb=lambda: self.restore_folder(folder),
+            subtitle=(
+                f"Before / after of every changed image in {folder} —"
+                " RESTORE ALL reverts ONLY this folder."
+            ),
+        )
+
     def _show_all_beforeafter(self) -> None:
         pairs = [
             pair for rel in self._image_rows
@@ -2405,6 +2453,19 @@ class ToolPanel(JobPanel):
     def restore_one(self, rel: str) -> None:
         if self.jobtemp is not None and self.jobtemp.restore_one(rel):
             self._mark_restored(rel)
+
+    def restore_folder(self, folder: str) -> int:
+        """Restore ONLY the images under ``folder`` (the folder-scoped
+        RESTORE ALL) — mirrors ``restore_all`` but over that folder's rels,
+        so a folder double-click never reverts other folders."""
+        if self.jobtemp is None:
+            return 0
+        count = 0
+        for rel in rels_in_folder(self._image_rows, folder):
+            if self.jobtemp.restore_one(rel):
+                self._mark_restored(rel)
+                count += 1
+        return count
 
     def restore_all(self) -> int:
         if self.jobtemp is None:
@@ -5044,7 +5105,10 @@ class BeforeAfterWindow(tk.Toplevel):
     scaled PhotoImage is held on ``self._photos`` so tk cannot GC it.
     """
 
-    def __init__(self, master, title, pairs, *, restore_label, restore_cb):
+    def __init__(
+        self, master, title, pairs, *, restore_label, restore_cb,
+        subtitle=None,
+    ):
         super().__init__(master)
         self.title(title)
         self.minsize(DOC_MIN_W, DOC_MIN_H)
@@ -5065,16 +5129,14 @@ class BeforeAfterWindow(tk.Toplevel):
 
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
-        ttk.Label(
-            bar,
-            text=(
+        if subtitle is None:
+            subtitle = (
                 "Before / after — Restore reverts this image to the"
                 " original." if len(pairs) == 1 else
                 "Before / after of every changed image — RESTORE ALL"
                 " reverts the whole job."
-            ),
-            style="Muted.TLabel",
-        ).pack(side="left")
+            )
+        ttk.Label(bar, text=subtitle, style="Muted.TLabel").pack(side="left")
         self._restore_btn = rounded_button(
             bar, restore_label, command=self._do_restore, kind="danger",
         )

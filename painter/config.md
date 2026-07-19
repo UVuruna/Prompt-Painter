@@ -181,8 +181,11 @@ match.
   each with its ttkbootstrap theme name, customtkinter appearance
   mode, switch knob side, the 16 ttk colour keys and a `status`
   block (the semantic colours set per-widget: done / done_soft /
-  advice / superseded / code_fg / btn_text / **skip** — the last a
-  muted grey tinting SKIPPED tool-panel rows, owner 2026-07-19).
+  advice / superseded / code_fg / btn_text / **skip** / **toolchanged**
+  — the last TWO are the tool-panel Treeview row tints (owner
+  2026-07-19): `skip` a muted grey for SKIPPED (unchanged) rows,
+  `toolchanged` a BOLD striking green/teal (`#2ee59d` night / `#0a9d6e`
+  day) for CHANGED (restorable) rows so the two never blur together).
   `theme_pair(key)`
   returns the `(day, night)` tuple every customtkinter colour kwarg
   passes so `set_appearance_mode()` flips them; `status_pair` does
