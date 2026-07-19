@@ -769,6 +769,19 @@ SAFER_PREAMBLE = (
 )
 
 
+# --- Continue nudge (opt-in, ON by default, owner 2026-07-20) --------
+
+# ChatGPT sometimes STALLS mid-image: the done edge fires (stop button
+# gone) yet no image loads and the answer text is EMPTY — a NoImage /
+# unknown-DOM state that matches no refusal/quota marker. The owner's
+# fix is a plain "continue" nudge in the SAME chat, which usually makes
+# it finish the pending image. On a NoImage the runner sends this ONCE
+# (the prompt is already in the chat — we only tell it to continue),
+# then either uses the recovered image or gives up loudly. Data only —
+# the owner can reword it here.
+CONTINUE_NUDGE = "Continue - please finish generating the image."
+
+
 # --- Timing ----------------------------------------------------------
 
 @dataclass(frozen=True)

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable
 
 from painter.config import (
+    CONTINUE_NUDGE,
     REPORT_SUFFIX,
     SAFER_PREAMBLE,
     STATE_DIRNAME,
@@ -31,6 +32,7 @@ from painter.config import (
 )
 from painter.driver import (
     ItemRefused,
+    NoImage,
     SiteDriver,
     TerminalState,
     sniff_format,
@@ -171,6 +173,7 @@ def run_sheet(
     only: set[str] | None = None,
     on_event: OnEvent | None = None,
     safer_retry: bool = False,
+    continue_nudge: bool = True,
     new_chat_per_folder: bool = False,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
@@ -339,6 +342,20 @@ def run_sheet(
                     if idx < total:
                         _pause(timing, should_stop, log)
                     continue
+            except NoImage:
+                # ChatGPT stalled: the done edge fired but no image and no
+                # marker matched. The owner's fix is a plain "continue"
+                # nudge in the SAME chat — try it ONCE. On recovery the
+                # nudge's own send time becomes t_send (gen_s is timed from
+                # it); if the nudge STILL yields no image (or any other
+                # DriverError — e.g. the nudge itself hits quota/refusal),
+                # it propagates and the site stops loudly, exactly as before.
+                if not continue_nudge:
+                    raise
+                log("    NO RESPONSE - nudging ChatGPT to continue (1 try) ...")
+                emit({"type": "item_nudge", "drop_path": item.drop_path})
+                data, t_send = generate_one(CONTINUE_NUDGE)
+                log("    continue nudge RECOVERED")
             t_image = time.monotonic()
             gen_s = t_image - t_send
 
@@ -428,6 +445,7 @@ def run_sheet(
     except BaseException as exc:
         stopped_why = {
             "GenerationTimeout": "generation timed out",
+            "NoImage": "no image — DOM state unknown",
         }.get(type(exc).__name__, f"aborted: {type(exc).__name__}")
         raise
     finally:

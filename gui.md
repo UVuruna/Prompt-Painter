@@ -218,7 +218,11 @@ reachability fixes:
   **post-save switches** — `BG removal`, `Crop`, `Upscale` (all ON
   by default; each site's post-save pipeline runs exactly ITS
   ticked steps, in that order, loud on failure but never killing
-  the run), **Report txt**, **Safer retry**, the **New chat** mode,
+  the run), **Report txt**, **Safer retry**, **Continue nudge**
+  (owner 2026-07-20 — ON by default; on a stuck `NoImage` response
+  the runner sends `CONTINUE_NUDGE` once into the same chat to un-stick
+  ChatGPT before giving up, passed to `run_sheet(continue_nudge=…)`),
+  the **New chat** mode,
   its own **Start / Stop** pair, and its own **⚙ Settings gear**
   (owner 2026-07-19). The gear reveals THIS agent's collapsible
   **fine-tune** area (`_finetune_box`, hidden by default): the **pause**
@@ -433,7 +437,8 @@ reachability fixes:
   the Aspect dialog), `aspect_filter` (that dialog's last input filter —
   `from`/`to`/`mode`), and `agents.<site>` with `background`, `style`
   (the rendering-style dropdown), `bg_removal`, `crop`, `upscale`,
-  `report`, `safer_retry`, `new_chat`, `pause_min/max`, `act_min/max`,
+  `report`, `safer_retry`, `continue_nudge`, `new_chat`,
+  `pause_min/max`, `act_min/max`,
   the per-agent upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`,
   and that agent's `settings_collapsed`.
 

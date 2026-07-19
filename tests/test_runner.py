@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from painter.config import (
+    CONTINUE_NUDGE,
     SAFER_PREAMBLE,
     SITES,
     STYLES,
@@ -20,7 +21,7 @@ from painter.config import (
     dest_for,
     prompt_suffix,
 )
-from painter.driver import ItemRefused, TerminalState
+from painter.driver import ItemRefused, NoImage, TerminalState
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
@@ -252,6 +253,82 @@ def test_no_safer_retry_by_default(tmp_path):
     assert generated == 1
     # no retry: item 0 submitted once, item 1 once
     assert len(driver.submitted) == 2
+
+
+def test_continue_nudge_recovers_a_stuck_response(tmp_path):
+    # ChatGPT stalls on the item (NoImage: done edge fired, no image, no
+    # marker); the one-shot continue nudge makes it finish. extract_image
+    # stays stuck until CONTINUE_NUDGE is the last thing submitted.
+    class StuckThenNudged(FakeDriver):
+        def extract_image(self):
+            if CONTINUE_NUDGE in self.submitted[-1]:
+                return PNG_1PX
+            raise NoImage(
+                "ChatGPT: the response holds no loaded generated image,"
+                " and the response matches no known refusal/quota marker"
+                " — DOM state unknown (selector rot?). Response starts: ''"
+            )
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    events: list[dict] = []
+    driver = StuckThenNudged(SITES["chatgpt"])
+    # continue_nudge defaults ON — not passed here, so this also proves
+    # the default is on out of the box
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST,
+        log=logs.append, on_event=events.append,
+    )
+    # the stuck item recovered on the nudge and counts as generated
+    assert generated == 1
+    assert (out / "chatgpt" / "fake" / "img_0.png").read_bytes() == PNG_1PX
+    assert any("continue nudge RECOVERED" in line for line in logs)
+    # the original prompt, then the nudge sent VERBATIM into the same chat
+    # (CONTINUE_NUDGE, no prompt suffix) — one nudge attempt per item
+    assert len(driver.submitted) == 2
+    assert driver.submitted[0].startswith("prompt 0")
+    assert driver.submitted[-1] == CONTINUE_NUDGE
+    assert any(e["type"] == "item_nudge" for e in events)
+
+
+def test_continue_nudge_still_stuck_stops_the_site(tmp_path):
+    # the nudge does not recover it either -> NoImage propagates and the
+    # whole site stops loudly, exactly as before the nudge existed
+    class AlwaysStuck(FakeDriver):
+        def extract_image(self):
+            raise NoImage("ChatGPT: DOM state unknown (selector rot?)")
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = AlwaysStuck(SITES["chatgpt"])
+    with pytest.raises(NoImage):
+        run_sheet(sheet, driver, out, "chatgpt", FAST, continue_nudge=True)
+    # ONE item attempted: its original submit + one nudge submit, then stop
+    assert len(driver.submitted) == 2
+    assert driver.submitted[-1] == CONTINUE_NUDGE
+    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+    # the report records the honest stop reason
+    report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "no image — DOM state unknown" in report
+
+
+def test_no_continue_nudge_stops_on_the_first_no_image(tmp_path):
+    # continue_nudge OFF: the first NoImage stops the site, no nudge sent
+    class AlwaysStuck(FakeDriver):
+        def extract_image(self):
+            raise NoImage("ChatGPT: DOM state unknown (selector rot?)")
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = AlwaysStuck(SITES["chatgpt"])
+    with pytest.raises(NoImage):
+        run_sheet(sheet, driver, out, "chatgpt", FAST, continue_nudge=False)
+    # only the original submit — no nudge at all
+    assert len(driver.submitted) == 1
+    assert CONTINUE_NUDGE not in driver.submitted
 
 
 def test_no_report_flag(tmp_path):

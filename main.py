@@ -124,6 +124,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--no-continue-nudge",
+        action="store_true",
+        help=(
+            "on a stuck no-image response (done edge fired, empty text,"
+            " no marker), do NOT nudge ChatGPT once to continue before"
+            " giving up (default: nudge once)"
+        ),
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="parse and report the sheets only — no browser needed",
@@ -289,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
                 prompt_suffix=suffix,
                 report=not args.no_report,
                 safer_retry=args.safer_retry,
+                continue_nudge=not args.no_continue_nudge,
                 new_chat_per_folder=(args.new_chat == "folder"),
             )
             total += generated

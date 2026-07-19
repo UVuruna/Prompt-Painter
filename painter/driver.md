@@ -52,12 +52,26 @@ pasted text lands).
   when the message carried no parseable time. The runner logs it
   and re-raises the exception unchanged so the GUI/CLI read it too.
 - `GenerationTimeout` — no done edge inside the hard cap.
+- `NoImage` — a `DriverError` subclass for the "no image, unknown DOM
+  state" case that `_raise_no_image` builds: either the busy signal
+  never appeared after submit, or the done edge fired yet no image
+  loaded and the answer text matches NO refusal/quota marker (the
+  owner's recurring stuck-ChatGPT case — done edge fired, empty text).
+  Distinct from the generic `DriverError` precisely so the runner can
+  catch JUST this and send a one-shot **continue nudge**
+  (`CONTINUE_NUDGE`) into the same chat before giving up; if the nudge
+  does not recover it, `NoImage` propagates like any other
+  `DriverError` and the site stops loudly. A matched marker still wins
+  first — `_raise_no_image` calls `_check_markers()`, so a refusal /
+  quota answer raises `ItemRefused` / `TerminalState` instead.
 
 While waiting for the result `<img>`, the response text is checked
 every poll, so refusals raise in seconds instead of burning the
 image timeout.
 - `DriverError` — anything else the config block does not
-  recognize, always with the response's opening text quoted.
+  recognize, always with the response's opening text quoted. Both the
+  CLI and the GUI catch `DriverError`, so `NoImage` (when a nudge does
+  not recover it) is reported through that same path.
 
 ## Connections
 

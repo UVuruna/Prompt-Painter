@@ -63,6 +63,17 @@ class GenerationTimeout(DriverError):
     """The done edge never came within the hard timeout."""
 
 
+class NoImage(DriverError):
+    """The done edge fired (or the busy signal never appeared) but no
+    generated image loaded, and the response text matches no refusal /
+    quota marker — an UNKNOWN DOM state (empty answer, selector rot, or
+    ChatGPT simply stalling mid-generation). Distinct from the generic
+    ``DriverError`` so the runner can catch JUST this and try a one-shot
+    "continue" nudge before giving up (the owner's recurring stuck-
+    ChatGPT case). If the nudge does not recover it, it propagates like
+    any other ``DriverError`` and the site stops loudly."""
+
+
 # Runs on the <img> element inside the page. Canvas first: site CSP
 # (Gemini's connect-src) blocks fetch() of blob: URLs, while drawing
 # the already-loaded <img> onto a canvas needs no request at all —
@@ -377,9 +388,14 @@ class SiteDriver:
                 )
 
     def _raise_no_image(self, situation: str) -> None:
-        """No image and no recognized marker — an unknown DOM state."""
+        """No image and no recognized marker — an unknown DOM state.
+
+        Raises ``NoImage`` (a ``DriverError`` subclass) so the runner
+        can catch exactly this and try a one-shot continue nudge; a
+        matched refusal/quota marker still wins first (``_check_markers``
+        raises ``ItemRefused`` / ``TerminalState`` instead)."""
         self._check_markers()
-        raise DriverError(
+        raise NoImage(
             f"{self.site.name}: {situation}, and the response matches no"
             f" known refusal/quota marker — DOM state unknown (selector"
             f" rot?). Response starts: {self._response_text()[:300]!r}"

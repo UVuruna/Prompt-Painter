@@ -243,6 +243,11 @@ match.
   one-shot safer retry after a SAFETY refusal (opt-in). An honest
   reframing of legitimate symbolic art (no real people, non-graphic),
   never a way to force disallowed content.
+- `CONTINUE_NUDGE` — the short "continue" message the runner sends
+  ONCE into the SAME chat when ChatGPT stalls on an image (the driver's
+  `NoImage`: done edge fired, empty answer, no marker). ON by default;
+  the owner's manual fix turned into an automatic one-shot. Data only —
+  reword it here.
 - `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`,
   `fmt_pct(value)` — the short human formatters shared by the runner
   report and the GUI dashboard. `fmt_op_duration` keeps sub-second

@@ -1280,7 +1280,7 @@ class AgentPanel(ttk.Labelframe):
     # the keys persisted per agent in the settings file
     _PERSIST = (
         "background", "style", "bg_removal", "crop", "upscale", "report",
-        "safer_retry", "new_chat", "pause_min", "pause_max",
+        "safer_retry", "continue_nudge", "new_chat", "pause_min", "pause_max",
         "act_min", "act_max",
         # per-agent upscale-gate fine-tune (owner 2026-07-19)
         "up_minw", "up_minh", "up_aspmin", "up_aspmax",
@@ -1313,6 +1313,10 @@ class AgentPanel(ttk.Labelframe):
         self.upscale_var = tk.BooleanVar(value=True)
         self.report_var = tk.BooleanVar(value=True)
         self.safer_var = tk.BooleanVar(value=True)
+        # one-shot "continue" nudge when ChatGPT stalls on an image
+        # (NoImage: done edge fired, empty answer, no marker) — owner
+        # 2026-07-20; ON by default so the stuck case self-heals
+        self.continue_nudge_var = tk.BooleanVar(value=True)
         self.new_chat_var = tk.StringVar(value="collection")
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
@@ -1372,6 +1376,9 @@ class AgentPanel(ttk.Labelframe):
         rounded_switch(row, "Report txt", self.report_var).pack(side="left")
         rounded_switch(row, "Safer retry", self.safer_var).pack(
             side="left", padx=8
+        )
+        rounded_switch(row, "Continue nudge", self.continue_nudge_var).pack(
+            side="left"
         )
 
         row = ttk.Frame(self)
@@ -1555,6 +1562,7 @@ class AgentPanel(ttk.Labelframe):
             "upscale": self.upscale_var,
             "report": self.report_var,
             "safer_retry": self.safer_var,
+            "continue_nudge": self.continue_nudge_var,
             "new_chat": self.new_chat_var,
             "pause_min": self.pause_min_var,
             "pause_max": self.pause_max_var,
@@ -2006,6 +2014,8 @@ class DashPanel(JobPanel):
             self._update_parent()
         elif kind == "item_retry":
             self.image_var.set(self.image_var.get() + "  (safer retry…)")
+        elif kind == "item_nudge":
+            self.image_var.set(self.image_var.get() + "  (continue nudge…)")
         elif kind == "sheet_done":
             self._finalize_theme()
             self.image_var.set("—")
@@ -3629,7 +3639,8 @@ class PainterGui:
             f" | bg_removal={panel.bg_removal_var.get()}"
             f" crop={panel.crop_var.get()}"
             f" upscale={panel.upscale_var.get()}"
-            f" | safer_retry={panel.safer_var.get()} ==="
+            f" | safer_retry={panel.safer_var.get()}"
+            f" continue_nudge={panel.continue_nudge_var.get()} ==="
         )
         worker = threading.Thread(
             target=self._drive_site,
@@ -3643,6 +3654,7 @@ class PainterGui:
                 panel.report_var.get(),
                 selection,
                 panel.safer_var.get(),
+                panel.continue_nudge_var.get(),
                 panel.new_chat_var.get(),
                 self._stop_events[key],
             ),
@@ -3653,7 +3665,7 @@ class PainterGui:
 
     def _drive_site(
         self, key, sheets, out_base, timing, post_save, suffix, report,
-        selection, safer, new_chat, stop_event,
+        selection, safer, continue_nudge, new_chat, stop_event,
     ) -> None:
         """One site's whole run — the theme queue in order, one thread."""
         log = lambda msg: self._q.put(f"[{key}] {msg}")
@@ -3690,6 +3702,7 @@ class PainterGui:
                         only=selection.get(str(sheet.source)),
                         on_event=events,
                         safer_retry=safer,
+                        continue_nudge=continue_nudge,
                         new_chat_per_folder=(new_chat == "folder"),
                     )
                     done_sheets += 1
