@@ -327,19 +327,21 @@ def test_crop_ignores_faint_line_and_tightens_to_the_subject(tmp_path):
         assert out.size == (expected, expected)
 
 
-def test_crop_cleans_halo_even_when_box_is_already_tight(tmp_path):
-    """A tight subject with a faint border halo still returns "done"
-    (the halo was cleaned) rather than "nothing"."""
+def test_crop_halo_only_no_dimensional_crop_is_nothing_byte_unchanged(tmp_path):
+    """The SUN_ECLIPSE case (owner 2026-07-19): a subject whose content
+    fills the frame carries a faint border halo, so ``clean_edge_halo``
+    zeroes some pixels — but the content box + margin still lands on the
+    FULL frame (0px change). The dimensional rule wins: "nothing", file
+    BYTE-UNCHANGED (the halo cleanup is discarded, never written)."""
     img = tmp_path / "halo.png"
     arr = np.zeros((30, 30, 4), dtype=np.uint8)
-    arr[:, :, 3] = 255                         # fully opaque subject
-    arr[0, :, 3] = 0                           # top row transparent (border)
-    arr[1, :, 3] = CLEAN_EDGE_ALPHA - 10       # faint halo row, border-connected
+    arr[:, :, 3] = 255                         # opaque subject FILLS the frame
+    arr[0, :, 3] = CLEAN_EDGE_ALPHA - 10       # faint halo row, border-connected
     save_rgba(img, arr)
-    assert crop_transparent(img, print) == "done"
-    with Image.open(img) as out:
-        top = np.asarray(out.convert("RGBA"))[1, :, 3]
-    assert (top == 0).all()                    # the faint halo row was zeroed
+    before = img.read_bytes()
+    # content fills the frame -> box + margin == full frame -> 0px change
+    assert crop_transparent(img, print) == "nothing"
+    assert img.read_bytes() == before          # halo cleanup discarded, untouched
 
 
 def test_ink_crop_noop_returns_nothing(tmp_path):

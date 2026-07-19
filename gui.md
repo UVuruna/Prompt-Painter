@@ -137,20 +137,24 @@ reachability fixes:
   appends its Start/Stop to the panel's `_button_pairs`; the
   unchanged-signature `set_run_state` loops that list so the compact
   and full buttons ALWAYS share the same filled/outline availability
-  and drive the same `_start_site`/`_stop_site`. The glyph flips to
-  `▸ Controls` when collapsed; the state persists
-  (`controls_collapsed`).
-- **Collapsible per-agent fine-tune** (owner 2026-07-19) — a second
-  `▸ Settings` toggle (top strip, left of `▾ Controls`) shows/hides
-  ALL the per-agent FINE-TUNE blocks as one: each `AgentPanel`'s
-  **Upscale gate (this site)** block — min W / min H / aspect FROM /
-  aspect TO spinners that feed THAT site's pipeline Upscale toggle.
-  HIDDEN by DEFAULT so the main UI stays clean; `_set_settings_collapsed`
-  drives every panel's `set_finetune_visible` (pack ↔ pack_forget of the
-  panel's `_finetune_box`, built at the panel's bottom), the glyph flips
-  `▾/▸ Settings`, and the state persists (`settings_collapsed`, default
-  collapsed). Independent of the Controls collapse (which hides the whole
-  upper area including these blocks).
+  and drive the same `_start_site`/`_stop_site`. The button carries the
+  **gamepad icon** (`assets/icons/controls.png`, owner 2026-07-19) beside
+  the glyph, which flips to `▸ Controls` when collapsed; the state
+  persists (`controls_collapsed`).
+- **Per-agent Settings gear** (owner 2026-07-19) — each `AgentPanel`
+  owns its OWN `⚙ Settings` gear button (`assets/icons/settings.png`, on
+  the Start/Stop row) that shows/hides THAT agent's collapsible
+  **fine-tune** area — its **pause** range, its **action-delay** range,
+  AND its **Upscale gate (this site)** block (min W / min H / aspect FROM
+  / aspect TO) — independently of the other site. HIDDEN by DEFAULT so
+  the panel stays compact; `_toggle_settings` flips the panel's own
+  `settings_collapsed_var` and `_apply_finetune_visibility` packs ↔
+  `pack_forget`s the panel's `_finetune_box` (built at the panel's bottom)
+  and swaps the `▾/▸ Settings` caret. The state is per agent, persisted in
+  that agent's settings (`settings_collapsed`, default collapsed) and
+  reflected on load. There is NO global Settings toggle (the 0.0.079
+  top-strip one was removed). Collapsing the whole Controls area hides
+  the panels — gear and all — as before.
 - **Whole-window vertical scroll** — the entire content lives in ONE
   `fill_height` `ScrollFrame` (the top strip is pinned OUTSIDE it, so
   the collapse toggle is always reachable). When the content exceeds
@@ -197,15 +201,18 @@ reachability fixes:
   by default; each site's post-save pipeline runs exactly ITS
   ticked steps, in that order, loud on failure but never killing
   the run), **Report txt**, **Safer retry**, the **New chat** mode,
-  its own **pause** and **action delay** Spinner ranges, its own
-  **Start / Stop** pair, and (owner 2026-07-19) its own **Upscale
-  gate (this site)** FINE-TUNE block — four Spinner fields (min W,
-  min H, aspect FROM, aspect TO) that `panel.upscale_params()` feeds
-  into THAT site's pipeline `upscale_if_small` when its Upscale
-  switch is on; the block is HIDDEN until the top-strip `▸ Settings`
-  toggle expands it (`set_finetune_visible`), and Start validates the
-  four values (positive, FROM ≤ TO) before spawning. Defaults 800 /
-  800 / 0.90 / 1.10 reproduce the old locked gate. A site "participates" in a run by
+  its own **Start / Stop** pair, and its own **⚙ Settings gear**
+  (owner 2026-07-19). The gear reveals THIS agent's collapsible
+  **fine-tune** area (`_finetune_box`, hidden by default): the **pause**
+  Spinner range, the **action delay** Spinner range, and the **Upscale
+  gate (this site)** block — four Spinner fields (min W, min H, aspect
+  FROM, aspect TO) that `panel.upscale_params()` feeds into THAT site's
+  pipeline `upscale_if_small` when its Upscale switch is on. All three
+  moved UNDER the gear (they were formerly always-visible / global);
+  `_toggle_settings` + `_apply_finetune_visibility` show/hide them per
+  agent, and Start still validates the four gate values (positive,
+  FROM ≤ TO) before spawning. Defaults 800 / 800 / 0.90 / 1.10
+  reproduce the old locked gate. A site "participates" in a run by
   being STARTED — there are no site on/off switches any more, and
   one site running never blocks starting the other. Start/Stop
   availability is STYLED (`style_action_button`): an available
@@ -376,28 +383,31 @@ reachability fixes:
   instantly) and persists the choice, then a ~600 ms smoothstep
   slide runs as flourish. See **Theming**.
 - **Settings persistence** (`painter/settings.py`) — remembered
-  across starts: the output folder, EVERY per-agent panel setting,
-  the font zoom base, the **theme** (`day` / `night`), the window
-  geometry, the **collapsed/expanded** controls state AND the
-  per-agent fine-tune (Settings) collapse state (selection ticks stay
-  per-run; the old dashboard `sash` is gone with the PanedWindow — a
+  across starts: the output folder, EVERY per-agent panel setting
+  (including each agent's OWN Settings-gear collapse state), the font
+  zoom base, the **theme** (`day` / `night`), the window geometry, and
+  the **collapsed/expanded** controls state (selection ticks stay
+  per-run; the old dashboard `sash` is gone with the PanedWindow, and
+  the old TOP-LEVEL `settings_collapsed` from 0.0.079 is gone too — a
   stale key is ignored). The **collection queue is NOT persisted** — the app
   starts with an empty list every launch (owner 2026-07-18); and a
   saved output folder that no longer exists is ignored in favour of
   the default `out/`, so done-detection never reads an empty
-  `_state`. Saves debounce on every meaningful change (var traces,
-  zoom, theme flip, either collapse, the two remembered dialogs) and
-  always fire on close; loading applies missing keys as current
-  defaults (a missing `theme` = `night`, `settings_collapsed` = True)
-  and drops queued files that no longer exist (reported in the log).
-  The stored dict: `output`, `font_base`, `theme`, `geometry`,
-  `controls_collapsed`, `settings_collapsed`, `upscale_tool`
+  `_state`. Saves debounce on every meaningful change (var traces —
+  the per-agent gear collapse rides a BooleanVar so it saves like every
+  other field —, zoom, theme flip, the Controls collapse, the two
+  remembered dialogs) and always fire on close; loading applies missing
+  keys as current defaults (a missing `theme` = `night`, a missing agent
+  `settings_collapsed` = True) and drops queued files that no longer
+  exist (reported in the log). The stored dict: `output`, `font_base`,
+  `theme`, `geometry`, `controls_collapsed`, `upscale_tool`
   (the standalone Upscale dialog's last-used `min_width`/`min_height`/
   `aspect_min`/`aspect_max`), `aspect_ratio` (the last `[W, H]` from
   the Aspect dialog), and `agents.<site>` with `background`,
   `bg_removal`, `crop`, `upscale`, `report`, `safer_retry`,
-  `new_chat`, `pause_min/max`, `act_min/max`, and the per-agent
-  upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`.
+  `new_chat`, `pause_min/max`, `act_min/max`, the per-agent
+  upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`, and that
+  agent's `settings_collapsed`.
 
 ## The Dashboard — per-JOB panels (owner 2026-07-19)
 The dashboard shows one panel PER RUNNING JOB, up to SIX in parallel:
@@ -467,7 +477,14 @@ key is gone (a stale one in an old settings.json is ignored).
   columns** (owner 2026-07-19): it changes ALPHA, not dimensions, so
   before == after resolution is meaningless — its panel shows Name · % ·
   Time · Size only (`self._is_bg` picks the column set). A refused
-  (no-op) row shows `—` in % and BLANK Time.
+  (no-op) row shows `—` in % and BLANK Time, and is TINTED a muted grey
+  (owner 2026-07-19): a `TOOL_SKIP_TAG` Treeview tag whose foreground is
+  the theme's `status["skip"]` (`#adb5bd` night / `#8a8578` day) so
+  SKIPPED rows read as dimmed against the full-contrast changed rows.
+  The tag is theme-aware — `skin_tree` registers it in the plain-tk skin
+  registry so it re-tints on a Day/Night flip. This bucket now also holds
+  the many 0px crops the crop-fix (SKIPPED iff output resolution ==
+  input) correctly routes to skipped.
 - **Double-click an image row** opens a `BeforeAfterWindow` for that
   image with a **Restore** (reverts ONLY it); **double-click the
   collection / folder node** opens a viewer of ALL the job's changed

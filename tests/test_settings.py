@@ -26,12 +26,12 @@ def test_roundtrip(monkeypatch, tmp_path):
 
 def test_roundtrip_upscale_and_dialog_schema(monkeypatch, tmp_path):
     """The owner 2026-07-19 keys survive the JSON round-trip verbatim:
-    the per-agent upscale-gate fine-tune, the standalone Upscale dialog's
-    last-used params, the last aspect W:H, and the Settings-collapse
-    state (nested dicts / lists / bools intact)."""
+    the standalone Upscale dialog's last-used params, the last aspect
+    W:H, and each agent's own fine-tune — the upscale-gate fields AND the
+    per-agent Settings-collapse state (nested dicts / lists / bools
+    intact)."""
     path = point_at(monkeypatch, tmp_path)
     data = {
-        "settings_collapsed": False,
         "upscale_tool": {
             "min_width": 1000, "min_height": 600,
             "aspect_min": 0.8, "aspect_max": 1.25,
@@ -41,6 +41,7 @@ def test_roundtrip_upscale_and_dialog_schema(monkeypatch, tmp_path):
             "gemini": {
                 "up_minw": "900", "up_minh": "900",
                 "up_aspmin": "0.85", "up_aspmax": "1.15",
+                "settings_collapsed": False,
             },
         },
     }

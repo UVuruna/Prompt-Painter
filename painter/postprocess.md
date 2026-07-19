@@ -27,20 +27,22 @@ a no-op — only for real errors (`PostprocessError`, loud).
   fires only on a catastrophic white-subject-eaten. Each `remove_*`
   now returns `(rgba, removed_frac)` and this step checks it before
   saving.
-- **`crop_transparent`** — two composable steps in place (owner
+- **`crop_transparent`** — halo cleanup THEN autocrop in place (owner
   2026-07-18, the OldAge.png case): (1) `clean_edge_halo` zeroes the
   faint stray line / halo CONNECTED TO THE IMAGE BORDER
-  (`CLEAN_EDGE_ENABLE`), then (2) autocrop to the INK-BASED content
-  box (a row/col needs `CROP_MIN_INK_PX` pixels at alpha ≥
-  `CROP_INK_ALPHA`, so a sparse faint line no longer defeats the
-  crop) plus the `CROP_MARGIN_PX` safety margin. CHANGED vs SKIPPED is
-  keyed on EXACT resolution (owner 2026-07-19): `"done"` as soon as the
-  cropped output differs from the input by ≥ 1px on ANY side (a 3px trim
-  counts even when its % rounds tiny), OR the halo cleanup zeroed
-  pixels; `"nothing"` when there is no transparency to crop against
-  (fully opaque), the image is fully transparent, the box + margin lands
-  on the full frame (0px change), OR it is already tight AND there was
-  no halo to clean.
+  (`CLEAN_EDGE_ENABLE`) — its ONLY job is to ENABLE a tighter box, then
+  (2) autocrop to the INK-BASED content box (a row/col needs
+  `CROP_MIN_INK_PX` pixels at alpha ≥ `CROP_INK_ALPHA`, so a sparse
+  faint line no longer defeats the crop) plus the `CROP_MARGIN_PX`
+  safety margin. CHANGED vs SKIPPED is STRICTLY DIMENSIONAL (owner
+  2026-07-19): `"done"` **only** when the cropped output resolution is
+  smaller than the input on some side (≥ 1px) — that alone saves the
+  file. When the box + margin lands on the FULL frame (0px change) the
+  result is `"nothing"`, the file left BYTE-UNCHANGED, **even if the
+  halo cleanup zeroed pixels** — that cleanup is discarded, never
+  written (the sun_eclipse 801×800 → 801×800 case: there is no such
+  thing as a halo-only `"done"`). `"nothing"` also covers a fully
+  opaque / fully transparent image and a box that cannot be found.
 
 A failed step is LOUD but never kills the run (the runner catches,
 counts and reports it; the raw image stays saved).

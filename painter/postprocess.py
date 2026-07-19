@@ -114,21 +114,23 @@ def remove_background(path: Path, log: Log) -> str:
 def crop_transparent(path: Path, log: Log) -> str:
     """Clean the faint border halo, then autocrop, in place.
 
-    Two composable steps on the one image (both from
-    [Background Remover]): (1) when ``CLEAN_EDGE_ENABLE``, faint
-    pixels connected to the image border — the stray line / halo
-    hugging the frame — are zeroed (``clean_edge_halo``); (2) the
-    image is cropped to its INK-BASED content box (a row/col needs
+    The halo cleanup (``clean_edge_halo`` when ``CLEAN_EDGE_ENABLE``)
+    only serves to ENABLE a tighter crop: faint pixels connected to the
+    image border — the stray line / halo hugging the frame — are zeroed
+    so they no longer drag the content box out to the edge. The image is
+    then cropped to its INK-BASED content box (a row/col needs
     ``CROP_MIN_INK_PX`` pixels at alpha >= ``CROP_INK_ALPHA``, so a
     sparse faint line no longer defeats the crop) plus the
     ``CROP_MARGIN_PX`` safety margin.
 
-    Returns "done" when it changed anything — the cropped output size
-    differs from the input by >= 1px on ANY side (owner 2026-07-19: a 3px
-    trim IS a crop even when the % rounds tiny; only a 0px change is a
-    no-op), OR the halo cleanup zeroed pixels — else "nothing" (no
-    transparency to crop against / fully transparent / already tight AND
-    nothing to clean). Raises ``PostprocessError`` on a real failure.
+    The rule is strictly DIMENSIONAL (owner 2026-07-19): "done" only when
+    the cropped output resolution is SMALLER than the input on some side
+    (>= 1px) — that alone saves the file (cleaned + cropped). A box +
+    margin that lands on the FULL frame is a 0px change and is SKIPPED —
+    "nothing", the file left BYTE-UNCHANGED, even when the halo cleanup
+    zeroed pixels (that cleanup is then discarded, never written; there
+    is no such thing as a halo-only "done"). Raises ``PostprocessError``
+    on a real failure.
     """
     from PIL import Image
 
@@ -138,17 +140,13 @@ def crop_transparent(path: Path, log: Log) -> str:
         with Image.open(path) as im:
             rgba = im.convert("RGBA")
 
-        cleaned = 0
         if CLEAN_EDGE_ENABLE:
-            rgba, cleaned = clean_edge_halo(rgba, CLEAN_EDGE_ALPHA)
+            rgba, _ = clean_edge_halo(rgba, CLEAN_EDGE_ALPHA)
 
         box = content_bbox(rgba, CROP_INK_ALPHA, CROP_MIN_INK_PX)
         if box is None:
             # no solid content to crop to (fully transparent / faint
-            # speckle only); a halo cleanup may still have changed it
-            if cleaned:
-                rgba.save(path, "PNG", optimize=True)
-                return "done"
+            # speckle only) -> no crop possible -> 0px change -> SKIPPED
             return "nothing"
 
         width, height = rgba.size
@@ -157,16 +155,13 @@ def crop_transparent(path: Path, log: Log) -> str:
         right = min(width, box[2] + CROP_MARGIN_PX)
         bottom = min(height, box[3] + CROP_MARGIN_PX)
         # CHANGED vs SKIPPED by EXACT resolution (owner 2026-07-19): the
-        # crop counts as soon as the output size differs from the input
-        # on ANY side (>= 1px). A box + margin that lands on the full
-        # frame (0px change) is no crop — SKIPPED. There is no
-        # negligible-trim slop any more.
-        resized = (right - left) != width or (bottom - top) != height
-
-        if not resized and not cleaned:
-            return "nothing"  # opaque / already tight (0px change), no halo
-        result = rgba.crop((left, top, right, bottom)) if resized else rgba
-        result.save(path, "PNG", optimize=True)
+        # crop counts ONLY when the output size differs from the input on
+        # SOME side (>= 1px). A box + margin that lands on the full frame
+        # (0px change) is no crop — SKIPPED — regardless of any halo
+        # cleanup, which is discarded rather than saved.
+        if (right - left) == width and (bottom - top) == height:
+            return "nothing"  # output resolution == input -> no crop
+        rgba.crop((left, top, right, bottom)).save(path, "PNG", optimize=True)
         return "done"
     except Exception as exc:
         raise PostprocessError(

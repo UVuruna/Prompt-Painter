@@ -318,11 +318,15 @@ WHEEL_DELTA_UNIT = 120      # one mouse-wheel notch (event.delta per detent)
 COMPACT_CLUSTER_GAP_PX = 24  # gap between the two agent clusters when collapsed
 COLLAPSE_GLYPH_EXPANDED = "▾  Controls"   # toggle label while controls show
 COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
-# the SETTINGS collapse (owner 2026-07-19) shows/hides the per-agent
-# fine-tune blocks (the four upscale-gate fields per site); HIDDEN by
-# default so the main UI stays clean.
-SETTINGS_GLYPH_EXPANDED = "▾  Settings"   # toggle label while fine-tune shows
-SETTINGS_GLYPH_COLLAPSED = "▸  Settings"  # toggle label while hidden
+# each AgentPanel's own Settings gear (owner 2026-07-19) shows/hides THAT
+# agent's fine-tune — its pause range, action-delay range and upscale-gate
+# fields — independently of the other site; HIDDEN by default so the panel
+# stays compact. The gear carries settings.png (a gear icon) + this caret.
+SETTINGS_GLYPH_EXPANDED = "▾  Settings"   # gear label while fine-tune shows
+SETTINGS_GLYPH_COLLAPSED = "▸  Settings"  # gear label while hidden
+# the Treeview row tag tinting a SKIPPED tool row (its foreground comes
+# from the theme's status["skip"], re-applied on a flip via skin_tree)
+TOOL_SKIP_TAG = "skip"
 
 
 def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
@@ -829,11 +833,20 @@ def _apply_surface_skin(widget: tk.Misc) -> None:
     widget.configure(background=tb.Style().colors.bg)
 
 
+def _apply_tree_skin(widget: ttk.Treeview) -> None:
+    """A tool-panel Treeview: (re-)tint the SKIPPED-row tag from the
+    active theme's muted status colour. The base row colours follow the
+    ttk 'Treeview' style, but a per-widget TAG foreground does not — so it
+    is registered here and re-applied on every flip (owner 2026-07-19)."""
+    widget.tag_configure(TOOL_SKIP_TAG, foreground=status("skip"))
+
+
 _TK_SKIN = {
     "text": _apply_text_skin,
     "listbox": _apply_listbox_skin,
     "canvas": _apply_surface_skin,
     "toplevel": _apply_surface_skin,
+    "tree": _apply_tree_skin,
 }
 
 
@@ -853,6 +866,12 @@ def skin_listbox(widget: tk.Listbox) -> None:
 
 def skin_canvas(widget: tk.Canvas) -> None:
     _skin(widget, "canvas")
+
+
+def skin_tree(widget: ttk.Treeview) -> None:
+    """Configure a tool-panel tree's SKIPPED-row tag and register it so
+    the tint re-applies on a theme flip."""
+    _skin(widget, "tree")
 
 
 def skin_toplevel(widget: tk.Misc) -> None:
@@ -1212,6 +1231,8 @@ class AgentPanel(ttk.Labelframe):
         "act_min", "act_max",
         # per-agent upscale-gate fine-tune (owner 2026-07-19)
         "up_minw", "up_minh", "up_aspmin", "up_aspmax",
+        # this agent's own Settings-gear collapse state (owner 2026-07-19)
+        "settings_collapsed",
     )
 
     def __init__(self, master, site_key: str, on_start, on_stop):
@@ -1256,6 +1277,10 @@ class AgentPanel(ttk.Labelframe):
         self.up_aspmax_var = tk.StringVar(
             value=f"{UPSCALE_ASPECT_MAX:.{UPSCALE_ASPECT_DECIMALS}f}"
         )
+        # this agent's OWN Settings-gear collapse state (owner 2026-07-19):
+        # True = fine-tune hidden (default). A BooleanVar so it persists and
+        # auto-saves through the same per-agent trace as every other field.
+        self.settings_collapsed_var = tk.BooleanVar(value=True)
 
         row = ttk.Frame(self)
         row.pack(fill="x", pady=2)
@@ -1284,22 +1309,6 @@ class AgentPanel(ttk.Labelframe):
         )
 
         row = ttk.Frame(self)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="pause", width=12).pack(side="left")
-        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-
-        row = ttk.Frame(self)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="action delay", width=12).pack(side="left")
-        Spinner(row, self.act_min_var, step=0.1).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.act_max_var, step=0.1).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-
-        row = ttk.Frame(self)
         row.pack(fill="x", pady=(6, 2))
         self.btn_start = rounded_button(
             row, "Start", command=partial(on_start, site_key),
@@ -1311,23 +1320,51 @@ class AgentPanel(ttk.Labelframe):
             kind="danger-outline", width=70,
         )
         self.btn_stop.pack(side="left", padx=6)
+        # this agent's OWN Settings gear (owner 2026-07-19): the gear icon
+        # + a state caret; it shows/hides THIS panel's fine-tune (pause +
+        # action delay + upscale gate) independently of the other site.
+        self._settings_btn = rounded_button(
+            row, SETTINGS_GLYPH_COLLAPSED, command=self._toggle_settings,
+            icon_name="settings",
+        )
+        self._settings_btn.pack(side="right")
         # every Start/Stop pair this agent owns (the panel's own pair plus
         # the collapsed-strip pair added by build_compact); set_run_state
         # styles ALL of them so both views always agree on availability
         self._button_pairs = [(self.btn_start, self.btn_stop)]
         self.set_run_state(running=False)
 
-        # the fine-tune block (upscale gate) — built last so it sits at
-        # the panel's bottom; hidden until the Settings collapse expands
+        # the collapsible fine-tune block (pause + action delay + upscale
+        # gate) — built last so it sits at the panel's bottom; hidden until
+        # this agent's own Settings gear expands it
         self._build_finetune()
+        self._apply_finetune_visibility()
 
     def _build_finetune(self) -> None:
-        """The per-agent upscale-gate fields (min W / min H / aspect
-        from / aspect to). Built into ``self._finetune_box`` and left
-        UNPACKED — ``set_finetune_visible`` packs it in when the Settings
-        collapse is expanded (owner 2026-07-19)."""
+        """This agent's collapsible FINE-TUNE area (owner 2026-07-19),
+        hidden behind its Settings gear: the PAUSE range, the ACTION-DELAY
+        range, and the UPSCALE-GATE fields (min W / min H / aspect from /
+        aspect to). Built into ``self._finetune_box`` and left UNPACKED —
+        ``_apply_finetune_visibility`` packs it in when the gear expands."""
         box = ttk.Frame(self)
         self._finetune_box = box
+
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="pause", width=12).pack(side="left")
+        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="action delay", width=12).pack(side="left")
+        Spinner(row, self.act_min_var, step=0.1).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(row, self.act_max_var, step=0.1).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+
         ttk.Label(
             box, text="Upscale gate (this site):", style="Head.TLabel"
         ).pack(anchor="w", pady=(4, 0))
@@ -1358,13 +1395,27 @@ class AgentPanel(ttk.Labelframe):
         ).pack(side="left")
         ttk.Label(row, text="W/H").pack(side="left", padx=(2, 0))
 
-    def set_finetune_visible(self, visible: bool) -> None:
-        """Show / hide this agent's upscale-gate fine-tune block (driven
-        by the window-wide Settings collapse toggle)."""
-        if visible:
-            self._finetune_box.pack(fill="x", pady=(2, 0))
-        else:
+    def _apply_finetune_visibility(self) -> None:
+        """Reflect ``settings_collapsed_var``: pack or unpack this agent's
+        fine-tune block and set the gear's state caret. The nested body's
+        size change lets the outer ScrollFrame recompute its region."""
+        collapsed = self.settings_collapsed_var.get()
+        if collapsed:
             self._finetune_box.pack_forget()
+        else:
+            self._finetune_box.pack(fill="x", pady=(2, 0))
+        self._settings_btn.configure(
+            text=SETTINGS_GLYPH_COLLAPSED if collapsed
+            else SETTINGS_GLYPH_EXPANDED
+        )
+
+    def _toggle_settings(self) -> None:
+        """The gear: flip THIS agent's fine-tune visibility, independently
+        of the other site. The var change persists via its own trace."""
+        self.settings_collapsed_var.set(
+            not self.settings_collapsed_var.get()
+        )
+        self._apply_finetune_visibility()
 
     def upscale_params(self) -> dict:
         """The four upscale-gate numbers as engine kwargs — ValueError
@@ -1446,6 +1497,7 @@ class AgentPanel(ttk.Labelframe):
             "up_minh": self.up_minh_var,
             "up_aspmin": self.up_aspmin_var,
             "up_aspmax": self.up_aspmax_var,
+            "settings_collapsed": self.settings_collapsed_var,
         }
 
     def persist_vars(self) -> list[tk.Variable]:
@@ -1455,11 +1507,13 @@ class AgentPanel(ttk.Labelframe):
         return {key: var.get() for key, var in self._vars().items()}
 
     def apply_settings(self, stored: dict) -> None:
-        """Missing keys keep the current defaults."""
+        """Missing keys keep the current defaults; the restored collapse
+        state is reflected into the panel."""
         variables = self._vars()
         for key in self._PERSIST:
             if key in stored:
                 variables[key].set(stored[key])
+        self._apply_finetune_visibility()
 
 
 # ---------------------------------------------------------------------
@@ -2105,6 +2159,9 @@ class ToolPanel(JobPanel):
         hsb.grid(row=1, column=0, sticky="ew")
         wrap.rowconfigure(0, weight=1)
         wrap.columnconfigure(0, weight=1)
+        # the SKIPPED-row tag follows the active theme's muted colour and
+        # re-tints on a flip (registered in the plain-tk skin registry)
+        skin_tree(self.tree)
         self.tree.bind("<Double-1>", self._on_activate)
 
         self.reset(active=False, total=0)
@@ -2226,8 +2283,11 @@ class ToolPanel(JobPanel):
         fnode = self._ensure_folder(folder_of(rel))
         # the '—' sits in the % column: index 0 (BG) or 2 (dimensional)
         values = ("—", "", "") if self._is_bg else ("", "", "—", "", "")
+        # tint the SKIPPED row muted (owner 2026-07-19) — this bucket now
+        # also holds the many 0px crops the crop-fix sends to skipped
         self.tree.insert(
             fnode, "end", text=PurePosixPath(rel).name, values=values,
+            tags=(TOOL_SKIP_TAG,),
         )
 
     # --- before/after viewer + restore ---------------------------------
@@ -2422,9 +2482,9 @@ class PainterGui:
         self._save_job: str | None = None  # debounced settings save
 
         # remembered dialog values (owner 2026-07-19): the standalone
-        # Upscale dialog's last-used four params, the last aspect W:H, and
-        # the Settings-collapse (per-agent fine-tune) state — all restored
-        # in _apply_settings and re-saved on change.
+        # Upscale dialog's last-used four params and the last aspect W:H —
+        # restored in _apply_settings and re-saved on change. Each agent's
+        # own Settings-gear collapse state is persisted by the AgentPanel.
         self._upscale_tool_params: dict = {
             "min_width": UPSCALE_MIN_WIDTH,
             "min_height": UPSCALE_MIN_HEIGHT,
@@ -2434,7 +2494,6 @@ class PainterGui:
         self._aspect_ratio: tuple[int, int] = (
             ASPECT_DEFAULT_W, ASPECT_DEFAULT_H
         )
-        self._settings_collapsed = True  # fine-tune hidden by default
 
         # the top strip (theme switch + collapse toggle) is PINNED outside
         # the scroll so the toggle is reachable even when the content
@@ -2468,25 +2527,19 @@ class PainterGui:
         # the mini Day/Night switch — reflects the already-applied theme
         self.switch = DayNightSwitch(self._top_strip, self)
         self.switch.pack(side="right")
-        # the collapse toggle, packed AFTER the switch so side='right'
-        # places it to the switch's LEFT
+        # the Controls collapse toggle, packed AFTER the switch so
+        # side='right' places it to the switch's LEFT; carries the gamepad
+        # icon (owner 2026-07-19) beside a state caret. The per-agent
+        # Settings gear moved INTO each AgentPanel (no global toggle).
         self._collapse_btn = rounded_button(
             self._top_strip, COLLAPSE_GLYPH_EXPANDED,
-            command=self._toggle_collapsed,
+            command=self._toggle_collapsed, icon_name="controls",
         )
         self._collapse_btn.pack(side="right", padx=(0, 8))
-        # the SETTINGS collapse toggle (per-agent fine-tune) — to the LEFT
-        # of the Controls toggle; hidden fine-tune by default
-        self._settings_btn = rounded_button(
-            self._top_strip, SETTINGS_GLYPH_COLLAPSED,
-            command=self._toggle_settings_collapsed,
-        )
-        self._settings_btn.pack(side="right", padx=(0, 8))
 
         self._bind_zoom()
         self._bind_wheel_routing()
         self._set_collapsed(False)  # deterministic initial packing
-        self._set_settings_collapsed(True)  # fine-tune hidden until restored
         self._apply_settings(self._settings)  # may restore a saved state
         self._wire_persistence()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -2588,24 +2641,6 @@ class PainterGui:
 
     def _toggle_collapsed(self) -> None:
         self._set_collapsed(not self._collapsed)
-        self._schedule_save()
-
-    def _set_settings_collapsed(self, collapsed: bool) -> None:
-        """Show / hide EVERY agent's upscale-gate fine-tune block as one
-        (owner 2026-07-19). Collapsed (default) keeps the main UI clean;
-        expanded reveals the four fields per site. Glyph mirrors the
-        Controls toggle; the state persists (``settings_collapsed``)."""
-        self._settings_collapsed = collapsed
-        for panel in self.agents.values():
-            panel.set_finetune_visible(not collapsed)
-        self._settings_btn.configure(
-            text=SETTINGS_GLYPH_COLLAPSED if collapsed
-            else SETTINGS_GLYPH_EXPANDED
-        )
-        self._scroll.refresh()
-
-    def _toggle_settings_collapsed(self) -> None:
-        self._set_settings_collapsed(not self._settings_collapsed)
         self._schedule_save()
 
     def _clamp_geometry(self, geo: str) -> str:
@@ -3674,7 +3709,6 @@ class PainterGui:
             "theme": ACTIVE_THEME,
             "geometry": self.root.geometry(),
             "controls_collapsed": self._collapsed,
-            "settings_collapsed": self._settings_collapsed,
             "upscale_tool": dict(self._upscale_tool_params),
             "aspect_ratio": list(self._aspect_ratio),
             "agents": {
@@ -3705,8 +3739,9 @@ class PainterGui:
             panel.apply_settings(stored.get("agents", {}).get(key, {}))
 
         # remembered dialog values (owner 2026-07-19): the standalone
-        # Upscale params, the last aspect W:H, and the fine-tune state.
-        # Each falls back to the current default on a missing/malformed key.
+        # Upscale params and the last aspect W:H (each agent's own
+        # Settings-gear collapse state is restored in panel.apply_settings
+        # above). Each falls back to the current default on a missing key.
         saved_up = stored.get("upscale_tool")
         if isinstance(saved_up, dict):
             for k in self._upscale_tool_params:
@@ -3721,12 +3756,10 @@ class PainterGui:
         if stored.get("geometry"):
             self.root.geometry(self._clamp_geometry(stored["geometry"]))
 
-        # restore the collapsed/expanded views LAST — geometry is already
-        # sane, so the swaps fit into a correctly-sized window
+        # restore the collapsed/expanded Controls view LAST — geometry is
+        # already sane, so the swap fits into a correctly-sized window (each
+        # agent's fine-tune collapse was already applied in apply_settings)
         self._set_collapsed(bool(stored.get("controls_collapsed", False)))
-        self._set_settings_collapsed(
-            bool(stored.get("settings_collapsed", True))
-        )
 
     def _wire_persistence(self) -> None:
         """Meaningful changes debounce into a save; the queue buttons,

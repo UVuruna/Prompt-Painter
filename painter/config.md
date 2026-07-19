@@ -161,7 +161,9 @@ match.
   each with its ttkbootstrap theme name, customtkinter appearance
   mode, switch knob side, the 16 ttk colour keys and a `status`
   block (the semantic colours set per-widget: done / done_soft /
-  advice / superseded / code_fg / btn_text). `theme_pair(key)`
+  advice / superseded / code_fg / btn_text / **skip** — the last a
+  muted grey tinting SKIPPED tool-panel rows, owner 2026-07-19).
+  `theme_pair(key)`
   returns the `(day, night)` tuple every customtkinter colour kwarg
   passes so `set_appearance_mode()` flips them; `status_pair` does
   the same for the status block. `BUTTON_FILL` / `BUTTON_TEXT` +
