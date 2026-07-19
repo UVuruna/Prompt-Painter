@@ -1,0 +1,7 @@
+{
+    "version": "0.0.086",
+    "name": "PromptPainter",
+    "description": "Supervised automation that generates images from prompt-sheet .md files by driving an already open Gemini/ChatGPT tab over CDP",
+    "exe_name": "PromptPainter.exe",
+    "installer_name": "PromptPainter_Setup.exe"
+}

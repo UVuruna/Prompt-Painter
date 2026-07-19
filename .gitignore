@@ -16,6 +16,18 @@ tools/
 # The owner's local GUI settings
 settings.json
 
+# Build outputs (PyInstaller + NSIS pipeline — setup/build.py)
+build/
+dist/
+*.spec
+setup/version_info.txt
+
+# Generated app icon (rebuilt from assets/logo.svg on every build)
+assets/icon.ico
+
+# Code signing certificate (never commit — back up externally)
+setup/cert/
+
 # Python
 __pycache__/
 *.pyc
