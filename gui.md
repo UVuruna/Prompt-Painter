@@ -140,6 +140,17 @@ reachability fixes:
   and drive the same `_start_site`/`_stop_site`. The glyph flips to
   `▸ Controls` when collapsed; the state persists
   (`controls_collapsed`).
+- **Collapsible per-agent fine-tune** (owner 2026-07-19) — a second
+  `▸ Settings` toggle (top strip, left of `▾ Controls`) shows/hides
+  ALL the per-agent FINE-TUNE blocks as one: each `AgentPanel`'s
+  **Upscale gate (this site)** block — min W / min H / aspect FROM /
+  aspect TO spinners that feed THAT site's pipeline Upscale toggle.
+  HIDDEN by DEFAULT so the main UI stays clean; `_set_settings_collapsed`
+  drives every panel's `set_finetune_visible` (pack ↔ pack_forget of the
+  panel's `_finetune_box`, built at the panel's bottom), the glyph flips
+  `▾/▸ Settings`, and the state persists (`settings_collapsed`, default
+  collapsed). Independent of the Controls collapse (which hides the whole
+  upper area including these blocks).
 - **Whole-window vertical scroll** — the entire content lives in ONE
   `fill_height` `ScrollFrame` (the top strip is pinned OUTSIDE it, so
   the collapse toggle is always reachable). When the content exceeds
@@ -186,8 +197,15 @@ reachability fixes:
   by default; each site's post-save pipeline runs exactly ITS
   ticked steps, in that order, loud on failure but never killing
   the run), **Report txt**, **Safer retry**, the **New chat** mode,
-  its own **pause** and **action delay** Spinner ranges, and its
-  own **Start / Stop** pair. A site "participates" in a run by
+  its own **pause** and **action delay** Spinner ranges, its own
+  **Start / Stop** pair, and (owner 2026-07-19) its own **Upscale
+  gate (this site)** FINE-TUNE block — four Spinner fields (min W,
+  min H, aspect FROM, aspect TO) that `panel.upscale_params()` feeds
+  into THAT site's pipeline `upscale_if_small` when its Upscale
+  switch is on; the block is HIDDEN until the top-strip `▸ Settings`
+  toggle expands it (`set_finetune_visible`), and Start validates the
+  four values (positive, FROM ≤ TO) before spawning. Defaults 800 /
+  800 / 0.90 / 1.10 reproduce the old locked gate. A site "participates" in a run by
   being STARTED — there are no site on/off switches any more, and
   one site running never blocks starting the other. Start/Stop
   availability is STYLED (`style_action_button`): an available
@@ -270,13 +288,20 @@ reachability fixes:
   `_run_tool_job` on a daemon thread; the engine function
   (`remove_background` / `crop_transparent` / `upscale_if_small` /
   `change_aspect`) runs over the picked images, in order.
-  **BG removal / Crop / Upscale** pick a FOLDER (`askdirectory`) and run
-  over every image under it. **Aspect ratio** is different (owner
-  2026-07-19): a folder can hold images of DIFFERENT ratios, so it picks
-  INDIVIDUAL image FILES (`askopenfilenames`, multi-select) after the
-  `AspectRatioDialog` — a tiny modal with two positive-integer fields
-  **W** and **H** (default 16 : 9) — and warns it DEFORMS the N selected
-  images (a non-proportional stretch written in place). The selection is
+  **BG removal / Crop** pick a FOLDER (`askdirectory`) and run over
+  every image under it. **Upscale** (owner 2026-07-19) is folder-based
+  too, but first pops `UpscaleParamsDialog` — a modal asking the FOUR
+  gate params (min W, min H, aspect FROM, aspect TO), PRE-FILLED with the
+  last-used values (`self._upscale_tool_params`, remembered/persisted,
+  positive-number + FROM≤TO validation), then runs `upscale_if_small`
+  with those params bound. **Aspect ratio** is different: a folder can
+  hold images of DIFFERENT ratios, so it picks INDIVIDUAL image FILES
+  (`askopenfilenames`, multi-select) after the `AspectRatioDialog` — a
+  tiny modal with two positive-integer fields **W** and **H**, PRE-FILLED
+  with the last-used ratio (`self._aspect_ratio`, remembered/persisted;
+  first run 16 : 9) — and warns it DEFORMS the N selected images (a
+  non-proportional stretch written in place). Both dialogs share
+  `_ModalToolDialog` (the centre-on-parent placement). The selection is
   keyed by `config.selection_base_and_rels` (the common-ancestor folder
   + each file's relative path), so picks spanning sub-folders still group
   under their folder node and restore correctly. Each image's ORIGINAL is
@@ -284,8 +309,9 @@ reachability fixes:
   restore**), so `done` = the file was changed (its backup kept,
   before→after measured and shown), REFUSED = the engine said
   "nothing"/"unclear" — nothing to do, its no-op backup dropped (for
-  Upscale: failed the gate — aspect outside 0.9–1.1 or both sides already
-  ≥ 800; for Aspect: already at the target ratio, left byte-unchanged).
+  Upscale: failed the gate — aspect outside the chosen FROM–TO or both
+  sides already ≥ the chosen min W/H; for Aspect: already at the target
+  ratio, left byte-unchanged).
   The op is also TIMED (per-image seconds; skipped items add no time).
   "Changed" keys ONLY on the engine ACTUALLY REWRITING the file: a "done"
   is NEVER demoted on a small/rounded metric (owner 2026-07-19) — a 3px
@@ -348,20 +374,26 @@ reachability fixes:
 - **Settings persistence** (`painter/settings.py`) — remembered
   across starts: the output folder, EVERY per-agent panel setting,
   the font zoom base, the **theme** (`day` / `night`), the window
-  geometry and the **collapsed/expanded** controls state (selection
-  ticks stay per-run; the old dashboard `sash` is gone with the
-  PanedWindow — a stale key is ignored). The **collection queue is NOT persisted** — the app
+  geometry, the **collapsed/expanded** controls state AND the
+  per-agent fine-tune (Settings) collapse state (selection ticks stay
+  per-run; the old dashboard `sash` is gone with the PanedWindow — a
+  stale key is ignored). The **collection queue is NOT persisted** — the app
   starts with an empty list every launch (owner 2026-07-18); and a
   saved output folder that no longer exists is ignored in favour of
   the default `out/`, so done-detection never reads an empty
   `_state`. Saves debounce on every meaningful change (var traces,
-  zoom, theme flip) and always fire on close; loading applies missing
-  keys as current defaults (a missing `theme` = `night`) and drops
-  queued files that no longer exist (reported in the log). The
-  stored dict: `output`, `font_base`, `theme`, `geometry`,
-  `controls_collapsed`, and `agents.<site>` with `background`,
+  zoom, theme flip, either collapse, the two remembered dialogs) and
+  always fire on close; loading applies missing keys as current
+  defaults (a missing `theme` = `night`, `settings_collapsed` = True)
+  and drops queued files that no longer exist (reported in the log).
+  The stored dict: `output`, `font_base`, `theme`, `geometry`,
+  `controls_collapsed`, `settings_collapsed`, `upscale_tool`
+  (the standalone Upscale dialog's last-used `min_width`/`min_height`/
+  `aspect_min`/`aspect_max`), `aspect_ratio` (the last `[W, H]` from
+  the Aspect dialog), and `agents.<site>` with `background`,
   `bg_removal`, `crop`, `upscale`, `report`, `safer_retry`,
-  `new_chat`, `pause_min/max`, `act_min/max`.
+  `new_chat`, `pause_min/max`, `act_min/max`, and the per-agent
+  upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`.
 
 ## The Dashboard — per-JOB panels (owner 2026-07-19)
 The dashboard shows one panel PER RUNNING JOB, up to SIX in parallel:

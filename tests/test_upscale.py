@@ -105,6 +105,70 @@ def test_tiny_image_stays_below_but_still_done(tmp_path, fake_binary):
     assert any("below 800" in line for line in logs)
 
 
+# --- the four configurable gate params (owner 2026-07-19) -------------
+
+def test_configurable_aspect_bounds(tmp_path, fake_binary):
+    """A wide W/H=1.5 image is rejected by the default 0.9–1.1 gate but
+    qualifies once the aspect bounds are widened to cover it."""
+    img = tmp_path / "wide.png"
+    make_png(img, 600, 400)  # W/H = 1.5
+    assert (
+        upscale_if_small(img, print, aspect_min=0.9, aspect_max=1.1)
+        == "nothing"
+    )
+    assert fake_binary == []  # the default gate never touched the binary
+    assert (
+        upscale_if_small(img, print, aspect_min=1.4, aspect_max=1.6)
+        == "done"
+    )
+    assert fake_binary == [4]
+    with Image.open(img) as out:
+        # 4x=(2400,1600); scaled so both hit the 800 defaults, aspect kept
+        assert out.size == (1200, 800)
+
+
+def test_configurable_min_width_and_height_targets(tmp_path, fake_binary):
+    """Separate min WIDTH and min HEIGHT: the binding axis (here width,
+    needing 1000) lands on its target and the other clears its own."""
+    img = tmp_path / "sq.png"
+    make_png(img, 300, 300)
+    assert (
+        upscale_if_small(img, print, min_width=1000, min_height=600)
+        == "done"
+    )
+    assert fake_binary == [4]
+    with Image.open(img) as out:
+        assert out.width >= 1000 and out.height >= 600
+        assert out.size == (1000, 1000)  # 4x=(1200,1200) * (1000/1200)
+
+
+def test_qualifies_when_only_one_dimension_is_under_its_min(
+    tmp_path, fake_binary
+):
+    """The gate is an OR: W under min_width qualifies even when H already
+    clears min_height, and the result grows so BOTH minimums are met."""
+    img = tmp_path / "tall_badge.png"
+    make_png(img, 760, 820)  # ratio ~0.927 (in gate); W<800, H>=800
+    assert upscale_if_small(img, print) == "done"
+    assert fake_binary == [4]
+    with Image.open(img) as out:
+        assert out.width >= 800 and out.height >= 800
+
+
+def test_non_qualifying_small_but_wrong_aspect_returns_nothing(
+    tmp_path, fake_binary
+):
+    """Small on both axes but aspect outside the (custom) gate -> nothing,
+    binary untouched."""
+    img = tmp_path / "portrait.png"
+    make_png(img, 500, 900)  # ratio ~0.556
+    assert (
+        upscale_if_small(img, print, aspect_min=0.9, aspect_max=1.1)
+        == "nothing"
+    )
+    assert fake_binary == []
+
+
 REAL_EXE = UPSCALE_DIR / UPSCALE_EXE_NAME
 
 

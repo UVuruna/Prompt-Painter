@@ -13,6 +13,15 @@ non-object file is reported LOUDLY on stderr but never crashes the
 app — the owner loses remembered choices, not work — and the next
 save overwrites it. Saves are atomic (temp file + replace).
 
+The dict SHAPE lives with the GUI (`_collect_settings` /
+`_apply_settings`, documented in [GUI](../gui.md)); as of owner
+2026-07-19 it also carries `settings_collapsed` (the per-agent
+fine-tune collapse), `upscale_tool` (the standalone Upscale dialog's
+last-used four gate params), `aspect_ratio` (the last W:H entered in
+the Aspect dialog), and per-agent `up_minw`/`up_minh`/`up_aspmin`/
+`up_aspmax` under `agents.<site>` — all plain JSON scalars, so this
+module round-trips them with zero special handling.
+
 ## Connections
 
 ### Uses

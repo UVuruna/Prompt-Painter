@@ -191,12 +191,23 @@ UPSCALE_ZIP_URL = (
     "v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip"
 )
 UPSCALE_MODEL = "realesrgan-x4plus"
-# Gating (owner 2026-07-18): an image qualifies ONLY if its aspect
-# ratio W/H is within 1 +- UPSCALE_ASPECT_TOL (the circular/badge
-# class) AND W or H is below UPSCALE_MIN_PX; then it is upscaled so
-# NO dimension stays below UPSCALE_MIN_PX (aspect preserved).
-UPSCALE_MIN_PX = 800
-UPSCALE_ASPECT_TOL = 0.1
+# Gating (owner 2026-07-19: now FOUR editable params, defaults reproduce
+# the old locked 2026-07-18 rule). An image qualifies ONLY if its aspect
+# ratio W/H is within [UPSCALE_ASPECT_MIN, UPSCALE_ASPECT_MAX] (the
+# circular/badge class) AND (W < UPSCALE_MIN_WIDTH OR H <
+# UPSCALE_MIN_HEIGHT); then it is upscaled (native 4x + LANCZOS, aspect
+# preserved) so W >= UPSCALE_MIN_WIDTH and H >= UPSCALE_MIN_HEIGHT. The
+# defaults (800 / 800 / 0.9 / 1.1) are the old min_px=800 + aspect_tol=0.1
+# behaviour. The GUI exposes all four PER AGENT and in the standalone
+# Upscale dialog (both persisted); these are just the shipped defaults.
+UPSCALE_MIN_WIDTH = 800
+UPSCALE_MIN_HEIGHT = 800
+UPSCALE_ASPECT_MIN = 0.9
+UPSCALE_ASPECT_MAX = 1.1
+# GUI spinner steps for the four upscale-gate fields (Rule #4).
+UPSCALE_MINDIM_STEP = 50    # min W / min H spinner step (px)
+UPSCALE_ASPECT_STEP = 0.05  # aspect from / to spinner step
+UPSCALE_ASPECT_DECIMALS = 2  # aspect fields show 2 decimals (0.90 / 1.10)
 
 
 # --- Change aspect ratio (owner's batch deform tool, 2026-07-19) -----

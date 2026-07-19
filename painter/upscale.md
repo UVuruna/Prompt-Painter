@@ -10,13 +10,18 @@ downloaded ON FIRST USE from the official Real-ESRGAN GitHub
 release — with live progress logging and loud, instructive failure
 when the download or the exe itself cannot run (no Vulkan device).
 
-**The locked gating (owner 2026-07-18):** an image QUALIFIES only
-if (1) its aspect ratio W/H is within `1 ± UPSCALE_ASPECT_TOL`
-(0.9–1.1 — the circular/badge class) AND (2) W or H is below
-`UPSCALE_MIN_PX` (800). Both pass → upscaled so NO dimension stays
-below the minimum, aspect preserved, PNG in/out so transparency
+**The gating (owner 2026-07-19 — four editable params, defaults
+reproduce the old locked 2026-07-18 rule):** an image QUALIFIES only
+if (1) its aspect ratio W/H is within `[aspect_min, aspect_max]`
+(default 0.9–1.1 — the circular/badge class) AND (2) `W < min_width`
+OR `H < min_height` (default 800 / 800). Both pass → upscaled so
+`W >= min_width` and `H >= min_height`, aspect preserved (the 4x
+image is LANCZOS-scaled by the smallest factor keeping BOTH minimums,
+so the binding axis lands on its target), PNG in/out so transparency
 survives. Anything else → `"nothing"`, so callers count done vs
-skipped cleanly.
+skipped cleanly. The GUI passes PER-AGENT values (each site's own
+fine-tune block) and the standalone Upscale dialog's remembered four
+params; the config defaults are the shipped values.
 
 **Native 4x only:** the binary always runs the x4plus model's
 native 4x and LANCZOS brings the result down to the exact target.
@@ -41,7 +46,8 @@ rondel) to corrupt the output — tile misalignment, lost detail.
   unpacks the release zip on first use, probes `-h` once per
   process. Raises `UpscaleError` with manual instructions when the
   download fails or the exe does not run on this machine.
-- `upscale_if_small(path, log, *, min_px, aspect_tol) -> str` —
-  `"done" | "nothing"` per the gating above, in place. Raises
+- `upscale_if_small(path, log, *, min_width, min_height, aspect_min,
+  aspect_max) -> str` — `"done" | "nothing"` per the gating above, in
+  place (defaults from config reproduce the old behaviour). Raises
   `UpscaleError` — LOUD but catchable, so a machine without Vulkan
   keeps the rest of the pipeline alive.

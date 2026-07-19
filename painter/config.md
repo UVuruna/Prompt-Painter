@@ -92,12 +92,19 @@ match.
   a single 0.40 would false-bail 58% of them, so white is guarded only
   against a catastrophic white-subject-eaten.
 - `TOOLS_DIR`, `UPSCALE_DIR`, `UPSCALE_EXE_NAME`,
-  `UPSCALE_ZIP_URL`, `UPSCALE_MODEL`, `UPSCALE_MIN_PX`,
-  `UPSCALE_ASPECT_TOL` — the Real-ESRGAN upscaler: where the
+  `UPSCALE_ZIP_URL`, `UPSCALE_MODEL`, `UPSCALE_MIN_WIDTH`,
+  `UPSCALE_MIN_HEIGHT`, `UPSCALE_ASPECT_MIN`, `UPSCALE_ASPECT_MAX`,
+  `UPSCALE_MINDIM_STEP`, `UPSCALE_ASPECT_STEP`,
+  `UPSCALE_ASPECT_DECIMALS` — the Real-ESRGAN upscaler: where the
   downloaded binary lives (`tools/`, gitignored), the official
-  release zip, and the locked gating (owner 2026-07-18) — aspect
-  W/H within `1 ± UPSCALE_ASPECT_TOL` AND a dimension below
-  `UPSCALE_MIN_PX`.
+  release zip, and the FOUR editable gate DEFAULTS (owner 2026-07-19,
+  reproducing the old locked `min_px=800`/`aspect_tol=0.1` rule) —
+  an image qualifies when its aspect W/H is within
+  `[UPSCALE_ASPECT_MIN, UPSCALE_ASPECT_MAX]` (0.9–1.1) AND
+  `W < UPSCALE_MIN_WIDTH` OR `H < UPSCALE_MIN_HEIGHT` (800 / 800).
+  The GUI exposes all four PER AGENT and in the standalone Upscale
+  dialog (both persisted); the `*_STEP` / `*_DECIMALS` values drive
+  those spinner fields.
 - `ASPECT_TOL`, `ASPECT_DEFAULT_W`, `ASPECT_DEFAULT_H` — the
   [Change Aspect Ratio](aspect.md) batch deform tool: `ASPECT_TOL`
   (0.001) is how close an image's W/H must be to the target ratio to

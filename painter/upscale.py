@@ -6,13 +6,15 @@ package, no CUDA — Vulkan), kept under ``tools/realesrgan/``
 (gitignored) and downloaded on first use from the official
 Real-ESRGAN GitHub release.
 
-Gating (owner 2026-07-18, locked): an image QUALIFIES only if
-(1) its aspect ratio W/H is within ``1 ± UPSCALE_ASPECT_TOL`` (the
-circular/badge class) AND (2) W or H is below ``UPSCALE_MIN_PX``.
-Both pass -> upscale so NO dimension stays below the minimum
+Gating (owner 2026-07-19, four editable params — defaults reproduce
+the old locked 2026-07-18 rule): an image QUALIFIES only if (1) its
+aspect ratio W/H is within ``[aspect_min, aspect_max]`` (the
+circular/badge class) AND (2) ``W < min_width`` OR ``H < min_height``.
+Both pass -> upscale so W >= ``min_width`` and H >= ``min_height``
 (aspect preserved, LANCZOS-corrected on overshoot, PNG in/out so
 transparency survives). Anything else -> "nothing", so a caller can
-count done vs skipped cleanly.
+count done vs skipped cleanly. The GUI passes per-agent / standalone
+values; the config defaults (800/800/0.9/1.1) are the old behaviour.
 
 Failures are LOUD (``UpscaleError``) but catchable — a machine
 without Vulkan support keeps the rest of the pipeline alive.
@@ -28,10 +30,12 @@ from pathlib import Path
 from typing import Callable
 
 from painter.config import (
-    UPSCALE_ASPECT_TOL,
+    UPSCALE_ASPECT_MAX,
+    UPSCALE_ASPECT_MIN,
     UPSCALE_DIR,
     UPSCALE_EXE_NAME,
-    UPSCALE_MIN_PX,
+    UPSCALE_MIN_HEIGHT,
+    UPSCALE_MIN_WIDTH,
     UPSCALE_MODEL,
     UPSCALE_ZIP_URL,
     fmt_size,
@@ -158,25 +162,27 @@ def upscale_if_small(
     path: Path,
     log: Log,
     *,
-    min_px: int = UPSCALE_MIN_PX,
-    aspect_tol: float = UPSCALE_ASPECT_TOL,
+    min_width: int = UPSCALE_MIN_WIDTH,
+    min_height: int = UPSCALE_MIN_HEIGHT,
+    aspect_min: float = UPSCALE_ASPECT_MIN,
+    aspect_max: float = UPSCALE_ASPECT_MAX,
 ) -> str:
     """Upscale one saved image in place when it qualifies.
 
-    Returns "done" (upscaled so no dimension stays below ``min_px``)
-    or "nothing" (aspect outside ``1 ± aspect_tol``, or already big
-    enough). Raises ``UpscaleError`` loudly when the binary cannot
-    run or fails — catchable, so the pipeline survives a machine
-    without Vulkan.
+    Returns "done" (upscaled so W >= ``min_width`` and H >=
+    ``min_height``, aspect preserved) or "nothing" (aspect W/H outside
+    ``[aspect_min, aspect_max]``, or already at both minimums). Raises
+    ``UpscaleError`` loudly when the binary cannot run or fails —
+    catchable, so the pipeline survives a machine without Vulkan.
     """
     from PIL import Image
 
     with Image.open(path) as im:
         width, height = im.size
     ratio = width / height
-    if not (1 - aspect_tol <= ratio <= 1 + aspect_tol):
+    if not (aspect_min <= ratio <= aspect_max):
         return "nothing"
-    if min(width, height) >= min_px:
+    if width >= min_width and height >= min_height:
         return "nothing"
 
     exe = ensure_binary(log)
@@ -192,10 +198,16 @@ def upscale_if_small(
     finally:
         tmp.unlink(missing_ok=True)
 
-    new_min = min(out.size)
-    if new_min > min_px:
-        # LANCZOS down to the exact target (aspect preserved)
-        factor = min_px / new_min
+    # The 4x image is (usually) larger than both targets; scale it down
+    # (aspect preserved) by the SMALLEST factor that still keeps W >=
+    # min_width AND H >= min_height — i.e. the larger of the two ratios,
+    # so the binding axis lands exactly on its target and the other
+    # clears its own. Capped at 1.0: a tiny source whose 4x cannot reach
+    # a target stays at full 4x (logged), never upscaled past 4x.
+    factor = min(
+        1.0, max(min_width / out.width, min_height / out.height)
+    )
+    if factor < 1.0:
         out = out.resize(
             (max(1, round(out.width * factor)),
              max(1, round(out.height * factor))),
@@ -206,9 +218,9 @@ def upscale_if_small(
         f"    upscaled {width}x{height} -> {out.width}x{out.height}"
         f" (Real-ESRGAN x4 + LANCZOS)"
     )
-    if min(out.size) < min_px:
+    if out.width < min_width or out.height < min_height:
         log(
-            f"    NOTE: even x4 left {path.name} below {min_px}px"
-            f" ({out.width}x{out.height}) — source was tiny"
+            f"    NOTE: even x4 left {path.name} below {min_width}x"
+            f"{min_height}px ({out.width}x{out.height}) — source was tiny"
         )
     return "done"

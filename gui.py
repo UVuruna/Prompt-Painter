@@ -89,6 +89,13 @@ from painter.config import (
     PROGRESS_SUFFIX,
     THEMES,
     TIMING,
+    UPSCALE_ASPECT_DECIMALS,
+    UPSCALE_ASPECT_MAX,
+    UPSCALE_ASPECT_MIN,
+    UPSCALE_ASPECT_STEP,
+    UPSCALE_MIN_HEIGHT,
+    UPSCALE_MIN_WIDTH,
+    UPSCALE_MINDIM_STEP,
     dest_for,
     fmt_duration,
     fmt_op_duration,
@@ -311,6 +318,11 @@ WHEEL_DELTA_UNIT = 120      # one mouse-wheel notch (event.delta per detent)
 COMPACT_CLUSTER_GAP_PX = 24  # gap between the two agent clusters when collapsed
 COLLAPSE_GLYPH_EXPANDED = "▾  Controls"   # toggle label while controls show
 COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
+# the SETTINGS collapse (owner 2026-07-19) shows/hides the per-agent
+# fine-tune blocks (the four upscale-gate fields per site); HIDDEN by
+# default so the main UI stays clean.
+SETTINGS_GLYPH_EXPANDED = "▾  Settings"   # toggle label while fine-tune shows
+SETTINGS_GLYPH_COLLAPSED = "▸  Settings"  # toggle label while hidden
 
 
 def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
@@ -694,7 +706,10 @@ class Spinner(ctk.CTkFrame):
     allowed and Start's validation is unchanged; +/- steps the value
     (never below 0). Unparsable text is left for Start to report."""
 
-    def __init__(self, parent, variable, step: float, entry_width: int = 40):
+    def __init__(
+        self, parent, variable, step: float, entry_width: int = 40,
+        decimals: int | None = None,
+    ):
         super().__init__(
             parent, corner_radius=INPUT_RADIUS, border_width=1,
             fg_color=theme_pair("inputbg"), border_color=theme_pair("secondary"),
@@ -702,8 +717,12 @@ class Spinner(ctk.CTkFrame):
         )
         self._var = variable
         self._step = step
-        # 1.0 steps show "8", 0.1 steps show "0.6"
-        self._decimals = 0 if float(step).is_integer() else 1
+        # 1.0 steps show "8", 0.1 steps show "0.6"; an explicit ``decimals``
+        # overrides (the aspect fields step 0.05 but want 2 decimals)
+        self._decimals = (
+            decimals if decimals is not None
+            else (0 if float(step).is_integer() else 1)
+        )
         # the +/- pads: ~24 px wide (clickable), slightly lower than the
         # frame so their canvases never overpaint the frame's own 1 px
         # border (CTk scales canvases; a 24 px child + 2 px pady used to
@@ -1191,6 +1210,8 @@ class AgentPanel(ttk.Labelframe):
         "background", "bg_removal", "crop", "upscale", "report",
         "safer_retry", "new_chat", "pause_min", "pause_max",
         "act_min", "act_max",
+        # per-agent upscale-gate fine-tune (owner 2026-07-19)
+        "up_minw", "up_minh", "up_aspmin", "up_aspmax",
     )
 
     def __init__(self, master, site_key: str, on_start, on_stop):
@@ -1223,6 +1244,17 @@ class AgentPanel(ttk.Labelframe):
         )
         self.act_max_var = tk.StringVar(
             value=f"{TIMING.action_delay_max_s:.1f}"
+        )
+        # per-agent upscale-gate fine-tune (owner 2026-07-19): min W /
+        # min H / aspect from / aspect to. Defaults reproduce the old
+        # locked rule; shown only when the Settings collapse is expanded.
+        self.up_minw_var = tk.StringVar(value=str(UPSCALE_MIN_WIDTH))
+        self.up_minh_var = tk.StringVar(value=str(UPSCALE_MIN_HEIGHT))
+        self.up_aspmin_var = tk.StringVar(
+            value=f"{UPSCALE_ASPECT_MIN:.{UPSCALE_ASPECT_DECIMALS}f}"
+        )
+        self.up_aspmax_var = tk.StringVar(
+            value=f"{UPSCALE_ASPECT_MAX:.{UPSCALE_ASPECT_DECIMALS}f}"
         )
 
         row = ttk.Frame(self)
@@ -1284,6 +1316,65 @@ class AgentPanel(ttk.Labelframe):
         # styles ALL of them so both views always agree on availability
         self._button_pairs = [(self.btn_start, self.btn_stop)]
         self.set_run_state(running=False)
+
+        # the fine-tune block (upscale gate) — built last so it sits at
+        # the panel's bottom; hidden until the Settings collapse expands
+        self._build_finetune()
+
+    def _build_finetune(self) -> None:
+        """The per-agent upscale-gate fields (min W / min H / aspect
+        from / aspect to). Built into ``self._finetune_box`` and left
+        UNPACKED — ``set_finetune_visible`` packs it in when the Settings
+        collapse is expanded (owner 2026-07-19)."""
+        box = ttk.Frame(self)
+        self._finetune_box = box
+        ttk.Label(
+            box, text="Upscale gate (this site):", style="Head.TLabel"
+        ).pack(anchor="w", pady=(4, 0))
+
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="min W", width=6).pack(side="left")
+        Spinner(row, self.up_minw_var, step=UPSCALE_MINDIM_STEP).pack(
+            side="left"
+        )
+        ttk.Label(row, text="min H", width=6).pack(side="left", padx=(8, 0))
+        Spinner(row, self.up_minh_var, step=UPSCALE_MINDIM_STEP).pack(
+            side="left"
+        )
+        ttk.Label(row, text="px").pack(side="left", padx=(2, 0))
+
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="aspect", width=6).pack(side="left")
+        Spinner(
+            row, self.up_aspmin_var, step=UPSCALE_ASPECT_STEP,
+            decimals=UPSCALE_ASPECT_DECIMALS,
+        ).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(
+            row, self.up_aspmax_var, step=UPSCALE_ASPECT_STEP,
+            decimals=UPSCALE_ASPECT_DECIMALS,
+        ).pack(side="left")
+        ttk.Label(row, text="W/H").pack(side="left", padx=(2, 0))
+
+    def set_finetune_visible(self, visible: bool) -> None:
+        """Show / hide this agent's upscale-gate fine-tune block (driven
+        by the window-wide Settings collapse toggle)."""
+        if visible:
+            self._finetune_box.pack(fill="x", pady=(2, 0))
+        else:
+            self._finetune_box.pack_forget()
+
+    def upscale_params(self) -> dict:
+        """The four upscale-gate numbers as engine kwargs — ValueError
+        propagates to the caller's Start validation."""
+        return {
+            "min_width": int(float(self.up_minw_var.get())),
+            "min_height": int(float(self.up_minh_var.get())),
+            "aspect_min": float(self.up_aspmin_var.get()),
+            "aspect_max": float(self.up_aspmax_var.get()),
+        }
 
     def set_run_state(
         self, running: bool, pending_restart: bool = False
@@ -1351,6 +1442,10 @@ class AgentPanel(ttk.Labelframe):
             "pause_max": self.pause_max_var,
             "act_min": self.act_min_var,
             "act_max": self.act_max_var,
+            "up_minw": self.up_minw_var,
+            "up_minh": self.up_minh_var,
+            "up_aspmin": self.up_aspmin_var,
+            "up_aspmax": self.up_aspmax_var,
         }
 
     def persist_vars(self) -> list[tk.Variable]:
@@ -2315,6 +2410,21 @@ class PainterGui:
         self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
         self._save_job: str | None = None  # debounced settings save
 
+        # remembered dialog values (owner 2026-07-19): the standalone
+        # Upscale dialog's last-used four params, the last aspect W:H, and
+        # the Settings-collapse (per-agent fine-tune) state — all restored
+        # in _apply_settings and re-saved on change.
+        self._upscale_tool_params: dict = {
+            "min_width": UPSCALE_MIN_WIDTH,
+            "min_height": UPSCALE_MIN_HEIGHT,
+            "aspect_min": UPSCALE_ASPECT_MIN,
+            "aspect_max": UPSCALE_ASPECT_MAX,
+        }
+        self._aspect_ratio: tuple[int, int] = (
+            ASPECT_DEFAULT_W, ASPECT_DEFAULT_H
+        )
+        self._settings_collapsed = True  # fine-tune hidden by default
+
         # the top strip (theme switch + collapse toggle) is PINNED outside
         # the scroll so the toggle is reachable even when the content
         # overflows a short window; everything else lives in ONE
@@ -2354,10 +2464,18 @@ class PainterGui:
             command=self._toggle_collapsed,
         )
         self._collapse_btn.pack(side="right", padx=(0, 8))
+        # the SETTINGS collapse toggle (per-agent fine-tune) — to the LEFT
+        # of the Controls toggle; hidden fine-tune by default
+        self._settings_btn = rounded_button(
+            self._top_strip, SETTINGS_GLYPH_COLLAPSED,
+            command=self._toggle_settings_collapsed,
+        )
+        self._settings_btn.pack(side="right", padx=(0, 8))
 
         self._bind_zoom()
         self._bind_wheel_routing()
         self._set_collapsed(False)  # deterministic initial packing
+        self._set_settings_collapsed(True)  # fine-tune hidden until restored
         self._apply_settings(self._settings)  # may restore a saved state
         self._wire_persistence()
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -2459,6 +2577,24 @@ class PainterGui:
 
     def _toggle_collapsed(self) -> None:
         self._set_collapsed(not self._collapsed)
+        self._schedule_save()
+
+    def _set_settings_collapsed(self, collapsed: bool) -> None:
+        """Show / hide EVERY agent's upscale-gate fine-tune block as one
+        (owner 2026-07-19). Collapsed (default) keeps the main UI clean;
+        expanded reveals the four fields per site. Glyph mirrors the
+        Controls toggle; the state persists (``settings_collapsed``)."""
+        self._settings_collapsed = collapsed
+        for panel in self.agents.values():
+            panel.set_finetune_visible(not collapsed)
+        self._settings_btn.configure(
+            text=SETTINGS_GLYPH_COLLAPSED if collapsed
+            else SETTINGS_GLYPH_EXPANDED
+        )
+        self._scroll.refresh()
+
+    def _toggle_settings_collapsed(self) -> None:
+        self._set_settings_collapsed(not self._settings_collapsed)
         self._schedule_save()
 
     def _clamp_geometry(self, geo: str) -> str:
@@ -2901,17 +3037,15 @@ class PainterGui:
 
     @staticmethod
     def _tool_func(kind: str):
-        """The engine function behind a FIXED tool (bg / crop /
-        upscale). Aspect binds its ratio in _start_tool. Lazy import so
-        the GUI opens even while the engine modules build."""
+        """The engine function behind a PARAMETERLESS tool (bg / crop).
+        Aspect binds its ratio and Upscale its four gate params in
+        _start_tool. Lazy import so the GUI opens even while the engine
+        modules build."""
         if kind == "bg":
             from painter.postprocess import remove_background
             return remove_background
-        if kind == "crop":
-            from painter.postprocess import crop_transparent
-            return crop_transparent
-        from painter.upscale import upscale_if_small
-        return upscale_if_small
+        from painter.postprocess import crop_transparent
+        return crop_transparent
 
     @staticmethod
     def _iter_images(folder: Path) -> list[Path]:
@@ -2919,6 +3053,18 @@ class PainterGui:
             p for p in folder.rglob("*")
             if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
         )
+
+    def _remember_aspect_ratio(self, ratio_w: int, ratio_h: int) -> None:
+        """Persist the last-entered aspect W:H so the dialog pre-fills it
+        next time (owner 2026-07-19)."""
+        self._aspect_ratio = (ratio_w, ratio_h)
+        self._schedule_save()
+
+    def _remember_upscale_params(self, params: dict) -> None:
+        """Persist the standalone Upscale dialog's last-used four params
+        so it pre-fills them next run (owner 2026-07-19)."""
+        self._upscale_tool_params = dict(params)
+        self._schedule_save()
 
     def _start_tool(self, slot: str) -> None:
         """Start ONE in-place tool as its OWN job: pick a folder (aspect
@@ -2940,11 +3086,13 @@ class PainterGui:
             # Aspect takes INDIVIDUAL image FILES, not a folder — one
             # folder can hold images of DIFFERENT ratios, and a single
             # target must never be blanket-applied to all (owner
-            # 2026-07-19). The other three tools stay folder-based.
-            ratio = AspectRatioDialog(self.root).result
+            # 2026-07-19). The other three tools stay folder-based. The
+            # dialog is PRE-FILLED with the last-used ratio (remembered).
+            ratio = AspectRatioDialog(self.root, *self._aspect_ratio).result
             if ratio is None:
                 return
             ratio_w, ratio_h = ratio
+            self._remember_aspect_ratio(ratio_w, ratio_h)
             from painter.aspect import change_aspect
 
             func = (
@@ -2970,7 +3118,26 @@ class PainterGui:
                 f" already at {ratio_w}:{ratio_h} are skipped untouched."
             )
         else:
-            func = self._tool_func(slot)
+            if slot == "upscale":
+                # Upscale asks its FOUR gate params first (owner
+                # 2026-07-19), PRE-FILLED with the last-used values; then
+                # runs folder-based like BG/Crop with those params bound.
+                params = UpscaleParamsDialog(
+                    self.root, self._upscale_tool_params
+                ).result
+                if params is None:
+                    return
+                self._remember_upscale_params(params)
+                from painter.upscale import upscale_if_small
+
+                func = (
+                    lambda path, log: upscale_if_small(path, log, **params)
+                )
+                label = (
+                    f"Upscale ≥{params['min_width']}x{params['min_height']}"
+                )
+            else:
+                func = self._tool_func(slot)
             folder = filedialog.askdirectory(
                 title=f"Folder with images — {label} runs IN PLACE"
             )
@@ -3089,6 +3256,9 @@ class PainterGui:
         if problem:
             return problem
 
+        # this agent's four upscale-gate params, read ONCE at Start (like
+        # the pace values) — validated by the caller before we get here
+        up_params = panel.upscale_params() if do_upscale else {}
         log = lambda msg: self._q.put(f"[{key}]     {msg}")
 
         def post_save(path: Path) -> str:
@@ -3105,7 +3275,9 @@ class PainterGui:
             if do_upscale:
                 from painter.upscale import upscale_if_small
 
-                parts.append(f"UPSCALE: {upscale_if_small(path, log)}")
+                parts.append(
+                    f"UPSCALE: {upscale_if_small(path, log, **up_params)}"
+                )
             return ", ".join(parts)
 
         return post_save
@@ -3162,6 +3334,30 @@ class PainterGui:
                 f"{SITES[key].name}: FROM must be <= TO (pause and delay).",
             )
             return
+        if panel.upscale_var.get():
+            try:
+                up = panel.upscale_params()
+            except ValueError:
+                messagebox.showerror(
+                    "PromptPainter",
+                    f"{SITES[key].name}: Upscale-gate values must be numbers.",
+                )
+                return
+            if up["min_width"] <= 0 or up["min_height"] <= 0 or (
+                up["aspect_min"] <= 0 or up["aspect_max"] <= 0
+            ):
+                messagebox.showerror(
+                    "PromptPainter",
+                    f"{SITES[key].name}: Upscale-gate min W/H and aspect"
+                    " bounds must all be positive.",
+                )
+                return
+            if up["aspect_min"] > up["aspect_max"]:
+                messagebox.showerror(
+                    "PromptPainter",
+                    f"{SITES[key].name}: Upscale aspect FROM must be <= TO.",
+                )
+                return
         timing = replace(
             TIMING,
             pause_min_s=pause_min,
@@ -3466,6 +3662,9 @@ class PainterGui:
             "theme": ACTIVE_THEME,
             "geometry": self.root.geometry(),
             "controls_collapsed": self._collapsed,
+            "settings_collapsed": self._settings_collapsed,
+            "upscale_tool": dict(self._upscale_tool_params),
+            "aspect_ratio": list(self._aspect_ratio),
             "agents": {
                 key: panel.get_settings()
                 for key, panel in self.agents.items()
@@ -3492,12 +3691,30 @@ class PainterGui:
             )
         for key, panel in self.agents.items():
             panel.apply_settings(stored.get("agents", {}).get(key, {}))
+
+        # remembered dialog values (owner 2026-07-19): the standalone
+        # Upscale params, the last aspect W:H, and the fine-tune state.
+        # Each falls back to the current default on a missing/malformed key.
+        saved_up = stored.get("upscale_tool")
+        if isinstance(saved_up, dict):
+            for k in self._upscale_tool_params:
+                if k in saved_up:
+                    self._upscale_tool_params[k] = saved_up[k]
+        saved_ratio = stored.get("aspect_ratio")
+        if (
+            isinstance(saved_ratio, (list, tuple)) and len(saved_ratio) == 2
+        ):
+            self._aspect_ratio = (int(saved_ratio[0]), int(saved_ratio[1]))
+
         if stored.get("geometry"):
             self.root.geometry(self._clamp_geometry(stored["geometry"]))
 
-        # restore the collapsed/expanded view LAST — geometry is already
-        # sane, so the swap fits into a correctly-sized window
+        # restore the collapsed/expanded views LAST — geometry is already
+        # sane, so the swaps fit into a correctly-sized window
         self._set_collapsed(bool(stored.get("controls_collapsed", False)))
+        self._set_settings_collapsed(
+            bool(stored.get("settings_collapsed", True))
+        )
 
     def _wire_persistence(self) -> None:
         """Meaningful changes debounce into a save; the queue buttons,
@@ -4130,12 +4347,27 @@ class SelectWindow(tk.Toplevel):
         self._recount_job = self._wrap_job = self._expand_job = None
 
 
-class AspectRatioDialog(tk.Toplevel):
+class _ModalToolDialog(tk.Toplevel):
+    """Shared plumbing for the small themed modal tool dialogs
+    (``AspectRatioDialog``, ``UpscaleParamsDialog``): the centre-on-parent
+    placement they both use (Rule #5 — one home for the identical
+    geometry math)."""
+
+    def _center_on(self, master) -> None:
+        """Place the dialog over the middle-upper third of the parent."""
+        master.update_idletasks()
+        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_reqwidth()) // 2
+        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
+        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+
+class AspectRatioDialog(_ModalToolDialog):
     """A tiny MODAL prompt for the target aspect ratio of the standalone
     'Aspect ratio…' deform tool. Two positive-integer fields (W and H,
-    defaulting to the configured 16:9); ``result`` is ``(w, h)`` on Run
-    or ``None`` on Cancel / Escape. Themed like the app (skinned
-    Toplevel + rounded fields / buttons)."""
+    PRE-FILLED with the last-used ratio the caller remembers, first run
+    16:9); ``result`` is ``(w, h)`` on Run or ``None`` on Cancel /
+    Escape. Themed like the app (skinned Toplevel + rounded fields /
+    buttons)."""
 
     def __init__(
         self, master,
@@ -4191,13 +4423,6 @@ class AspectRatioDialog(tk.Toplevel):
         self._w_entry.focus_set()
         self.wait_window(self)
 
-    def _center_on(self, master) -> None:
-        """Place the dialog over the middle-upper third of the parent."""
-        master.update_idletasks()
-        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_reqwidth()) // 2
-        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
-
     def _run(self) -> None:
         """Validate the two fields as positive whole numbers, then close
         with ``result`` set; a bad value stays open with a loud message."""
@@ -4217,6 +4442,122 @@ class AspectRatioDialog(tk.Toplevel):
             )
             return
         self.result = (ratio_w, ratio_h)
+        self.destroy()
+
+
+class UpscaleParamsDialog(_ModalToolDialog):
+    """The MODAL prompt for the standalone Upscale tool's four gate
+    params — min WIDTH, min HEIGHT, aspect FROM, aspect TO — PRE-FILLED
+    with the last-used values the caller remembers (first run = config
+    defaults 800/800/0.9/1.1). ``result`` is the engine-kwargs dict
+    ``{"min_width", "min_height", "aspect_min", "aspect_max"}`` on Run,
+    or ``None`` on Cancel / Escape. Themed like the app (skinned Toplevel
+    + rounded fields / buttons)."""
+
+    def __init__(self, master, defaults: dict):
+        super().__init__(master)
+        self.title("Upscale settings")
+        self.resizable(False, False)
+        skin_toplevel(self)  # bg registered so a flip re-tints the window
+        self.result: dict | None = None
+        self._minw_var = tk.StringVar(value=str(defaults["min_width"]))
+        self._minh_var = tk.StringVar(value=str(defaults["min_height"]))
+        self._aspmin_var = tk.StringVar(
+            value=f"{defaults['aspect_min']:.{UPSCALE_ASPECT_DECIMALS}f}"
+        )
+        self._aspmax_var = tk.StringVar(
+            value=f"{defaults['aspect_max']:.{UPSCALE_ASPECT_DECIMALS}f}"
+        )
+
+        body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
+        body.pack(fill="both", expand=True)
+        ttk.Label(
+            body,
+            text=(
+                "Upscale gate — an image is enlarged only when its\n"
+                "aspect W/H is in range AND it is under a minimum:"
+            ),
+        ).pack(anchor="w", pady=(0, 10))
+
+        dims = ttk.Frame(body)
+        dims.pack(anchor="w")
+        ttk.Label(dims, text="min W", width=6).pack(side="left")
+        self._minw_entry = rounded_entry(
+            dims, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._minw_var,
+            justify="center",
+        )
+        self._minw_entry.pack(side="left")
+        ttk.Label(dims, text="min H", width=6).pack(side="left", padx=(10, 0))
+        rounded_entry(
+            dims, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._minh_var,
+            justify="center",
+        ).pack(side="left")
+        ttk.Label(dims, text="px").pack(side="left", padx=(4, 0))
+
+        asp = ttk.Frame(body)
+        asp.pack(anchor="w", pady=(8, 0))
+        ttk.Label(asp, text="aspect", width=6).pack(side="left")
+        rounded_entry(
+            asp, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._aspmin_var,
+            justify="center",
+        ).pack(side="left")
+        ttk.Label(asp, text="–").pack(side="left", padx=8)
+        rounded_entry(
+            asp, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._aspmax_var,
+            justify="center",
+        ).pack(side="left")
+        ttk.Label(asp, text="W/H").pack(side="left", padx=(4, 0))
+
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(14, 0))
+        rounded_button(btns, "Run", command=self._run, kind="success").pack(
+            side="right"
+        )
+        rounded_button(btns, "Cancel", command=self.destroy).pack(
+            side="right", padx=6
+        )
+
+        self.bind("<Return>", lambda _e: self._run())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.update_idletasks()
+        self._center_on(master)
+        self.transient(master)
+        self.grab_set()
+        self._minw_entry.focus_set()
+        self.wait_window(self)
+
+    def _run(self) -> None:
+        """Validate the four fields as positive numbers (min W/H whole,
+        aspect real) with FROM <= TO, then close with ``result`` set as
+        engine kwargs; a bad value stays open with a loud message."""
+        try:
+            min_width = int(float(self._minw_var.get().strip()))
+            min_height = int(float(self._minh_var.get().strip()))
+            aspect_min = float(self._aspmin_var.get().strip())
+            aspect_max = float(self._aspmax_var.get().strip())
+        except ValueError:
+            messagebox.showerror(
+                "PromptPainter",
+                "All four fields must be numbers.", parent=self,
+            )
+            return
+        if min(min_width, min_height, aspect_min, aspect_max) <= 0:
+            messagebox.showerror(
+                "PromptPainter",
+                "Min W/H and aspect bounds must all be positive.",
+                parent=self,
+            )
+            return
+        if aspect_min > aspect_max:
+            messagebox.showerror(
+                "PromptPainter",
+                "Aspect FROM must be <= aspect TO.", parent=self,
+            )
+            return
+        self.result = {
+            "min_width": min_width, "min_height": min_height,
+            "aspect_min": aspect_min, "aspect_max": aspect_max,
+        }
         self.destroy()
 
 
