@@ -196,11 +196,15 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
 `parse(sheet) → queue` → per pending item: paste (+ suffix) →
 submit → await the done-edge (hard timeout) → extract bytes → save
 `<out>/<category>/<site>/<rest>` (the assets mirror) → background
-fix → mark done in
-`.progress.json` (RESUMABLE — a crash or quota stop costs nothing)
-→ pause → next. Progress logging per item (elapsed, done/total —
-root Rule #10). At the end the owner reviews quality; unsatisfying
-prompts get reworked in the sheet.
+fix → pause → next. Progress logging per item (elapsed, done/total —
+root Rule #10). **DONE = the FILE EXISTS at its output path**
+(`<out>/dest_for(...)`), checked on disk — not a sidecar record
+(the `.progress.json` state file was removed 2026-07-19). RESUMABLE
+for free: an unattended run skips items whose dest file already
+exists; an EXPLICIT tick list regenerates exactly those (overwriting
+an existing file — the way to redo a bad image), and Select shows
+done items green but re-tickable. At the end the owner reviews
+quality; unsatisfying prompts get reworked in the sheet or re-ticked.
 
 **GitHub:** [UVuruna/Prompt-Painter](https://github.com/UVuruna/Prompt-Painter)
 (`origin`, branch `main`).

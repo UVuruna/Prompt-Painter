@@ -95,9 +95,10 @@ pair with a prompt — the fix is in the sheet, not the parser).
 ## The run loop
 
 queue = parse(sheet) → for each pending item: paste, submit, await
-the done-edge, extract bytes, save `out/<theme>/<stem>.png`, mark
-done in a sidecar state file (`.progress.json`) → RESUMABLE (a
-crash or quota stop costs nothing); paced (a configurable pause
+the done-edge, extract bytes, save `out/<theme>/<stem>.png` →
+RESUMABLE for free because DONE = the output file EXISTS on disk (a
+run skips items whose file is already there; the `.progress.json`
+sidecar was dropped 2026-07-19); paced (a configurable pause
 between prompts — image quotas are real); always supervised, the
 owner watching the window it drives.
 
