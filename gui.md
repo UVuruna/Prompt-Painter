@@ -23,9 +23,15 @@ the `rounded_button` / `rounded_entry` / `rounded_combo` /
 `rounded_switch` factories and `_button_colors` (semantic kinds:
 secondary, success Start, danger outline Stop, info Copy, outlines,
 flat link and ▶/▼ expander) — every CTk colour kwarg is a fixed
-`(day, night)` tuple via `theme_pair()`, so a single
+`(day, night)` tuple, so a single
 `ctk.set_appearance_mode()` flip repaints all CTk controls with zero
-re-walk; every factory also pins `bg_color` to the active window
+re-walk. The SOLID kinds (secondary / success / danger / info) draw
+their fill AND label from the per-theme `config.BUTTON_FILL` /
+`BUTTON_TEXT` pairs (owner 2026-07-19): the DAY shade differs from NIGHT
+for every kind and the neutral `secondary` is a LIGHT sand fill with
+DARK text on day (it used to borrow the dark warm-grey palette key and
+render brown on the cream window); coloured kinds keep a white label in
+both themes. every factory also pins `bg_color` to the active window
 background so rounded corners never show a foreign gray on ttk
 parents. Two smooth-field fixes
 live in the factories (2026-07-18): `_untheme_inner_entry`
@@ -260,21 +266,30 @@ reachability fixes:
   cyan/teal 🫧, Crop amber ✂, Upscale violet 🔍, Aspect ratio magenta
   📐, all in `config.JOB_COLORS`/`JOB_EMOJI`). A click (`_start_tool`)
   refuses a second job of the SAME kind (a messagebox — one job per
-  kind), opens the folder pick + a confirm, then spawns
+  kind), opens the input pick + a confirm, then spawns
   `_run_tool_job` on a daemon thread; the engine function
   (`remove_background` / `crop_transparent` / `upscale_if_small` /
-  `change_aspect`) runs over every image under the folder, in order.
-  **Aspect ratio** first opens an `AspectRatioDialog` — a tiny modal
-  with two positive-integer fields **W** and **H** (default 16 : 9) —
-  and warns it DEFORMS (a non-proportional stretch written in place).
-  Each image's ORIGINAL is BACKED UP first (`painter/jobtemp.py`, see
-  **Temp / before-after / restore**), so `done` = the file was changed
-  (its backup kept, before→after measured and shown), REFUSED = the
-  engine said "nothing"/"unclear" — nothing to do, its no-op backup
-  dropped (for Upscale: failed the gate — aspect outside 0.9–1.1 or
-  both sides already ≥ 800; for Aspect: already at the target ratio,
-  left byte-unchanged). The panel shows the tool's own PARAMETER
-  (below).
+  `change_aspect`) runs over the picked images, in order.
+  **BG removal / Crop / Upscale** pick a FOLDER (`askdirectory`) and run
+  over every image under it. **Aspect ratio** is different (owner
+  2026-07-19): a folder can hold images of DIFFERENT ratios, so it picks
+  INDIVIDUAL image FILES (`askopenfilenames`, multi-select) after the
+  `AspectRatioDialog` — a tiny modal with two positive-integer fields
+  **W** and **H** (default 16 : 9) — and warns it DEFORMS the N selected
+  images (a non-proportional stretch written in place). The selection is
+  keyed by `config.selection_base_and_rels` (the common-ancestor folder
+  + each file's relative path), so picks spanning sub-folders still group
+  under their folder node and restore correctly. Each image's ORIGINAL is
+  BACKED UP first (`painter/jobtemp.py`, see **Temp / before-after /
+  restore**), so `done` = the file was changed (its backup kept,
+  before→after measured and shown), REFUSED = the engine said
+  "nothing"/"unclear" — nothing to do, its no-op backup dropped (for
+  Upscale: failed the gate — aspect outside 0.9–1.1 or both sides already
+  ≥ 800; for Aspect: already at the target ratio, left byte-unchanged).
+  A "done" whose MEASURED metric rounds to 0 % (a 1px crop nibble, a
+  sub-pixel stretch) is demoted to REFUSED too — bucketed SKIPPED, not
+  changed, its backup dropped, so the panel counts stay honest (owner
+  2026-07-19). The panel shows the tool's own PARAMETER (below).
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause / Action delay** — both are random FROM–TO ranges: the
@@ -477,20 +492,30 @@ grabs the current OLD-theme window client area with `PIL.ImageGrab`
 (from `winfo_rootx/rooty/width/height`) into an `ImageTk.PhotoImage`
 (held on the overlay so tk cannot GC it), and mounts it in a
 borderless, topmost, `overrideredirect` Toplevel placed exactly over
-the window at `-alpha` 1.0. `_apply_theme_now` then repaints the REAL
-window in the new theme UNDERNEATH the snapshot, one forced
+the window at `-alpha` 1.0. The snapshot also carries a BIG CENTRED ICON
+of the theme being switched TO — the SUN going to day, the MOON going to
+night (`_render_theme_cover_icon`, the SAME anti-aliased PIL sun/moon
+renderers as the switch knob, sized to `SWITCH_COVER_ICON_FRAC` = 30 % of
+the window's min dimension) — `alpha_composite`-d INTO the grab so the
+icon fades with the cover. Order matters (owner 2026-07-19, the flash
+fix): the overlay is FORCED fully mapped + painted first —
+`deiconify` → `lift` → `update_idletasks` → `update()` (so DWM actually
+paints the cover on screen) — and ONLY THEN does `_apply_theme_now`
+repaint the REAL window in the new theme UNDERNEATH the cover; one forced
 `update_idletasks` settles that cascade invisibly, and
 `_fade_out_overlay` ramps the overlay's window `-alpha` 1.0 → 0.0 over
-`SWITCH_FADE_MS` (≈260 ms) in `SWITCH_FADE_STEPS` (16) `root.after`
-ticks (ease-out) before destroying it. It is a pure visual nicety:
-any failure (ImageGrab unavailable, `-alpha` unsupported) is caught,
-any partial overlay destroyed, and the plain instant `_apply_theme_now`
-runs instead with a one-line log note (root Rule #1 — never a stuck
-overlay or an un-themed app). Caveats: `ImageGrab` grabs SCREEN pixels,
-so a window occluding ours is captured in the snapshot; the app is
-frozen (static snapshot) for the ~260 ms fade, so live dashboard
-updates are briefly hidden. Startup passes `animate=False` (no window
-yet) — instant flip, no overlay.
+`SWITCH_FADE_MS` (≈500 ms) in `SWITCH_FADE_STEPS` (28) `root.after`
+ticks (ease-out) before destroying it. Forcing the paint before the
+repaint GUARANTEES only the snapshot + sun/moon is ever seen mid-flip,
+never a half-themed cascade. It is a pure visual nicety: any failure
+(ImageGrab unavailable, `-alpha` unsupported) is caught, any partial
+overlay destroyed, and the plain instant `_apply_theme_now` runs instead
+with a one-line log note (root Rule #1 — never a stuck overlay or an
+un-themed app). Caveats: `ImageGrab` grabs SCREEN pixels, so a window
+occluding ours is captured in the snapshot; the app is frozen (static
+snapshot) for the ~500 ms fade, so live dashboard updates are briefly
+hidden. Startup passes `animate=False` (no window yet) — instant flip,
+no overlay.
 
 **Startup order** (`PainterGui.__init__`) applies the saved theme
 BEFORE building any widget — `register_painter_day()` → load settings

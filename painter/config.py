@@ -89,6 +89,15 @@ SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
 # a transparent image to its content bounding box.
 CROP_MARGIN_PX = 4  # safety margin kept around the content box
 
+# NEGLIGIBLE-crop guard (owner 2026-07-19). A content box + margin that
+# would nibble every side by <= this many px is treated as NO crop — a
+# 626x1286 -> 625x1286 "1px trim" is within the margin's own slop, not a
+# real crop, so crop_transparent returns "nothing" (no rewrite, no temp
+# backup) and the panel counts it SKIPPED, not changed. A crop that
+# trims MORE than this on any side, or a real halo cleanup, still
+# returns "done".
+CROP_MIN_TRIM_PX = 2
+
 # INK-BASED content box (owner 2026-07-18, the OldAge.png case). A
 # single-threshold box (any pixel at alpha >= 8) was defeated by faint
 # stray pixels hugging the border (a thin far-left line at alpha ~8-32),
@@ -305,6 +314,75 @@ def status_pair(role: str) -> tuple[str, str]:
     return (THEMES["day"]["status"][role], THEMES["night"]["status"][role])
 
 
+# --- Solid-button fills per theme (owner 2026-07-19) -----------------
+#
+# The SOLID button kinds each carry their OWN (day, night) fill + text,
+# decoupled from the ttk palette so the DAY shade can differ from NIGHT
+# for every kind (owner's ask) without disturbing the palette keys that
+# also serve borders / muted text. Two rules the owner set:
+#   * DAY has NO dark-filled neutral button — `secondary` becomes a
+#     LIGHT sand fill with dark text (it used to borrow the dark warm-
+#     grey palette key and render brown on the cream window).
+#   * Every kind's DAY hex DIFFERS from its NIGHT hex; DAY shades are a
+#     touch lighter / desaturated to sit on the cream window, NIGHT
+#     keeps the darkly look.
+# Coloured kinds stay clearly coloured in both themes (white label);
+# only the neutral kind flips to a light fill + dark label on day.
+BUTTON_FILL = {
+    "secondary": ("#e6e0d3", "#4a4a4a"),  # day: light sand   / night: neutral grey
+    "success":   ("#1f9d76", "#00bc8c"),  # day: softer green / night: darkly green
+    "danger":    ("#cf4436", "#e74c3c"),  # day: brick red    / night: darkly red
+    "info":      ("#9a7d3a", "#3aa0e0"),  # day: accent gold  / night: sky blue
+}
+BUTTON_TEXT = {
+    "secondary": ("#2a2620", "#ffffff"),  # DARK text on the light day fill
+    "success":   ("#ffffff", "#ffffff"),
+    "danger":    ("#ffffff", "#ffffff"),
+    "info":      ("#ffffff", "#ffffff"),
+}
+
+
+def button_fill_pair(kind: str) -> tuple[str, str]:
+    """(day, night) fill for one SOLID button kind — a CTk light/dark
+    tuple that auto-flips on set_appearance_mode()."""
+    return BUTTON_FILL[kind]
+
+
+def button_text_pair(kind: str) -> tuple[str, str]:
+    """(day, night) label colour for one SOLID button kind — dark on the
+    light day fill for the neutral kind, white on the coloured ones."""
+    return BUTTON_TEXT[kind]
+
+
+# --- Multi-file selection base (aspect tool, owner 2026-07-19) --------
+#
+# The Aspect-ratio tool picks INDIVIDUAL image FILES (a folder may hold
+# mixed ratios), unlike the folder-based BG / Crop / Upscale tools. The
+# job machinery keys every file by a (base folder, relative path) pair —
+# JobTemp backs up under base/rel and the panel groups rows by rel's
+# parent. This derives that base (the common ancestor of the picks) and
+# each file's rel, so a selection spanning sub-folders still groups and
+# restores correctly. Files sitting in ONE folder yield base=that folder
+# and rel=filename.
+def selection_base_and_rels(paths) -> tuple:
+    """Return ``(base, [rel, ...])`` for a list of selected file paths:
+    ``base`` is the common ancestor DIRECTORY of the picks and each
+    ``rel`` is the POSIX path of the file relative to it. Raises
+    ``ValueError`` on an empty selection (nothing to base)."""
+    import os
+    from pathlib import Path
+
+    files = [Path(p) for p in paths]
+    if not files:
+        raise ValueError("empty selection — no files to base")
+    if len(files) == 1:
+        base = files[0].parent
+    else:
+        base = Path(os.path.commonpath([str(f.parent) for f in files]))
+    rels = [f.relative_to(base).as_posix() for f in files]
+    return base, rels
+
+
 # --- Dashboard per-JOB panels (owner 2026-07-19) ---------------------
 #
 # The dashboard shows one panel PER RUNNING JOB (up to 6 in parallel):
@@ -407,9 +485,17 @@ SWITCH_HOVER_SCALE = 1.05   # knob grows this much on hover
 # hides that cascade behind a STATIC SNAPSHOT of the OLD theme in a
 # borderless overlay Toplevel, then fades the overlay's window alpha out
 # over the freshly repainted NEW theme underneath.
-SWITCH_FADE_MS = 260        # total snapshot cross-fade duration (alpha 1->0)
-SWITCH_FADE_STEPS = 16      # alpha ramp ticks across SWITCH_FADE_MS
+SWITCH_FADE_MS = 500        # total snapshot cross-fade duration (alpha 1->0)
+SWITCH_FADE_STEPS = 28      # alpha ramp ticks across SWITCH_FADE_MS (gentle ease-out)
 SWITCH_SUPERSAMPLE = 4      # render knobs at Nx, then LANCZOS down for crisp edges
+# During the fade a LARGE centred icon of the NEXT theme rides on the
+# cover (SUN going to day, MOON going to night) and fades with it — the
+# same PIL sun/moon renderers as the switch knob, sized to a fraction of
+# the window's MIN dimension so the flip reads at a glance (owner
+# 2026-07-19). The cover is forced painted BEFORE any theme repaint, so
+# only the snapshot + icon are ever seen mid-flip, never the cascade.
+SWITCH_COVER_ICON_FRAC = 0.30  # cover icon diameter = this * min(win W, H)
+SWITCH_COVER_ICON_SS = 2       # supersample for the big cover icon (LANCZOS down)
 
 # the two track pill SVGs (stems, resolved in assets/icons) — reused
 # straight from the owner's website switch, so the starfield / sky-clouds

@@ -59,6 +59,8 @@ from painter.config import (
     STATE_DIRNAME,
     SWITCH_ANIM_MS,
     SWITCH_ASPECT,
+    SWITCH_COVER_ICON_FRAC,
+    SWITCH_COVER_ICON_SS,
     SWITCH_CRATER,
     SWITCH_CRATERS,
     SWITCH_FADE_MS,
@@ -87,8 +89,11 @@ from painter.config import (
     dest_for,
     fmt_duration,
     fmt_size,
+    button_fill_pair,
+    button_text_pair,
     job_color_pair,
     prompt_suffix,
+    selection_base_and_rels,
     status_pair,
     theme_pair,
 )
@@ -467,6 +472,20 @@ def _render_sun_knob(d_px: int, ss: int) -> Image.Image:
     return glow.resize((cell, cell), Image.LANCZOS)
 
 
+def _render_theme_cover_icon(target_name: str, min_dim: int) -> Image.Image:
+    """The BIG centred icon that rides the theme cross-fade cover: the
+    SUN of the theme being switched TO (day) or the MOON (night), the
+    SAME anti-aliased PIL renderers as the switch knob, sized to
+    ``SWITCH_COVER_ICON_FRAC`` of the window's min dimension. RGBA with
+    transparent surroundings so it composites cleanly onto the snapshot
+    (owner 2026-07-19)."""
+    d = max(round(min_dim * SWITCH_COVER_ICON_FRAC), 1)
+    ss = SWITCH_COVER_ICON_SS
+    if THEMES[target_name]["switch_on"]:   # going to day -> the sun
+        return _render_sun_knob(d, ss)
+    return _render_moon_knob(d, ss)        # going to night -> the moon
+
+
 def _render_switch_track(stem: str, w: int, h: int) -> Image.Image:
     """One track pill: the owner's website switch SVG (in assets/icons),
     rasterized anti-aliased through the icon SVG->PIL path and sized to
@@ -502,21 +521,19 @@ def _darken_pair(
 
 def _button_colors(kind: str) -> dict:
     """CTkButton colour kwargs for one semantic kind, as (day, night)
-    tuples via theme_pair() — a single ctk.set_appearance_mode() then
-    repaints every button with zero re-walk. Solid buttons carry the
-    status btn_text (white in both themes) so they stay legible on the
-    cream day fill."""
-    solid = {
-        "secondary": theme_pair("secondary"),
-        "success": theme_pair("success"),
-        "danger": theme_pair("danger"),
-        "info": theme_pair("info"),
-    }
+    tuples — a single ctk.set_appearance_mode() then repaints every
+    button with zero re-walk. Solid kinds draw their fill AND label from
+    the per-theme BUTTON_FILL / BUTTON_TEXT pairs (owner 2026-07-19): the
+    DAY shade differs from NIGHT for every kind, and the neutral
+    'secondary' is a LIGHT sand fill with DARK text on day (never the
+    dark warm-grey that read brown on the cream window); coloured kinds
+    keep a white label in both themes."""
+    solid = ("secondary", "success", "danger", "info")
     if kind in solid:
-        color = solid[kind]
+        fill = button_fill_pair(kind)
         return dict(
-            fg_color=color, hover_color=_darken_pair(color),
-            text_color=status_pair("btn_text"),
+            fg_color=fill, hover_color=_darken_pair(fill),
+            text_color=button_text_pair(kind),
             text_color_disabled=theme_pair("light"),
         )
     outline = {
@@ -872,14 +889,22 @@ def _apply_theme_now(name: str) -> None:
 # to the plain instant flip, never a stuck overlay or an un-themed app.
 
 
-def _snapshot_overlay(root: tk.Misc) -> tk.Toplevel:
-    """Grab the root window's client area (PIL.ImageGrab) and mount it in
+def _snapshot_overlay(root: tk.Misc, target_name: str) -> tk.Toplevel:
+    """Grab the root window's client area (PIL.ImageGrab), composite the
+    NEXT theme's big sun/moon icon centred on it, and mount the result in
     a borderless, topmost, fully-opaque Toplevel placed exactly over the
-    window. The PhotoImage is held on the overlay (tk keeps no ref of its
-    own) so it survives the whole fade."""
+    window. The icon is baked INTO the snapshot (its transparent
+    surroundings blend onto the grab) so the whole cover fades as one.
+    The PhotoImage is held on the overlay (tk keeps no ref of its own) so
+    it survives the whole fade."""
     x, y = root.winfo_rootx(), root.winfo_rooty()
     w, h = root.winfo_width(), root.winfo_height()
-    photo = ImageTk.PhotoImage(ImageGrab.grab(bbox=(x, y, x + w, y + h)))
+    snap = ImageGrab.grab(bbox=(x, y, x + w, y + h)).convert("RGBA")
+    icon = _render_theme_cover_icon(target_name, min(w, h))
+    snap.alpha_composite(
+        icon, ((w - icon.width) // 2, (h - icon.height) // 2)
+    )
+    photo = ImageTk.PhotoImage(snap)
     overlay = tk.Toplevel(root)
     overlay.overrideredirect(True)
     overlay.geometry(f"{w}x{h}+{x}+{y}")
@@ -939,8 +964,16 @@ def apply_theme(name: str, animate: bool = False) -> None:
         return
     overlay = None
     try:
-        overlay = _snapshot_overlay(root)
-        _apply_theme_now(name)      # repaint the real window BEHIND the snap
+        overlay = _snapshot_overlay(root, name)
+        # FORCE the cover fully mapped + painted by the window manager
+        # BEFORE any theme repaint runs, so the half-themed cascade is
+        # NEVER seen — only the snapshot + the next theme's sun/moon
+        # (owner 2026-07-19; the old order let the cascade flash through).
+        overlay.deiconify()
+        overlay.lift()
+        overlay.update_idletasks()
+        overlay.update()            # DWM actually paints the cover now
+        _apply_theme_now(name)      # repaint the real window BEHIND the cover
         root.update_idletasks()     # force the cascade to settle, hidden
         _fade_out_overlay(root, overlay)
     except Exception as exc:        # visual nicety — never crash the flip
@@ -2844,6 +2877,10 @@ class PainterGui:
 
         label = JOB_LABEL[slot]
         if slot == "aspect":
+            # Aspect takes INDIVIDUAL image FILES, not a folder — one
+            # folder can hold images of DIFFERENT ratios, and a single
+            # target must never be blanket-applied to all (owner
+            # 2026-07-19). The other three tools stay folder-based.
             ratio = AspectRatioDialog(self.root).result
             if ratio is None:
                 return
@@ -2854,13 +2891,19 @@ class PainterGui:
                 lambda path, log: change_aspect(path, ratio_w, ratio_h, log)
             )
             label = f"Aspect {ratio_w}:{ratio_h}"
-            folder = filedialog.askdirectory(
-                title=f"Folder with images — {label} runs IN PLACE"
+            picks = filedialog.askopenfilenames(
+                title=f"Image files to deform — {label} runs IN PLACE",
+                filetypes=[
+                    ("Images", "*.png *.jpg *.jpeg *.webp"),
+                    ("All files", "*.*"),
+                ],
             )
-            if not folder:
+            if not picks:
                 return
+            folder_path, _rels = selection_base_and_rels(picks)
+            files = [Path(p) for p in picks]
             message = (
-                f"DEFORM every image under:\n{folder}\n\n"
+                f"DEFORM {len(files)} selected image(s)\n\n"
                 f"to a {ratio_w}:{ratio_h} aspect ratio?\n\n"
                 "A non-proportional STRETCH written IN PLACE — the"
                 " originals are backed up so you can Restore. Images"
@@ -2873,6 +2916,8 @@ class PainterGui:
             )
             if not folder:
                 return
+            folder_path = Path(folder)
+            files = self._iter_images(folder_path)
             message = (
                 f"{label} IN PLACE for every image under:\n{folder}?\n\n"
                 "(the originals are backed up so you can Restore; files"
@@ -2881,7 +2926,6 @@ class PainterGui:
         if not messagebox.askyesno("PromptPainter", message):
             return
 
-        folder_path = Path(folder)
         # a finished panel for this slot may still be on screen — clear
         # its old temp before the new job takes the slot
         old = self._tool_temps.pop(slot, None)
@@ -2890,7 +2934,6 @@ class PainterGui:
         temp = jobtemp.JobTemp(slot, folder_path)
         self._tool_temps[slot] = temp
 
-        files = self._iter_images(folder_path)
         panel = self.panels[slot]
         panel.folder = folder_path
         panel.jobtemp = temp
@@ -2933,11 +2976,21 @@ class PainterGui:
                 except Exception as exc:
                     status = "FAILED"
                     self._q.put(f"[{label}] FAIL {src.name}: {exc}")
+                metric = (
+                    jobtemp.measure(slot, temp.before_path(rel), src)
+                    if status == "done" else None
+                )
+                # a "done" whose measured metric ROUNDS TO 0% is not a
+                # real change (a 1px crop nibble, a sub-pixel stretch) —
+                # demote it to "nothing" so the panel counts it SKIPPED
+                # and its backup is dropped, keeping counts + restore
+                # honest (owner 2026-07-19). FAILED / unclear stay
+                # distinct in the summary.
+                if status == "done" and round(metric["pct"]) == 0:
+                    status = "nothing"
+                    metric = None
                 counts[status] = counts.get(status, 0) + 1
                 if status == "done":
-                    metric = jobtemp.measure(
-                        slot, temp.before_path(rel), src
-                    )
                     emit({
                         "type": "item_done", "rel": rel,
                         "size": src.stat().st_size, **metric,

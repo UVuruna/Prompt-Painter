@@ -216,6 +216,33 @@ def test_crop_shrinks_to_the_content_box_plus_margin(tmp_path):
     assert crop_transparent(img, print) == "nothing"
 
 
+def test_crop_negligible_trim_is_nothing_and_byte_unchanged(tmp_path):
+    """A content box + margin that would nibble each side by only
+    <= CROP_MIN_TRIM_PX is NOT a real crop (owner 2026-07-19): return
+    "nothing" and leave the file byte-unchanged, so a 1px 'trim' is
+    never rewritten and the panel counts it SKIPPED, not changed."""
+    img = tmp_path / "nibble.png"
+    arr = np.zeros((100, 100, 4), dtype=np.uint8)
+    # 90x90 solid block inside a 5px transparent border: the ink box is
+    # (5,5,95,95); + the 4px margin that lands 1px from every edge.
+    arr[5:95, 5:95] = (200, 50, 50, 255)
+    save_rgba(img, arr)
+    before = img.read_bytes()
+    assert crop_transparent(img, print) == "nothing"
+    assert img.read_bytes() == before  # a 1px nibble is never written
+
+
+def test_crop_meaningful_trim_still_done(tmp_path):
+    """A trim larger than CROP_MIN_TRIM_PX on a side is a real crop."""
+    img = tmp_path / "real.png"
+    arr = np.zeros((100, 100, 4), dtype=np.uint8)
+    arr[30:70, 30:70] = (200, 50, 50, 255)  # 40x40 -> trims ~26px/side
+    save_rgba(img, arr)
+    assert crop_transparent(img, print) == "done"
+    with Image.open(img) as out:
+        assert out.size == (40 + 2 * CROP_MARGIN_PX, 40 + 2 * CROP_MARGIN_PX)
+
+
 def test_crop_on_opaque_image_is_nothing(tmp_path):
     img = tmp_path / "opaque.png"
     arr = np.full((40, 40, 4), 255, dtype=np.uint8)

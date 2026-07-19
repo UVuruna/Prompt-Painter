@@ -67,7 +67,13 @@ match.
   the image border (the visible stray line / halo) are zeroed, while
   interior soft edges — enclosed by the solid subject, never
   border-connected — are left alone. `CROP_MARGIN_PX` still pads the
-  final box.
+  final box. `CROP_MIN_TRIM_PX` (owner 2026-07-19) is the negligible-crop
+  guard: a content box + margin that would nibble EVERY side by
+  ≤ `CROP_MIN_TRIM_PX` is treated as NO crop (a 626×1286 → 625×1286 1px
+  "trim" is within the margin's own slop), so `crop_transparent` returns
+  "nothing" — no rewrite, no temp backup — and the panel counts it
+  SKIPPED, not changed. A trim larger than that on any side, or a real
+  halo cleanup, still returns "done".
 - `BLACK_VOID_MAX`, `SAFETY_MAX_REMOVE_FRAC`,
   `SAFETY_MAX_REMOVE_FRAC_WHITE` — the black-void removal + SAFETY guard
   (owner 2026-07-19, the bible/dark case). Brightness-keying cannot
@@ -97,7 +103,13 @@ match.
   (0.001) is how close an image's W/H must be to the target ratio to
   count as already-at-ratio (left byte-unchanged, no write);
   `ASPECT_DEFAULT_W`/`ASPECT_DEFAULT_H` (16 / 9) preselect the GUI's
-  ratio prompt.
+  ratio prompt. `selection_base_and_rels(paths)` (owner 2026-07-19)
+  backs the tool's MULTI-FILE picker — unlike the folder-based BG / Crop
+  / Upscale tools, Aspect ratio picks INDIVIDUAL image files (a folder
+  can hold mixed ratios), and this returns the `(base, [rel, ...])` pair
+  the job machinery keys on (base = the common-ancestor DIRECTORY of the
+  picks, one folder ⇒ base = that folder, rel = filename), so a selection
+  spanning sub-folders still groups + restores correctly.
 - `JOB_ORDER`, `JOB_TOOL_KINDS`, `JOB_LABEL`, `JOB_LOGO`, `JOB_EMOJI`,
   `JOB_COLORS`, `JOB_METRIC`, `job_color_pair(kind)`,
   `GRID_COLS_BY_COUNT` — the dashboard per-JOB panels (owner
@@ -138,7 +150,14 @@ match.
   advice / superseded / code_fg / btn_text). `theme_pair(key)`
   returns the `(day, night)` tuple every customtkinter colour kwarg
   passes so `set_appearance_mode()` flips them; `status_pair` does
-  the same for the status block. The `SWITCH_*` constants are the
+  the same for the status block. `BUTTON_FILL` / `BUTTON_TEXT` +
+  `button_fill_pair(kind)` / `button_text_pair(kind)` (owner 2026-07-19)
+  hold the SOLID button fill + label per kind (secondary / success /
+  danger / info) as `(day, night)`, DECOUPLED from the palette keys so
+  the DAY shade differs from NIGHT for every kind and the neutral
+  `secondary` is a LIGHT sand fill with DARK text on day (never the dark
+  warm-grey that read brown on the cream window); coloured kinds keep a
+  white label in both themes. The `SWITCH_*` constants are the
   Day/Night switch geometry (scaled from `SWITCH_H`) and its
   IMAGE-BASED art (owner 2026-07-18 — tkinter Canvas has no
   anti-aliasing, so the switch composites PIL images, not raw ovals):
@@ -148,9 +167,15 @@ match.
   colours — silver moon (`SWITCH_MOON_CENTER`/`_EDGE`) + 3 craters,
   gold sun (`SWITCH_SUN_CENTER`/`_EDGE`) + a blurred glow
   (`SWITCH_SUN_GLOW*`) — rendered at `SWITCH_SUPERSAMPLE`x and
-  LANCZOS-downscaled. This block is PURE hex/number data — no
-  tkinter/ttkbootstrap/PIL import — so the engine and tests stay
-  framework-free; [GUI](../gui.md) rasterizes it into the live art.
+  LANCZOS-downscaled. The theme CROSS-FADE constants live here too:
+  `SWITCH_FADE_MS` (≈500 ms) / `SWITCH_FADE_STEPS` (28) time the
+  snapshot-overlay alpha ramp (lengthened 2026-07-19 to kill the flip
+  flash), and `SWITCH_COVER_ICON_FRAC` (0.30) / `SWITCH_COVER_ICON_SS`
+  size the BIG centred sun/moon that rides the cover — the SAME renderers
+  as the switch knob, showing the theme being switched TO. This block is
+  PURE hex/number data — no tkinter/ttkbootstrap/PIL import — so the
+  engine and tests stay framework-free; [GUI](../gui.md) rasterizes it
+  into the live art.
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text)` — the rule
   block appended to every prompt: the chosen background (each

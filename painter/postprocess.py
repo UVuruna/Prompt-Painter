@@ -30,6 +30,7 @@ from painter.config import (
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
     CROP_MIN_INK_PX,
+    CROP_MIN_TRIM_PX,
     SAFETY_MAX_REMOVE_FRAC,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
 )
@@ -155,11 +156,16 @@ def crop_transparent(path: Path, log: Log) -> str:
         top = max(0, box[1] - CROP_MARGIN_PX)
         right = min(width, box[2] + CROP_MARGIN_PX)
         bottom = min(height, box[3] + CROP_MARGIN_PX)
-        trimmed = (left, top, right, bottom) != (0, 0, width, height)
+        # a crop counts only when SOME side trims more than
+        # CROP_MIN_TRIM_PX — a <=Npx nibble on every side is within the
+        # margin's own slop, not a real crop (owner 2026-07-19), so a
+        # 626x1286 -> 625x1286 no-op is never written or counted.
+        max_trim = max(left, top, width - right, height - bottom)
+        big_trim = max_trim > CROP_MIN_TRIM_PX
 
-        if not trimmed and not cleaned:
-            return "nothing"  # opaque or already tight, nothing to clean
-        result = rgba.crop((left, top, right, bottom)) if trimmed else rgba
+        if not big_trim and not cleaned:
+            return "nothing"  # opaque / already tight / negligible nibble
+        result = rgba.crop((left, top, right, bottom)) if big_trim else rgba
         result.save(path, "PNG", optimize=True)
         return "done"
     except Exception as exc:
