@@ -51,7 +51,6 @@ from painter.config import (
     CHECKER_TILE_PX,
     DEFAULT_OUT_DIR,
     GRID_COLS_BY_COUNT,
-    JOB_EMOJI,
     JOB_LABEL,
     JOB_LOGO,
     JOB_METRIC,
@@ -99,6 +98,7 @@ from painter.config import (
     dest_for,
     fmt_duration,
     fmt_op_duration,
+    fmt_pct,
     fmt_size,
     button_fill_pair,
     button_text_pair,
@@ -1534,16 +1534,14 @@ class JobPanel(ttk.Frame):
     def _build_header(self, kind: str) -> None:
         header = ttk.Frame(self)
         header.pack(fill="x")
-        if kind in JOB_LOGO:  # a gen site — its SVG logo
-            ctk.CTkLabel(
-                header, text="", image=icon(JOB_LOGO[kind]), width=24,
-                fg_color="transparent", bg_color=theme_pair("bg"),
-            ).pack(side="left", padx=(0, 6))
-        else:  # a tool — its emoji mark
-            ctk.CTkLabel(
-                header, text=JOB_EMOJI[kind], width=24, font=ctk_font("title"),
-                fg_color="transparent", bg_color=theme_pair("bg"),
-            ).pack(side="left", padx=(0, 6))
+        # every job — gen site or tool — carries an icon (its
+        # config.JOB_LOGO stem, resolved to an svg/png by icon()) beside
+        # the coloured job NAME. The four tools got dedicated PNG icons
+        # (owner 2026-07-19), replacing the old emoji marks.
+        ctk.CTkLabel(
+            header, text="", image=icon(JOB_LOGO[kind]), width=24,
+            fg_color="transparent", bg_color=theme_pair("bg"),
+        ).pack(side="left", padx=(0, 6))
         ctk.CTkLabel(
             header, text=JOB_LABEL[kind], font=ctk_font("title"),
             text_color=job_color_pair(kind),
@@ -2070,17 +2068,26 @@ class ToolPanel(JobPanel):
 
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, pady=(2, 0))
-        cols = ("before", "after", "pct", "time", "size")
-        self.tree = ttk.Treeview(wrap, columns=cols, height=8)
-        self.tree.heading("#0", text="Name")
-        self.tree.column("#0", width=200, minwidth=120, stretch=False)
-        for cid, txt, w, anc in (
-            ("before", "Before", 92, "center"),
-            ("after", "After", 92, "center"),
-            ("pct", "%", 64, "e"),
+        # BG removal changes ALPHA, not dimensions — its Before/After
+        # resolution are always identical and meaningless, so its panel
+        # DROPS those two columns (owner 2026-07-19); the dimensional
+        # tools (crop / upscale / aspect) keep them.
+        self._is_bg = kind == "bg"
+        metric_cols = (
+            ("pct", "%", 72 if self._is_bg else 64, "e"),
             ("time", "Time", 64, "e"),
             ("size", "Size", 72, "e"),
-        ):
+        )
+        col_specs = metric_cols if self._is_bg else (
+            ("before", "Before", 92, "center"),
+            ("after", "After", 92, "center"),
+            *metric_cols,
+        )
+        self._cols = tuple(c[0] for c in col_specs)
+        self.tree = ttk.Treeview(wrap, columns=self._cols, height=8)
+        self.tree.heading("#0", text="Name")
+        self.tree.column("#0", width=200, minwidth=120, stretch=False)
+        for cid, txt, w, anc in col_specs:
             self.tree.heading(cid, text=txt)
             self.tree.column(cid, width=w, minwidth=w, anchor=anc,
                              stretch=False)
@@ -2158,7 +2165,9 @@ class ToolPanel(JobPanel):
         counts = f"{self._changed} changed, {self._skipped} skipped"
         if self._pcts:
             avg = sum(self._pcts) / len(self._pcts)
-            self.metric_var.set(f"avg {avg:.0f}% {self._metric_name}   ·   {counts}")
+            self.metric_var.set(
+                f"avg {fmt_pct(avg)}% {self._metric_name}   ·   {counts}"
+            )
         else:
             self.metric_var.set(f"{self._metric_name}: —   ·   {counts}")
         self._update_time()
@@ -2183,7 +2192,7 @@ class ToolPanel(JobPanel):
             name = self.folder.name if self.folder else JOB_LABEL[self.slot_key]
             self._tree_root = self.tree.insert(
                 "", "end", text=f"{name}   · {JOB_LABEL[self.slot_key]}",
-                open=True, values=("", "", "", "", ""),
+                open=True, values=("",) * len(self._cols),
             )
             self._node_info[self._tree_root] = {"level": "collection"}
         return self._tree_root
@@ -2193,7 +2202,7 @@ class ToolPanel(JobPanel):
         if node is None:
             node = self.tree.insert(
                 self._ensure_root(), "end", text=folder, open=True,
-                values=("", "", "", "", ""),
+                values=("",) * len(self._cols),
             )
             self._folder_nodes[folder] = node
             self._node_info[node] = {"level": "folder", "folder": folder}
@@ -2201,22 +2210,24 @@ class ToolPanel(JobPanel):
 
     def _insert_image_row(self, rel: str, event: dict) -> None:
         fnode = self._ensure_folder(folder_of(rel))
+        pct = f"{fmt_pct(event['pct'])}%"
+        metric = (pct, fmt_op_duration(event["time"]), fmt_size(event["size"]))
+        # the BG panel has no Before/After columns; the dimensional tools do
+        values = metric if self._is_bg else (
+            event["before"], event["after"], *metric
+        )
         row = self.tree.insert(
-            fnode, "end", text=PurePosixPath(rel).name,
-            values=(
-                event["before"], event["after"],
-                f"{event['pct']:.0f}%", fmt_op_duration(event["time"]),
-                fmt_size(event["size"]),
-            ),
+            fnode, "end", text=PurePosixPath(rel).name, values=values,
         )
         self._node_info[row] = {"level": "image", "rel": rel, "has_backup": True}
         self._image_rows[rel] = row
 
     def _insert_refused_row(self, rel: str) -> None:
         fnode = self._ensure_folder(folder_of(rel))
+        # the '—' sits in the % column: index 0 (BG) or 2 (dimensional)
+        values = ("—", "", "") if self._is_bg else ("", "", "—", "", "")
         self.tree.insert(
-            fnode, "end", text=PurePosixPath(rel).name,
-            values=("", "", "—", "", ""),
+            fnode, "end", text=PurePosixPath(rel).name, values=values,
         )
 
     # --- before/after viewer + restore ---------------------------------
@@ -2695,12 +2706,13 @@ class PainterGui:
             row, "Instructions", command=self._open_instructions,
         ).pack(side="right")
         # the four in-place tools — each its OWN concurrent job + panel,
-        # carrying the panel's colour + emoji. Packed reversed so they
-        # read BG removal / Crop / Upscale / Aspect ratio left→right.
+        # carrying the panel's colour + its PNG icon (owner 2026-07-19,
+        # replacing the old emoji). Packed reversed so they read BG
+        # removal / Crop / Upscale / Aspect ratio left→right.
         for slot in reversed(JOB_TOOL_KINDS):
             color = job_color_pair(slot)
             rounded_button(
-                row, f"{JOB_EMOJI[slot]}  {JOB_LABEL[slot]}",
+                row, JOB_LABEL[slot], icon_name=slot,
                 command=partial(self._start_tool, slot),
                 fg_color=color, hover_color=_darken_pair(color),
                 text_color=status_pair("btn_text"),

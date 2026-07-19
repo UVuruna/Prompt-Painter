@@ -216,24 +216,40 @@ def test_crop_shrinks_to_the_content_box_plus_margin(tmp_path):
     assert crop_transparent(img, print) == "nothing"
 
 
-def test_crop_negligible_trim_is_nothing_and_byte_unchanged(tmp_path):
-    """A content box + margin that would nibble each side by only
-    <= CROP_MIN_TRIM_PX is NOT a real crop (owner 2026-07-19): return
-    "nothing" and leave the file byte-unchanged, so a 1px 'trim' is
-    never rewritten and the panel counts it SKIPPED, not changed."""
-    img = tmp_path / "nibble.png"
+def test_crop_zero_px_change_is_nothing_byte_unchanged(tmp_path):
+    """SKIPPED iff the output resolution EQUALS the input (owner
+    2026-07-19). A content box whose +margin lands exactly on the full
+    frame is a 0px change: "nothing", file byte-unchanged (no rewrite,
+    no restore point)."""
+    img = tmp_path / "full.png"
     arr = np.zeros((100, 100, 4), dtype=np.uint8)
-    # 90x90 solid block inside a 5px transparent border: the ink box is
-    # (5,5,95,95); + the 4px margin that lands 1px from every edge.
-    arr[5:95, 5:95] = (200, 50, 50, 255)
+    # content (2,2,98,98) + the 4px margin clamps to (0,0,100,100) = the
+    # whole frame -> output size == input size -> no crop.
+    arr[2:98, 2:98] = (200, 50, 50, 255)
     save_rgba(img, arr)
     before = img.read_bytes()
     assert crop_transparent(img, print) == "nothing"
-    assert img.read_bytes() == before  # a 1px nibble is never written
+    assert img.read_bytes() == before  # a 0px change is never written
+
+
+def test_crop_one_px_change_is_done(tmp_path):
+    """CHANGED iff ANY dimension differs by >= 1px (owner 2026-07-19,
+    reverses the old <=2px slop skip). A box + margin that trims exactly
+    ONE pixel off one side IS a crop -> "done", output 1px smaller."""
+    img = tmp_path / "onepx.png"
+    arr = np.zeros((100, 100, 4), dtype=np.uint8)
+    # content columns 5..99 over all rows: ink box (5,0,100,100), + the
+    # 4px margin -> (1,0,100,100) -> exactly 1px off the LEFT, nothing
+    # else -> 99x100.
+    arr[:, 5:100] = (200, 50, 50, 255)
+    save_rgba(img, arr)
+    assert crop_transparent(img, print) == "done"
+    with Image.open(img) as out:
+        assert out.size == (99, 100)  # exactly 1px trimmed
 
 
 def test_crop_meaningful_trim_still_done(tmp_path):
-    """A trim larger than CROP_MIN_TRIM_PX on a side is a real crop."""
+    """A multi-pixel trim on every side is, of course, a real crop."""
     img = tmp_path / "real.png"
     arr = np.zeros((100, 100, 4), dtype=np.uint8)
     arr[30:70, 30:70] = (200, 50, 50, 255)  # 40x40 -> trims ~26px/side

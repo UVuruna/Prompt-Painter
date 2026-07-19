@@ -30,7 +30,6 @@ from painter.config import (
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
     CROP_MIN_INK_PX,
-    CROP_MIN_TRIM_PX,
     SAFETY_MAX_REMOVE_FRAC,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
 )
@@ -124,11 +123,12 @@ def crop_transparent(path: Path, log: Log) -> str:
     sparse faint line no longer defeats the crop) plus the
     ``CROP_MARGIN_PX`` safety margin.
 
-    Returns "done" when it changed anything (halo cleaned OR box
-    trimmed) or "nothing" — no transparency to crop against (fully
-    opaque, so the box IS the image), fully transparent, or already
-    tight AND nothing to clean. Raises ``PostprocessError`` on a real
-    failure.
+    Returns "done" when it changed anything — the cropped output size
+    differs from the input by >= 1px on ANY side (owner 2026-07-19: a 3px
+    trim IS a crop even when the % rounds tiny; only a 0px change is a
+    no-op), OR the halo cleanup zeroed pixels — else "nothing" (no
+    transparency to crop against / fully transparent / already tight AND
+    nothing to clean). Raises ``PostprocessError`` on a real failure.
     """
     from PIL import Image
 
@@ -156,16 +156,16 @@ def crop_transparent(path: Path, log: Log) -> str:
         top = max(0, box[1] - CROP_MARGIN_PX)
         right = min(width, box[2] + CROP_MARGIN_PX)
         bottom = min(height, box[3] + CROP_MARGIN_PX)
-        # a crop counts only when SOME side trims more than
-        # CROP_MIN_TRIM_PX — a <=Npx nibble on every side is within the
-        # margin's own slop, not a real crop (owner 2026-07-19), so a
-        # 626x1286 -> 625x1286 no-op is never written or counted.
-        max_trim = max(left, top, width - right, height - bottom)
-        big_trim = max_trim > CROP_MIN_TRIM_PX
+        # CHANGED vs SKIPPED by EXACT resolution (owner 2026-07-19): the
+        # crop counts as soon as the output size differs from the input
+        # on ANY side (>= 1px). A box + margin that lands on the full
+        # frame (0px change) is no crop — SKIPPED. There is no
+        # negligible-trim slop any more.
+        resized = (right - left) != width or (bottom - top) != height
 
-        if not big_trim and not cleaned:
-            return "nothing"  # opaque / already tight / negligible nibble
-        result = rgba.crop((left, top, right, bottom)) if big_trim else rgba
+        if not resized and not cleaned:
+            return "nothing"  # opaque / already tight (0px change), no halo
+        result = rgba.crop((left, top, right, bottom)) if resized else rgba
         result.save(path, "PNG", optimize=True)
         return "done"
     except Exception as exc:

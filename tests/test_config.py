@@ -18,6 +18,7 @@ from painter.config import (
     button_fill_pair,
     button_text_pair,
     fmt_op_duration,
+    fmt_pct,
     selection_base_and_rels,
 )
 
@@ -80,6 +81,24 @@ def test_op_duration_uses_whole_seconds_from_ten():
 
 def test_op_duration_uses_minutes_past_a_minute():
     assert fmt_op_duration(65.0) == "1m 05s"
+
+
+# --- tool metric % formatter (owner 2026-07-19) -----------------------
+
+
+def test_fmt_pct_two_decimals_below_ten():
+    """A value under 10 keeps 2 decimals — so a 3px crop reads '0.24',
+    never a rounded-away '0'."""
+    assert fmt_pct(0.08) == "0.08"
+    assert fmt_pct(5.23) == "5.23"
+    assert fmt_pct(9.99) == "9.99"     # the boundary, still 2 decimals
+
+
+def test_fmt_pct_one_decimal_from_ten():
+    """At 10 and above the precision drops to 1 decimal."""
+    assert fmt_pct(10.0) == "10.0"     # the boundary, now 1 decimal
+    assert fmt_pct(33.4) == "33.4"
+    assert fmt_pct(300.0) == "300.0"
 
 
 # --- multi-file selection base (Aspect tool) --------------------------

@@ -39,6 +39,15 @@ def fmt_size(num_bytes: int) -> str:
         return f"{num_bytes / 1024:.0f} KB"
     return f"{num_bytes} B"
 
+
+def fmt_pct(value: float) -> str:
+    """A tool metric percentage, precision scaled by magnitude (owner
+    2026-07-19): below 10 -> 2 decimals ('0.08', '5.23', '9.99'), 10 and
+    up -> 1 decimal ('10.0', '33.4', '300.0'). Returns the NUMBER only;
+    callers append the '%'. So a 3px crop reads '0.24', never a rounded-
+    away '0'."""
+    return f"{value:.2f}" if value < 10 else f"{value:.1f}"
+
 # --- CDP attachment / Chrome launch ----------------------------------
 
 CDP_PORT = 9222
@@ -100,14 +109,12 @@ SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
 # a transparent image to its content bounding box.
 CROP_MARGIN_PX = 4  # safety margin kept around the content box
 
-# NEGLIGIBLE-crop guard (owner 2026-07-19). A content box + margin that
-# would nibble every side by <= this many px is treated as NO crop — a
-# 626x1286 -> 625x1286 "1px trim" is within the margin's own slop, not a
-# real crop, so crop_transparent returns "nothing" (no rewrite, no temp
-# backup) and the panel counts it SKIPPED, not changed. A crop that
-# trims MORE than this on any side, or a real halo cleanup, still
-# returns "done".
-CROP_MIN_TRIM_PX = 2
+# CHANGED vs SKIPPED by EXACT resolution (owner 2026-07-19, reverses the
+# old CROP_MIN_TRIM_PX slop): crop_transparent counts a crop as soon as
+# the cropped output differs from the input by >= 1px on ANY side — a
+# 1254x1254 -> 1254x1251 3px trim IS a crop even though its % rounds
+# tiny. Only a 0px change (output size == input size) is SKIPPED. There
+# is no negligible-trim threshold any more.
 
 # INK-BASED content box (owner 2026-07-18, the OldAge.png case). A
 # single-threshold box (any pixel at alpha >= 8) was defeated by faint
@@ -429,15 +436,20 @@ JOB_LABEL = {
     "aspect": "Aspect ratio",
 }
 
-# the two gen sites carry an SVG logo (assets/icons/<stem>.svg);
-# supersedes the old gui._SITE_ICON map (Rule #5, one home)
-JOB_LOGO = {"chatgpt": "chatGPT", "gemini": "gemini"}
-
-# the four tools carry an emoji "logo" (owner can swap later): bubbles /
-# scissors / magnifier / ruler. Colour emoji render in their own glyph
-# colours — the panel/button NAME carries the job colour, the emoji is
-# the mark.
-JOB_EMOJI = {"bg": "🫧", "crop": "✂️", "upscale": "🔍", "aspect": "📐"}
+# EVERY job carries an icon (assets/icons/<stem>) beside its coloured
+# NAME on the tool button + panel header: the two gen sites their brand
+# logo, the four tools the owner's dedicated PNG icons (owner 2026-07-19,
+# replacing the old emoji marks). gui.icon() resolves each stem — svg
+# where Qt can render it, png otherwise (the tool icons ARE png), so the
+# stems double as the png basenames. Supersedes the old gui._SITE_ICON.
+JOB_LOGO = {
+    "chatgpt": "chatGPT",
+    "gemini": "gemini",
+    "bg": "bg",
+    "crop": "crop",
+    "upscale": "upscale",
+    "aspect": "aspect",
+}
 
 # per-job (day, night) colour pair — the header name + the tool button
 # fill. CTk stores the tuple and re-resolves it per appearance mode, so

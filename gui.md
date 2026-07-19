@@ -280,9 +280,11 @@ reachability fixes:
   tools (owner 2026-07-19; the three renamed buttons DROPPED "only"),
   each its OWN CONCURRENT JOB with its own worker thread and its own
   dashboard panel — up to all four plus both sites (6 panels) run at
-  once. Each button carries the panel's COLOUR + emoji (BG removal
-  cyan/teal 🫧, Crop amber ✂, Upscale violet 🔍, Aspect ratio magenta
-  📐, all in `config.JOB_COLORS`/`JOB_EMOJI`). A click (`_start_tool`)
+  once. Each button carries the panel's COLOUR + its PNG icon (owner
+  2026-07-19, replacing the old emoji: BG removal cyan/teal, Crop amber,
+  Upscale violet, Aspect ratio magenta — colours in `config.JOB_COLORS`,
+  icons `bg`/`crop`/`upscale`/`aspect` via `config.JOB_LOGO` + `icon()`).
+  A click (`_start_tool`)
   refuses a second job of the SAME kind (a messagebox — one job per
   kind), opens the input pick + a confirm, then spawns
   `_run_tool_job` on a daemon thread; the engine function
@@ -313,15 +315,17 @@ reachability fixes:
   sides already ≥ the chosen min W/H; for Aspect: already at the target
   ratio, left byte-unchanged).
   The op is also TIMED (per-image seconds; skipped items add no time).
-  "Changed" keys ONLY on the engine ACTUALLY REWRITING the file: a "done"
-  is NEVER demoted on a small/rounded metric (owner 2026-07-19) — a 3px
-  crop or a small BG clear rounds the metric to 0 % yet the FILE WAS
-  MODIFIED, so its backup + before/after must survive. Keying "changed"
-  on a resolution/metric change (instead of on the file being rewritten)
-  was the old before/after bug for BG removal, which changes ALPHA, not
-  dimensions. The engine already returns "nothing" for a true
-  byte-unchanged no-op, so a "done" is always a real, restorable change.
-  The panel shows the tool's own PARAMETER + timing (below).
+  "Changed" keys ONLY on the engine ACTUALLY REWRITING the file (a
+  "done"), never on the metric size (owner 2026-07-19) — a 3px crop or a
+  small BG clear is a genuine, restorable change even though its % is
+  tiny, so its backup + before/after must survive. The % itself is now
+  rendered by `config.fmt_pct` (2 decimals below 10, 1 decimal from 10),
+  so that 3px crop reads `0.24%`, never a rounded-away `0%`. Keying
+  "changed" on a resolution/metric change (instead of on the file being
+  rewritten) was the old before/after bug for BG removal, which changes
+  ALPHA, not dimensions. The engine returns "nothing" for a true
+  byte-unchanged no-op (crop: a 0px-change box), so a "done" is always a
+  real change. The panel shows the tool's own PARAMETER + timing (below).
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause / Action delay** — both are random FROM–TO ranges: the
@@ -404,10 +408,11 @@ gets a **✕ Close** button when the job FINISHES; Close removes the
 panel from the grid AND clears that job's temp backups. Only
 running-or-ran jobs show.
 
-**`JobPanel`** is the shared base: a coloured header (an SVG
-`config.JOB_LOGO` for the two sites, a `config.JOB_EMOJI` for the four
-tools, plus the job NAME in the job's `(day, night)` `JOB_COLORS`
-pair), the muted state line (quota countdown / current item), and the
+**`JobPanel`** is the shared base: a coloured header (an ICON via
+`config.JOB_LOGO` + `icon()` — a brand logo for the two sites, a
+dedicated PNG for each of the four tools, owner 2026-07-19 — plus the
+job NAME in the job's `(day, night)` `JOB_COLORS` pair), the muted state
+line (quota countdown / current item), and the
 hidden CLOSE button `finish()` reveals / `reset_finished()` hides.
 `DashPanel(JobPanel)` is one gen site's view; `ToolPanel(JobPanel)` is
 one tool's. Both are BUILT ONCE (never destroyed) and fed ONLY by the
@@ -452,11 +457,17 @@ key is gone (a stale one in an old settings.json is ignored).
   ONLY images actually PROCESSED (changed); skipped images add no time
   (owner 2026-07-19). Times use `config.fmt_op_duration` (sub-second
   below 10 s — bg/crop/aspect run in fractions of a second — so a fast
-  op is `0.2s`, not `fmt_duration`'s flattened `0s`).
-- a **collection → folder → image** `ttk.Treeview` (Name · Before ·
-  After · % · Time · Size): each image row shows its BEFORE / AFTER
-  resolution, the tool's %, and its per-image op time; a refused (no-op)
-  row shows `—` in % and BLANK Time.
+  op is `0.2s`, not `fmt_duration`'s flattened `0s`); every % (the avg
+  stat AND the per-row column) uses `config.fmt_pct` (2 decimals below
+  10, 1 from 10) so a tiny metric reads `0.24%`, not `0%`.
+- a **collection → folder → image** `ttk.Treeview`. The dimensional
+  tools (Crop / Upscale / Aspect) show Name · Before · After · % · Time
+  · Size — each image row its BEFORE / AFTER resolution, the tool's %,
+  and its per-image op time. **BG removal DROPS the Before/After
+  columns** (owner 2026-07-19): it changes ALPHA, not dimensions, so
+  before == after resolution is meaningless — its panel shows Name · % ·
+  Time · Size only (`self._is_bg` picks the column set). A refused
+  (no-op) row shows `—` in % and BLANK Time.
 - **Double-click an image row** opens a `BeforeAfterWindow` for that
   image with a **Restore** (reverts ONLY it); **double-click the
   collection / folder node** opens a viewer of ALL the job's changed

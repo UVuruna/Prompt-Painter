@@ -33,11 +33,14 @@ a no-op — only for real errors (`PostprocessError`, loud).
   (`CLEAN_EDGE_ENABLE`), then (2) autocrop to the INK-BASED content
   box (a row/col needs `CROP_MIN_INK_PX` pixels at alpha ≥
   `CROP_INK_ALPHA`, so a sparse faint line no longer defeats the
-  crop) plus the `CROP_MARGIN_PX` safety margin. `"done"` when it
-  changed anything (halo cleaned OR box trimmed); `"nothing"` when
-  there is no transparency to crop against (fully opaque), the image
-  is fully transparent, or it is already tight AND there was no halo
-  to clean.
+  crop) plus the `CROP_MARGIN_PX` safety margin. CHANGED vs SKIPPED is
+  keyed on EXACT resolution (owner 2026-07-19): `"done"` as soon as the
+  cropped output differs from the input by ≥ 1px on ANY side (a 3px trim
+  counts even when its % rounds tiny), OR the halo cleanup zeroed
+  pixels; `"nothing"` when there is no transparency to crop against
+  (fully opaque), the image is fully transparent, the box + margin lands
+  on the full frame (0px change), OR it is already tight AND there was
+  no halo to clean.
 
 A failed step is LOUD but never kills the run (the runner catches,
 counts and reports it; the raw image stays saved).

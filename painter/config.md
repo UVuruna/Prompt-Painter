@@ -67,13 +67,13 @@ match.
   the image border (the visible stray line / halo) are zeroed, while
   interior soft edges — enclosed by the solid subject, never
   border-connected — are left alone. `CROP_MARGIN_PX` still pads the
-  final box. `CROP_MIN_TRIM_PX` (owner 2026-07-19) is the negligible-crop
-  guard: a content box + margin that would nibble EVERY side by
-  ≤ `CROP_MIN_TRIM_PX` is treated as NO crop (a 626×1286 → 625×1286 1px
-  "trim" is within the margin's own slop), so `crop_transparent` returns
-  "nothing" — no rewrite, no temp backup — and the panel counts it
-  SKIPPED, not changed. A trim larger than that on any side, or a real
-  halo cleanup, still returns "done".
+  final box. CHANGED vs SKIPPED is now keyed on EXACT resolution (owner
+  2026-07-19, reversing the old `CROP_MIN_TRIM_PX` slop): `crop_transparent`
+  counts a crop as soon as the cropped output differs from the input by
+  ≥ 1px on ANY side — a 1254×1254 → 1254×1251 3px trim IS a crop even
+  though its % rounds tiny — and returns "nothing" ONLY when the box +
+  margin lands on the full frame (0px change, no rewrite, no temp
+  backup). There is no negligible-trim threshold any more.
 - `BLACK_VOID_MAX`, `SAFETY_MAX_REMOVE_FRAC`,
   `SAFETY_MAX_REMOVE_FRAC_WHITE` — the black-void removal + SAFETY guard
   (owner 2026-07-19, the bible/dark case). Brightness-keying cannot
@@ -117,7 +117,7 @@ match.
   the job machinery keys on (base = the common-ancestor DIRECTORY of the
   picks, one folder ⇒ base = that folder, rel = filename), so a selection
   spanning sub-folders still groups + restores correctly.
-- `JOB_ORDER`, `JOB_TOOL_KINDS`, `JOB_LABEL`, `JOB_LOGO`, `JOB_EMOJI`,
+- `JOB_ORDER`, `JOB_TOOL_KINDS`, `JOB_LABEL`, `JOB_LOGO`,
   `JOB_COLORS`, `JOB_METRIC`, `job_color_pair(kind)`,
   `GRID_COLS_BY_COUNT` — the dashboard per-JOB panels (owner
   2026-07-19). The dashboard shows one panel PER RUNNING JOB — the two
@@ -126,12 +126,14 @@ match.
   panels so ChatGPT + Gemini always take the top cells;
   `GRID_COLS_BY_COUNT` (1→1, 2→2, 3→3, 4→2, 5→2, 6→2, rows =
   ceil(N/cols)) is the responsive shape. Each job carries a `JOB_LABEL`
-  (the three tool buttons drop "only"), a mark — the two sites an SVG
-  `JOB_LOGO` (supersedes the old `gui._SITE_ICON`), the four tools a
-  `JOB_EMOJI` — a `(day, night)` `JOB_COLORS` pair (`job_color_pair`
-  returns it, auto-flipping on `set_appearance_mode`), and a
-  `JOB_METRIC` word (removed / reduction / increase / deformation) the
-  tool panel shows. Pure strings/numbers, so the tests import it
+  (the three tool buttons drop "only"), an ICON stem in `JOB_LOGO` —
+  ALL six jobs now (owner 2026-07-19): the two sites their brand logo,
+  the four tools dedicated PNG icons (`bg`/`crop`/`upscale`/`aspect`,
+  replacing the old `JOB_EMOJI` marks; `gui.icon()` resolves each stem
+  to svg or png). Plus a `(day, night)` `JOB_COLORS` pair
+  (`job_color_pair` returns it, auto-flipping on `set_appearance_mode`),
+  and a `JOB_METRIC` word (removed / reduction / increase / deformation)
+  the tool panel shows. Pure strings/numbers, so the tests import it
   without tkinter.
 - `JOBTEMP_DIRNAME`, `JOBTEMP_REMOVED_ALPHA` — the tool temp/restore
   store (owner 2026-07-19). `JOBTEMP_DIRNAME` (`.painter_tmp`,
@@ -200,11 +202,16 @@ match.
   one-shot safer retry after a SAFETY refusal (opt-in). An honest
   reframing of legitimate symbolic art (no real people, non-graphic),
   never a way to force disallowed content.
-- `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`
-  — the short human formatters shared by the runner report and the GUI
-  dashboard. `fmt_op_duration` keeps sub-second precision below 10 s
-  (`0.2s`) for the fast in-place tools' per-image op times, where
-  whole-second `fmt_duration` would show `0s`.
+- `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`,
+  `fmt_pct(value)` — the short human formatters shared by the runner
+  report and the GUI dashboard. `fmt_op_duration` keeps sub-second
+  precision below 10 s (`0.2s`) for the fast in-place tools' per-image
+  op times, where whole-second `fmt_duration` would show `0s`.
+  `fmt_pct` (owner 2026-07-19) formats a tool metric % by magnitude —
+  below 10 → 2 decimals (`0.08`, `5.23`, `9.99`), 10 and up → 1 decimal
+  (`10.0`, `33.4`, `300.0`), the NUMBER only (callers append `%`) — so a
+  3px crop reads `0.24%`, never a rounded-away `0%`. Used everywhere the
+  tool panels render a % (the per-row column AND the header avg stat).
 - `MIN_IMAGE_PX` — an `<img>` narrower than this is a placeholder.
 
 ## Classes
