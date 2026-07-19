@@ -286,10 +286,16 @@ reachability fixes:
   "nothing"/"unclear" — nothing to do, its no-op backup dropped (for
   Upscale: failed the gate — aspect outside 0.9–1.1 or both sides already
   ≥ 800; for Aspect: already at the target ratio, left byte-unchanged).
-  A "done" whose MEASURED metric rounds to 0 % (a 1px crop nibble, a
-  sub-pixel stretch) is demoted to REFUSED too — bucketed SKIPPED, not
-  changed, its backup dropped, so the panel counts stay honest (owner
-  2026-07-19). The panel shows the tool's own PARAMETER (below).
+  The op is also TIMED (per-image seconds; skipped items add no time).
+  "Changed" keys ONLY on the engine ACTUALLY REWRITING the file: a "done"
+  is NEVER demoted on a small/rounded metric (owner 2026-07-19) — a 3px
+  crop or a small BG clear rounds the metric to 0 % yet the FILE WAS
+  MODIFIED, so its backup + before/after must survive. Keying "changed"
+  on a resolution/metric change (instead of on the file being rewritten)
+  was the old before/after bug for BG removal, which changes ALPHA, not
+  dimensions. The engine already returns "nothing" for a true
+  byte-unchanged no-op, so a "done" is always a real, restorable change.
+  The panel shows the tool's own PARAMETER + timing (below).
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause / Action delay** — both are random FROM–TO ranges: the
@@ -405,31 +411,47 @@ key is gone (a stale one in an old settings.json is ignored).
   prompt + the saved image.
 
 **`ToolPanel`** (one in-place tool), header + state line then:
-- a progress bar and an aggregate metric label — `avg N% <metric> ·
+- a progress bar, an aggregate metric label — `avg N% <metric> ·
   X changed, Y skipped`, where the metric is the tool's own PARAMETER
   (`config.JOB_METRIC`): BG removal `removed` (% removed pixels), Crop
   `reduction` (% area), Upscale `increase` (% area), Aspect ratio
-  `deformation` (% growth of the stretched axis).
+  `deformation` (% growth of the stretched axis) — and a TIME label
+  `⏱ <total> total · <avg>/img`. Both the total and the average count
+  ONLY images actually PROCESSED (changed); skipped images add no time
+  (owner 2026-07-19). Times use `config.fmt_op_duration` (sub-second
+  below 10 s — bg/crop/aspect run in fractions of a second — so a fast
+  op is `0.2s`, not `fmt_duration`'s flattened `0s`).
 - a **collection → folder → image** `ttk.Treeview` (Name · Before ·
-  After · % · Size): each image row shows its BEFORE / AFTER resolution
-  and the tool's %; a refused (no-op) row shows `—`.
+  After · % · Time · Size): each image row shows its BEFORE / AFTER
+  resolution, the tool's %, and its per-image op time; a refused (no-op)
+  row shows `—` in % and BLANK Time.
 - **Double-click an image row** opens a `BeforeAfterWindow` for that
   image with a **Restore** (reverts ONLY it); **double-click the
   collection / folder node** opens a viewer of ALL the job's changed
   images with **RESTORE ALL** (reverts the whole job). A restore marks
   the row(s) restored and puts the ORIGINAL back on disk (see below).
+  Works for ALL four tools — BG removal included: it changes ALPHA, not
+  dimensions, and the viewer keys off the BACKUP existing (never a
+  resolution change), so a cleared-background image shows before/after
+  just like a resized one.
 
 ### Temp / before-after / restore
 Every tool job holds a `painter.jobtemp.JobTemp` (a per-slot subdir
 under the gitignored `.painter_tmp/` project temp). The worker
-`backup`s each ORIGINAL before the op; on `done` it `measure`s
-before→after (the metric shown), on a no-op it `drop`s the backup. The
-`BeforeAfterWindow` (a themed Toplevel like DocWindow — skinned,
-registered in `THEME_TOPLEVELS`, holding its scaled PhotoImages via the
-shared `_scaled_photo` helper) stacks each image's before + after;
-Restore / RESTORE ALL delegate to the `JobTemp`. Temp is CLEARED on the
-panel's CLOSE, on app exit (`_on_close`) and swept at startup —
-gen jobs make NEW files, so they need no restore.
+`backup`s each ORIGINAL before the op; on `done` (the file was actually
+rewritten) it `measure`s before→after (the metric shown) and keeps the
+backup, on a no-op it `drop`s the backup. The `BeforeAfterWindow` (a
+themed Toplevel like DocWindow — skinned, registered in
+`THEME_TOPLEVELS`, holding its scaled PhotoImages via the shared
+`_scaled_photo` helper) stacks each image's before + after. The AFTER of
+a BG removal / crop is TRANSPARENT where the background was cleared;
+drawn straight onto the panel colour it looks unchanged, so the viewer
+composites any image WITH ALPHA over a neutral checkerboard
+(`_scaled_photo(..., on_checker=True)` → `_checkerboard` /
+`_has_alpha`, greys in `config.CHECKER_*`) — the removed area reads as
+removed. Restore / RESTORE ALL delegate to the `JobTemp`. Temp is
+CLEARED on the panel's CLOSE, on app exit (`_on_close`) and swept at
+startup — gen jobs make NEW files, so they need no restore.
 
 ## Theming
 Two coordinated palettes — **night** (the built-in `darkly`, kept

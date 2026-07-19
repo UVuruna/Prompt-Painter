@@ -46,6 +46,9 @@ from painter.config import (
     ASPECT_DEFAULT_W,
     BACKGROUND_CHOICES,
     CDP_URL,
+    CHECKER_DARK,
+    CHECKER_LIGHT,
+    CHECKER_TILE_PX,
     DEFAULT_OUT_DIR,
     GRID_COLS_BY_COUNT,
     JOB_EMOJI,
@@ -88,6 +91,7 @@ from painter.config import (
     TIMING,
     dest_for,
     fmt_duration,
+    fmt_op_duration,
     fmt_size,
     button_fill_pair,
     button_text_pair,
@@ -1886,12 +1890,39 @@ class DashPanel(JobPanel):
             self.cells[("task", key)].set(task[key])
 
 
-def _scaled_photo(path: Path, avail_px: int) -> ImageTk.PhotoImage:
+def _checkerboard(w: int, h: int) -> Image.Image:
+    """A neutral light/dark checkerboard the size WxH — the transparency
+    backdrop so a removed (transparent) background reads as removed, not
+    as the panel colour."""
+    tile = CHECKER_TILE_PX
+    board = Image.new("RGB", (w, h), CHECKER_LIGHT)
+    dark = Image.new("RGB", (tile, tile), CHECKER_DARK)
+    for y in range(0, h, tile):
+        for x in range(0, w, tile):
+            if ((x // tile) + (y // tile)) % 2:
+                board.paste(dark, (x, y))
+    return board
+
+
+def _has_alpha(img: Image.Image) -> bool:
+    """Whether an image carries transparency (RGBA/LA, or a palette with
+    a transparency entry)."""
+    return img.mode in ("RGBA", "LA") or (
+        img.mode == "P" and "transparency" in img.info
+    )
+
+
+def _scaled_photo(
+    path: Path, avail_px: int, on_checker: bool = False
+) -> ImageTk.PhotoImage:
     """One image loaded and scaled to fit ``avail_px`` wide (never
     upscaled), as a live PhotoImage the caller must keep a ref to.
     Shared by DocWindow's prompt image and the BeforeAfterWindow viewer
-    (Rule #5). Raises OSError on an unreadable file (the caller reports
-    it)."""
+    (Rule #5). With ``on_checker`` a transparent image is composited over
+    a checkerboard so the transparency is VISIBLE (the tool viewer's
+    AFTER — a cleared background — otherwise shows the panel colour and
+    looks unchanged). Raises OSError on an unreadable file (the caller
+    reports it)."""
     img = Image.open(path)
     img.load()
     if img.width > avail_px:
@@ -1899,6 +1930,11 @@ def _scaled_photo(path: Path, avail_px: int) -> ImageTk.PhotoImage:
         img = img.resize(
             (avail_px, max(round(img.height * scale), 1)), Image.LANCZOS
         )
+    if on_checker and _has_alpha(img):
+        rgba = img.convert("RGBA")
+        board = _checkerboard(rgba.width, rgba.height)
+        board.paste(rgba, (0, 0), rgba)  # alpha-composite the subject over it
+        img = board
     return ImageTk.PhotoImage(img)
 
 
@@ -1929,18 +1965,25 @@ class ToolPanel(JobPanel):
         self.metric_var = tk.StringVar(value="—")
         ttk.Label(
             self, textvariable=self.metric_var, style="Value.TLabel"
+        ).pack(anchor="w", pady=(0, 2))
+        # execution time — total over PROCESSED images + per-image average
+        # (skipped images contribute no time), mirroring the gen panels
+        self.time_var = tk.StringVar(value="⏱ —")
+        ttk.Label(
+            self, textvariable=self.time_var, style="Muted.TLabel"
         ).pack(anchor="w", pady=(0, 4))
 
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, pady=(2, 0))
-        cols = ("before", "after", "pct", "size")
+        cols = ("before", "after", "pct", "time", "size")
         self.tree = ttk.Treeview(wrap, columns=cols, height=8)
         self.tree.heading("#0", text="Name")
         self.tree.column("#0", width=200, minwidth=120, stretch=False)
         for cid, txt, w, anc in (
             ("before", "Before", 92, "center"),
             ("after", "After", 92, "center"),
-            ("pct", "%", 72, "e"),
+            ("pct", "%", 64, "e"),
+            ("time", "Time", 64, "e"),
             ("size", "Size", 72, "e"),
         ):
             self.tree.heading(cid, text=txt)
@@ -1972,6 +2015,7 @@ class ToolPanel(JobPanel):
         self._changed = 0
         self._skipped = 0
         self._pcts: list[float] = []
+        self._times: list[float] = []   # per-PROCESSED-image op seconds
         self._tree_root: str | None = None
         self._folder_nodes: dict[str, str] = {}
         self._image_rows: dict[str, str] = {}
@@ -1998,6 +2042,7 @@ class ToolPanel(JobPanel):
         elif kind == "item_done":
             self._changed += 1
             self._pcts.append(event["pct"])
+            self._times.append(event["time"])
             self._insert_image_row(event["rel"], event)
             self._advance()
         elif kind == "item_refused":
@@ -2021,6 +2066,20 @@ class ToolPanel(JobPanel):
             self.metric_var.set(f"avg {avg:.0f}% {self._metric_name}   ·   {counts}")
         else:
             self.metric_var.set(f"{self._metric_name}: —   ·   {counts}")
+        self._update_time()
+
+    def _update_time(self) -> None:
+        """Total op time over PROCESSED images + the per-image average
+        (skipped images add no time)."""
+        if self._times:
+            total = sum(self._times)
+            avg = total / len(self._times)
+            self.time_var.set(
+                f"⏱ {fmt_op_duration(total)} total"
+                f"   ·   {fmt_op_duration(avg)}/img"
+            )
+        else:
+            self.time_var.set("⏱ —")
 
     # --- tree building -------------------------------------------------
 
@@ -2029,7 +2088,7 @@ class ToolPanel(JobPanel):
             name = self.folder.name if self.folder else JOB_LABEL[self.slot_key]
             self._tree_root = self.tree.insert(
                 "", "end", text=f"{name}   · {JOB_LABEL[self.slot_key]}",
-                open=True, values=("", "", "", ""),
+                open=True, values=("", "", "", "", ""),
             )
             self._node_info[self._tree_root] = {"level": "collection"}
         return self._tree_root
@@ -2039,7 +2098,7 @@ class ToolPanel(JobPanel):
         if node is None:
             node = self.tree.insert(
                 self._ensure_root(), "end", text=folder, open=True,
-                values=("", "", "", ""),
+                values=("", "", "", "", ""),
             )
             self._folder_nodes[folder] = node
             self._node_info[node] = {"level": "folder", "folder": folder}
@@ -2051,7 +2110,8 @@ class ToolPanel(JobPanel):
             fnode, "end", text=PurePosixPath(rel).name,
             values=(
                 event["before"], event["after"],
-                f"{event['pct']:.0f}%", fmt_size(event["size"]),
+                f"{event['pct']:.0f}%", fmt_op_duration(event["time"]),
+                fmt_size(event["size"]),
             ),
         )
         self._node_info[row] = {"level": "image", "rel": rel, "has_backup": True}
@@ -2061,7 +2121,7 @@ class ToolPanel(JobPanel):
         fnode = self._ensure_folder(folder_of(rel))
         self.tree.insert(
             fnode, "end", text=PurePosixPath(rel).name,
-            values=("", "", "—", ""),
+            values=("", "", "—", "", ""),
         )
 
     # --- before/after viewer + restore ---------------------------------
@@ -2971,28 +3031,28 @@ class PainterGui:
                     "title": src.name,
                 })
                 temp.backup(src, rel)  # the ORIGINAL, before the op
+                t_item = time.time()
                 try:
                     status = func(src, log)
                 except Exception as exc:
                     status = "FAILED"
                     self._q.put(f"[{label}] FAIL {src.name}: {exc}")
+                op_s = time.time() - t_item  # this image's op time
+                # "changed" keys on the engine ACTUALLY REWRITING the file
+                # ("done"), never on a resolution/metric change (owner
+                # 2026-07-19): a 3px crop or a small BG clear rounds the
+                # metric to 0% yet the file WAS modified, so its backup +
+                # before/after must survive. The engine already returns
+                # "nothing" for a true no-op (byte-unchanged), so a "done"
+                # is always a real, restorable change.
                 metric = (
                     jobtemp.measure(slot, temp.before_path(rel), src)
                     if status == "done" else None
                 )
-                # a "done" whose measured metric ROUNDS TO 0% is not a
-                # real change (a 1px crop nibble, a sub-pixel stretch) —
-                # demote it to "nothing" so the panel counts it SKIPPED
-                # and its backup is dropped, keeping counts + restore
-                # honest (owner 2026-07-19). FAILED / unclear stay
-                # distinct in the summary.
-                if status == "done" and round(metric["pct"]) == 0:
-                    status = "nothing"
-                    metric = None
                 counts[status] = counts.get(status, 0) + 1
                 if status == "done":
                     emit({
-                        "type": "item_done", "rel": rel,
+                        "type": "item_done", "rel": rel, "time": op_s,
                         "size": src.stat().st_size, **metric,
                     })
                 else:  # nothing / unclear / FAILED -> unchanged file
@@ -4469,7 +4529,9 @@ class BeforeAfterWindow(tk.Toplevel):
         ):
             ttk.Label(block, text=tag, style="Muted.TLabel").pack(anchor="w")
             try:
-                photo = _scaled_photo(path, avail)
+                # composite over a checker so a cleared/transparent AFTER
+                # reads as removed, not as the window colour
+                photo = _scaled_photo(path, avail, on_checker=True)
             except OSError as exc:
                 ttk.Label(
                     block, text=f"({tag} unreadable: {exc})"

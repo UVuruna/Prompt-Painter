@@ -20,6 +20,17 @@ def fmt_duration(seconds: float) -> str:
     return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
 
 
+def fmt_op_duration(seconds: float) -> str:
+    """A short op duration for the fast in-place tools: '0.2s', '3.4s',
+    '12s', '1m 05s'. Sub-second precision below 10s that the whole-second
+    ``fmt_duration`` would flatten to '0s' (bg/crop/aspect run in
+    fractions of a second; only upscale takes real time)."""
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
 def fmt_size(num_bytes: int) -> str:
     """A short human file size: '1.4 MB', '812 KB', '70 B'."""
     if num_bytes >= 1024 * 1024:
@@ -463,6 +474,17 @@ JOBTEMP_DIRNAME = ".painter_tmp"  # PROJECT_ROOT-relative temp/backup root
 # alpha below this counts as a "removed" (transparent) pixel for the BG
 # metric — the same opacity notion as CROP_INK_ALPHA / CLEAN_EDGE_ALPHA.
 JOBTEMP_REMOVED_ALPHA = 40
+
+# Transparency backdrop for the before/after viewer. BG removal (and the
+# other tools) leave the AFTER image transparent where the background was
+# cleared; drawn straight onto the panel colour, "removed" looks
+# unchanged. So the viewer composites any image WITH ALPHA over a neutral
+# light/dark checkerboard (the same cue Photoshop uses) and the removed
+# area reads as removed. Deliberately theme-agnostic greys — this is a
+# transparency backdrop, not app chrome.
+CHECKER_TILE_PX = 12                 # checker square side, px
+CHECKER_LIGHT = (205, 205, 205)      # the light squares
+CHECKER_DARK = (150, 150, 150)       # the dark squares
 
 
 # --- The Day/Night switch (image-based, ported from the owner's website

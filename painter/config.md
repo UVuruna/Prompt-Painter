@@ -132,6 +132,11 @@ match.
   [Job Temp](jobtemp.md) uses; `JOBTEMP_REMOVED_ALPHA` (40) is the
   alpha below which a pixel counts as "removed" for the BG metric (the
   same opacity notion as `CROP_INK_ALPHA` / `CLEAN_EDGE_ALPHA`).
+- `CHECKER_TILE_PX`, `CHECKER_LIGHT`, `CHECKER_DARK` — the neutral
+  light/dark checkerboard the before/after viewer composites a
+  transparent AFTER over, so a removed (transparent) background reads as
+  removed rather than as the panel colour. Theme-agnostic greys — a
+  transparency backdrop, not app chrome.
 - `QUOTA_RESET_PATTERNS`, `parse_quota_reset(text) -> float | None`
   — the quota reset time (owner's #2): each pattern captures one
   number ("resets in 27 minutes", "in 14 hours", Serbian "za 27
@@ -188,8 +193,11 @@ match.
   one-shot safer retry after a SAFETY refusal (opt-in). An honest
   reframing of legitimate symbolic art (no real people, non-graphic),
   never a way to force disallowed content.
-- `fmt_duration(seconds)`, `fmt_size(bytes)` — the short human
-  formatters shared by the runner report and the GUI dashboard.
+- `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`
+  — the short human formatters shared by the runner report and the GUI
+  dashboard. `fmt_op_duration` keeps sub-second precision below 10 s
+  (`0.2s`) for the fast in-place tools' per-image op times, where
+  whole-second `fmt_duration` would show `0s`.
 - `MIN_IMAGE_PX` — an `<img>` narrower than this is a placeholder.
 
 ## Classes

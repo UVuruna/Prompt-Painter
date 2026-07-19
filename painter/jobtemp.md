@@ -10,6 +10,13 @@ subdir, so the dashboard can show a BEFORE/AFTER viewer and RESTORE one
 image or the whole job. The image-generation jobs make NEW files and
 never need it.
 
+Whether an image has a before/after keys ONLY on its BACKUP existing —
+i.e. the engine actually rewrote the file (`done`) — never on a
+resolution change. BG removal changes ALPHA, not dimensions (its
+before/after share WxH), so a resolution-based "did anything change?"
+test would wrongly report "nothing" for a cleared background; keying on
+the backup keeps before/after + restore working for ALL four tools.
+
 `measure` computes the before→after number each tool panel shows
 (% removed / reduction / increase / deformation) from the temp backup
 vs the in-place result — so the engine functions stay untouched and
@@ -24,9 +31,10 @@ PIL/numpy load lazily inside `measure`, so dry runs stay stdlib-only.
 
 ### Used by
 - [GUI](../gui.md) — `_start_tool` creates one `JobTemp` per tool job,
-  the worker `backup`s / `drop`s / `measure`s per file, the tool panel
-  restores one/all, and the app clears temps on panel CLOSE, on exit
-  and at startup.
+  the worker `backup`s each original, TIMES the op, then on `done`
+  `measure`s / keeps the backup (else `drop`s it), the tool panel shows
+  the metric + per-image time and restores one/all, and the app clears
+  temps on panel CLOSE, on exit and at startup.
 - [Tests (folder)](../tests/___tests.md) — `test_jobtemp.py`.
 
 ## API

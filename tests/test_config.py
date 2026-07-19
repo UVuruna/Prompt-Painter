@@ -17,6 +17,7 @@ from painter.config import (
     BUTTON_TEXT,
     button_fill_pair,
     button_text_pair,
+    fmt_op_duration,
     selection_base_and_rels,
 )
 
@@ -59,6 +60,26 @@ def test_no_solid_button_is_dark_filled_on_day_except_intentional_colours():
 
 def test_fill_and_text_tables_cover_the_same_kinds():
     assert set(BUTTON_FILL) == set(BUTTON_TEXT)
+
+
+# --- tool op-time formatter -------------------------------------------
+
+
+def test_op_duration_shows_subsecond_below_ten():
+    """The fast in-place tools (bg/crop/aspect) run in fractions of a
+    second — the tool panel's Time must NOT flatten them to '0s' the way
+    whole-second fmt_duration would."""
+    assert fmt_op_duration(0.19) == "0.2s"
+    assert fmt_op_duration(0.0) == "0.0s"
+    assert fmt_op_duration(3.44) == "3.4s"
+
+
+def test_op_duration_uses_whole_seconds_from_ten():
+    assert fmt_op_duration(12.0) == "12s"
+
+
+def test_op_duration_uses_minutes_past_a_minute():
+    assert fmt_op_duration(65.0) == "1m 05s"
 
 
 # --- multi-file selection base (Aspect tool) --------------------------
