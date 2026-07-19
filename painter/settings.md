@@ -18,9 +18,12 @@ The dict SHAPE lives with the GUI (`_collect_settings` /
 2026-07-19 it also carries `settings_collapsed` (the per-agent
 fine-tune collapse), `upscale_tool` (the standalone Upscale dialog's
 last-used four gate params), `aspect_ratio` (the last W:H entered in
-the Aspect dialog), and per-agent `up_minw`/`up_minh`/`up_aspmin`/
-`up_aspmax` under `agents.<site>` — all plain JSON scalars, so this
-module round-trips them with zero special handling.
+the Aspect dialog), `aspect_filter` (the Aspect dialog's last input
+FILTER — `from`/`to`/`mode`), a per-agent `style` (the rendering-style
+dropdown, under `agents.<site>`), and per-agent `up_minw`/`up_minh`/
+`up_aspmin`/`up_aspmax` under `agents.<site>` — all plain JSON scalars
+and small dicts, so this module round-trips them with zero special
+handling.
 
 ## Connections
 

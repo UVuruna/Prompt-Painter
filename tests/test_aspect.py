@@ -16,6 +16,11 @@ import pytest
 from PIL import Image
 
 from painter.aspect import AspectError, change_aspect
+from painter.config import (
+    ASPECT_FILTER_IF,
+    ASPECT_FILTER_IF_NOT,
+    ASPECT_FILTER_OFF,
+)
 
 
 def make_png(path: Path, width: int, height: int, mode: str = "RGBA") -> None:
@@ -122,3 +127,59 @@ def test_real_image_error_is_loud(tmp_path):
     bad.write_text("this is not a PNG")
     with pytest.raises(AspectError):
         change_aspect(bad, 16, 9, print)
+
+
+# --- optional input filter on the CURRENT ratio (owner 2026-07-19) ----
+# ~square band 0.9-1.1: a 1000x1000 image (W/H = 1.0) is IN it, a
+# 2000x1000 image (W/H = 2.0) is OUT of it.
+
+
+def test_filter_if_processes_only_in_range(tmp_path):
+    """IF keeps ONLY in-range images; an out-of-range image is skipped
+    byte-unchanged."""
+    square = tmp_path / "square.png"
+    make_png(square, 1000, 1000)          # W/H = 1.0, in 0.9-1.1
+    wide = tmp_path / "wide.png"
+    make_png(wide, 2000, 1000)            # W/H = 2.0, out of range
+    wide_before = wide.read_bytes()
+    assert change_aspect(
+        square, 16, 9, print,
+        filter_from=0.9, filter_to=1.1, filter_mode=ASPECT_FILTER_IF,
+    ) == "done"
+    assert change_aspect(
+        wide, 16, 9, print,
+        filter_from=0.9, filter_to=1.1, filter_mode=ASPECT_FILTER_IF,
+    ) == "nothing"
+    assert wide.read_bytes() == wide_before  # left untouched
+
+
+def test_filter_if_not_skips_in_range(tmp_path):
+    """IF NOT skips in-range images and processes the rest."""
+    square = tmp_path / "square.png"
+    make_png(square, 1000, 1000)          # in range -> skipped
+    wide = tmp_path / "wide.png"
+    make_png(wide, 2000, 1000)            # out of range -> processed
+    square_before = square.read_bytes()
+    assert change_aspect(
+        square, 16, 9, print,
+        filter_from=0.9, filter_to=1.1, filter_mode=ASPECT_FILTER_IF_NOT,
+    ) == "nothing"
+    assert square.read_bytes() == square_before
+    assert change_aspect(
+        wide, 16, 9, print,
+        filter_from=0.9, filter_to=1.1, filter_mode=ASPECT_FILTER_IF_NOT,
+    ) == "done"
+
+
+def test_filter_off_processes_all(tmp_path):
+    """off (the default) ignores the range and processes every image."""
+    square = tmp_path / "square.png"
+    make_png(square, 1000, 1000)
+    assert change_aspect(
+        square, 16, 9, print,
+        filter_from=0.9, filter_to=1.1, filter_mode=ASPECT_FILTER_OFF,
+    ) == "done"
+    # and with no filter args at all (the plain call) it still processes
+    other = tmp_path / "other.png"
+    make_png(other, 1000, 1000)
+    assert change_aspect(other, 16, 9, print) == "done"

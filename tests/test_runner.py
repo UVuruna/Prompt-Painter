@@ -15,6 +15,7 @@ import pytest
 from painter.config import (
     SAFER_PREAMBLE,
     SITES,
+    STYLES,
     TIMING,
     dest_for,
     prompt_suffix,
@@ -89,6 +90,27 @@ def test_prompt_suffix_rules():
     chatgpt_default = prompt_suffix("chatgpt", "transparent")
     assert "TRANSPARENT" in chatgpt_default
     assert prompt_suffix("gemini", "none") != ""  # Gemini keeps its laws
+
+
+def test_style_clause_appended_at_the_end():
+    """The chosen style clause is appended at the very END of the suffix,
+    AFTER the background rule and the Gemini laws; None appends nothing."""
+    base = prompt_suffix("gemini", "white")  # no style
+    styled = prompt_suffix("gemini", "white", style="Oil painting")
+    # everything the un-styled suffix had, then the style clause appended
+    assert styled.startswith(base)
+    assert styled.endswith(STYLES["Oil painting"])
+    assert "classical oil painting" in styled
+    # the style sits AFTER the background rule and the reflections law
+    assert styled.index("STYLE:") > styled.index("PURE WHITE")
+    assert styled.index("STYLE:") > styled.index("NO reflections")
+
+
+def test_style_none_appends_nothing():
+    base = prompt_suffix("chatgpt", "transparent")
+    assert prompt_suffix("chatgpt", "transparent", style="None") == base
+    assert prompt_suffix("chatgpt", "transparent", style=None) == base
+    assert "STYLE:" not in base
 
 
 def test_gemini_aspect_depends_on_the_prompt():

@@ -35,7 +35,10 @@ match.
 - [Settings](settings.md) — `SETTINGS_PATH`
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
   `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
-  `prompt_suffix`
+  `prompt_suffix`; GUI also `STYLES`/`STYLE_CHOICES`/`STYLE_DEFAULT`,
+  `RESIZE_SETTLE_MS`, the `ASPECT_FILTER_*` constants, `iter_images`
+- [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
+  `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`
 
 ## Values
 
@@ -111,12 +114,28 @@ match.
   count as already-at-ratio (left byte-unchanged, no write);
   `ASPECT_DEFAULT_W`/`ASPECT_DEFAULT_H` (16 / 9) preselect the GUI's
   ratio prompt. `selection_base_and_rels(paths)` (owner 2026-07-19)
-  backs the tool's MULTI-FILE picker — unlike the folder-based BG / Crop
-  / Upscale tools, Aspect ratio picks INDIVIDUAL image files (a folder
-  can hold mixed ratios), and this returns the `(base, [rel, ...])` pair
-  the job machinery keys on (base = the common-ancestor DIRECTORY of the
-  picks, one folder ⇒ base = that folder, rel = filename), so a selection
-  spanning sub-folders still groups + restores correctly.
+  backs the tool's MULTI-FILE picker — Aspect ratio picks INDIVIDUAL
+  image files (a folder can hold mixed ratios), and this returns the
+  `(base, [rel, ...])` pair the job machinery keys on (base = the
+  common-ancestor DIRECTORY of the picks, one folder ⇒ base = that
+  folder, rel = filename), so a selection spanning sub-folders still
+  groups + restores correctly.
+- `ASPECT_FILTER_OFF` / `ASPECT_FILTER_IF` / `ASPECT_FILTER_IF_NOT`,
+  `ASPECT_FILTER_MODES`, `ASPECT_FILTER_DEFAULT_FROM` /
+  `ASPECT_FILTER_DEFAULT_TO` — the Aspect tool's optional INPUT FILTER
+  on each image's CURRENT ratio W/H (owner 2026-07-19). A single
+  `[from, to]` range plus a MODE: `off` processes all, `IF` processes
+  ONLY images whose W/H is in range, `IF NOT` skips those and processes
+  the rest ([Change Aspect Ratio](aspect.md) applies it; a filtered-out
+  image is a plain "nothing" skip). The mode strings double as the
+  dialog combobox labels; the defaults pre-fill the ~square band
+  (0.9–1.1). Since 0.0.078 the Aspect tool accepts FILES **or** a whole
+  FOLDER (the filter makes folders useful — skip the already-good ones).
+- `TOOL_IMAGE_EXTENSIONS`, `iter_images(folder)` — the shared image
+  enumerator (owner 2026-07-19): every image file (`.png/.jpg/.jpeg/
+  .webp`) under a folder, sorted, recursive. ONE home for the
+  folder-based tools (BG / Crop / Upscale) and the Aspect tool's folder
+  input (`gui._iter_images` delegates here — Rule #5).
 - `JOB_ORDER`, `JOB_TOOL_KINDS`, `JOB_LABEL`, `JOB_LOGO`,
   `JOB_COLORS`, `JOB_METRIC`, `job_color_pair(kind)`,
   `GRID_COLS_BY_COUNT` — the dashboard per-JOB panels (owner
@@ -192,14 +211,30 @@ match.
   PURE hex/number data — no tkinter/ttkbootstrap/PIL import — so the
   engine and tests stay framework-free; [GUI](../gui.md) rasterizes it
   into the live art.
+- `RESIZE_SETTLE_MS` — the smooth-resize debounce window (owner
+  2026-07-19). customtkinter re-renders on every intermediate
+  `<Configure>`, so a window drag / maximize used to run the
+  [GUI](../gui.md) `ScrollFrame`'s expensive re-fit (scrollregion bbox +
+  fill-height) per frame. The `ScrollFrame` now defers that heavy pass
+  and runs it ONCE, this many ms (150) after the LAST `<Configure>`
+  ("wait for mouse release").
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
-  `prompt_suffix(site_key, background, prompt_text)` — the rule
-  block appended to every prompt: the chosen background (each
+  `prompt_suffix(site_key, background, prompt_text, style=None)` — the
+  rule block appended to every prompt: the chosen background (each
   site's dropdown defaults to its `default_background` — ChatGPT
   transparent, Gemini white) plus the site's forced laws (owner
   2026-07-17). Gemini's aspect law is picked FROM THE PROMPT:
   TALL/lancet prompts get tall portrait, everything else (badges,
   rondels, medallions) a perfect 1:1 square; plus NO reflections.
+- `STYLES`, `STYLE_CHOICES`, `STYLE_DEFAULT` — the per-agent STYLE
+  clause (owner 2026-07-19). `STYLES` maps 7 named keys ("None" +
+  Realistic / Oil painting / Watercolor / 3D render / Flat vector / Ink
+  engraving) to an appended clause; "None" → `""` (nothing appended).
+  Each [GUI](../gui.md) AgentPanel picks one; `prompt_suffix`'s `style`
+  arg appends that clause at the very END of the suffix (AFTER the
+  background rule + Gemini laws), only when it is not "None".
+  `STYLE_CHOICES` is the dropdown order (None first). Pure data — reword
+  the clauses here without touching logic.
 - `SAFER_PREAMBLE` — the allegory-framing note prepended on a
   one-shot safer retry after a SAFETY refusal (opt-in). An honest
   reframing of legitimate symbolic art (no real people, non-graphic),

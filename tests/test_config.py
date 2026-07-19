@@ -15,10 +15,14 @@ import pytest
 from painter.config import (
     BUTTON_FILL,
     BUTTON_TEXT,
+    STYLES,
+    STYLE_CHOICES,
+    STYLE_DEFAULT,
     button_fill_pair,
     button_text_pair,
     fmt_op_duration,
     fmt_pct,
+    iter_images,
     selection_base_and_rels,
 )
 
@@ -129,3 +133,46 @@ def test_files_across_subfolders_base_on_the_common_ancestor():
 def test_empty_selection_raises():
     with pytest.raises(ValueError):
         selection_base_and_rels([])
+
+
+# --- folder image enumeration (the tools' shared walk) ----------------
+
+
+def _touch(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x")
+
+
+def test_iter_images_enumerates_recursively_and_skips_non_images(tmp_path):
+    _touch(tmp_path / "a.png")
+    _touch(tmp_path / "b.JPG")           # case-insensitive extension
+    _touch(tmp_path / "note.txt")        # not an image -> skipped
+    _touch(tmp_path / "sub" / "d.webp")  # nested -> found
+    found = [p.relative_to(tmp_path).as_posix() for p in iter_images(tmp_path)]
+    assert found == ["a.png", "b.JPG", "sub/d.webp"]  # sorted, no note.txt
+
+
+def test_iter_images_empty_folder_is_empty(tmp_path):
+    assert iter_images(tmp_path) == []
+
+
+# --- per-agent STYLE clause (owner 2026-07-19) ------------------------
+
+
+def test_styles_has_the_seven_keys_none_first():
+    assert len(STYLES) == 7
+    assert set(STYLES) == {
+        "None", "Realistic", "Oil painting", "Watercolor", "3D render",
+        "Flat vector", "Ink engraving",
+    }
+    # the dropdown order lists None first (the default)
+    assert STYLE_CHOICES[0] == STYLE_DEFAULT == "None"
+    assert tuple(STYLES) == STYLE_CHOICES
+
+
+def test_style_none_is_empty_others_are_clauses():
+    assert STYLES["None"] == ""  # None -> nothing appended
+    for name, clause in STYLES.items():
+        if name == "None":
+            continue
+        assert clause.startswith("STYLE:")  # every real style is a clause

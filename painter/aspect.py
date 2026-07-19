@@ -31,7 +31,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from painter.config import ASPECT_TOL
+from painter.config import (
+    ASPECT_FILTER_IF,
+    ASPECT_FILTER_IF_NOT,
+    ASPECT_FILTER_OFF,
+    ASPECT_TOL,
+)
 
 Log = Callable[[str], None]
 
@@ -48,14 +53,24 @@ def change_aspect(
     log: Log,
     *,
     tol: float = ASPECT_TOL,
+    filter_from: float | None = None,
+    filter_to: float | None = None,
+    filter_mode: str = ASPECT_FILTER_OFF,
 ) -> str:
     """Stretch one image to the target ratio ``ratio_w : ratio_h`` in
     place.
 
     Returns "done" (resized to the target ratio) or "nothing" (already
-    at the ratio within ``tol`` — the file is left byte-unchanged). The
-    stretch NEVER shrinks either axis (see the module docstring); mode
-    and alpha are preserved and the result is saved as PNG.
+    at the ratio within ``tol``, OR filtered out by the input filter —
+    the file is left byte-unchanged). The stretch NEVER shrinks either
+    axis (see the module docstring); mode and alpha are preserved and the
+    result is saved as PNG.
+
+    An optional INPUT FILTER on the image's CURRENT ratio ``cur = W/H``
+    gates whether it is touched at all: ``filter_mode`` ``IF`` processes
+    ONLY images whose ``cur`` is within ``[filter_from, filter_to]``;
+    ``IF NOT`` SKIPS those and processes the rest; ``off`` processes all.
+    A filtered-out image returns "nothing" (a plain skip, no write).
 
     Raises ``AspectError`` loudly when the target ratio is non-positive
     or a real image failure occurs; a no-op never raises.
@@ -72,6 +87,14 @@ def change_aspect(
             width, height = im.size
             target = ratio_w / ratio_h
             cur = width / height
+            # optional input filter on the CURRENT ratio — a filtered-out
+            # image is a plain skip, byte-unchanged
+            if filter_mode != ASPECT_FILTER_OFF:
+                in_range = filter_from <= cur <= filter_to
+                if filter_mode == ASPECT_FILTER_IF and not in_range:
+                    return "nothing"
+                if filter_mode == ASPECT_FILTER_IF_NOT and in_range:
+                    return "nothing"
             if abs(cur - target) <= tol:
                 return "nothing"
             if cur < target:

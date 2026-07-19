@@ -230,6 +230,21 @@ ASPECT_TOL = 0.001
 ASPECT_DEFAULT_W = 16
 ASPECT_DEFAULT_H = 9
 
+# Optional INPUT FILTER on the aspect tool (owner 2026-07-19). Before
+# deforming, an image's CURRENT ratio W/H can gate whether it is touched
+# at all: a single [from, to] range plus a MODE — off (process all) / IF
+# (process ONLY images whose W/H is IN the range) / IF NOT (SKIP those,
+# process the rest). Example bands: ~square = 0.9-1.1; 2:1 = ~1.8-2.2.
+# A filtered-out image is a plain SKIP ("nothing", no backup). The mode
+# strings double as the dialog's combobox labels (Rule #4).
+ASPECT_FILTER_OFF = "off"
+ASPECT_FILTER_IF = "IF"
+ASPECT_FILTER_IF_NOT = "IF NOT"
+ASPECT_FILTER_MODES = (ASPECT_FILTER_OFF, ASPECT_FILTER_IF, ASPECT_FILTER_IF_NOT)
+# the dialog pre-fills this ~square band the first time the filter is used
+ASPECT_FILTER_DEFAULT_FROM = 0.9
+ASPECT_FILTER_DEFAULT_TO = 1.1
+
 
 # --- Settings persistence (owner's #9) -------------------------------
 
@@ -414,6 +429,24 @@ def selection_base_and_rels(paths) -> tuple:
     return base, rels
 
 
+# The image extensions the four in-place tools accept — ONE home for the
+# folder walk (iter_images) and the aspect file-picker filter (Rule #4/#5).
+TOOL_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def iter_images(folder) -> list:
+    """Every image FILE under ``folder`` (recursive), sorted — the shared
+    enumerator behind the folder-based tools (BG / Crop / Upscale) and the
+    Aspect tool's folder input. Non-image files are skipped."""
+    from pathlib import Path
+
+    root = Path(folder)
+    return sorted(
+        p for p in root.rglob("*")
+        if p.suffix.lower() in TOOL_IMAGE_EXTENSIONS
+    )
+
+
 # --- Dashboard per-JOB panels (owner 2026-07-19) ---------------------
 #
 # The dashboard shows one panel PER RUNNING JOB (up to 6 in parallel):
@@ -544,6 +577,16 @@ SWITCH_SUPERSAMPLE = 4      # render knobs at Nx, then LANCZOS down for crisp ed
 SWITCH_COVER_ICON_FRAC = 0.30  # cover icon diameter = this * min(win W, H)
 SWITCH_COVER_ICON_SS = 2       # supersample for the big cover icon (LANCZOS down)
 
+# --- Smooth window RESIZE (owner 2026-07-19) --------------------------
+# customtkinter re-renders its canvas-drawn rounded widgets on every
+# intermediate <Configure>, so dragging the window edge / maximizing used
+# to run the ScrollFrame's expensive re-fit (scrollregion bbox scan +
+# fill-height) per frame — visible jank. The ScrollFrame now DEBOUNCES
+# that heavy pass: during an active resize it only tracks the canvas width
+# (cheap) and re-arms a settle timer; the bbox/fill-height re-fit runs
+# ONCE, this many ms after the LAST <Configure> ("wait for mouse release").
+RESIZE_SETTLE_MS = 150
+
 # the two track pill SVGs (stems, resolved in assets/icons) — reused
 # straight from the owner's website switch, so the starfield / sky-clouds
 # art matches the site exactly
@@ -635,21 +678,75 @@ def _aspect_rule(prompt_text: str) -> str:
     return ASPECT_DEFAULT
 
 
-def prompt_suffix(site_key: str, background: str, prompt_text: str = "") -> str:
-    """The rule block appended to one prompt of one site."""
+# --- Per-agent STYLE clause (owner 2026-07-19) -----------------------
+#
+# Each AgentPanel picks a rendering STYLE; the chosen clause is appended
+# at the very END of that site's prompt suffix (AFTER the background rule
+# and the Gemini laws), only when it is not "None". Pure data — the owner
+# can reword the text here without touching any logic. "None" (the
+# default) maps to an empty clause = nothing appended. STYLE_CHOICES
+# preserves the dropdown order (None first).
+STYLES = {
+    "None": "",
+    "Realistic": (
+        "STYLE: photorealistic, high-fidelity finish - crisp fine detail,"
+        " smooth clean surfaces, natural even lighting; NO film grain, NO"
+        " speckle or noise, NO gritty sandpaper texture, NO heavy painterly"
+        " stylization."
+    ),
+    "Oil painting": (
+        "STYLE: classical oil painting - visible confident brushwork, rich"
+        " layered color, subtle canvas texture, painterly light."
+    ),
+    "Watercolor": (
+        "STYLE: soft watercolor - translucent layered washes, gentle color"
+        " bleeds, visible paper grain, delicate edges."
+    ),
+    "3D render": (
+        "STYLE: clean 3D render - physically based materials, soft studio"
+        " lighting, smooth surfaces, subtle ambient occlusion, crisp"
+        " reflections."
+    ),
+    "Flat vector": (
+        "STYLE: flat vector illustration - bold clean shapes, solid fills,"
+        " crisp edges, minimal or no gradients, no texture."
+    ),
+    "Ink engraving": (
+        "STYLE: fine antique engraving - precise cross-hatched linework,"
+        " high-contrast ink, old-print character."
+    ),
+}
+STYLE_CHOICES = tuple(STYLES)  # dropdown order — "None" first
+STYLE_DEFAULT = "None"
+
+
+def prompt_suffix(
+    site_key: str,
+    background: str,
+    prompt_text: str = "",
+    style: str | None = None,
+) -> str:
+    """The rule block appended to one prompt of one site.
+
+    ``style`` (a STYLES key, "None"/None = no style) appends that style's
+    clause at the very END, after the aspect/background/site rules.
+    """
     rules = [_aspect_rule(prompt_text)]
     bg_rule = _BACKGROUND_RULE[background]
     if bg_rule:
         rules.append(bg_rule)
     rules.extend(SITE_PROMPT_RULES[site_key])
-    if not rules:
-        return ""
     if len(rules) == 1:
-        return f"\n\nIMPORTANT: {rules[0]}."
-    numbered = " ".join(
-        f"{n}) {rule}." for n, rule in enumerate(rules, start=1)
-    )
-    return f"\n\nIMPORTANT — follow ALL rules strictly: {numbered}"
+        suffix = f"\n\nIMPORTANT: {rules[0]}."
+    else:
+        numbered = " ".join(
+            f"{n}) {rule}." for n, rule in enumerate(rules, start=1)
+        )
+        suffix = f"\n\nIMPORTANT — follow ALL rules strictly: {numbered}"
+    clause = STYLES.get(style) if style else None
+    if clause:  # "None" -> "" -> falsy -> nothing appended
+        suffix += f" {clause}"
+    return suffix
 
 
 # --- Safer-retry preamble (opt-in, owner 2026-07-17) -----------------

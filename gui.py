@@ -44,6 +44,11 @@ from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageGrab, ImageTk
 from painter.config import (
     ASPECT_DEFAULT_H,
     ASPECT_DEFAULT_W,
+    ASPECT_FILTER_DEFAULT_FROM,
+    ASPECT_FILTER_DEFAULT_TO,
+    ASPECT_FILTER_IF,
+    ASPECT_FILTER_MODES,
+    ASPECT_FILTER_OFF,
     BACKGROUND_CHOICES,
     CDP_URL,
     CHECKER_DARK,
@@ -57,8 +62,11 @@ from painter.config import (
     JOB_ORDER,
     JOB_TOOL_KINDS,
     NEW_CHAT_CHOICES,
+    RESIZE_SETTLE_MS,
     SITES,
     STATE_DIRNAME,
+    STYLE_CHOICES,
+    STYLE_DEFAULT,
     SWITCH_ANIM_MS,
     SWITCH_ASPECT,
     SWITCH_COVER_ICON_FRAC,
@@ -100,6 +108,7 @@ from painter.config import (
     fmt_op_duration,
     fmt_pct,
     fmt_size,
+    iter_images,
     button_fill_pair,
     button_text_pair,
     job_color_pair,
@@ -1073,6 +1082,8 @@ class ScrollFrame(ttk.Frame):
         self._fill_h = 0  # last forced body height (change-guarded loop break)
         self._sr_job = None  # coalesced scrollregion pass (see _on_body)
         self._sr_suspended = False  # bulk-build pause (see suspend_...)
+        self._resizing = False  # active window-resize debounce (see _on_canvas)
+        self._settle_job = None  # the resize-settle after() id
         self.canvas = tk.Canvas(self, highlightthickness=0)
         skin_canvas(self.canvas)  # registered so its bg re-tints on a flip
         vbar = ttk.Scrollbar(
@@ -1108,7 +1119,7 @@ class ScrollFrame(ttk.Frame):
         # <Configure> per child — recomputing bbox('all') each time is
         # O(N^2). Instead flag one after_idle pass and let the whole
         # settled layout be scanned exactly ONCE.
-        if self._sr_suspended or self._sr_job is not None:
+        if self._sr_suspended or self._resizing or self._sr_job is not None:
             return
         self._sr_job = self.after_idle(self._recompute_sr)
 
@@ -1164,12 +1175,44 @@ class ScrollFrame(ttk.Frame):
         if self._sr_job is not None:
             self.after_cancel(self._sr_job)
             self._sr_job = None
+        if self._settle_job is not None:
+            self.after_cancel(self._settle_job)
+            self._settle_job = None
         self._unbind_wheel(event)
 
     def _on_canvas(self, event) -> None:
         if self._stretch:
             self.canvas.itemconfigure(self._win, width=event.width)
-        self._apply_fill_height()
+        # DEBOUNCE (owner 2026-07-19): a window drag / maximize fires
+        # <Configure> many times a second; running the fill-height +
+        # scrollregion bbox scan on EACH is the customtkinter re-render
+        # jank. The width track (above) stays live so content follows the
+        # window, but the heavy re-fit is deferred. The FIRST configure of
+        # a SETTLED window (initial layout / a lone resize) fills height at
+        # once so the viewport never shows a dead strip; once a resize is
+        # underway (_resizing) the re-fit is deferred and runs ONCE on
+        # settle, not per frame.
+        if not self._resizing:
+            self._apply_fill_height()
+        self._arm_settle()
+
+    def _arm_settle(self) -> None:
+        """Flag an active resize and (re)start the settle timer. Gates
+        ``_on_body``'s per-<Configure> scheduling; the heavy re-fit is
+        deferred to ``_settle`` (RESIZE_SETTLE_MS after the LAST
+        <Configure> — 'wait for mouse release')."""
+        self._resizing = True
+        if self._settle_job is not None:
+            self.after_cancel(self._settle_job)
+        self._settle_job = self.after(RESIZE_SETTLE_MS, self._settle)
+
+    def _settle(self) -> None:
+        """The size settled — clear the resize flag and run ONE re-fit
+        (fill-height + scrollregion), coalesced like ``_on_body``."""
+        self._settle_job = None
+        self._resizing = False
+        if self._sr_job is None:
+            self._sr_job = self.after_idle(self._recompute_sr)
 
     def _bind_wheel(self, _event) -> None:
         self.canvas.bind_all("<MouseWheel>", self._on_wheel)
@@ -1226,7 +1269,7 @@ class AgentPanel(ttk.Labelframe):
 
     # the keys persisted per agent in the settings file
     _PERSIST = (
-        "background", "bg_removal", "crop", "upscale", "report",
+        "background", "style", "bg_removal", "crop", "upscale", "report",
         "safer_retry", "new_chat", "pause_min", "pause_max",
         "act_min", "act_max",
         # per-agent upscale-gate fine-tune (owner 2026-07-19)
@@ -1252,6 +1295,9 @@ class AgentPanel(ttk.Labelframe):
         self.configure(labelwidget=head, padding=6)
 
         self.background_var = tk.StringVar(value=site.default_background)
+        # the rendering STYLE clause appended at the END of this site's
+        # prompt suffix (owner 2026-07-19); "None" = nothing appended
+        self.style_var = tk.StringVar(value=STYLE_DEFAULT)
         self.bg_removal_var = tk.BooleanVar(value=True)
         self.crop_var = tk.BooleanVar(value=True)
         self.upscale_var = tk.BooleanVar(value=True)
@@ -1291,6 +1337,16 @@ class AgentPanel(ttk.Labelframe):
         ttk.Label(row, text="New chat:").pack(side="left")
         rounded_combo(
             row, NEW_CHAT_CHOICES, self.new_chat_var, width=100,
+        ).pack(side="left", padx=(2, 0))
+
+        # the Style dropdown — a primary per-generation choice like
+        # Background, so it lives in the ALWAYS-VISIBLE area, not under the
+        # Settings gear (owner 2026-07-19)
+        row = ttk.Frame(self)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Style:").pack(side="left")
+        rounded_combo(
+            row, STYLE_CHOICES, self.style_var, width=150,
         ).pack(side="left", padx=(2, 0))
 
         row = ttk.Frame(self)
@@ -1483,6 +1539,7 @@ class AgentPanel(ttk.Labelframe):
     def _vars(self) -> dict[str, tk.Variable]:
         return {
             "background": self.background_var,
+            "style": self.style_var,
             "bg_removal": self.bg_removal_var,
             "crop": self.crop_var,
             "upscale": self.upscale_var,
@@ -2494,6 +2551,14 @@ class PainterGui:
         self._aspect_ratio: tuple[int, int] = (
             ASPECT_DEFAULT_W, ASPECT_DEFAULT_H
         )
+        # the aspect tool's remembered optional INPUT FILTER (owner
+        # 2026-07-19): a W/H range + a mode (off / IF / IF NOT). Off by
+        # default; the dialog pre-fills the ~square band when first used.
+        self._aspect_filter: dict = {
+            "from": ASPECT_FILTER_DEFAULT_FROM,
+            "to": ASPECT_FILTER_DEFAULT_TO,
+            "mode": ASPECT_FILTER_OFF,
+        }
 
         # the top strip (theme switch + collapse toggle) is PINNED outside
         # the scroll so the toggle is reachable even when the content
@@ -3096,15 +3161,18 @@ class PainterGui:
 
     @staticmethod
     def _iter_images(folder: Path) -> list[Path]:
-        return sorted(
-            p for p in folder.rglob("*")
-            if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp")
-        )
+        return iter_images(folder)
 
     def _remember_aspect_ratio(self, ratio_w: int, ratio_h: int) -> None:
         """Persist the last-entered aspect W:H so the dialog pre-fills it
         next time (owner 2026-07-19)."""
         self._aspect_ratio = (ratio_w, ratio_h)
+        self._schedule_save()
+
+    def _remember_aspect_filter(self, filt: dict) -> None:
+        """Persist the aspect tool's last-used INPUT FILTER (from / to /
+        mode) so the dialog pre-fills it next time (owner 2026-07-19)."""
+        self._aspect_filter = dict(filt)
         self._schedule_save()
 
     def _remember_upscale_params(self, params: dict) -> None:
@@ -3130,39 +3198,63 @@ class PainterGui:
 
         label = JOB_LABEL[slot]
         if slot == "aspect":
-            # Aspect takes INDIVIDUAL image FILES, not a folder — one
-            # folder can hold images of DIFFERENT ratios, and a single
-            # target must never be blanket-applied to all (owner
-            # 2026-07-19). The other three tools stay folder-based. The
-            # dialog is PRE-FILLED with the last-used ratio (remembered).
-            ratio = AspectRatioDialog(self.root, *self._aspect_ratio).result
-            if ratio is None:
+            # Aspect accepts individual image FILES or a whole FOLDER (the
+            # optional input filter makes folders useful — skip the
+            # already-good ones). One folder can hold images of DIFFERENT
+            # ratios, so a single target is never blanket-applied blindly;
+            # the filter gates which images are touched. The other three
+            # tools stay folder-based. The dialog PRE-FILLS the last-used
+            # ratio + filter (both remembered). (owner 2026-07-19)
+            choice = AspectRatioDialog(
+                self.root, *self._aspect_ratio, self._aspect_filter
+            ).result
+            if choice is None:
                 return
-            ratio_w, ratio_h = ratio
+            ratio_w, ratio_h = choice["ratio"]
+            filt = choice["filter"]
             self._remember_aspect_ratio(ratio_w, ratio_h)
+            self._remember_aspect_filter(filt)
             from painter.aspect import change_aspect
 
             func = (
-                lambda path, log: change_aspect(path, ratio_w, ratio_h, log)
+                lambda path, log: change_aspect(
+                    path, ratio_w, ratio_h, log,
+                    filter_from=filt["from"], filter_to=filt["to"],
+                    filter_mode=filt["mode"],
+                )
             )
             label = f"Aspect {ratio_w}:{ratio_h}"
-            picks = filedialog.askopenfilenames(
-                title=f"Image files to deform — {label} runs IN PLACE",
-                filetypes=[
-                    ("Images", "*.png *.jpg *.jpeg *.webp"),
-                    ("All files", "*.*"),
-                ],
+            if choice["input"] == "folder":
+                folder = filedialog.askdirectory(
+                    title=f"Folder with images — {label} runs IN PLACE"
+                )
+                if not folder:
+                    return
+                folder_path = Path(folder)
+                files = self._iter_images(folder_path)
+            else:
+                picks = filedialog.askopenfilenames(
+                    title=f"Image files to deform — {label} runs IN PLACE",
+                    filetypes=[
+                        ("Images", "*.png *.jpg *.jpeg *.webp"),
+                        ("All files", "*.*"),
+                    ],
+                )
+                if not picks:
+                    return
+                folder_path, _rels = selection_base_and_rels(picks)
+                files = [Path(p) for p in picks]
+            filt_note = (
+                f"\nFilter: {filt['mode']} {filt['from']}–{filt['to']} (W/H)"
+                if filt["mode"] != ASPECT_FILTER_OFF else ""
             )
-            if not picks:
-                return
-            folder_path, _rels = selection_base_and_rels(picks)
-            files = [Path(p) for p in picks]
             message = (
-                f"DEFORM {len(files)} selected image(s)\n\n"
-                f"to a {ratio_w}:{ratio_h} aspect ratio?\n\n"
+                f"DEFORM {len(files)} image(s)\n\n"
+                f"to a {ratio_w}:{ratio_h} aspect ratio?{filt_note}\n\n"
                 "A non-proportional STRETCH written IN PLACE — the"
                 " originals are backed up so you can Restore. Images"
-                f" already at {ratio_w}:{ratio_h} are skipped untouched."
+                f" already at {ratio_w}:{ratio_h} (or filtered out) are"
+                " skipped untouched."
             )
         else:
             if slot == "upscale":
@@ -3465,9 +3557,10 @@ class PainterGui:
         self._dashgrid.add(key)  # reveal the panel (idempotent on restart)
         self._update_status()
         background = panel.background_var.get()
+        style = panel.style_var.get()
         self._log(
             f"=== START {key} | {len(sheets)} sheet(s) -> {out_base}"
-            f" | background: {background}"
+            f" | background: {background} | style: {style}"
             f" | bg_removal={panel.bg_removal_var.get()}"
             f" crop={panel.crop_var.get()}"
             f" upscale={panel.upscale_var.get()}"
@@ -3481,7 +3574,7 @@ class PainterGui:
                 out_base,
                 timing,
                 post_save,
-                partial(prompt_suffix, key, background),
+                partial(prompt_suffix, key, background, style=style),
                 panel.report_var.get(),
                 selection,
                 panel.safer_var.get(),
@@ -3711,6 +3804,7 @@ class PainterGui:
             "controls_collapsed": self._collapsed,
             "upscale_tool": dict(self._upscale_tool_params),
             "aspect_ratio": list(self._aspect_ratio),
+            "aspect_filter": dict(self._aspect_filter),
             "agents": {
                 key: panel.get_settings()
                 for key, panel in self.agents.items()
@@ -3752,6 +3846,11 @@ class PainterGui:
             isinstance(saved_ratio, (list, tuple)) and len(saved_ratio) == 2
         ):
             self._aspect_ratio = (int(saved_ratio[0]), int(saved_ratio[1]))
+        saved_filter = stored.get("aspect_filter")
+        if isinstance(saved_filter, dict):
+            for k in self._aspect_filter:
+                if k in saved_filter:
+                    self._aspect_filter[k] = saved_filter[k]
 
         if stored.get("geometry"):
             self.root.geometry(self._clamp_geometry(stored["geometry"]))
@@ -4407,24 +4506,43 @@ class _ModalToolDialog(tk.Toplevel):
 
 
 class AspectRatioDialog(_ModalToolDialog):
-    """A tiny MODAL prompt for the target aspect ratio of the standalone
-    'Aspect ratio…' deform tool. Two positive-integer fields (W and H,
-    PRE-FILLED with the last-used ratio the caller remembers, first run
-    16:9); ``result`` is ``(w, h)`` on Run or ``None`` on Cancel /
-    Escape. Themed like the app (skinned Toplevel + rounded fields /
-    buttons)."""
+    """The MODAL prompt for the standalone 'Aspect ratio…' deform tool.
+
+    Asks THREE things (owner 2026-07-19):
+      * the target OUTPUT ratio — two positive-integer fields W and H,
+        PRE-FILLED with the last-used ratio (first run 16:9);
+      * an optional INPUT FILTER on each image's CURRENT ratio (W/H) —
+        a [from, to] range plus a mode (off / IF / IF NOT), remembered;
+      * whether the input is individual FILES or a whole FOLDER — the two
+        action buttons ('Files…' / 'Folder…') encode the choice.
+
+    ``result`` is ``None`` on Cancel / Escape, else a dict
+    ``{"ratio": (w, h), "filter": {"from": float|None, "to": float|None,
+    "mode": str}, "input": "files"|"folder"}``. Themed like the app."""
 
     def __init__(
         self, master,
         default_w: int = ASPECT_DEFAULT_W, default_h: int = ASPECT_DEFAULT_H,
+        filter_defaults: dict | None = None,
     ):
         super().__init__(master)
         self.title("Change aspect ratio")
         self.resizable(False, False)
         skin_toplevel(self)  # bg registered so a flip re-tints the window
-        self.result: tuple[int, int] | None = None
+        self.result: dict | None = None
         self._w_var = tk.StringVar(value=str(default_w))
         self._h_var = tk.StringVar(value=str(default_h))
+        fd = filter_defaults or {}
+        _dec = UPSCALE_ASPECT_DECIMALS
+        self._mode_var = tk.StringVar(
+            value=fd.get("mode", ASPECT_FILTER_OFF)
+        )
+        self._from_var = tk.StringVar(
+            value=f"{fd.get('from', ASPECT_FILTER_DEFAULT_FROM):.{_dec}f}"
+        )
+        self._to_var = tk.StringVar(
+            value=f"{fd.get('to', ASPECT_FILTER_DEFAULT_TO):.{_dec}f}"
+        )
 
         body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
         body.pack(fill="both", expand=True)
@@ -4433,7 +4551,7 @@ class AspectRatioDialog(_ModalToolDialog):
         ).pack(anchor="w", pady=(0, 10))
 
         fields = ttk.Frame(body)
-        fields.pack()
+        fields.pack(anchor="w")
         ttk.Label(fields, text="W").pack(side="left", padx=(0, 4))
         self._w_entry = rounded_entry(
             fields, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._w_var,
@@ -4450,16 +4568,46 @@ class AspectRatioDialog(_ModalToolDialog):
         )
         self._h_entry.pack(side="left")
 
+        # --- optional INPUT FILTER on the current ratio ----------------
+        ttk.Label(
+            body,
+            text=(
+                "Optional filter on each image's CURRENT ratio (W/H)\n"
+                "— off = process every image:"
+            ),
+        ).pack(anchor="w", pady=(14, 6))
+        filt = ttk.Frame(body)
+        filt.pack(anchor="w")
+        rounded_combo(
+            filt, ASPECT_FILTER_MODES, self._mode_var, width=88,
+        ).pack(side="left", padx=(0, 10))
+        rounded_entry(
+            filt, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._from_var,
+            justify="center",
+        ).pack(side="left")
+        ttk.Label(filt, text="–").pack(side="left", padx=6)
+        rounded_entry(
+            filt, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._to_var,
+            justify="center",
+        ).pack(side="left")
+        ttk.Label(filt, text="W/H").pack(side="left", padx=(4, 0))
+
         btns = ttk.Frame(body)
-        btns.pack(fill="x", pady=(14, 0))
-        rounded_button(btns, "Run", command=self._run, kind="success").pack(
-            side="right"
-        )
+        btns.pack(fill="x", pady=(16, 0))
+        rounded_button(
+            btns, "Files…", command=partial(self._run, "files"),
+            kind="success",
+        ).pack(side="right")
+        rounded_button(
+            btns, "Folder…", command=partial(self._run, "folder"),
+            kind="info",
+        ).pack(side="right", padx=6)
         rounded_button(btns, "Cancel", command=self.destroy).pack(
-            side="right", padx=6
+            side="right", padx=(0, 6)
         )
 
-        self.bind("<Return>", lambda _e: self._run())
+        # Enter defaults to the multi-FILE pick (the tool's original input)
+        self.bind("<Return>", lambda _e: self._run("files"))
         self.bind("<Escape>", lambda _e: self.destroy())
         self.update_idletasks()
         self._center_on(master)
@@ -4468,9 +4616,11 @@ class AspectRatioDialog(_ModalToolDialog):
         self._w_entry.focus_set()
         self.wait_window(self)
 
-    def _run(self) -> None:
-        """Validate the two fields as positive whole numbers, then close
-        with ``result`` set; a bad value stays open with a loud message."""
+    def _run(self, input_mode: str) -> None:
+        """Validate the ratio (positive whole numbers) and, when the mode
+        is not off, the filter range (positive reals, FROM <= TO); then
+        close with ``result`` set for the chosen ``input_mode``. A bad
+        value stays open with a loud message."""
         try:
             ratio_w = int(self._w_var.get().strip())
             ratio_h = int(self._h_var.get().strip())
@@ -4486,7 +4636,38 @@ class AspectRatioDialog(_ModalToolDialog):
                 "Width and height must both be positive.", parent=self,
             )
             return
-        self.result = (ratio_w, ratio_h)
+
+        mode = self._mode_var.get()
+        filt_from = filt_to = None
+        if mode != ASPECT_FILTER_OFF:
+            try:
+                filt_from = float(self._from_var.get().strip())
+                filt_to = float(self._to_var.get().strip())
+            except ValueError:
+                messagebox.showerror(
+                    "PromptPainter",
+                    "The filter range must be numbers (or set the mode to"
+                    " off).", parent=self,
+                )
+                return
+            if filt_from <= 0 or filt_to <= 0:
+                messagebox.showerror(
+                    "PromptPainter",
+                    "The filter range must be positive.", parent=self,
+                )
+                return
+            if filt_from > filt_to:
+                messagebox.showerror(
+                    "PromptPainter",
+                    "Filter FROM must be <= TO.", parent=self,
+                )
+                return
+
+        self.result = {
+            "ratio": (ratio_w, ratio_h),
+            "filter": {"from": filt_from, "to": filt_to, "mode": mode},
+            "input": input_mode,
+        }
         self.destroy()
 
 

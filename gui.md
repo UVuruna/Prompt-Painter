@@ -71,6 +71,18 @@ when the content is shorter than the window — behind a change-guard
 that breaks the itemconfigure→`<Configure>`→recompute loop
 (`winfo_reqheight` is invariant under the forced height, so one
 settle converges); `refresh()` re-fits after a collapse/expand.
+`ScrollFrame` also DEBOUNCES the resize re-fit (owner 2026-07-19):
+customtkinter re-renders on every intermediate `<Configure>`, so a
+window drag / maximize used to run the fill-height + scrollregion
+scan per frame (visible jank). Now a canvas `<Configure>` tracks the
+width live (cheap) but re-arms a settle timer (`_arm_settle`), the
+`_resizing` flag gates `_on_body`'s per-frame scheduling, and the
+heavy pass runs ONCE via `_settle` ~`RESIZE_SETTLE_MS` (150 ms) after
+the LAST `<Configure>` ("wait for mouse release") — the first
+configure of a settled window still fills height at once so the
+viewport never shows a start-up dead strip. Measured: a 20-step
+resize burst runs the heavy re-fit 0× during the drag and once on
+settle, vs 18× (per frame) before.
 The module-level `folder_of(drop_path)` (a drop path's
 POSIX parent, `(root)` fallback) is the shared L2 folder identity
 for both the dashboard tree and the Select window.
@@ -196,7 +208,13 @@ reachability fixes:
   everything below the shared Output line: the **background
   dropdown** (`transparent` / `white` / `none`, preselected to the
   site's default — ChatGPT transparent, Gemini white; Gemini's
-  three laws still ride along automatically), the three composable
+  three laws still ride along automatically), the **Style dropdown**
+  (owner 2026-07-19 — one of the 7 `config.STYLES`, default `None`;
+  a PRIMARY per-generation choice so it sits in the always-visible
+  area near Background / New chat, NOT under the gear; its clause is
+  appended at the very END of that site's `prompt_suffix`, after the
+  background rule + Gemini laws, and it is passed into the worker via
+  `partial(prompt_suffix, key, background, style=...)`), the three composable
   **post-save switches** — `BG removal`, `Crop`, `Upscale` (all ON
   by default; each site's post-save pipeline runs exactly ITS
   ticked steps, in that order, loud on failure but never killing
@@ -303,14 +321,21 @@ reachability fixes:
   gate params (min W, min H, aspect FROM, aspect TO), PRE-FILLED with the
   last-used values (`self._upscale_tool_params`, remembered/persisted,
   positive-number + FROM≤TO validation), then runs `upscale_if_small`
-  with those params bound. **Aspect ratio** is different: a folder can
-  hold images of DIFFERENT ratios, so it picks INDIVIDUAL image FILES
-  (`askopenfilenames`, multi-select) after the `AspectRatioDialog` — a
-  tiny modal with two positive-integer fields **W** and **H**, PRE-FILLED
-  with the last-used ratio (`self._aspect_ratio`, remembered/persisted;
-  first run 16 : 9) — and warns it DEFORMS the N selected images (a
-  non-proportional stretch written in place). Both dialogs share
-  `_ModalToolDialog` (the centre-on-parent placement). The selection is
+  with those params bound. **Aspect ratio** pops the `AspectRatioDialog`
+  first — a modal with two positive-integer fields **W** and **H**
+  (PRE-FILLED with the last-used ratio `self._aspect_ratio`; first run
+  16 : 9), an optional INPUT FILTER (owner 2026-07-19 — a `mode`
+  combobox `off` / `IF` / `IF NOT` plus a `from`–`to` W/H range,
+  PRE-FILLED from `self._aspect_filter`), and TWO action buttons
+  **Folder…** / **Files…** that encode the input choice: a folder can
+  hold images of DIFFERENT ratios, so the tool accepts a whole FOLDER
+  (`askdirectory` → `_iter_images`) OR individual FILES (`askopenfilenames`,
+  multi-select) — the filter is what makes a folder useful (skip the
+  already-good ones). `.result` is `{ratio, filter, input}`; the run binds
+  `ratio_w/ratio_h` and `filter_from/filter_to/filter_mode` into
+  `change_aspect`, and the confirm warns it DEFORMS the N images (a
+  non-proportional stretch written in place). Both modals share
+  `_ModalToolDialog` (the centre-on-parent placement). A file selection is
   keyed by `config.selection_base_and_rels` (the common-ancestor folder
   + each file's relative path), so picks spanning sub-folders still group
   under their folder node and restore correctly. Each image's ORIGINAL is
@@ -320,7 +345,7 @@ reachability fixes:
   "nothing"/"unclear" — nothing to do, its no-op backup dropped (for
   Upscale: failed the gate — aspect outside the chosen FROM–TO or both
   sides already ≥ the chosen min W/H; for Aspect: already at the target
-  ratio, left byte-unchanged).
+  ratio OR filtered out by the input filter, left byte-unchanged).
   The op is also TIMED (per-image seconds; skipped items add no time).
   "Changed" keys ONLY on the engine ACTUALLY REWRITING the file (a
   "done"), never on the metric size (owner 2026-07-19) — a 3px crop or a
@@ -403,11 +428,12 @@ reachability fixes:
   `theme`, `geometry`, `controls_collapsed`, `upscale_tool`
   (the standalone Upscale dialog's last-used `min_width`/`min_height`/
   `aspect_min`/`aspect_max`), `aspect_ratio` (the last `[W, H]` from
-  the Aspect dialog), and `agents.<site>` with `background`,
-  `bg_removal`, `crop`, `upscale`, `report`, `safer_retry`,
-  `new_chat`, `pause_min/max`, `act_min/max`, the per-agent
-  upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`, and that
-  agent's `settings_collapsed`.
+  the Aspect dialog), `aspect_filter` (that dialog's last input filter —
+  `from`/`to`/`mode`), and `agents.<site>` with `background`, `style`
+  (the rendering-style dropdown), `bg_removal`, `crop`, `upscale`,
+  `report`, `safer_retry`, `new_chat`, `pause_min/max`, `act_min/max`,
+  the per-agent upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`,
+  and that agent's `settings_collapsed`.
 
 ## The Dashboard — per-JOB panels (owner 2026-07-19)
 The dashboard shows one panel PER RUNNING JOB, up to SIX in parallel:
