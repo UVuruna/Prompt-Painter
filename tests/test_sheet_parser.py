@@ -37,8 +37,9 @@ GOLDEN_COUNTS = {
     # sheet: (items, skipped)
     "trinity_prompts.md": (7, 0),
     "family_prompts.md": (7, 0),
-    # + the Prism center Seal (DOMY 0.14.322)
-    "persons_prompts.md": (5, 2),
+    # 4 archetypes + the Prism center Seal + Lucifer/Judas, whose REUSE
+    # seats were given full prompts (DOMY, so now generated not skipped)
+    "persons_prompts.md": (7, 0),
     "one_soul_prompts.md": (8, 0),
     "walks_prompts.md": (16, 0),
     # 4 temperaments + the 4 tetramorph (approved 2026-07-17, moved
@@ -131,24 +132,21 @@ def test_walks_bell_rondel_prompt_byte_identical():
     assert sheet.items[-1].prompt == BELL_RONDEL_PROMPT
 
 
-# --- persons: REUSE seats are skipped, never generated ----------------
+# --- persons: the former REUSE seats now carry prompts, so generate ---
 
-def test_persons_reuse_skipped():
-    # the two REUSE seats have NO prompt in the sheet — nothing to
-    # load, so they stay informational skips (not items)
+def test_persons_all_generate():
+    # Lucifer/Judas were REUSE seats with no prompt; DOMY later gave
+    # them full prompts, so they now LOAD as items — nothing is skipped
     sheet = golden("persons_prompts.md")
-    assert [s.title for s in sheet.skipped] == [
-        "Lucifer — Pride (red arm, 20h)",
-        "Judas — Weakness / Fear (blue arm, 04h)",
-    ]
-    for s in sheet.skipped:
-        assert "REUSE" in s.reason
+    assert sheet.skipped == ()
     generated = {i.drop_path for i in sheet.items}
     assert generated == {
         "assets/archetype/persons/One_Love.png",
         "assets/archetype/persons/Michael_Courage.png",
         "assets/archetype/persons/Devil_Hatred.png",
         "assets/archetype/persons/Jesus_Humility.png",
+        "assets/archetype/persons/Lucifer_Pride.png",
+        "assets/archetype/persons/Judas_Fear.png",
         "assets/archetype/persons/Seal.png",
     }
 
