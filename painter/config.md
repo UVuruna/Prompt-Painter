@@ -301,8 +301,13 @@ match.
   `AI_STUDIO_URL` (the wizard's step-1 browser target),
   `AI_CALL_PAUSE_S` (free-tier pacing, ~10 requests/minute → 6.5 s
   between calls), `AI_TIMEOUT_S`, `AI_TEST_PROMPT` (the wizard's tiny
-  Test call), `AI_MAX_QUESTIONS` + `SHEETS_DIR` + the four sheet-flow
-  prompt templates (`AI_QUESTIONS_SYSTEM`, `AI_SHEET_SYSTEM`,
+  Test call), the TRANSIENT-error retry knobs — `AI_TRANSIENT_STATUS`
+  (`{429, 500, 503}`, the codes a wait can fix; everything else raises
+  at once), `AI_RETRY_MAX` (attempts per call), `AI_RETRY_BACKOFF_S`
+  (the fixed 503/500 wait) and `AI_RETRY_MAX_WAIT_S` (the cap on a
+  429's server-named `retryDelay`) — `AI_MAX_QUESTIONS` + `SHEETS_DIR`
+  + the four sheet-flow prompt templates (`AI_QUESTIONS_SYSTEM`,
+  `AI_SHEET_SYSTEM`,
   `AI_SHEET_REQUEST`, `AI_REPAIR_PROMPT` — `{contract}` is
   instructions.md verbatim), and the checker's `AI_FLAGS_FILENAME`,
   `AI_CHECK_INSTRUCTIONS` (banal defects only, strict OK/DEFECTS

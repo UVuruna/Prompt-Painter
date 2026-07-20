@@ -656,24 +656,37 @@ image) and starts `_run_ai_check_job` on its own worker (registered
 in `_tool_workers["aicheck"]`, so the one-job-per-kind guard and the
 `__tool_done__` plumbing are reused as-is). The worker first
 `prune_stale_flags` (a REGENERATED file's changed mtime drops its old
-flag), then per image calls `ai.check_image` with
-`AI_CHECK_INSTRUCTIONS` (BANAL defects only) and parses the strict
-OK/DEFECTS answer:
+flag), then per image calls `ai.check_one_image` (the pure driver —
+it times the call, retries transient 503/429 failures, parses the
+strict OK/DEFECTS answer, merges/clears the flag and does the
+FLAGGED/FAIL logging) and maps its `kind` to a row:
 
 - **flagged** → `ai.record_flag` (merged into
-  `<out>/_state/ai_flags.json`: defects, checked_at, model, the
-  file's mtime) + a STRIKING row (`TOOL_CHANGED_TAG`) whose metric is
-  the DEFECT COUNT plus the first defect text;
+  `<out>/_state/ai_flags.json`: defects, the verbatim raw response,
+  checked_at, model, the file's mtime) + a STRIKING row
+  (`TOOL_CHANGED_TAG`) whose metric is the DEFECT COUNT plus the first
+  defect text;
 - **OK** → `ai.clear_flag` (a fixed image loses its stale flag) + a
   muted row (`TOOL_SKIP_TAG`);
-- a per-image `AiError` is LOUD in the log, counted as an error row,
-  and never kills the batch (the tool-job convention).
+- a per-image `AiError` (a 503 that survives the retries, a malformed
+  answer) is LOUD in the log, counted as an error row, and never kills
+  the batch (the tool-job convention).
+
+Every row carries its own op **Time** column (`fmt_op_duration`), and
+the panel's stat line shows the total + per-image average over the
+CHECKED images (`fmt_time_summary`, shared with the tool panels) — the
+owner wanted to see how long the paced checker actually works,
+retries included.
 
 The flag KEY is the image's path RELATIVE to the shared Output base
 (`ai.flag_key`; absolute for an outside image — persists, but can
-never match a queued collection). **Double-click a flagged row** →
-a `DocWindow` with the defect bullets + the image itself. Two panel
-actions:
+never match a queued collection). **Double-click ANY checked row**
+(flagged, OK or error) → a `DocWindow` (`ai_check_doc_md`) with the
+parsed defects (when any), the **verbatim** AI response under "Full AI
+response:" and the image itself — so the owner sees exactly what the
+model said about this exact image (the raw response also resolves the
+"is this the right image?" doubt: the viewer opens `ai.flag_file`, the
+same round-trip the worker's `flag_key` reverses). Two panel actions:
 
 - **Send flagged to generator** → `_resend_flagged`:
   `ai.plan_resend` (pure, GUI-free) reverses each flag key to its

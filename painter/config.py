@@ -903,6 +903,16 @@ AI_CALL_PAUSE_S = 6.5
 AI_TIMEOUT_S = 120.0  # one HTTP call's hard cap (vision calls are slow)
 # the wizard's "Test key" prompt — tiny and cheap, the answer is shown
 AI_TEST_PROMPT = "Reply with exactly: OK"
+# TRANSIENT API failures RETRY (the free tier 503s under load, 429s at
+# the rate cap); PERMANENT ones (400 bad request, 401/403 bad key, 404
+# no such model) raise on the first try. The client keys the retry on
+# the HTTP status.
+AI_TRANSIENT_STATUS = frozenset({429, 500, 503})
+AI_RETRY_MAX = 3        # total attempts per call before giving up loudly
+AI_RETRY_BACKOFF_S = 5.0  # fixed wait before a 503/500 retry
+# a 429 carries the server's own backoff (error.details[].retryDelay /
+# "please retry in Xs"); honour it, but never wait longer than this
+AI_RETRY_MAX_WAIT_S = 30.0
 
 # --- the AI sheet generator (owner's #2: follow-up questions) ---------
 AI_MAX_QUESTIONS = 6  # the clarifying poll is capped at this many

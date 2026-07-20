@@ -345,6 +345,7 @@ AI_REQUEST_LINES = 4        # the request Text height (lines)
 AI_STEP_INDENT_PX = 28      # wizard body indent under the numbered steps
 AI_POLL_MS = 150            # AI dialog worker-queue poll cadence (ms)
 AI_CHECK_DEFECT_COL_PX = 64   # the checker tree's 'Defects' count column
+AI_CHECK_TIME_COL_PX = 64     # the checker tree's per-image 'Time' column
 AI_CHECK_FIRST_COL_PX = 230   # the checker tree's 'First defect' column
 AI_CHECK_LOG_EVERY = 5      # checker progress log cadence (paced calls are slow)
 
@@ -1831,6 +1832,38 @@ def badge_dots(keys: tuple[str, ...]) -> ImageTk.PhotoImage | None:
     return photo
 
 
+def fmt_time_summary(times: list[float]) -> str:
+    """The '⏱ Xs total · Ys/img' stat line shared by the in-place tool
+    panels and the AI-check panel (Rule #5): the total op time over the
+    processed images and the per-image average; '⏱ —' before anything
+    has been timed."""
+    if not times:
+        return "⏱ —"
+    total = sum(times)
+    return (
+        f"⏱ {fmt_op_duration(total)} total"
+        f"   ·   {fmt_op_duration(total / len(times))}/img"
+    )
+
+
+def ai_check_doc_md(
+    rel: str, defects: list[str] | None, raw: str | None
+) -> str:
+    """The DocWindow markdown for one AI-checked image (owner
+    2026-07-21): the name + path, the parsed defects (when any) AND the
+    VERBATIM raw model response under 'Full AI response:' — so the owner
+    sees EXACTLY what the vision model said, not only the parsed
+    bullets. The raw goes in a code fence (rendered monospace,
+    verbatim)."""
+    parts = [f"# {PurePosixPath(rel).name}\n", f"`{rel}`\n"]
+    if defects:
+        bullets = "\n".join(f"- {d}" for d in defects)
+        parts.append(f"**AI-flagged defects:**\n\n{bullets}\n")
+    if raw is not None:
+        parts.append(f"**Full AI response:**\n\n```\n{raw.strip()}\n```\n")
+    return "\n".join(parts)
+
+
 def build_job_tree(panel, col_specs, height: int = 8) -> ttk.Treeview:
     """The rowed table a job panel shows (ToolPanel + AiCheckPanel —
     Rule #5, one home for the identical plumbing): a Treeview with the
@@ -2559,15 +2592,7 @@ class ToolPanel(JobPanel):
     def _update_time(self) -> None:
         """Total op time over PROCESSED images + the per-image average
         (skipped images add no time)."""
-        if self._times:
-            total = sum(self._times)
-            avg = total / len(self._times)
-            self.time_var.set(
-                f"⏱ {fmt_op_duration(total)} total"
-                f"   ·   {fmt_op_duration(avg)}/img"
-            )
-        else:
-            self.time_var.set("⏱ —")
+        self.time_var.set(fmt_time_summary(self._times))
 
     # --- tree building (root/folder nodes inherited from JobPanel) -----
 
@@ -2751,10 +2776,18 @@ class AiCheckPanel(JobPanel):
         self.metric_var = tk.StringVar(value="—")
         ttk.Label(
             self, textvariable=self.metric_var, style="Value.TLabel"
+        ).pack(anchor="w", pady=(0, 2))
+        # execution time — total over CHECKED images + the per-image
+        # average, mirroring the in-place tool panels (the owner wants to
+        # see how long the paced checker actually works)
+        self.time_var = tk.StringVar(value="⏱ —")
+        ttk.Label(
+            self, textvariable=self.time_var, style="Muted.TLabel"
         ).pack(anchor="w", pady=(0, 4))
 
         col_specs = (
             ("defects", "Defects", AI_CHECK_DEFECT_COL_PX, "e"),
+            ("time", "Time", AI_CHECK_TIME_COL_PX, "e"),
             ("first", "First defect", AI_CHECK_FIRST_COL_PX, "w"),
         )
         self._cols = tuple(c[0] for c in col_specs)
@@ -2782,6 +2815,8 @@ class AiCheckPanel(JobPanel):
         self.reset_finished()
         self._total = total
         self._flagged: dict[str, list[str]] = {}  # flag key -> defects
+        self._raw: dict[str, str | None] = {}     # flag key -> raw answer
+        self._times: list[float] = []             # per-CHECKED-image op s
         self._ok = 0
         self._errors = 0
         self._tree_root: str | None = None
@@ -2804,17 +2839,19 @@ class AiCheckPanel(JobPanel):
             self.state_var.set(
                 f"({event['idx']}/{event['of']}) {event['title'][:50]}"
             )
-        elif kind == "item_flagged":
-            self._flagged[event["rel"]] = list(event["defects"])
-            self._insert_row(event["rel"], defects=event["defects"])
-            self._advance()
-        elif kind == "item_ok":
-            self._ok += 1
-            self._insert_row(event["rel"], defects=None)
-            self._advance()
-        elif kind == "item_error":
-            self._errors += 1
-            self._insert_row(event["rel"], defects=None, error=True)
+        elif kind in ("item_flagged", "item_ok", "item_error"):
+            rel = event["rel"]
+            self._times.append(event["time"])
+            self._raw[rel] = event.get("raw")  # verbatim, for the viewer
+            if kind == "item_flagged":
+                self._flagged[rel] = list(event["defects"])
+                self._insert_row(rel, event["defects"], event["time"])
+            elif kind == "item_ok":
+                self._ok += 1
+                self._insert_row(rel, None, event["time"])
+            else:
+                self._errors += 1
+                self._insert_row(rel, None, event["time"], error=True)
             self._advance()
         elif kind == "sheet_done":
             done = f"done — {len(self._flagged)} flagged, {self._ok} OK"
@@ -2834,20 +2871,23 @@ class AiCheckPanel(JobPanel):
         if self._errors:
             text += f"   ·   {self._errors} error(s)"
         self.metric_var.set(text)
+        self.time_var.set(fmt_time_summary(self._times))
 
     def _insert_row(
-        self, rel: str, defects: list | None, error: bool = False
+        self, rel: str, defects: list | None, time_s: float,
+        error: bool = False,
     ) -> None:
         fnode = self._ensure_folder(folder_of(rel))
+        time_txt = fmt_op_duration(time_s)
         if defects:
             # the CHANGED (striking) bucket — this image needs work
-            values = (str(len(defects)), defects[0])
+            values = (str(len(defects)), time_txt, defects[0])
             tags = (TOOL_CHANGED_TAG,)
         elif error:
-            values = ("!", "API error — see the Log")
+            values = ("!", time_txt, "API error — see the Log")
             tags = (TOOL_SKIP_TAG,)
         else:
-            values = ("OK", "")
+            values = ("OK", time_txt, "")
             tags = (TOOL_SKIP_TAG,)
         row = self.tree.insert(
             fnode, "end", text=PurePosixPath(rel).name, values=values,
@@ -2859,31 +2899,32 @@ class AiCheckPanel(JobPanel):
     # --- the defect viewer + panel actions ------------------------------
 
     def _file_for(self, rel: str) -> Path:
-        """The image file behind one flag key (relative to the out base,
-        or absolute when the image lived outside it)."""
-        path = Path(rel)
-        if path.is_absolute():
-            return path
-        return (self.out_base or Path(".")) / path
+        """The image file behind one flag key — the SAME round-trip the
+        checker's ``flag_key`` reverses (``ai.flag_file``), so the viewer
+        can never open a different image than the one that was flagged."""
+        from painter import ai
+
+        return ai.flag_file(rel, self.out_base or Path("."))
 
     def _on_activate(self, _event) -> None:
+        """Double-click ANY checked row (flagged, OK or error) → a
+        DocWindow with the parsed defects (when any), the VERBATIM AI
+        response and the image itself, so the owner can inspect exactly
+        what the model said about this exact image (owner 2026-07-21)."""
         info = self._node_info.get(self.tree.focus())
         if not info or info.get("level") != "image":
             return
         rel = info["rel"]
         defects = self._flagged.get(rel)
-        if not defects:
-            return  # OK / error rows carry nothing to show
-        bullets = "\n".join(f"- {d}" for d in defects)
-        md = (
-            f"# {PurePosixPath(rel).name}\n\n`{rel}`\n\n"
-            f"**AI-flagged defects:**\n\n{bullets}\n"
-        )
+        raw = self._raw.get(rel)
+        if not defects and raw is None:
+            return  # nothing was captured for this row
+        md = ai_check_doc_md(rel, defects, raw)
         image = self._file_for(rel)
         DocWindow(
             self.winfo_toplevel(), rel, md,
-            copy_text=bullets,
-            hint="Banal defects the vision model flagged on this image.",
+            copy_text=raw if raw is not None else "\n".join(defects or []),
+            hint="Exactly what the vision model reported for this image.",
             image_path=image if image.is_file() else None,
         )
 
@@ -4095,35 +4136,37 @@ class PainterGui:
             ai.prune_stale_flags(out_base, log)
             emit({"type": "sheet_start", "total": len(files)})
             flagged = ok = errors = 0
+            # check_one_image's kind -> the panel event type it emits
+            event_type = {
+                "flagged": "item_flagged",
+                "ok": "item_ok",
+                "error": "item_error",
+            }
             t0 = time.time()
             for i, src in enumerate(files, start=1):
-                rel = ai.flag_key(src, out_base)
                 emit({
                     "type": "item_start", "idx": i, "of": len(files),
                     "title": src.name,
                 })
-                try:
-                    answer = ai.check_image(src, AI_CHECK_INSTRUCTIONS)
-                    defects = ai.parse_check_response(answer)
-                except ai.AiError as exc:
-                    errors += 1
-                    log(f"FAIL {src.name}: {exc}")
-                    emit({"type": "item_error", "rel": rel})
-                    continue
-                if defects:
+                # check_one_image does the timing, parse, flag merge/clear
+                # and the FLAGGED/FAIL logging; the loud-but-never-fatal
+                # AiError handling lives inside it (the tool-job convention)
+                result = ai.check_one_image(
+                    src, out_base, AI_CHECK_INSTRUCTIONS, log=log
+                )
+                kind = result["kind"]
+                event = {
+                    "type": event_type[kind], "rel": result["rel"],
+                    "raw": result["raw"], "time": result["time"],
+                }
+                if kind == "flagged":
                     flagged += 1
-                    ai.record_flag(
-                        out_base, src, defects, GEMINI_VISION_MODEL, log
-                    )
-                    log(f"FLAGGED {src.name}: {'; '.join(defects)}")
-                    emit({
-                        "type": "item_flagged", "rel": rel,
-                        "defects": defects,
-                    })
-                else:
+                    event["defects"] = result["defects"]
+                elif kind == "ok":
                     ok += 1
-                    ai.clear_flag(out_base, src, log)  # a fixed image
-                    emit({"type": "item_ok", "rel": rel})
+                else:
+                    errors += 1
+                emit(event)
                 if i % AI_CHECK_LOG_EVERY == 0:
                     self._q.put(
                         f"[AI check] [{time.time() - t0:.0f}s]"

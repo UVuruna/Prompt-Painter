@@ -42,9 +42,13 @@ from painter.config import (
     AI_MAX_QUESTIONS,
     AI_QUESTIONS_SYSTEM,
     AI_REPAIR_PROMPT,
+    AI_RETRY_BACKOFF_S,
+    AI_RETRY_MAX,
+    AI_RETRY_MAX_WAIT_S,
     AI_SHEET_REQUEST,
     AI_SHEET_SYSTEM,
     AI_TIMEOUT_S,
+    AI_TRANSIENT_STATUS,
     GEMINI_API_BASE,
     GEMINI_KEY_SETTING,
     GEMINI_TEXT_MODEL,
@@ -60,7 +64,13 @@ from painter.sheet_parser import SheetError, parse_sheet
 class AiError(Exception):
     """A Gemini API call failed — HTTP error, refusal/block or a
     malformed response. Loud (Rule #1); the CALLER decides whether one
-    failure skips an image or stops a flow — it is never swallowed."""
+    failure skips an image or stops a flow — it is never swallowed.
+
+    ``status`` is the numeric HTTP code when the failure was an HTTP
+    error (None for a refusal/block/malformed/network failure) — the
+    retry logic and callers key on it instead of parsing the message."""
+
+    status: int | None = None
 
 
 class NoKey(AiError):
@@ -135,15 +145,48 @@ def _payload_image(image_bytes: bytes, mime: str, instructions: str) -> dict:
     }
 
 
-def _http_detail(exc: urllib.error.HTTPError) -> str:
-    """The API's own error message when the body carries the standard
-    ``{"error": {"message": ...}}`` JSON, else the plain HTTP reason —
-    a best-effort DETAIL extractor for the loud AiError, never a
-    swallow (the AiError is raised either way)."""
+# a "38s" / "37.9s" / "retry in 5s" seconds value the server names
+_SECONDS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*s\b")
+
+
+def _seconds_from(text: str) -> float | None:
+    """The first "<number>s" in ``text`` (a server-named backoff), or
+    None — best-effort, used only to honour a 429's requested wait."""
+    m = _SECONDS_RE.search(text)
+    return float(m.group(1)) if m else None
+
+
+def _http_error(exc: urllib.error.HTTPError) -> tuple[str, float | None]:
+    """Parse a Gemini HTTPError body ONCE (the fp is single-read):
+    the API's error message (or the plain HTTP reason) and, for a 429,
+    the server's requested backoff in seconds — from
+    ``error.details[].retryDelay`` ('38s') or, failing that, a
+    "please retry in Xs" the message names; None when absent.
+    Best-effort; the caller raises the loud AiError either way."""
     try:
-        return json.loads(exc.read())["error"]["message"]
+        body = json.loads(exc.read())
     except Exception:
-        return str(exc.reason)
+        return str(exc.reason), None
+    err = body.get("error") or {}
+    message = err.get("message") or str(exc.reason)
+    retry_s = None
+    for detail in err.get("details") or ():
+        if isinstance(detail, dict) and detail.get("retryDelay"):
+            retry_s = _seconds_from(str(detail["retryDelay"]))
+            if retry_s is not None:
+                break
+    if retry_s is None:
+        retry_s = _seconds_from(message)
+    return message, retry_s
+
+
+def _retry_wait(code: int, retry_s: float | None) -> float:
+    """The backoff before the next attempt: a 429 honours the server's
+    requested delay (capped at ``AI_RETRY_MAX_WAIT_S``); 503/500 use the
+    fixed ``AI_RETRY_BACKOFF_S``."""
+    if code == 429 and retry_s is not None:
+        return min(retry_s, AI_RETRY_MAX_WAIT_S)
+    return AI_RETRY_BACKOFF_S
 
 
 def _response_text(data: dict, model: str) -> str:
@@ -177,9 +220,24 @@ def _response_text(data: dict, model: str) -> str:
     )
 
 
-def _call(model: str, payload: dict, key: str) -> str:
-    """POST one generateContent request; returns the response TEXT."""
-    _pace()
+def _raise_http(model: str, exc: urllib.error.HTTPError, message: str) -> None:
+    """Raise the loud ``AiError`` for an HTTP failure, carrying the
+    numeric ``.status`` so callers key on the code, not the message."""
+    err = AiError(f"Gemini API HTTP {exc.code} on {model}: {message}")
+    err.status = exc.code
+    raise err from exc
+
+
+def _call(model: str, payload: dict, key: str, *, log=print) -> str:
+    """POST one generateContent request; returns the response TEXT.
+
+    TRANSIENT API failures (``AI_TRANSIENT_STATUS`` — 503 high-demand,
+    429 rate-limit, 500) are RETRIED up to ``AI_RETRY_MAX`` attempts,
+    with a backoff between them (503/500 a fixed ``AI_RETRY_BACKOFF_S``;
+    429 the server's own "retry in Xs", capped at ``AI_RETRY_MAX_WAIT_S``)
+    — each retry is logged. PERMANENT failures (400/401/403/404: a bad
+    request, bad key or unknown model) raise on the FIRST try. Every
+    attempt is PACED like any other call (``_pace``)."""
     req = urllib.request.Request(
         f"{GEMINI_API_BASE}/models/{model}:generateContent",
         data=json.dumps(payload).encode("utf-8"),
@@ -189,22 +247,33 @@ def _call(model: str, payload: dict, key: str) -> str:
         },
         method="POST",
     )
-    try:
-        with _urlopen(req, timeout=AI_TIMEOUT_S) as resp:
-            raw = resp.read()
-    except urllib.error.HTTPError as exc:
-        raise AiError(
-            f"Gemini API HTTP {exc.code} on {model}: {_http_detail(exc)}"
-        ) from exc
-    except urllib.error.URLError as exc:
-        raise AiError(f"Gemini API unreachable: {exc.reason}") from exc
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise AiError(
-            f"Gemini API returned non-JSON: {raw[:200]!r}"
-        ) from exc
-    return _response_text(data, model)
+    for attempt in range(1, AI_RETRY_MAX + 1):
+        _pace()
+        try:
+            with _urlopen(req, timeout=AI_TIMEOUT_S) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as exc:
+            message, retry_s = _http_error(exc)
+            if exc.code not in AI_TRANSIENT_STATUS or attempt >= AI_RETRY_MAX:
+                _raise_http(model, exc, message)
+            wait = _retry_wait(exc.code, retry_s)
+            log(
+                f"Gemini API HTTP {exc.code} on {model} ({message}) —"
+                f" retry {attempt + 1}/{AI_RETRY_MAX} in {wait:.0f}s"
+            )
+            time.sleep(wait)
+            continue
+        except urllib.error.URLError as exc:
+            raise AiError(f"Gemini API unreachable: {exc.reason}") from exc
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise AiError(
+                f"Gemini API returned non-JSON: {raw[:200]!r}"
+            ) from exc
+        return _response_text(data, model)
+    # unreachable: the final transient attempt raises above (Rule #7)
+    raise AiError(f"{model}: retries exhausted")
 
 
 def generate_text(
@@ -213,10 +282,14 @@ def generate_text(
     *,
     key: str | None = None,
     model: str = GEMINI_TEXT_MODEL,
+    log=print,
 ) -> str:
     """One text generation; ``key=None`` reads settings.json (NoKey
-    when absent) — the wizard's Test passes its candidate explicitly."""
-    return _call(model, _payload_text(prompt, system), key or api_key())
+    when absent) — the wizard's Test passes its candidate explicitly.
+    ``log`` receives any transient-retry lines (see ``_call``)."""
+    return _call(
+        model, _payload_text(prompt, system), key or api_key(), log=log
+    )
 
 
 def check_image(
@@ -225,8 +298,10 @@ def check_image(
     *,
     key: str | None = None,
     model: str = GEMINI_VISION_MODEL,
+    log=print,
 ) -> str:
-    """One vision call over a saved image file; returns the raw text."""
+    """One vision call over a saved image file; returns the raw text.
+    ``log`` receives any transient-retry lines (see ``_call``)."""
     image_path = Path(image_path)
     mime = _MIME.get(image_path.suffix.lower())
     if mime is None:
@@ -234,7 +309,7 @@ def check_image(
             f"{image_path.name}: unsupported image type for the checker"
         )
     payload = _payload_image(image_path.read_bytes(), mime, instructions)
-    return _call(model, payload, key or api_key())
+    return _call(model, payload, key or api_key(), log=log)
 
 
 # ---------------------------------------------------------------------
@@ -438,8 +513,11 @@ def flag_key(image_path: Path, out_base: Path) -> str:
         return resolved.as_posix()
 
 
-def _flag_file(key: str, out_base: Path) -> Path:
-    """The image file a flag key points at (relative or absolute)."""
+def flag_file(key: str, out_base: Path) -> Path:
+    """The image file a flag key points at — the EXACT reverse of
+    ``flag_key`` (relative to the out base, or absolute when the image
+    lived outside it). One home for the round-trip so the checker's
+    flag key and the panel's viewer file can never drift apart."""
     path = Path(key)
     return path if path.is_absolute() else Path(out_base) / path
 
@@ -482,15 +560,19 @@ def record_flag(
     image_path: Path,
     defects: list[str],
     model: str,
+    raw: str,
     log=print,
 ) -> str:
     """Load-merge-save one image's flag entry; returns its key. The
     stored mtime is the file's AT CHECK TIME — a later regeneration
-    changes it and ``prune_stale_flags`` drops the entry."""
+    changes it and ``prune_stale_flags`` drops the entry. ``raw`` is the
+    VERBATIM model response, persisted alongside the parsed defects so
+    the owner can inspect exactly what the vision model said."""
     flags = load_flags(out_base, log)
     key = flag_key(image_path, out_base)
     flags[key] = {
         "defects": list(defects),
+        "raw": raw,
         "checked_at": datetime.now().isoformat(timespec="seconds"),
         "model": model,
         "mtime": Path(image_path).stat().st_mtime,
@@ -526,7 +608,7 @@ def prune_stale_flags(out_base: Path, log=print) -> int:
     keep: dict = {}
     dropped = 0
     for key, entry in flags.items():
-        file = _flag_file(key, out_base)
+        file = flag_file(key, out_base)
         try:
             same = file.stat().st_mtime == float(entry.get("mtime", -1.0))
         except (OSError, TypeError, ValueError):
@@ -542,6 +624,57 @@ def prune_stale_flags(out_base: Path, log=print) -> int:
             " or gone since the check)"
         )
     return dropped
+
+
+def check_one_image(
+    src: Path,
+    out_base: Path,
+    instructions: str,
+    *,
+    model: str = GEMINI_VISION_MODEL,
+    log=print,
+    check=None,
+) -> dict:
+    """Drive ONE image through the vision checker and the flag memory —
+    the pure core the GUI worker loops over (Rule #5, and offline-
+    testable: ``check`` defaults to this module's ``check_image``, so a
+    test injects a per-image mock).
+
+    Times the call, parses the strict OK/DEFECTS answer, MERGES a flag
+    (or CLEARS a fixed image's old flag) and returns the row the panel
+    renders — the flag ``key`` (``flag_key``, which ``flag_file``
+    reverses back to THIS exact file), the ``kind``
+    ('flagged'/'ok'/'error'), the parsed ``defects``, the VERBATIM
+    ``raw`` model text and the elapsed ``time`` seconds. A per-image
+    ``AiError`` (HTTP after the retries, or a malformed answer) is
+    CAUGHT and returned as an 'error' row — loud in the log, never
+    fatal (the tool-job convention); ``raw`` then carries the model's
+    answer when we got one (a parse failure) or the error text (a
+    network/HTTP failure), so the viewer always shows what happened."""
+    check = check or check_image
+    key = flag_key(src, out_base)
+    t0 = time.monotonic()
+    raw: str | None = None
+    try:
+        raw = check(src, instructions, model=model, log=log)
+        defects = parse_check_response(raw)
+    except AiError as exc:
+        op_s = time.monotonic() - t0
+        log(f"FAIL {Path(src).name}: {exc}")
+        return {
+            "rel": key, "kind": "error", "defects": [],
+            "raw": raw if raw is not None else str(exc), "time": op_s,
+        }
+    op_s = time.monotonic() - t0
+    if defects:
+        record_flag(out_base, src, defects, model, raw, log)
+        log(f"FLAGGED {Path(src).name}: {'; '.join(defects)}")
+        return {
+            "rel": key, "kind": "flagged", "defects": defects,
+            "raw": raw, "time": op_s,
+        }
+    clear_flag(out_base, src, log)  # a fixed image loses its stale flag
+    return {"rel": key, "kind": "ok", "defects": [], "raw": raw, "time": op_s}
 
 
 def drop_and_site_for(rel: str) -> tuple[str, str] | None:

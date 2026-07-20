@@ -194,6 +194,123 @@ def test_network_error_is_loud(monkeypatch):
         ai.generate_text("p", key="k")
 
 
+# --- transient-error retry (owner 2026-07-21) --------------------------
+
+
+def http_error(code, message="boom", retry_delay=None):
+    """An HTTPError whose JSON body carries error.message (+ an optional
+    RetryInfo.retryDelay), read ONCE by the client (single-read fp)."""
+    err = {"message": message}
+    if retry_delay is not None:
+        err["details"] = [{
+            "@type": "type.googleapis.com/google.rpc.RetryInfo",
+            "retryDelay": retry_delay,
+        }]
+    body = json.dumps({"error": err}).encode()
+    return urllib.error.HTTPError(
+        "http://x", code, message, None, io.BytesIO(body)
+    )
+
+
+def urlopen_sequence(monkeypatch, *outcomes):
+    """Each ``_urlopen`` call yields the next outcome: a dict → a
+    FakeResponse, an Exception → raised. Returns the recorded call list
+    so a test can assert how many ATTEMPTS the retry loop made."""
+    calls: list = []
+    it = iter(outcomes)
+
+    def fake(req, timeout):
+        calls.append((req, timeout))
+        outcome = next(it)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return FakeResponse(outcome)
+
+    monkeypatch.setattr(ai, "_urlopen", fake)
+    return calls
+
+
+@pytest.fixture
+def backoff_sleeps(monkeypatch):
+    """Record the retry BACKOFF sleeps instead of really waiting. The
+    autouse fixture zeroes the free-tier pace, so every recorded sleep
+    is a retry backoff (``_pace`` never sleeps here)."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(ai.time, "sleep", sleeps.append)
+    return sleeps
+
+
+def test_transient_503_retries_then_recovers(monkeypatch, backoff_sleeps):
+    from painter.config import AI_RETRY_BACKOFF_S
+
+    calls = urlopen_sequence(
+        monkeypatch,
+        http_error(503, "The model is overloaded, try again later."),
+        text_response("recovered"),
+    )
+    assert ai.generate_text("p", key="k") == "recovered"
+    assert len(calls) == 2                       # exactly one retry
+    assert backoff_sleeps == [AI_RETRY_BACKOFF_S]  # the fixed 503 backoff
+
+
+def test_permanent_400_raises_immediately(monkeypatch, backoff_sleeps):
+    calls = urlopen_sequence(monkeypatch, http_error(400, "API key not valid"))
+    with pytest.raises(ai.AiError) as excinfo:
+        ai.generate_text("p", key="bad")
+    assert excinfo.value.status == 400           # the code is on the AiError
+    assert len(calls) == 1                        # no retry on a permanent error
+    assert backoff_sleeps == []
+
+
+def test_429_honours_the_servers_retry_delay(monkeypatch, backoff_sleeps):
+    calls = urlopen_sequence(
+        monkeypatch,
+        http_error(429, "Rate limit. Please retry in 4s.", retry_delay="4s"),
+        text_response("ok"),
+    )
+    assert ai.generate_text("p", key="k") == "ok"
+    assert len(calls) == 2
+    assert backoff_sleeps == [4.0]               # the server's own backoff
+
+
+def test_429_retry_delay_is_capped(monkeypatch, backoff_sleeps):
+    from painter.config import AI_RETRY_MAX_WAIT_S
+
+    urlopen_sequence(
+        monkeypatch,
+        http_error(429, "slow down", retry_delay="999s"),
+        text_response("ok"),
+    )
+    ai.generate_text("p", key="k")
+    assert backoff_sleeps == [AI_RETRY_MAX_WAIT_S]  # never longer than the cap
+
+
+def test_transient_retries_exhaust_and_raise(monkeypatch, backoff_sleeps):
+    from painter.config import AI_RETRY_MAX
+
+    calls = urlopen_sequence(
+        monkeypatch,
+        *[http_error(503, "overloaded") for _ in range(AI_RETRY_MAX)],
+    )
+    with pytest.raises(ai.AiError) as excinfo:
+        ai.generate_text("p", key="k")
+    assert excinfo.value.status == 503
+    assert len(calls) == AI_RETRY_MAX             # every attempt was made
+    assert len(backoff_sleeps) == AI_RETRY_MAX - 1  # a backoff between each
+
+
+def test_check_image_retries_transient_too(monkeypatch, backoff_sleeps, tmp_path):
+    """The retry wraps the shared ``_call``, so the vision path recovers
+    identically — this is the delilah/herod 503 skip fix."""
+    img = tmp_path / "plate.png"
+    img.write_bytes(PNG_1PX)
+    urlopen_sequence(
+        monkeypatch, http_error(503, "high demand"), text_response("OK")
+    )
+    assert ai.check_image(img, "find defects", key="k") == "OK"
+    assert len(backoff_sleeps) == 1
+
+
 # --- key handling ------------------------------------------------------
 
 
@@ -422,12 +539,14 @@ def test_flags_round_trip(tmp_path):
     out = tmp_path / "out"
     img = _make_image(out, "emblem/gemini/mood/Glory.png")
     key = ai.record_flag(
-        out, img, ["subject cut"], "gemini-test", log=lambda _l: None
+        out, img, ["subject cut"], "gemini-test",
+        "DEFECTS:\n- subject cut", log=lambda _l: None,
     )
     assert key == "emblem/gemini/mood/Glory.png"
     flags = ai.load_flags(out)
     entry = flags[key]
     assert entry["defects"] == ["subject cut"]
+    assert entry["raw"] == "DEFECTS:\n- subject cut"  # verbatim, persisted
     assert entry["model"] == "gemini-test"
     assert entry["checked_at"]
     assert entry["mtime"] == img.stat().st_mtime
@@ -443,8 +562,8 @@ def test_flags_merge_never_clobbers_other_entries(tmp_path):
     out = tmp_path / "out"
     a = _make_image(out, "badge/chatgpt/a.png")
     b = _make_image(out, "badge/chatgpt/b.png")
-    ai.record_flag(out, a, ["x"], "m", log=lambda _l: None)
-    ai.record_flag(out, b, ["y"], "m", log=lambda _l: None)
+    ai.record_flag(out, a, ["x"], "m", "DEFECTS:\n- x", log=lambda _l: None)
+    ai.record_flag(out, b, ["y"], "m", "DEFECTS:\n- y", log=lambda _l: None)
     assert set(ai.load_flags(out)) == {
         "badge/chatgpt/a.png", "badge/chatgpt/b.png",
     }
@@ -458,7 +577,7 @@ def test_prune_drops_regenerated_and_missing_files(tmp_path):
     regen = _make_image(out, "badge/chatgpt/regen.png")
     gone = _make_image(out, "badge/chatgpt/gone.png")
     for img in (keep, regen, gone):
-        ai.record_flag(out, img, ["d"], "m", log=lambda _l: None)
+        ai.record_flag(out, img, ["d"], "m", "DEFECTS:\n- d", log=lambda _l: None)
     # regenerate one (mtime changes), delete another
     os.utime(regen, (regen.stat().st_atime, regen.stat().st_mtime + 60))
     gone.unlink()
@@ -489,6 +608,128 @@ def test_flag_key_relative_inside_absolute_outside(tmp_path):
     key = ai.flag_key(outside, out)
     assert Path(key).is_absolute()
     assert key.endswith("elsewhere/y.png")
+
+
+# --- the per-image checker orchestrator (owner 2026-07-21) -------------
+
+
+def test_check_one_image_flags_records_raw_and_times(tmp_path, monkeypatch):
+    out = tmp_path / "out"
+    img = _make_image(out, "emblem/gemini/mood/Glory.png")
+    clock = [100.0]
+    monkeypatch.setattr(ai.time, "monotonic", lambda: clock[0])
+    raw = "DEFECTS:\n- subject cut at the left edge"
+
+    def fake_check(src, instructions, *, model=None, log=None):
+        clock[0] += 0.5           # the "call" takes half a second
+        return raw
+
+    result = ai.check_one_image(
+        img, out, "instr", check=fake_check, log=lambda _l: None
+    )
+    assert result["kind"] == "flagged"
+    assert result["rel"] == "emblem/gemini/mood/Glory.png"
+    assert result["defects"] == ["subject cut at the left edge"]
+    assert result["raw"] == raw
+    assert result["time"] == 0.5  # timing is plumbed, not a hardcoded 0
+    # the raw is PERSISTED alongside the defects for later inspection
+    assert ai.load_flags(out)["emblem/gemini/mood/Glory.png"]["raw"] == raw
+
+
+def test_check_one_image_ok_clears_stale_flag_and_carries_raw(tmp_path):
+    out = tmp_path / "out"
+    img = _make_image(out, "emblem/gemini/mood/Clean.png")
+    # a pre-existing flag a now-clean re-check must drop
+    ai.record_flag(out, img, ["old"], "m", "DEFECTS:\n- old", log=lambda _l: None)
+    result = ai.check_one_image(
+        img, out, "instr", check=lambda *a, **k: "OK", log=lambda _l: None
+    )
+    assert result["kind"] == "ok"
+    assert result["defects"] == []
+    assert result["raw"] == "OK"
+    assert ai.load_flags(out) == {}   # the stale flag was cleared
+
+
+def test_check_one_image_error_is_caught_never_fatal(tmp_path):
+    out = tmp_path / "out"
+    img = _make_image(out, "emblem/gemini/x.png")
+
+    def boom(*a, **k):
+        raise ai.AiError("Gemini API HTTP 503 on gemini: high demand")
+
+    result = ai.check_one_image(
+        img, out, "instr", check=boom, log=lambda _l: None
+    )
+    assert result["kind"] == "error"  # returned, never raised (tool-job rule)
+    assert "503" in result["raw"]     # the error text, shown in the viewer
+    assert ai.load_flags(out) == {}   # nothing recorded on an error
+
+
+def test_check_pairing_maps_each_response_to_the_right_image(tmp_path):
+    """FIX 5: over a batch, each image's flag / raw / viewer-file maps to
+    THAT exact image — no off-by-one — including an image OUTSIDE the out
+    base (an absolute key that ``flag_file`` still round-trips, the run
+    that checked DOMY Watch while the out base was Downloads)."""
+    out = tmp_path / "out"
+    serpent = _make_image(out, "emblem/gemini/mood/Serpent.png")
+    glory = _make_image(out, "emblem/gemini/mood/Glory.png")
+    herod = tmp_path / "DOMY" / "assets" / "Herod.png"
+    herod.parent.mkdir(parents=True)
+    herod.write_bytes(PNG_1PX)
+    images = [serpent, glory, herod]
+
+    # a DISTINCT response per image, keyed by the file stem
+    responses = {
+        "Serpent": "DEFECTS:\n- frame cut on the left",
+        "Glory": "OK",
+        "Herod": "DEFECTS:\n- watermark bottom-right",
+    }
+
+    def fake_check(src, instructions, *, model=None, log=None):
+        return responses[Path(src).stem]
+
+    results = {
+        src: ai.check_one_image(
+            src, out, "instr", check=fake_check, log=lambda _l: None
+        )
+        for src in images
+    }
+    for src, result in results.items():
+        # the raw is THIS image's response, not a neighbour's
+        assert result["raw"] == responses[src.stem]
+        # the flag key round-trips (flag_file — the SAME function the
+        # panel's viewer uses) back to THIS exact file
+        assert ai.flag_file(result["rel"], out).resolve() == src.resolve()
+
+    # the persisted flags carry each image's OWN defects; the OK image none
+    flags = ai.load_flags(out)
+    assert flags[results[serpent]["rel"]]["defects"] == ["frame cut on the left"]
+    assert flags[results[herod]["rel"]]["defects"] == ["watermark bottom-right"]
+    assert results[glory]["rel"] not in flags
+    # the outside image keyed by an ABSOLUTE path (never matches a queue)
+    assert Path(results[herod]["rel"]).is_absolute()
+
+
+def test_ai_check_doc_md_shows_defects_and_verbatim_raw():
+    """FIX 3: the viewer markdown carries the name + path, the parsed
+    defects AND the verbatim raw response — and an OK row is viewable
+    too (its raw shows, no defect section)."""
+    import gui
+
+    md = gui.ai_check_doc_md(
+        "emblem/gemini/mood/Glory.png",
+        ["subject cut left"],
+        "DEFECTS:\n- subject cut left",
+    )
+    assert "Glory.png" in md                        # the image name heading
+    assert "`emblem/gemini/mood/Glory.png`" in md   # the full path
+    assert "- subject cut left" in md               # the parsed defect bullet
+    assert "**Full AI response:**" in md            # the raw section
+    assert "DEFECTS:\n- subject cut left" in md      # the verbatim response
+
+    ok = gui.ai_check_doc_md("emblem/gemini/mood/Clean.png", None, "OK")
+    assert "AI-flagged defects" not in ok           # nothing parsed
+    assert "**Full AI response:**" in ok and "OK" in ok
 
 
 # --- the re-send reverse mapping ----------------------------------------
