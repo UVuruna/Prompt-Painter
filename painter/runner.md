@@ -74,8 +74,8 @@ event) so the dashboard never stalls; the `item_done` event with
 ## Functions
 
 - `run_sheet(sheet, driver, out_root, timing, log, should_stop,
-  post_save, prompt_suffix, report, only, on_event, safer_retry,
-  continue_nudge) -> int` — `on_event` receives structured progress
+  post_save, prompt_suffix, extra_suffix, report, only, on_event,
+  safer_retry, continue_nudge) -> int` — `on_event` receives structured progress
   dicts: `sheet_start` (sheet, pending, total), `item_start` (title,
   idx, of), `item_retry` (safer retry), `item_nudge` (continue nudge,
   drop_path), `item_progress` (idx, of, gen_s — the live
@@ -97,7 +97,13 @@ event) so the dashboard never stalls; the `item_done` event with
   honors `should_stop`, and feeds `RunReport` when `report` is on.
   `only` narrows the queue to the owner's ticked drop paths,
   generating EXACTLY those and OVERWRITING any that already exist
-  (the regenerate path). A
+  (the regenerate path). `extra_suffix` (owner 2026-07-20, the AI
+  checker's re-send) is an optional `{drop_path: text}` map — the
+  mapped item gets its text appended AFTER the site suffix (the
+  "previous attempt had these flaws" fix note), unmapped items get
+  nothing, and the note also rides a safer retry (the preamble is
+  prepended to the same base); default `None` keeps every existing
+  caller unchanged. A
   SAFETY refusal (`ItemRefused`) skips just that item and the run
   continues; when `safer_retry` is on the item is re-sent ONCE with
   `SAFER_PREAMBLE` first, and only a second refusal counts as

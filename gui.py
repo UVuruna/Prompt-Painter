@@ -29,6 +29,7 @@ import re
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from dataclasses import replace
 from tkinter import font as tkfont
 from datetime import datetime
@@ -41,6 +42,10 @@ import ttkbootstrap as tb
 from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageGrab, ImageTk
 
 from painter.config import (
+    AI_CALL_PAUSE_S,
+    AI_CHECK_INSTRUCTIONS,
+    AI_STUDIO_URL,
+    AI_TEST_PROMPT,
     ASPECT_DEFAULT_H,
     ASPECT_DEFAULT_W,
     ASPECT_FILTER_DEFAULT_FROM,
@@ -58,6 +63,8 @@ from painter.config import (
     CHECKER_LIGHT,
     CHECKER_TILE_PX,
     DEFAULT_OUT_DIR,
+    GEMINI_KEY_SETTING,
+    GEMINI_VISION_MODEL,
     GRID_COLS_BY_COUNT,
     JOB_LABEL,
     JOB_LOGO,
@@ -66,7 +73,9 @@ from painter.config import (
     JOB_TOOL_KINDS,
     NEW_CHAT_CHOICES,
     RESIZE_SETTLE_MS,
+    SHEETS_DIR,
     SITES,
+    STATE_DIRNAME,
     STYLE_CHOICES,
     STYLE_DEFAULT,
     SWITCH_ANIM_MS,
@@ -328,6 +337,16 @@ BEFORE_AFTER_IMG_PAD_PX = 60  # slack subtracted from the width for the images
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
 ASPECT_DIALOG_ENTRY_W = 64  # px width of each W / H field in the ratio dialog
 ASPECT_DIALOG_PAD_PX = 16   # padding around the ratio dialog body
+
+# --- AI dialogs: key wizard / sheet generator / checker (Rule #4) -----
+AI_KEY_ENTRY_W = 380        # the wizard's key entry width (px)
+AI_STATUS_WRAP_PX = 460     # AI dialog status / question label wraplength
+AI_REQUEST_LINES = 4        # the request Text height (lines)
+AI_STEP_INDENT_PX = 28      # wizard body indent under the numbered steps
+AI_POLL_MS = 150            # AI dialog worker-queue poll cadence (ms)
+AI_CHECK_DEFECT_COL_PX = 64   # the checker tree's 'Defects' count column
+AI_CHECK_FIRST_COL_PX = 230   # the checker tree's 'First defect' column
+AI_CHECK_LOG_EVERY = 5      # checker progress log cadence (paced calls are slow)
 
 # --- Main window: min size, on-screen clamp, wheel, collapse (Rule #4) -
 # The whole window is vertically scrollable so a stale-tall geometry can
@@ -1812,6 +1831,41 @@ def badge_dots(keys: tuple[str, ...]) -> ImageTk.PhotoImage | None:
     return photo
 
 
+def build_job_tree(panel, col_specs, height: int = 8) -> ttk.Treeview:
+    """The rowed table a job panel shows (ToolPanel + AiCheckPanel —
+    Rule #5, one home for the identical plumbing): a Treeview with the
+    given ``(id, heading, width, anchor)`` value columns, round v/h
+    scrollbars in a grid-managed wrap, and the theme-following row tags
+    (skin_tree). The caller keeps the column ids and binds its own
+    double-click."""
+    wrap = ttk.Frame(panel)
+    wrap.pack(fill="both", expand=True, pady=(2, 0))
+    tree = ttk.Treeview(
+        wrap, columns=tuple(c[0] for c in col_specs), height=height
+    )
+    tree.heading("#0", text="Name")
+    tree.column("#0", width=200, minwidth=120, stretch=False)
+    for cid, txt, w, anc in col_specs:
+        tree.heading(cid, text=txt)
+        tree.column(cid, width=w, minwidth=w, anchor=anc, stretch=False)
+    vsb = ttk.Scrollbar(
+        wrap, orient="vertical", command=tree.yview, bootstyle="round",
+    )
+    hsb = ttk.Scrollbar(
+        wrap, orient="horizontal", command=tree.xview, bootstyle="round",
+    )
+    tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+    tree.grid(row=0, column=0, sticky="nsew")
+    vsb.grid(row=0, column=1, sticky="ns")
+    hsb.grid(row=1, column=0, sticky="ew")
+    wrap.rowconfigure(0, weight=1)
+    wrap.columnconfigure(0, weight=1)
+    # the CHANGED/SKIPPED row tags follow the active theme's status
+    # colours and re-tint on a flip (the plain-tk skin registry)
+    skin_tree(tree)
+    return tree
+
+
 class JobPanel(ttk.Frame):
     """Base for a per-JOB dashboard panel — a generation site or an
     in-place tool.
@@ -1823,7 +1877,11 @@ class JobPanel(ttk.Frame):
     the panel. The body (progress / stats / table) is built by the
     subclass. A panel appears when its job STARTS and disappears when
     the owner clicks CLOSE (owner 2026-07-19: only running-or-ran jobs
-    show).
+    show). For the FOLDER-BASED panels (ToolPanel, AiCheckPanel) it
+    also carries the shared root/folder tree-node plumbing — those
+    subclasses own ``self.tree``/``self._cols``/``self.folder`` and the
+    per-run node dicts; DashPanel builds its own theme-based nodes and
+    never calls these.
     """
 
     def __init__(self, master, kind: str, on_show=None, on_close=None):
@@ -1878,6 +1936,29 @@ class JobPanel(ttk.Frame):
     def _do_close(self) -> None:
         if self._on_close is not None:
             self._on_close(self.slot_key)
+
+    # --- shared folder>image tree nodes (ToolPanel + AiCheckPanel) -----
+
+    def _ensure_root(self) -> str:
+        if self._tree_root is None:
+            name = self.folder.name if self.folder else JOB_LABEL[self.slot_key]
+            self._tree_root = self.tree.insert(
+                "", "end", text=f"{name}   · {JOB_LABEL[self.slot_key]}",
+                open=True, values=("",) * len(self._cols),
+            )
+            self._node_info[self._tree_root] = {"level": "collection"}
+        return self._tree_root
+
+    def _ensure_folder(self, folder: str) -> str:
+        node = self._folder_nodes.get(folder)
+        if node is None:
+            node = self.tree.insert(
+                self._ensure_root(), "end", text=folder, open=True,
+                values=("",) * len(self._cols),
+            )
+            self._folder_nodes[folder] = node
+            self._node_info[node] = {"level": "folder", "folder": folder}
+        return node
 
 
 class DashPanel(JobPanel):
@@ -2391,8 +2472,6 @@ class ToolPanel(JobPanel):
             self, textvariable=self.time_var, style="Muted.TLabel"
         ).pack(anchor="w", pady=(0, 4))
 
-        wrap = ttk.Frame(self)
-        wrap.pack(fill="both", expand=True, pady=(2, 0))
         # BG removal changes ALPHA, not dimensions — its Before/After
         # resolution are always identical and meaningless, so its panel
         # DROPS those two columns (owner 2026-07-19); the dimensional
@@ -2409,30 +2488,7 @@ class ToolPanel(JobPanel):
             *metric_cols,
         )
         self._cols = tuple(c[0] for c in col_specs)
-        self.tree = ttk.Treeview(wrap, columns=self._cols, height=8)
-        self.tree.heading("#0", text="Name")
-        self.tree.column("#0", width=200, minwidth=120, stretch=False)
-        for cid, txt, w, anc in col_specs:
-            self.tree.heading(cid, text=txt)
-            self.tree.column(cid, width=w, minwidth=w, anchor=anc,
-                             stretch=False)
-        vsb = ttk.Scrollbar(
-            wrap, orient="vertical", command=self.tree.yview,
-            bootstyle="round",
-        )
-        hsb = ttk.Scrollbar(
-            wrap, orient="horizontal", command=self.tree.xview,
-            bootstyle="round",
-        )
-        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-        hsb.grid(row=1, column=0, sticky="ew")
-        wrap.rowconfigure(0, weight=1)
-        wrap.columnconfigure(0, weight=1)
-        # the SKIPPED-row tag follows the active theme's muted colour and
-        # re-tints on a flip (registered in the plain-tk skin registry)
-        skin_tree(self.tree)
+        self.tree = build_job_tree(self, col_specs)
         self.tree.bind("<Double-1>", self._on_activate)
 
         self.reset(active=False, total=0)
@@ -2513,28 +2569,7 @@ class ToolPanel(JobPanel):
         else:
             self.time_var.set("⏱ —")
 
-    # --- tree building -------------------------------------------------
-
-    def _ensure_root(self) -> str:
-        if self._tree_root is None:
-            name = self.folder.name if self.folder else JOB_LABEL[self.slot_key]
-            self._tree_root = self.tree.insert(
-                "", "end", text=f"{name}   · {JOB_LABEL[self.slot_key]}",
-                open=True, values=("",) * len(self._cols),
-            )
-            self._node_info[self._tree_root] = {"level": "collection"}
-        return self._tree_root
-
-    def _ensure_folder(self, folder: str) -> str:
-        node = self._folder_nodes.get(folder)
-        if node is None:
-            node = self.tree.insert(
-                self._ensure_root(), "end", text=folder, open=True,
-                values=("",) * len(self._cols),
-            )
-            self._folder_nodes[folder] = node
-            self._node_info[node] = {"level": "folder", "folder": folder}
-        return node
+    # --- tree building (root/folder nodes inherited from JobPanel) -----
 
     def _insert_image_row(self, rel: str, event: dict) -> None:
         fnode = self._ensure_folder(folder_of(rel))
@@ -2686,6 +2721,201 @@ class ToolPanel(JobPanel):
                 info["has_backup"] = False
 
 
+class AiCheckPanel(JobPanel):
+    """The AI image checker's dashboard panel (owner 2026-07-20): a
+    progress bar, the flagged/OK counts, and a folder > image table —
+    FLAGGED rows striking (the changed bucket) with their DEFECT COUNT
+    as the row metric, OK rows muted (the skipped bucket), API failures
+    counted loudly as errors. Double-click a flagged row for the full
+    defect list + the image itself (a DocWindow).
+
+    Two panel actions: **Send flagged to generator** re-queues every
+    flagged image that matches a QUEUED collection on its ORIGINAL site
+    (``only=`` + a per-item fix note appended to the prompt), and
+    **Clear flags** wipes this run's entries from
+    ``<out>/_state/ai_flags.json``. The panel never touches the images
+    or the flags itself — both actions go through the GUI callbacks.
+    """
+
+    def __init__(self, master, on_close=None, on_resend=None, on_clear=None):
+        super().__init__(master, "aicheck", on_show=None, on_close=on_close)
+        self._on_resend = on_resend  # called with {flag key: [defects]}
+        self._on_clear = on_clear    # called with (out_base, keys) -> int
+        self.folder: Path | None = None    # the checked folder
+        self.out_base: Path | None = None  # the flags' out base
+
+        self.prog = ttk.Progressbar(
+            self, bootstyle="info-striped", maximum=1, value=0
+        )
+        self.prog.pack(fill="x", pady=(6, 4))
+        self.metric_var = tk.StringVar(value="—")
+        ttk.Label(
+            self, textvariable=self.metric_var, style="Value.TLabel"
+        ).pack(anchor="w", pady=(0, 4))
+
+        col_specs = (
+            ("defects", "Defects", AI_CHECK_DEFECT_COL_PX, "e"),
+            ("first", "First defect", AI_CHECK_FIRST_COL_PX, "w"),
+        )
+        self._cols = tuple(c[0] for c in col_specs)
+        self.tree = build_job_tree(self, col_specs)
+        self.tree.bind("<Double-1>", self._on_activate)
+
+        actions = ttk.Frame(self)
+        actions.pack(fill="x", pady=(6, 0))
+        self.btn_resend = rounded_button(
+            actions, "Send flagged to generator",
+            command=self._do_resend, kind="info",
+        )
+        self.btn_resend.pack(side="left")
+        self.btn_clear = rounded_button(
+            actions, "Clear flags", command=self._do_clear,
+            kind="danger-outline",
+        )
+        self.btn_clear.pack(side="left", padx=6)
+
+        self.reset(active=False, total=0)
+
+    # --- state ---------------------------------------------------------
+
+    def reset(self, active: bool = True, total: int = 0) -> None:
+        self.reset_finished()
+        self._total = total
+        self._flagged: dict[str, list[str]] = {}  # flag key -> defects
+        self._ok = 0
+        self._errors = 0
+        self._tree_root: str | None = None
+        self._folder_nodes: dict[str, str] = {}
+        self._image_rows: dict[str, str] = {}
+        self.tree.delete(*self.tree.get_children())
+        self._node_info.clear()
+        self.prog.configure(maximum=max(total, 1), value=0)
+        self.state_var.set("running …" if active else "idle")
+        self._update_metric()
+
+    # --- events (main thread, via the queue pump) ----------------------
+
+    def handle(self, event: dict) -> None:
+        kind = event["type"]
+        if kind == "sheet_start":
+            self._total = event["total"]
+            self.prog.configure(maximum=max(self._total, 1), value=0)
+        elif kind == "item_start":
+            self.state_var.set(
+                f"({event['idx']}/{event['of']}) {event['title'][:50]}"
+            )
+        elif kind == "item_flagged":
+            self._flagged[event["rel"]] = list(event["defects"])
+            self._insert_row(event["rel"], defects=event["defects"])
+            self._advance()
+        elif kind == "item_ok":
+            self._ok += 1
+            self._insert_row(event["rel"], defects=None)
+            self._advance()
+        elif kind == "item_error":
+            self._errors += 1
+            self._insert_row(event["rel"], defects=None, error=True)
+            self._advance()
+        elif kind == "sheet_done":
+            done = f"done — {len(self._flagged)} flagged, {self._ok} OK"
+            if self._errors:
+                done += f", {self._errors} error(s)"
+            self.state_var.set(done)
+            self._update_metric()
+
+    def _advance(self) -> None:
+        self.prog.configure(
+            value=len(self._flagged) + self._ok + self._errors
+        )
+        self._update_metric()
+
+    def _update_metric(self) -> None:
+        text = f"{len(self._flagged)} flagged   ·   {self._ok} OK"
+        if self._errors:
+            text += f"   ·   {self._errors} error(s)"
+        self.metric_var.set(text)
+
+    def _insert_row(
+        self, rel: str, defects: list | None, error: bool = False
+    ) -> None:
+        fnode = self._ensure_folder(folder_of(rel))
+        if defects:
+            # the CHANGED (striking) bucket — this image needs work
+            values = (str(len(defects)), defects[0])
+            tags = (TOOL_CHANGED_TAG,)
+        elif error:
+            values = ("!", "API error — see the Log")
+            tags = (TOOL_SKIP_TAG,)
+        else:
+            values = ("OK", "")
+            tags = (TOOL_SKIP_TAG,)
+        row = self.tree.insert(
+            fnode, "end", text=PurePosixPath(rel).name, values=values,
+            tags=tags,
+        )
+        self._node_info[row] = {"level": "image", "rel": rel}
+        self._image_rows[rel] = row
+
+    # --- the defect viewer + panel actions ------------------------------
+
+    def _file_for(self, rel: str) -> Path:
+        """The image file behind one flag key (relative to the out base,
+        or absolute when the image lived outside it)."""
+        path = Path(rel)
+        if path.is_absolute():
+            return path
+        return (self.out_base or Path(".")) / path
+
+    def _on_activate(self, _event) -> None:
+        info = self._node_info.get(self.tree.focus())
+        if not info or info.get("level") != "image":
+            return
+        rel = info["rel"]
+        defects = self._flagged.get(rel)
+        if not defects:
+            return  # OK / error rows carry nothing to show
+        bullets = "\n".join(f"- {d}" for d in defects)
+        md = (
+            f"# {PurePosixPath(rel).name}\n\n`{rel}`\n\n"
+            f"**AI-flagged defects:**\n\n{bullets}\n"
+        )
+        image = self._file_for(rel)
+        DocWindow(
+            self.winfo_toplevel(), rel, md,
+            copy_text=bullets,
+            hint="Banal defects the vision model flagged on this image.",
+            image_path=image if image.is_file() else None,
+        )
+
+    def _do_resend(self) -> None:
+        if not self._flagged:
+            messagebox.showinfo(
+                "PromptPainter",
+                "No flagged images in this run — nothing to re-send.",
+            )
+            return
+        if self._on_resend is not None:
+            self._on_resend(dict(self._flagged))
+
+    def _do_clear(self) -> None:
+        if not self._flagged:
+            messagebox.showinfo(
+                "PromptPainter",
+                "No flagged images in this run — nothing to clear.",
+            )
+            return
+        if self._on_clear is None or self.out_base is None:
+            return
+        count = self._on_clear(self.out_base, list(self._flagged))
+        for rel in self._flagged:
+            row = self._image_rows.get(rel)
+            if row is not None:
+                self.tree.set(row, "defects", "cleared")
+        self._flagged.clear()
+        self._update_metric()
+        self.state_var.set(f"{count} flag(s) cleared")
+
+
 class DashGrid(ttk.Frame):
     """The dashboard's up-to-6 per-job panels in a responsive grid, gen
     sites FIRST.
@@ -2797,6 +3027,10 @@ class PainterGui:
         # (site, source-path, drop-path) -> BooleanVar; missing = ticked
         self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
         self._save_job: str | None = None  # debounced settings save
+        # the Gemini API key (owner 2026-07-20): held here so the whole-
+        # dict settings save round-trips it; the wizard writes it and
+        # painter.ai reads it back from settings.json per call
+        self._gemini_key: str = ""
         # drag-resize / maximize mitigation (owner 2026-07-20): the
         # root's own <Configure> stream drives (a) a cover+fade on the
         # DISCRETE maximize/restore jump and (b) buffering of dashboard
@@ -3150,6 +3384,27 @@ class PainterGui:
                 text_color=status_pair("btn_text"),
             ).pack(side="right", padx=4)
 
+        # the AI features row (owner 2026-07-20): the sheet GENERATOR,
+        # the batch image CHECKER (its own job/panel like the tools, in
+        # its rose job colour) and the guided key wizard — a SECOND row
+        # so the tool row never clips at the window minimum.
+        ai_row = ttk.Frame(parent)
+        ai_row.pack(fill="x", pady=(0, 6))
+        rounded_button(
+            ai_row, "New collection (AI)…", icon_name="ai",
+            command=self._new_collection_ai,
+        ).pack(side="left")
+        color = job_color_pair("aicheck")
+        rounded_button(
+            ai_row, f"{JOB_LABEL['aicheck']}…", icon_name=JOB_LOGO["aicheck"],
+            command=self._start_ai_check,
+            fg_color=color, hover_color=_darken_pair(color),
+            text_color=status_pair("btn_text"),
+        ).pack(side="left", padx=4)
+        rounded_button(
+            ai_row, "AI key…", command=self._open_key_wizard,
+        ).pack(side="right")
+
     def _build_views(self, parent) -> None:
         self.notebook = ttk.Notebook(parent)
         self.notebook.pack(fill="both", expand=True)
@@ -3172,6 +3427,12 @@ class PainterGui:
             self.panels[kind] = ToolPanel(
                 self._dashgrid, kind, on_close=self._close_panel,
             )
+        # the AI checker's own job slot (owner 2026-07-20) — the seventh
+        # panel; its two actions call back into the GUI's engine glue
+        self.panels["aicheck"] = AiCheckPanel(
+            self._dashgrid, on_close=self._close_panel,
+            on_resend=self._resend_flagged, on_clear=self._clear_ai_flags,
+        )
         self._dashgrid.attach(self.panels)
         self._dashgrid.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -3714,6 +3975,230 @@ class PainterGui:
         finally:
             self._q.put(("__tool_done__", slot))
 
+    # --- the AI features (owner 2026-07-20) ----------------------------
+
+    @property
+    def gemini_key(self) -> str:
+        return self._gemini_key
+
+    def set_gemini_key(self, key: str) -> None:
+        """The wizard's Save: remember + persist IMMEDIATELY (painter.ai
+        reads the key back from settings.json on every call, so the
+        debounced save would race a feature started right after)."""
+        self._gemini_key = key
+        self._save_now()
+        self._log("Gemini API key saved to settings.json")
+
+    def _open_key_wizard(self) -> None:
+        AiKeyWizard(self.root, self)
+
+    def _ensure_ai_key(self) -> bool:
+        """True when a key is on disk. On ``NoKey`` the guided wizard
+        opens AUTOMATICALLY (the spec'd auto-open) and the key is
+        re-checked once it closes."""
+        from painter import ai
+
+        try:
+            ai.api_key()
+            return True
+        except ai.NoKey:
+            self._log("AI: no Gemini API key — opening the guided wizard")
+            AiKeyWizard(self.root, self)
+        try:
+            ai.api_key()
+            return True
+        except ai.NoKey:
+            self._log("AI: still no key — cancelled")
+            return False
+
+    def _new_collection_ai(self) -> None:
+        """'New collection (AI)…' — the request -> questions -> sheet
+        flow lives in its own dialog; only the key gate sits here."""
+        if not self._ensure_ai_key():
+            return
+        AiSheetDialog(self.root, self)
+
+    def add_generated_sheet(self, path: Path) -> None:
+        """Queue one AI-generated sheet (the same de-dup rule as Add…)."""
+        if path not in self._sheets:
+            self._sheets.append(path)
+            self.sheet_list.insert("end", path.name)
+        self._schedule_save()
+
+    def _start_ai_check(self) -> None:
+        """'AI check…' — a batch vision pass over a folder of images as
+        its OWN job/panel (read-only: it writes NOTHING but the flag
+        file under <out>/_state/). One job at a time, like the tools."""
+        if "aicheck" in self._tool_workers:
+            messagebox.showerror(
+                "PromptPainter",
+                f"{JOB_LABEL['aicheck']} is already running — wait for it"
+                " to finish, or Close its panel.",
+            )
+            return
+        if not self._ensure_ai_key():
+            return
+        folder = filedialog.askdirectory(
+            title="Folder with images — AI check (read-only)"
+        )
+        if not folder:
+            return
+        folder_path = Path(folder)
+        files = iter_images(folder_path)
+        if not files:
+            messagebox.showinfo(
+                "PromptPainter", f"No images under:\n{folder}"
+            )
+            return
+        out_base = self._out_base()
+        if not messagebox.askyesno(
+            "PromptPainter",
+            f"AI-check {len(files)} image(s) under:\n{folder}?\n\n"
+            "Each image goes to the Gemini vision model (banal defects"
+            f" only), paced ~{AI_CALL_PAUSE_S:.0f}s per call on the free"
+            " tier. Nothing is modified; flags persist under\n"
+            f"{out_base / STATE_DIRNAME}.",
+        ):
+            return
+
+        panel = self.panels["aicheck"]
+        panel.folder = folder_path
+        panel.out_base = out_base
+        panel.reset(active=True, total=len(files))
+        self._dashgrid.add("aicheck")
+        self.notebook.select(0)
+        self.status_var.set(f"{JOB_LABEL['aicheck']} running …")
+
+        worker = threading.Thread(
+            target=self._run_ai_check_job,
+            args=(folder_path, files, out_base),
+            daemon=True,
+        )
+        self._tool_workers["aicheck"] = worker
+        worker.start()
+
+    def _run_ai_check_job(self, folder, files, out_base) -> None:
+        """The checker worker: prune stale flags (regenerated files),
+        then one paced vision call per image — flagged entries are
+        recorded (merged) into the flag file as they land, an OK image
+        CLEARS any old flag it had, and a per-image API failure is loud
+        but never kills the batch (the tool-job convention)."""
+        from painter import ai
+
+        emit = lambda ev: self._q.put(("__event__", "aicheck", ev))
+        log = lambda msg: self._q.put(f"[AI check] {msg}")
+        try:
+            log(
+                f"{len(files)} image(s) under {folder} — model"
+                f" {GEMINI_VISION_MODEL}, paced {AI_CALL_PAUSE_S:.0f}s/call"
+            )
+            ai.prune_stale_flags(out_base, log)
+            emit({"type": "sheet_start", "total": len(files)})
+            flagged = ok = errors = 0
+            t0 = time.time()
+            for i, src in enumerate(files, start=1):
+                rel = ai.flag_key(src, out_base)
+                emit({
+                    "type": "item_start", "idx": i, "of": len(files),
+                    "title": src.name,
+                })
+                try:
+                    answer = ai.check_image(src, AI_CHECK_INSTRUCTIONS)
+                    defects = ai.parse_check_response(answer)
+                except ai.AiError as exc:
+                    errors += 1
+                    log(f"FAIL {src.name}: {exc}")
+                    emit({"type": "item_error", "rel": rel})
+                    continue
+                if defects:
+                    flagged += 1
+                    ai.record_flag(
+                        out_base, src, defects, GEMINI_VISION_MODEL, log
+                    )
+                    log(f"FLAGGED {src.name}: {'; '.join(defects)}")
+                    emit({
+                        "type": "item_flagged", "rel": rel,
+                        "defects": defects,
+                    })
+                else:
+                    ok += 1
+                    ai.clear_flag(out_base, src, log)  # a fixed image
+                    emit({"type": "item_ok", "rel": rel})
+                if i % AI_CHECK_LOG_EVERY == 0:
+                    self._q.put(
+                        f"[AI check] [{time.time() - t0:.0f}s]"
+                        f" {i}/{len(files)} ({i / len(files) * 100:.0f}%)"
+                    )
+            emit({"type": "sheet_done"})
+            log(
+                f"done: {flagged} flagged, {ok} OK, {errors} error(s) —"
+                f" flags in {ai.flags_path(out_base)}"
+            )
+        finally:
+            self._q.put(("__tool_done__", "aicheck"))
+
+    def _resend_flagged(self, flagged: dict[str, list[str]]) -> None:
+        """The AI-check panel's 'Send flagged to generator': map every
+        flagged image back to its (site, drop path) — the ``dest_for``
+        reverse — match it against the QUEUED collections, and start
+        each matched site with ``only=`` exactly those items plus a
+        per-item fix note appended to the prompt (the regenerate path,
+        overwriting the flawed file). Unmatched images and an
+        already-running site are LOUD skips, never silent."""
+        from painter import ai
+
+        if not self._sheets:
+            messagebox.showerror(
+                "PromptPainter",
+                "The Collections queue is empty — Add… the sheet(s) the"
+                " flagged images came from, then Send again.",
+            )
+            return
+        sheets = self._parse_all()
+        drop_to_source = {
+            item.drop_path: str(sheet.source)
+            for sheet in sheets
+            for item in sheet.items
+        }
+        plans, notes, unmatched = ai.plan_resend(flagged, drop_to_source)
+        for key, why in unmatched:
+            self._log(f"[AI check] NO MATCH ({why}): {key} — skipped")
+        if not plans:
+            messagebox.showinfo(
+                "PromptPainter",
+                "None of the flagged images matches a queued collection"
+                " — queue the sheet(s) they came from and Send again.",
+            )
+            return
+        for site in sorted(plans):
+            if site in self._running:
+                self._log(
+                    f"[{site}] already running — flagged re-send skipped"
+                    " (Stop it first, then Send again)"
+                )
+                continue
+            count = sum(len(drops) for drops in plans[site].values())
+            self._log(
+                f"[{site}] AI re-send: {count} flagged image(s), each"
+                " with its fix note"
+            )
+            self._start_site(
+                site, override_selection=plans[site],
+                extra_suffix=notes[site],
+            )
+
+    def _clear_ai_flags(self, out_base: Path, keys: list[str]) -> int:
+        """The panel's Clear-flags action — drops the given entries from
+        the flag file; returns the number actually removed."""
+        from painter import ai
+
+        cleared = ai.clear_flag_keys(out_base, keys, self._log)
+        self._log(
+            f"[AI check] {cleared} flag(s) cleared from"
+            f" {ai.flags_path(out_base)}"
+        )
+        return cleared
+
     def _compose_post_save(self, key: str):
         """The site's post-save hook per ITS panel switches — the same
         shape the CLI builds: ``post_save(path) -> "REMOVE BG: done,
@@ -3760,8 +4245,21 @@ class PainterGui:
 
         return post_save
 
-    def _start_site(self, key: str) -> None:
-        """Start ONE site — the other site's run is never touched."""
+    def _start_site(
+        self,
+        key: str,
+        override_selection: dict[str, set[str]] | None = None,
+        extra_suffix: dict[str, str] | None = None,
+    ) -> None:
+        """Start ONE site — the other site's run is never touched.
+
+        ``override_selection`` (the AI checker's re-send, owner
+        2026-07-20) replaces the Select-window ticks with an explicit
+        per-sheet drop-path set and narrows the run to EXACTLY those
+        sheets; ``extra_suffix`` rides along to the runner so each
+        re-sent item carries its fix note. The plain Start (buttons,
+        quota auto-restart) passes neither.
+        """
         if key in self._running:
             return
         self._cancel_restart(key)  # a manual Start beats the timer
@@ -3769,6 +4267,11 @@ class PainterGui:
             messagebox.showerror("PromptPainter", "Add sheet .md files first.")
             return
         sheets = self._parse_all()
+        if override_selection is not None:
+            # the re-send drives ONLY the sheets carrying flagged items
+            sheets = [
+                s for s in sheets if str(s.source) in override_selection
+            ]
         if not sheets:
             messagebox.showerror(
                 "PromptPainter", "No usable sheets in the queue."
@@ -3869,22 +4372,28 @@ class PainterGui:
         # default advice rule). Once Select has been opened, the ticks
         # are authoritative — including ticked advice items — so we pass
         # the explicit set, never collapsing "all ticked" back to None.
-        selection: dict[str, set[str] | None] = {}
-        for sheet in sheets:
-            src = str(sheet.source)
-            touched = any(
-                site == key and source == src
-                for (site, source, _drop) in self._select_vars
-            )
-            if touched:
-                selection[src] = {
-                    drop
-                    for (site, source, drop), var
-                    in self._select_vars.items()
-                    if site == key and source == src and var.get()
-                }
-            else:
-                selection[src] = None
+        # An AI re-send bypasses the ticks entirely: its explicit
+        # per-sheet sets ARE the selection (the regenerate path).
+        selection: dict[str, set[str] | None]
+        if override_selection is not None:
+            selection = dict(override_selection)
+        else:
+            selection = {}
+            for sheet in sheets:
+                src = str(sheet.source)
+                touched = any(
+                    site == key and source == src
+                    for (site, source, _drop) in self._select_vars
+                )
+                if touched:
+                    selection[src] = {
+                        drop
+                        for (site, source, drop), var
+                        in self._select_vars.items()
+                        if site == key and source == src and var.get()
+                    }
+                else:
+                    selection[src] = None
 
         self._stop_events[key].clear()
         self._running.add(key)
@@ -3915,6 +4424,7 @@ class PainterGui:
                 timing,
                 post_save,
                 partial(prompt_suffix, key, background, style=style),
+                extra_suffix,
                 panel.report_var.get(),
                 selection,
                 panel.safer_var.get(),
@@ -3928,8 +4438,9 @@ class PainterGui:
         worker.start()
 
     def _drive_site(
-        self, key, sheets, out_base, timing, post_save, suffix, report,
-        selection, safer, continue_nudge, new_chat, stop_event,
+        self, key, sheets, out_base, timing, post_save, suffix,
+        extra_suffix, report, selection, safer, continue_nudge, new_chat,
+        stop_event,
     ) -> None:
         """One site's whole run — the theme queue in order, one thread."""
         log = lambda msg: self._q.put(f"[{key}] {msg}")
@@ -3962,6 +4473,7 @@ class PainterGui:
                         should_stop=stop_event.is_set,
                         post_save=post_save,
                         prompt_suffix=suffix,
+                        extra_suffix=extra_suffix,
                         report=report,
                         only=selection.get(str(sheet.source)),
                         on_event=events,
@@ -4159,6 +4671,10 @@ class PainterGui:
             "theme": ACTIVE_THEME,
             "geometry": self.root.geometry(),
             "controls_collapsed": self._collapsed,
+            # the AI features' credential (owner 2026-07-20): held on
+            # the GUI so the whole-dict save round-trips it; painter.ai
+            # reads it back from settings.json per call
+            GEMINI_KEY_SETTING: self._gemini_key,
             "upscale_tool": dict(self._upscale_tool_params),
             "aspect_ratio": list(self._aspect_ratio),
             "aspect_filter": dict(self._aspect_filter),
@@ -4175,6 +4691,7 @@ class PainterGui:
         output folder, per-agent settings, theme, geometry, zoom and
         the collapsed state persist (a stale ``sash`` key from an older
         settings.json is simply ignored)."""
+        self._gemini_key = str(stored.get(GEMINI_KEY_SETTING, "") or "")
         saved_out = stored.get("output")
         if saved_out and Path(saved_out).is_dir():
             self.out_var.set(saved_out)
@@ -5151,6 +5668,421 @@ class UpscaleParamsDialog(_ModalToolDialog):
             "min_width": min_width, "min_height": min_height,
             "aspect_min": aspect_min, "aspect_max": aspect_max,
         }
+        self.destroy()
+
+
+class _AiDialog(_ModalToolDialog):
+    """Shared plumbing of the AI dialogs (key wizard, sheet generator):
+    a worker→UI queue polled on the tk loop — the worker threads ONLY
+    ``self._q.put(...)`` and never touch a widget; ``_on_message``
+    applies each message on the main thread. The poll dies quietly with
+    the window (Rule #5 — one home for the identical loop)."""
+
+    def _init_ai_queue(self) -> None:
+        self._q: queue.Queue = queue.Queue()
+        self._poll_job: str | None = None
+
+    def _arm_poll(self) -> None:
+        self._poll_job = self.after(AI_POLL_MS, self._poll)
+
+    def _poll(self) -> None:
+        self._poll_job = None
+        if not self.winfo_exists():
+            return  # closed mid-work — the worker's message is moot
+        try:
+            msg = self._q.get_nowait()
+        except queue.Empty:
+            self._arm_poll()
+            return
+        self._on_message(msg)
+
+    def _on_message(self, msg: tuple) -> None:
+        raise NotImplementedError  # each dialog applies its own messages
+
+
+class AiKeyWizard(_AiDialog):
+    """The guided Gemini-API-key onboarding (owner 2026-07-20): four
+    numbered steps that STEER the user — open AI Studio in the browser,
+    sign in with any Google account, create the key, paste it — plus a
+    **Test key** that makes one tiny real call and shows OK / the loud
+    error, and **Save key** persisting it to settings.json. Opened by
+    the toolbar's 'AI key…' button and AUTOMATICALLY whenever an AI
+    feature is invoked without a key (``NoKey``)."""
+
+    def __init__(self, master, gui: "PainterGui"):
+        super().__init__(master)
+        self.title("Gemini API key — guided setup")
+        self.resizable(False, False)
+        skin_toplevel(self)  # bg registered so a flip re-tints the window
+        self._gui = gui
+        self._init_ai_queue()
+
+        body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
+        body.pack(fill="both", expand=True)
+        ttk.Label(
+            body, text="Get a FREE Gemini API key", style="Head.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            body,
+            text=(
+                "The AI features (New collection, AI check) need it —"
+                " a one-time setup."
+            ),
+            style="Muted.TLabel", wraplength=AI_STATUS_WRAP_PX,
+        ).pack(anchor="w", pady=(0, 10))
+
+        step = ttk.Frame(body)
+        step.pack(fill="x", pady=2)
+        ttk.Label(step, text="1.", width=3, style="Value.TLabel").pack(
+            side="left"
+        )
+        rounded_button(
+            step, "Open aistudio.google.com", command=self._open_browser,
+            kind="info", icon_name="web",
+        ).pack(side="left")
+        for number, text in (
+            ("2.", "Sign in with ANY Google account."),
+            ("3.", "Press  Get API key  →  Create API key."),
+            ("4.", "Copy the key and paste it below:"),
+        ):
+            row = ttk.Frame(body)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=number, width=3, style="Value.TLabel").pack(
+                side="left"
+            )
+            ttk.Label(row, text=text).pack(side="left")
+
+        self._key_var = tk.StringVar(value=gui.gemini_key)
+        self._entry = rounded_entry(
+            body, width=AI_KEY_ENTRY_W, textvariable=self._key_var,
+        )
+        self._entry.pack(fill="x", pady=(4, 8), padx=(AI_STEP_INDENT_PX, 0))
+
+        self._status_var = tk.StringVar(value="")
+        self._status_lbl = ttk.Label(
+            body, textvariable=self._status_var,
+            wraplength=AI_STATUS_WRAP_PX, justify="left",
+        )
+        self._status_lbl.pack(
+            anchor="w", pady=(0, 6), padx=(AI_STEP_INDENT_PX, 0)
+        )
+
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(6, 0))
+        rounded_button(
+            btns, "Save key", command=self._save, kind="success",
+        ).pack(side="right")
+        self._test_btn = rounded_button(
+            btns, "Test key", command=self._test, kind="info",
+        )
+        self._test_btn.pack(side="right", padx=6)
+        rounded_button(btns, "Cancel", command=self.destroy).pack(
+            side="right", padx=(0, 6)
+        )
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.update_idletasks()
+        self._center_on(master)
+        self.transient(master)
+        self.grab_set()
+        self._entry.focus_set()
+        self.wait_window(self)
+
+    def _open_browser(self) -> None:
+        webbrowser.open(AI_STUDIO_URL)
+
+    def _show_status(self, kind: str, text: str) -> None:
+        colors = {
+            "ok": status("done"),
+            "err": status("superseded"),
+            "info": tb.Style().colors.light,
+        }
+        self._status_lbl.configure(foreground=colors[kind])
+        self._status_var.set(text)
+
+    def _test(self) -> None:
+        """One tiny REAL call with the pasted key — OK or the loud
+        error, on a worker thread so the dialog never blocks."""
+        key = self._key_var.get().strip()
+        if not key:
+            self._show_status("err", "Paste the key first (step 4).")
+            return
+        self._test_btn.configure(state="disabled")
+        self._show_status("info", "testing — one tiny API call …")
+
+        def work():
+            from painter import ai
+
+            try:
+                answer = ai.generate_text(AI_TEST_PROMPT, key=key)
+                self._q.put(
+                    ("ok",
+                     f"OK — the key works (answered: {answer.strip()[:40]!r})")
+                )
+            except ai.AiError as exc:
+                self._q.put(("err", str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._arm_poll()
+
+    def _on_message(self, msg: tuple) -> None:
+        kind, text = msg
+        self._test_btn.configure(state="normal")
+        self._show_status(kind, text)
+
+    def _save(self) -> None:
+        key = self._key_var.get().strip()
+        if not key:
+            messagebox.showerror(
+                "PromptPainter", "Paste the key first (step 4).",
+                parent=self,
+            )
+            return
+        self._gui.set_gemini_key(key)
+        self.destroy()
+
+
+class AiSheetDialog(_AiDialog):
+    """'New collection (AI)…' (owner 2026-07-20). Phase 1: the owner
+    types the request (any language); the FIRST call returns a short
+    clarifying POLL (the contract + questions-only system prompt).
+    Phase 2: the answers (each skippable) feed the SECOND call, whose
+    ``.md`` is validated with the REAL parser plus ONE automatic repair
+    round. Valid → saved under ``sheets/`` (slugged name) and ADDED to
+    the Collections queue; still broken → the raw md opens in a
+    DocWindow for manual fixing and is NOT loaded. Both calls run on
+    worker threads; progress lands in the status line + the main Log.
+    Non-modal (registered in ``THEME_TOPLEVELS``) so a long generation
+    never grabs the app."""
+
+    def __init__(self, master, gui: "PainterGui"):
+        super().__init__(master)
+        self.title("New collection (AI)")
+        self.resizable(False, False)
+        skin_toplevel(self)  # bg registered so a flip re-tints the window
+        THEME_TOPLEVELS.append(self)
+        self._gui = gui
+        self._init_ai_queue()
+        self._busy = False
+        self._request = ""
+        self._contract = ""
+        self._questions: list[str] = []
+        self._answer_vars: list[tk.StringVar] = []
+
+        body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
+        body.pack(fill="both", expand=True)
+
+        # --- phase 1: the request --------------------------------------
+        self._req_box = ttk.Frame(body)
+        self._req_box.pack(fill="x")
+        ttk.Label(
+            self._req_box, text="What should the new collection generate?",
+            style="Head.TLabel",
+        ).pack(anchor="w")
+        ttk.Label(
+            self._req_box,
+            text=(
+                'e.g. "Napravi mi 12 slika Astrologije" — any language;'
+                " the model first asks its clarifying questions, then"
+                " writes the sheet per the contract."
+            ),
+            style="Muted.TLabel", wraplength=AI_STATUS_WRAP_PX,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+        self._request_txt = tk.Text(
+            self._req_box, height=AI_REQUEST_LINES, wrap="word",
+            font=tk_font("root"), width=1,  # the pack fill sets the width
+        )
+        skin_text(self._request_txt)
+        self._request_txt.pack(fill="x")
+
+        # --- phase 2: the poll (filled when the questions arrive) ------
+        self._poll_box = ttk.Frame(body)
+
+        self._status_var = tk.StringVar(value="")
+        ttk.Label(
+            body, textvariable=self._status_var, style="Muted.TLabel",
+            wraplength=AI_STATUS_WRAP_PX, justify="left",
+        ).pack(anchor="w", pady=(8, 4))
+
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(4, 0))
+        self._go_btn = rounded_button(
+            btns, "Ask questions", command=self._ask, kind="success",
+            icon_name="ai",
+        )
+        self._go_btn.pack(side="right")
+        rounded_button(btns, "Cancel", command=self.destroy).pack(
+            side="right", padx=6
+        )
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.bind("<Destroy>", self._on_destroy)
+        self.update_idletasks()
+        self.minsize(
+            max(self.winfo_reqwidth(), AI_STATUS_WRAP_PX + 60), 0
+        )
+        self._center_on(master)
+        self.transient(master)
+        self._request_txt.focus_set()
+
+    def apply_theme(self) -> None:
+        # ttk children flip via styles; the Text and entries ride the
+        # global recolour — nothing per-widget to redo here.
+        pass
+
+    def _on_destroy(self, event) -> None:
+        if event.widget is self and self in THEME_TOPLEVELS:
+            THEME_TOPLEVELS.remove(self)
+
+    # --- phase transitions (main thread) --------------------------------
+
+    def _set_busy(self, text: str) -> None:
+        self._busy = True
+        self._go_btn.configure(state="disabled")
+        self._status_var.set(text)
+
+    def _set_idle(self, text: str) -> None:
+        self._busy = False
+        self._go_btn.configure(state="normal")
+        self._status_var.set(text)
+
+    def _ask(self) -> None:
+        """FIRST call — the clarifying questions."""
+        if self._busy:
+            return
+        request = self._request_txt.get("1.0", "end").strip()
+        if not request:
+            messagebox.showerror(
+                "PromptPainter",
+                "Type what the collection should be first.", parent=self,
+            )
+            return
+        self._request = request
+        self._gui._q.put(f"[AI sheet] request: {request[:80]}")
+        self._set_busy("asking the model for its clarifying questions …")
+
+        def work():
+            from painter import ai
+
+            try:
+                contract = ai.contract_text()
+                questions = ai.ask_questions(request, contract)
+                self._q.put(("questions", contract, questions))
+            except (ai.AiError, OSError) as exc:
+                self._q.put(("error", str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._arm_poll()
+
+    def _show_questions(self, questions: list[str]) -> None:
+        self._questions = questions
+        self._request_txt.configure(state="disabled")  # the request is set
+        ttk.Label(
+            self._poll_box,
+            text="The model asks (answers optional — empty = its choice):",
+            style="Head.TLabel",
+        ).pack(anchor="w", pady=(8, 4))
+        for question in questions:
+            row = ttk.Frame(self._poll_box)
+            row.pack(fill="x", pady=2)
+            ttk.Label(
+                row, text=question, wraplength=AI_STATUS_WRAP_PX,
+                justify="left",
+            ).pack(anchor="w")
+            var = tk.StringVar(value="")
+            rounded_entry(row, textvariable=var).pack(fill="x", pady=(1, 0))
+            self._answer_vars.append(var)
+        self._poll_box.pack(fill="x", after=self._req_box)
+        self._go_btn.configure(text="Generate sheet", command=self._generate)
+        self._set_idle(
+            f"{len(questions)} question(s) — answer what you care about,"
+            " then Generate."
+        )
+        self.update_idletasks()
+        self._center_on(self.master)
+
+    def _generate(self) -> None:
+        """SECOND call — the sheet + validation + one repair round."""
+        if self._busy:
+            return
+        answers = [var.get() for var in self._answer_vars]
+        request, contract = self._request, self._contract
+        questions = self._questions
+        log = lambda msg: self._gui._q.put(f"[AI sheet] {msg}")
+        self._set_busy(
+            "generating the sheet (validated with the real parser; one"
+            " automatic repair round if needed) …"
+        )
+
+        def work():
+            import tempfile
+
+            from painter import ai
+
+            try:
+                with tempfile.TemporaryDirectory(
+                    prefix="painter_ai_"
+                ) as tmp:
+                    md, problems, theme = ai.generate_sheet(
+                        request, questions, answers, contract,
+                        Path(tmp), log=log,
+                    )
+                self._q.put(("sheet", md, problems, theme))
+            except ai.AiError as exc:
+                self._q.put(("error", str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._arm_poll()
+
+    def _on_message(self, msg: tuple) -> None:
+        kind = msg[0]
+        if kind == "error":
+            self._gui._log(f"[AI sheet] ERROR: {msg[1]}")
+            self._set_idle(f"ERROR: {msg[1]}")
+        elif kind == "questions":
+            _kind, self._contract, questions = msg
+            if questions:
+                self._gui._q.put(
+                    f"[AI sheet] {len(questions)} clarifying question(s)"
+                )
+                self._show_questions(questions)
+            else:
+                # no parseable poll — generate straight from the request
+                self._gui._q.put(
+                    "[AI sheet] the model asked no questions —"
+                    " generating directly"
+                )
+                self._set_idle("")
+                self._generate()
+        elif kind == "sheet":
+            self._finish(md=msg[1], problems=msg[2], theme=msg[3])
+
+    def _finish(self, md: str, problems: list[str], theme) -> None:
+        if problems:
+            for problem in problems:
+                self._gui._log(f"[AI sheet] PROBLEM: {problem}")
+            self._set_idle(
+                "the sheet still fails the contract after the repair"
+                " round — opened for manual fixing, NOT loaded (the"
+                " problems are in the Log)."
+            )
+            DocWindow(
+                self._gui.root, "AI sheet — fix manually (not loaded)",
+                md,
+                hint=(
+                    "This draft fails the sheet contract — Copy it, fix"
+                    " it by hand, save it and Add… it to the queue."
+                ),
+            )
+            return  # the dialog stays open — better answers may succeed
+        from painter import ai
+
+        path = ai.save_sheet(md, theme, SHEETS_DIR)
+        self._gui.add_generated_sheet(path)
+        self._gui._log(
+            f"[AI sheet] saved {path} — added to the Collections queue"
+        )
         self.destroy()
 
 

@@ -23,7 +23,10 @@ FILTER — `from`/`to`/`mode`), a per-agent `style` (the rendering-style
 dropdown, under `agents.<site>`), and per-agent `up_minw`/`up_minh`/
 `up_aspmin`/`up_aspmax` under `agents.<site>` — all plain JSON scalars
 and small dicts, so this module round-trips them with zero special
-handling.
+handling. Since owner 2026-07-20 it also carries `gemini_api_key` —
+the AI features' free AI Studio key, written by the GUI's guided
+wizard and read back by [AI Client & Flows](ai.md) on every call;
+it is a CREDENTIAL, one more reason this file stays gitignored.
 
 ## Connections
 

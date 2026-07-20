@@ -28,9 +28,31 @@ lines with resolution and postprocess actions, averages, totals,
 stop reason), resume by FILE EXISTENCE (a second unattended run
 drives nothing; a ticked `only` REGENERATES an already-saved file),
 the graceful stop flag, the `post_save` hook (a failure
-is loud, counted, and never kills the run), and `TerminalState`
+is loud, counted, and never kills the run), the per-item
+`extra_suffix` map (the AI re-send's fix note — appended after the
+site suffix for exactly the mapped item, and riding the safer
+retry), and `TerminalState`
 propagation — the runner logs the parsed quota reset time, stamps
 it into the report and re-raises the exception unchanged.
+
+### `test_ai.py` — Gemini Client + AI Flows
+NO live API anywhere: the HTTP layer is the monkeypatched
+`painter.ai._urlopen`. Covers the client's request building (url +
+model, `x-goog-api-key` header, contents/systemInstruction payload,
+base64 `inlineData` for images), the tolerant candidates/parts
+response parsing, the loud failure taxonomy (`AiError` on HTTP
+errors with the API's own message, prompt blocks, non-STOP finishes,
+malformed shapes; `NoKey` on a missing/blank key BEFORE any network
+traffic), the free-tier pacing sleep, the sheet-generator flow with
+a mocked `gen` (questions parsing + cap, skipped answers, the
+whole-file fence unwrap, real-parser validation, exactly ONE repair
+round, the still-broken path that must NOT load, slugged
+collision-free saves), the checker's strict OK/DEFECTS format, and
+the flag memory (round-trip, merge, clear, the mtime-based prune of
+regenerated/missing files, relative-vs-absolute keys, the
+`dest_for` reverse mapping and the full `plan_resend` grouping —
+per site / per sheet, each item its own fix note, loud unmatched
+reasons).
 
 ### `test_quota_reset.py` — Quota Reset Parsing
 `parse_quota_reset` against the LIVE-captured ChatGPT quota

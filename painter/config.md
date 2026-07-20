@@ -42,6 +42,8 @@ match.
   the `BADGES` block + `badge_keys_for` (the dashboard status badges)
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`
+- [AI Client & Flows](ai.md) — the `GEMINI_*` / `AI_*` block,
+  `SITES` (the re-send reverse map), `STATE_DIRNAME`, `PROJECT_ROOT`
 
 ## Values
 
@@ -143,19 +145,22 @@ match.
   `JOB_COLORS`, `JOB_METRIC`, `job_color_pair(kind)`,
   `GRID_COLS_BY_COUNT` — the dashboard per-JOB panels (owner
   2026-07-19). The dashboard shows one panel PER RUNNING JOB — the two
-  gen SITES plus the four in-place TOOLS, up to six in parallel.
+  gen SITES plus the four in-place TOOLS plus the AI CHECKER (owner
+  2026-07-20), up to seven in parallel.
   `JOB_ORDER` is the fixed priority (gen first) that row-major places
   panels so ChatGPT + Gemini always take the top cells;
-  `GRID_COLS_BY_COUNT` (1→1, 2→2, 3→3, 4→2, 5→2, 6→2, rows =
+  `GRID_COLS_BY_COUNT` (1→1, 2→2, 3→3, 4→2, 5→2, 6→2, 7→3, rows =
   ceil(N/cols)) is the responsive shape. Each job carries a `JOB_LABEL`
   (the three tool buttons drop "only"), an ICON stem in `JOB_LOGO` —
-  ALL six jobs now (owner 2026-07-19): the two sites their brand logo,
+  the two sites their brand logo,
   the four tools dedicated PNG icons (`bg`/`crop`/`upscale`/`aspect`,
   replacing the old `JOB_EMOJI` marks; `gui.icon()` resolves each stem
-  to svg or png). Plus a `(day, night)` `JOB_COLORS` pair
+  to svg or png), the checker the `ai` png. Plus a `(day, night)`
+  `JOB_COLORS` pair
   (`job_color_pair` returns it, auto-flipping on `set_appearance_mode`),
-  and a `JOB_METRIC` word (removed / reduction / increase / deformation)
-  the tool panel shows. Pure strings/numbers, so the tests import it
+  and a `JOB_METRIC` word (removed / reduction / increase / deformation;
+  the checker's odd one out is `defects` — a COUNT, not a %) the panel
+  shows. Pure strings/numbers, so the tests import it
   without tkinter.
 - `JOBTEMP_DIRNAME`, `JOBTEMP_REMOVED_ALPHA` — the tool temp/restore
   store (owner 2026-07-19). `JOBTEMP_DIRNAME` (`.painter_tmp`,
@@ -288,6 +293,21 @@ match.
   `NoImage`: done edge fired, empty answer, no marker). ON by default;
   the owner's manual fix turned into an automatic one-shot. Data only —
   reword it here.
+- The **AI features block** (owner 2026-07-20, consumed by
+  [AI Client & Flows](ai.md) and the GUI): `GEMINI_API_BASE` +
+  `GEMINI_TEXT_MODEL` / `GEMINI_VISION_MODEL` (model names ROTATE with
+  Google's releases — bump the strings here, never code),
+  `GEMINI_KEY_SETTING` (the `settings.json` key name),
+  `AI_STUDIO_URL` (the wizard's step-1 browser target),
+  `AI_CALL_PAUSE_S` (free-tier pacing, ~10 requests/minute → 6.5 s
+  between calls), `AI_TIMEOUT_S`, `AI_TEST_PROMPT` (the wizard's tiny
+  Test call), `AI_MAX_QUESTIONS` + `SHEETS_DIR` + the four sheet-flow
+  prompt templates (`AI_QUESTIONS_SYSTEM`, `AI_SHEET_SYSTEM`,
+  `AI_SHEET_REQUEST`, `AI_REPAIR_PROMPT` — `{contract}` is
+  instructions.md verbatim), and the checker's `AI_FLAGS_FILENAME`,
+  `AI_CHECK_INSTRUCTIONS` (banal defects only, strict OK/DEFECTS
+  format) and `AI_FIX_NOTE` (the re-send's per-item note). All prompt
+  text is DATA — the owner rewords it here.
 - `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`,
   `fmt_pct(value)` — the short human formatters shared by the runner
   report and the GUI dashboard. `fmt_op_duration` keeps sub-second

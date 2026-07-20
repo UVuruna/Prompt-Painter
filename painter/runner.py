@@ -169,6 +169,7 @@ def run_sheet(
     should_stop: ShouldStop | None = None,
     post_save: PostSave | None = None,
     prompt_suffix: str | Callable[[str], str] = "",
+    extra_suffix: dict[str, str] | None = None,
     report: bool = True,
     only: set[str] | None = None,
     on_event: OnEvent | None = None,
@@ -186,7 +187,10 @@ def run_sheet(
     ticked drop paths) generates EXACTLY those, OVERWRITING any that
     already exist — the regenerate path; None resumes by FILE
     EXISTENCE (skip every image already on disk) and sits sheet-advised
-    items out.
+    items out. ``extra_suffix`` (owner 2026-07-20, the AI checker's
+    re-send) maps a drop path to EXTRA text appended AFTER the site
+    suffix for exactly that item (the "previous attempt had these
+    flaws" fix note); items absent from the map get no extra text.
     """
     state_dir = out_base / STATE_DIRNAME / site_key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -310,6 +314,12 @@ def run_sheet(
                 if callable(prompt_suffix)
                 else prompt_suffix
             )
+            # a PER-ITEM extra (the AI re-send fix note) rides at the
+            # very end, after every site rule — and survives a safer
+            # retry, which prepends its preamble to this same base
+            extra = extra_suffix.get(item.drop_path) if extra_suffix else None
+            if extra:
+                suffix += "\n\n" + extra
             base = item.prompt + suffix
             retried = False  # True when the SAFER RETRY produced the image
             try:

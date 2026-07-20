@@ -458,7 +458,7 @@ def iter_images(folder) -> list:
 # places panels row-major into the grid, so ChatGPT + Gemini always take
 # the top cells. All of this is PURE data (strings/numbers only) so the
 # engine and tests import config.py without tkinter.
-JOB_ORDER = ("chatgpt", "gemini", "bg", "crop", "upscale", "aspect")
+JOB_ORDER = ("chatgpt", "gemini", "bg", "crop", "upscale", "aspect", "aicheck")
 JOB_TOOL_KINDS = ("bg", "crop", "upscale", "aspect")
 
 # button + panel-header label per job (the three tool buttons drop the
@@ -470,6 +470,7 @@ JOB_LABEL = {
     "crop": "Crop",
     "upscale": "Upscale",
     "aspect": "Aspect ratio",
+    "aicheck": "AI check",
 }
 
 # EVERY job carries an icon (assets/icons/<stem>) beside its coloured
@@ -485,6 +486,7 @@ JOB_LOGO = {
     "crop": "crop",
     "upscale": "upscale",
     "aspect": "aspect",
+    "aicheck": "ai",
 }
 
 # per-job (day, night) colour pair — the header name + the tool button
@@ -497,17 +499,21 @@ JOB_COLORS = {
     "crop": ("#b9770e", "#f0a835"),     # amber
     "upscale": ("#7a4fc0", "#b088f0"),  # violet
     "aspect": ("#b03080", "#e05ab0"),   # magenta
+    "aicheck": ("#b23a55", "#f26d8d"),  # rose / red
 }
 
 # the aggregate metric each TOOL panel reports (its per-image % means):
 #   bg = removed pixels, crop = area reduction, upscale = area increase,
 #   aspect = deformation (growth of the stretched axis). measure() tags
 #   every item with the same word so the panel header and the rows agree.
+# "aicheck" is the odd one out: its per-row metric is the DEFECT COUNT,
+# not a %, but the word still names the column for panel/doc coherence.
 JOB_METRIC = {
     "bg": "removed",
     "crop": "reduction",
     "upscale": "increase",
     "aspect": "deformation",
+    "aicheck": "defects",
 }
 
 
@@ -519,8 +525,8 @@ def job_color_pair(kind: str) -> tuple[str, str]:
 
 # how many grid COLUMNS for N active panels; rows = ceil(N / cols). The
 # owner's chosen shape: 1→1, 2→2, 3→3, 4→2x2, 5→2x3 (ChatGPT+Gemini in
-# the top row, 6th cell empty), 6→2x3.
-GRID_COLS_BY_COUNT = {1: 1, 2: 2, 3: 3, 4: 2, 5: 2, 6: 2}
+# the top row, 6th cell empty), 6→2x3; 7 (all six + AI check) → 3x3.
+GRID_COLS_BY_COUNT = {1: 1, 2: 2, 3: 3, 4: 2, 5: 2, 6: 2, 7: 3}
 
 
 # --- Dashboard status badges (owner 2026-07-20) ----------------------
@@ -870,6 +876,97 @@ SAFER_PREAMBLE = (
 # then either uses the recovered image or gives up loudly. Data only —
 # the owner can reword it here.
 CONTINUE_NUDGE = "Continue - please finish generating the image."
+
+
+# --- AI features: free Gemini API (owner 2026-07-20) ------------------
+#
+# painter/ai.py drives the FREE AI Studio REST API (no SDK) for two GUI
+# features: the sheet GENERATOR (text model) and the image CHECKER
+# (vision model). Model names ROTATE with Google's releases — they are
+# DATA here so the owner can bump them without touching code. The key
+# lives in settings.json (gitignored) under GEMINI_KEY_SETTING; the GUI
+# wizard writes it there and painter.ai reads it per call.
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_TEXT_MODEL = "gemini-2.5-flash"    # sheet generator (free tier)
+GEMINI_VISION_MODEL = "gemini-2.5-flash"  # image checker (same model reads images)
+GEMINI_KEY_SETTING = "gemini_api_key"     # the settings.json key name
+# where the wizard's step-1 button sends the browser (the key page)
+AI_STUDIO_URL = "https://aistudio.google.com/apikey"
+# free-tier pacing: the flash free tier allows ~10 requests/minute, so
+# consecutive calls keep at least this many seconds apart (6.0 would sit
+# exactly on the limit; 6.5 leaves headroom for clock skew)
+AI_CALL_PAUSE_S = 6.5
+AI_TIMEOUT_S = 120.0  # one HTTP call's hard cap (vision calls are slow)
+# the wizard's "Test key" prompt — tiny and cheap, the answer is shown
+AI_TEST_PROMPT = "Reply with exactly: OK"
+
+# --- the AI sheet generator (owner's #2: follow-up questions) ---------
+AI_MAX_QUESTIONS = 6  # the clarifying poll is capped at this many
+# where AI-generated sheets are saved (owner content, NOT gitignored —
+# but never committed by an agent either; the dir is created on demand)
+SHEETS_DIR = PROJECT_ROOT / "sheets"
+# FIRST call system prompt: the contract + "questions only". {contract}
+# is instructions.md verbatim; {max_q} is AI_MAX_QUESTIONS.
+AI_QUESTIONS_SYSTEM = (
+    "You help an operator author a PromptPainter prompt-sheet (.md"
+    " file). This is the sheet contract you must know:\n\n{contract}\n\n"
+    "DO NOT produce the sheet yet. First return ONLY a short numbered"
+    " list of clarifying questions (at most {max_q}), one question per"
+    " line, no other text before or after. Ask only what the request"
+    " leaves unknown of: theme and visual style, image count, the drop"
+    " folder (assets/<category>/<rest>), file naming, background"
+    " (transparent / white), shape (rondel / lancet / plate), any"
+    " special laws."
+)
+# SECOND call system prompt: the contract + "the raw .md only".
+AI_SHEET_SYSTEM = (
+    "You author a PromptPainter prompt-sheet (.md file). Follow the"
+    " sheet contract EXACTLY:\n\n{contract}\n\n"
+    "Return ONLY the raw markdown of the complete sheet — no"
+    " commentary, no surrounding code fence around the whole file. It"
+    " must carry exactly one '# H1' theme line and, per image, a"
+    " '**Title** → `assets/<category>/<rest>/<File>.png`' line followed"
+    " by one fenced prompt block."
+)
+# SECOND call user content: the request + the answered poll.
+AI_SHEET_REQUEST = (
+    "The operator's request:\n{request}\n\n"
+    "The operator answered the clarifying questions:\n{qa}\n\n"
+    "Write the complete sheet now."
+)
+# ONE automatic repair round when the parser rejects the produced md.
+AI_REPAIR_PROMPT = (
+    "The sheet you produced fails the PromptPainter parser with these"
+    " problems:\n{problems}\n\nHere is the sheet you produced:\n\n{md}"
+    "\n\nReturn the corrected COMPLETE .md (raw markdown, no"
+    " commentary, no code fence around the whole file), fixing every"
+    " listed problem and keeping everything else identical."
+)
+
+# --- the AI image checker (owner's #3: banal defects only) ------------
+AI_FLAGS_FILENAME = "ai_flags.json"  # under <out>/_state/
+# the vision instruction — BANAL defects only, in a strict short format
+# the parser (painter.ai.parse_check_response) can read
+AI_CHECK_INSTRUCTIONS = (
+    "You are a strict quality checker of AI-generated decorative images"
+    " (badges, rondels, stained-glass panels, emblems, plates). Look"
+    " ONLY for these BANAL defects: the subject or its circle/frame"
+    " slightly CUT OFF at an image edge; leftover background patches or"
+    " halos around the subject; stray lines, smudges or floating"
+    " artifacts; watermark or text artifacts; an obviously clipped or"
+    " asymmetric frame. IGNORE style, beauty and artistic choices —"
+    " they are not defects.\n"
+    "Respond in EXACTLY this format: if the image is clean, reply with"
+    " the single line 'OK'. Otherwise reply with the first line"
+    " 'DEFECTS:' followed by one short defect description per line,"
+    " each line starting with '- '."
+)
+# the per-item extra suffix appended when a flagged image is re-sent to
+# its original generator ({defects} = the '; '-joined defect list)
+AI_FIX_NOTE = (
+    "The previous attempt had these flaws: {defects}. Regenerate the"
+    " same image correcting them."
+)
 
 
 # --- Timing ----------------------------------------------------------

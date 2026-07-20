@@ -425,6 +425,31 @@ reachability fixes:
   `<Map>`, when it is finally laid out) and clamped to
   `screen*DOC_MAX_FRAC`, so a short excerpt shrinks to content while
   a tall medallion / long doc scrolls.
+- **The AI row** (owner 2026-07-20, a SECOND toolbar row so the tool
+  row never clips at the window minimum) — three buttons over
+  [AI Client & Flows](painter/ai.md), all gated by the free Gemini
+  key in `settings.json`:
+    - **New collection (AI)…** opens `AiSheetDialog` — the owner
+      types the request (any language), the model returns a short
+      clarifying POLL (first call: the sheet contract + a
+      questions-only system prompt), the answers (each skippable)
+      feed the second call, and the produced `.md` is validated with
+      the REAL parser plus ONE automatic repair round. Valid → saved
+      under the project-local `sheets/` (slugged filename, created on
+      demand) and ADDED to the Collections queue; still broken → the
+      raw md opens in a `DocWindow` for manual fixing and is NOT
+      loaded. Non-modal, worker-threaded, progress in the Log.
+    - **AI check…** — the batch image checker, its OWN job/panel
+      (see `AiCheckPanel` under the Dashboard section).
+    - **AI key…** opens `AiKeyWizard` — the guided key onboarding:
+      four numbered steps (1. a button opening
+      `aistudio.google.com` via `webbrowser`, 2. sign in with any
+      Google account, 3. Get API key → Create API key, 4. paste it),
+      a **Test key** making one tiny real call on a worker thread
+      (OK in green / the loud `AiError` in red), and **Save key**
+      persisting it. The wizard ALSO opens AUTOMATICALLY whenever an
+      AI feature is invoked and `painter.ai` raises `NoKey`
+      (`_ensure_ai_key` re-checks after it closes).
 - **Two views** (tabs): the **Dashboard** and the **Log
   (detailed)** (timestamped `[HH:MM:SS]`, both sites interleaved
   with `[gemini]` / `[chatgpt]` prefixes). A SAFETY refusal skips
@@ -467,7 +492,11 @@ reachability fixes:
   keys as current defaults (a missing `theme` = `night`, a missing agent
   `settings_collapsed` = True) and drops queued files that no longer
   exist (reported in the log). The stored dict: `output`, `font_base`,
-  `theme`, `geometry`, `controls_collapsed`, `upscale_tool`
+  `theme`, `geometry`, `controls_collapsed`, `gemini_api_key` (the AI
+  features' credential, owner 2026-07-20 — held on the GUI so the
+  whole-dict save round-trips it; the wizard's Save persists
+  IMMEDIATELY via `set_gemini_key` → `_save_now`, since `painter.ai`
+  reads the key back from disk per call), `upscale_tool`
   (the standalone Upscale dialog's last-used `min_width`/`min_height`/
   `aspect_min`/`aspect_max`), `aspect_ratio` (the last `[W, H]` from
   the Aspect dialog), `aspect_filter` (that dialog's last input filter —
@@ -479,9 +508,10 @@ reachability fixes:
   and that agent's `settings_collapsed`.
 
 ## The Dashboard — per-JOB panels (owner 2026-07-19)
-The dashboard shows one panel PER RUNNING JOB, up to SIX in parallel:
-the two generation SITES (ChatGPT, Gemini) plus the four in-place TOOLS
-(BG removal, Crop, Upscale, Aspect ratio). Panels are no longer fixed —
+The dashboard shows one panel PER RUNNING JOB, up to SEVEN in parallel:
+the two generation SITES (ChatGPT, Gemini), the four in-place TOOLS
+(BG removal, Crop, Upscale, Aspect ratio) and the AI CHECKER (owner
+2026-07-20). Panels are no longer fixed —
 a panel APPEARS when its job STARTS (a site Start / a tool button) and
 gets a **✕ Close** button when the job FINISHES; Close removes the
 panel from the grid AND clears that job's temp backups. Only
@@ -492,14 +522,21 @@ running-or-ran jobs show.
 dedicated PNG for each of the four tools, owner 2026-07-19 — plus the
 job NAME in the job's `(day, night)` `JOB_COLORS` pair), the muted state
 line (quota countdown / current item), and the
-hidden CLOSE button `finish()` reveals / `reset_finished()` hides.
+hidden CLOSE button `finish()` reveals / `reset_finished()` hides. It
+also carries the shared root/folder TREE-NODE plumbing
+(`_ensure_root` / `_ensure_folder`) for the folder-based panels
+(ToolPanel, AiCheckPanel), whose rowed table itself is built by the
+module `build_job_tree` helper (Rule #5 — one home for the Treeview +
+round scrollbars + theme tags); DashPanel builds its own theme-keyed
+nodes and never calls these.
 `DashPanel(JobPanel)` is one gen site's view; `ToolPanel(JobPanel)` is
 one tool's. Both are BUILT ONCE (never destroyed) and fed ONLY by the
 runner/worker's structured events on the main thread.
 
 **`DashGrid`** replaces the old draggable `ttk.PanedWindow`. It holds
-the six build-once panels and re-flows them by ACTIVE COUNT via
-`config.GRID_COLS_BY_COUNT` (1→1 col, 2→2, 3→3, 4→2×2, 5→2×3, 6→2×3;
+the seven build-once panels and re-flows them by ACTIVE COUNT via
+`config.GRID_COLS_BY_COUNT` (1→1 col, 2→2, 3→3, 4→2×2, 5→2×3, 6→2×3,
+7→3×3;
 rows = ceil(N/cols)), row-major over `JOB_ORDER` (gen FIRST) so ChatGPT
 + Gemini always fill the TOP row — at N=5 the 6th cell stays empty.
 Cells share a `uniform` group so they are equal and evenly fill the
@@ -609,6 +646,47 @@ composites any image WITH ALPHA over a neutral checkerboard
 removed. Restore / RESTORE ALL delegate to the `JobTemp`. Temp is
 CLEARED on the panel's CLOSE, on app exit (`_on_close`) and swept at
 startup — gen jobs make NEW files, so they need no restore.
+
+### `AiCheckPanel` — the AI image checker (owner 2026-07-20)
+The seventh job slot (`aicheck`, rose `JOB_COLORS`, the `ai` png).
+**AI check…** gates on the key (`_ensure_ai_key` — the wizard
+auto-opens on `NoKey`), picks a FOLDER, confirms (the run is
+READ-ONLY but costs paced free-tier calls, ~`AI_CALL_PAUSE_S` s per
+image) and starts `_run_ai_check_job` on its own worker (registered
+in `_tool_workers["aicheck"]`, so the one-job-per-kind guard and the
+`__tool_done__` plumbing are reused as-is). The worker first
+`prune_stale_flags` (a REGENERATED file's changed mtime drops its old
+flag), then per image calls `ai.check_image` with
+`AI_CHECK_INSTRUCTIONS` (BANAL defects only) and parses the strict
+OK/DEFECTS answer:
+
+- **flagged** → `ai.record_flag` (merged into
+  `<out>/_state/ai_flags.json`: defects, checked_at, model, the
+  file's mtime) + a STRIKING row (`TOOL_CHANGED_TAG`) whose metric is
+  the DEFECT COUNT plus the first defect text;
+- **OK** → `ai.clear_flag` (a fixed image loses its stale flag) + a
+  muted row (`TOOL_SKIP_TAG`);
+- a per-image `AiError` is LOUD in the log, counted as an error row,
+  and never kills the batch (the tool-job convention).
+
+The flag KEY is the image's path RELATIVE to the shared Output base
+(`ai.flag_key`; absolute for an outside image — persists, but can
+never match a queued collection). **Double-click a flagged row** →
+a `DocWindow` with the defect bullets + the image itself. Two panel
+actions:
+
+- **Send flagged to generator** → `_resend_flagged`:
+  `ai.plan_resend` (pure, GUI-free) reverses each flag key to its
+  `(drop_path, site)` (the `dest_for` reverse), matches it against
+  the QUEUED sheets' items and returns the per-site plan; each
+  matched site is started with
+  `_start_site(site, override_selection={sheet: drops},
+  extra_suffix={drop: ai.fix_note(defects)})` — the regenerate path
+  (`only=` overwrites the flawed file) with the "previous attempt
+  had these flaws" note appended per item. An unmatched image and an
+  already-running site are LOUD log skips.
+- **Clear flags** → `_clear_ai_flags` (`ai.clear_flag_keys`) wipes
+  this run's entries and marks the rows `cleared`.
 
 ## Theming
 Two coordinated palettes — **night** (the built-in `darkly`, kept
@@ -760,9 +838,15 @@ its panel's buttons (per-site stop events); each creates its own
 Playwright instance and `SiteDriver` (sync Playwright is
 per-thread) and walks the theme queue sequentially. The four TOOLS
 add up to four MORE daemon workers (`_run_tool_job`), one per kind
-(one job per kind — a second click is refused), so up to six jobs run
+(one job per kind — a second click is refused), and the AI CHECKER a
+seventh (`_run_ai_check_job`, same `_tool_workers` bookkeeping), so up
+to seven jobs run
 CONCURRENTLY; each tool worker only backs up + processes files under
-its own picked folder and its own `JobTemp` subdir (disjoint writes).
+its own picked folder and its own `JobTemp` subdir (disjoint writes;
+the checker writes only the flag file under `<out>/_state/`). The AI
+DIALOGS (`AiKeyWizard`'s Test, `AiSheetDialog`'s two calls) run their
+API work on short-lived daemon threads too, feeding a per-dialog queue
+polled with `after` (`_AiDialog` — the workers never touch a widget).
 Every worker touches the window ONLY through the single `self._q`
 queue drained on the tk timer (`_drain_queue` via `root.after`) — so
 every widget mutation runs on the main thread. The drain hands each
@@ -786,6 +870,7 @@ countdown, no CLOSE, until the restart or a Stop).
   [Run Loop](painter/runner.md), [Chrome Launcher](painter/chrome.md),
   [Postprocess](painter/postprocess.md), [Upscale](painter/upscale.md),
   [Change Aspect Ratio](painter/aspect.md), [Job Temp](painter/jobtemp.md),
+  [AI Client & Flows](painter/ai.md),
   [Settings](painter/settings.md), [Config](painter/config.md)
 
 ### Used by

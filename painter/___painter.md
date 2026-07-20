@@ -70,6 +70,16 @@ before→after % each tool panel shows (removed / reduction / increase /
 deformation), derived OUTSIDE the engine functions. Cleared on panel
 CLOSE, on app exit and swept at startup. See [Job Temp](jobtemp.md).
 
+### `ai.py` — AI Client & Flows
+The AI features' engine (owner 2026-07-20): a minimal Gemini REST
+client over `urllib` (free AI Studio key from `settings.json`, loud
+`AiError`/`NoKey`, paced for the free tier), the sheet-GENERATOR
+flow (clarifying questions → final `.md` → REAL-parser validation +
+one automatic repair round → save under `sheets/`), and the image
+CHECKER's flag memory (`<out>/_state/ai_flags.json`, mtime-based
+invalidation) with the `dest_for` reverse mapping the re-send uses.
+See [AI Client & Flows](ai.md).
+
 ### `settings.py` — Settings Persistence
 Loads/saves the GUI's remembered choices as `settings.json` at the
 project root (gitignored); a corrupt file is loud but never crashes

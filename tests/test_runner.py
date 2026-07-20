@@ -472,6 +472,50 @@ def test_only_regenerates_an_existing_file(tmp_path):
     assert (out / dest_for("fake/img_1.png", "gemini")).read_bytes() == b"STALE"
 
 
+def test_extra_suffix_appends_the_per_item_note(tmp_path):
+    """The AI checker's re-send path (owner 2026-07-20): ``extra_suffix``
+    maps a drop path to EXTRA text appended after the site suffix for
+    exactly that item; unmapped items get none, and the note also rides
+    the SAFER-RETRY resend (the preamble is prepended to the same base)."""
+    sheet = make_sheet(tmp_path, n=3)
+    out = tmp_path / "out"
+    driver = FakeDriver(SITES["gemini"])
+    suffix = prompt_suffix("gemini", "white")
+    note = "The previous attempt had these flaws: subject cut. Regenerate."
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST,
+        prompt_suffix=suffix,
+        extra_suffix={"fake/img_1.png": note},
+        only={"fake/img_0.png", "fake/img_1.png"},
+    )
+    assert generated == 2
+    # item 0: prompt + site suffix only; item 1: ... + the fix note
+    assert driver.submitted[0] == "prompt 0" + suffix
+    assert driver.submitted[1] == "prompt 1" + suffix + "\n\n" + note
+
+
+def test_extra_suffix_survives_the_safer_retry(tmp_path):
+    class RefuseOnce(FakeDriver):
+        def extract_image(self):
+            if SAFER_PREAMBLE not in self.submitted[-1]:
+                raise ItemRefused("refused: unsafe")
+            return PNG_1PX
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    driver = RefuseOnce(SITES["gemini"])
+    note = "Fix the stray line."
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST,
+        extra_suffix={"fake/img_0.png": note},
+        safer_retry=True,
+    )
+    assert generated == 1
+    # both the original send and the safer retry carry the note
+    assert all(s.endswith("\n\n" + note) for s in driver.submitted)
+    assert driver.submitted[1].startswith(SAFER_PREAMBLE)
+
+
 def test_stop_flag_stops_between_items(tmp_path):
     sheet = make_sheet(tmp_path, n=3)
     out = tmp_path / "out"
