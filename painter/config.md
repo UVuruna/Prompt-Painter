@@ -37,7 +37,9 @@ match.
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
   `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
   `prompt_suffix`; GUI also `STYLES`/`STYLE_CHOICES`/`STYLE_DEFAULT`,
-  `RESIZE_SETTLE_MS`, the `ASPECT_FILTER_*` constants, `iter_images`
+  `RESIZE_SETTLE_MS`, the `ASPECT_FILTER_*` constants, `iter_images`,
+  the `SWITCH_*`/`TRANSITION_FADE_*` theming-and-cover art block, and
+  the `BADGES` block + `badge_keys_for` (the dashboard status badges)
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`
 
@@ -203,25 +205,63 @@ match.
   the two track pills are the owner's website SVGs
   (`SWITCH_TRACK_NIGHT_SVG` / `SWITCH_TRACK_DAY_SVG`, in
   `assets/icons/`), and the moon/sun knobs are PIL radial-gradient
-  colours — silver moon (`SWITCH_MOON_CENTER`/`_EDGE`) + 3 craters,
-  gold sun (`SWITCH_SUN_CENTER`/`_EDGE`) + a blurred glow
-  (`SWITCH_SUN_GLOW*`) — rendered at `SWITCH_SUPERSAMPLE`x and
-  LANCZOS-downscaled. The theme CROSS-FADE constants live here too:
+  colours — the MOON a real moon (owner 2026-07-20): silver gradient
+  (`SWITCH_MOON_CENTER`/`_EDGE`) + 7 varied craters
+  (`SWITCH_CRATERS`, floors `SWITCH_CRATER`) each with a subtle
+  alpha-blended lit rim arc (`SWITCH_CRATER_RIM` /
+  `_RIM_FRAC` / `_RIM_ALPHA` at 185 — a solid near-white arc read as a
+  pac-man ring — / `_RIM_ARC_DEG`), TERMINATOR shading (lit from
+  `SWITCH_MOON_LIGHT_DIR`, far limb falling to
+  `SWITCH_MOON_DARK_FLOOR` across a `SWITCH_MOON_TERMINATOR_SOFT`
+  smoothstep band) and deterministic value-noise mottling
+  (`SWITCH_MOON_NOISE_SEED`/`_CELLS`/`_AMPL` — the seed is FIXED so
+  the moon is identical every build; 11.0 amplitude, 6.0 measured
+  invisible) — the gold sun (`SWITCH_SUN_CENTER`/`_EDGE`) + a blurred
+  glow (`SWITCH_SUN_GLOW*`) — rendered at `SWITCH_SUPERSAMPLE`x and
+  LANCZOS-downscaled. The snapshot-cover FADE constants live here too:
   `SWITCH_FADE_MS` (≈500 ms) / `SWITCH_FADE_STEPS` (28) time the
-  snapshot-overlay alpha ramp (lengthened 2026-07-19 to kill the flip
-  flash), and `SWITCH_COVER_ICON_FRAC` (0.30) / `SWITCH_COVER_ICON_SS`
-  size the BIG centred sun/moon that rides the cover — the SAME renderers
-  as the switch knob, showing the theme being switched TO. This block is
+  ceremonial THEME cross-fade (lengthened 2026-07-19 to kill the flip
+  flash), `TRANSITION_FADE_MS` (260 ms) / `TRANSITION_FADE_STEPS` (14)
+  the snappier covers the SAME `gui.smooth_transition` mechanism puts
+  behind the Controls collapse, each agent's Settings gear and a
+  window maximize/restore (owner 2026-07-20), and
+  `SWITCH_COVER_ICON_FRAC` (0.30) / `SWITCH_COVER_ICON_SS`
+  size the BIG centred sun/moon that rides the theme cover — the SAME
+  renderers as the switch knob, showing the theme being switched TO.
+  This block is
   PURE hex/number data — no tkinter/ttkbootstrap/PIL import — so the
   engine and tests stay framework-free; [GUI](../gui.md) rasterizes it
   into the live art.
 - `RESIZE_SETTLE_MS` — the smooth-resize debounce window (owner
-  2026-07-19). customtkinter re-renders on every intermediate
-  `<Configure>`, so a window drag / maximize used to run the
-  [GUI](../gui.md) `ScrollFrame`'s expensive re-fit (scrollregion bbox +
-  fill-height) per frame. The `ScrollFrame` now defers that heavy pass
-  and runs it ONCE, this many ms (150) after the LAST `<Configure>`
-  ("wait for mouse release").
+  2026-07-19, widened in role 2026-07-20). customtkinter re-renders on
+  every intermediate `<Configure>`, so a window drag / maximize used to
+  run the [GUI](../gui.md) `ScrollFrame`'s expensive re-fit
+  (scrollregion bbox + fill-height) per frame. Everything deferrable
+  now waits this many ms (150) after the LAST `<Configure>` ("wait for
+  mouse release") and runs ONCE: the `ScrollFrame` re-fit AND its
+  body-width apply, the Select window's label wraplength re-flow, and
+  the main window's buffered dashboard events (the root watcher
+  buffers `__event__` messages during an active drag and flushes them
+  on this same settle).
+- `BADGES`, `BADGE_ACTION_STEPS`, `BADGE_DONE_STATUS`,
+  `BADGE_DOT_PX` / `BADGE_DOT_GAP_PX` / `BADGE_DOT_SS`,
+  `badge_keys_for(actions, retried)` — the dashboard STATUS BADGES
+  (owner 2026-07-20): small coloured dots beside an image row's name
+  in the gen panels' Collections tree, marking what actually HAPPENED
+  to that image. `BADGES` is pure data — key → (dot colour, legend
+  label), render order; deliberately THEME-AGNOSTIC mid-tones so one
+  dot reads on both tree backgrounds, and the owner retints/renames
+  here. `BADGE_ACTION_STEPS` maps the runner's post_save step names
+  (`REMOVE BG` / `CROP` / `UPSCALE`) to badge keys;
+  `badge_keys_for` parses the action string ("REMOVE BG: done, CROP:
+  done, UPSCALE: nothing") and awards a badge ONLY on status
+  `BADGE_DONE_STATUS` ("done" — never nothing/unclear/FAILED; unknown
+  segments are ignored, badges only assert a positive), plus the
+  `retry` badge when the safer retry produced the image. The `DOT_*`
+  numbers drive [GUI](../gui.md)'s PIL dot rasterizer (supersampled +
+  LANCZOS) — dots are PIL-drawn, NOT emoji: Tk 8.6 on Windows renders
+  colour emoji as identical monochrome circles (verified live
+  2026-07-20).
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text, style=None)` — the
   rule block appended to every prompt: the chosen background (each

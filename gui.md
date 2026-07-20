@@ -71,18 +71,26 @@ when the content is shorter than the window — behind a change-guard
 that breaks the itemconfigure→`<Configure>`→recompute loop
 (`winfo_reqheight` is invariant under the forced height, so one
 settle converges); `refresh()` re-fits after a collapse/expand.
-`ScrollFrame` also DEBOUNCES the resize re-fit (owner 2026-07-19):
-customtkinter re-renders on every intermediate `<Configure>`, so a
-window drag / maximize used to run the fill-height + scrollregion
-scan per frame (visible jank). Now a canvas `<Configure>` tracks the
-width live (cheap) but re-arms a settle timer (`_arm_settle`), the
-`_resizing` flag gates `_on_body`'s per-frame scheduling, and the
-heavy pass runs ONCE via `_settle` ~`RESIZE_SETTLE_MS` (150 ms) after
-the LAST `<Configure>` ("wait for mouse release") — the first
-configure of a settled window still fills height at once so the
-viewport never shows a start-up dead strip. Measured: a 20-step
-resize burst runs the heavy re-fit 0× during the drag and once on
-settle, vs 18× (per frame) before.
+`ScrollFrame` also DEBOUNCES the resize re-fit (owner 2026-07-19,
+tightened 2026-07-20): customtkinter re-renders on every intermediate
+`<Configure>`, so a window drag / maximize used to run the
+fill-height + scrollregion scan per frame (visible jank). A canvas
+`<Configure>` now only REMEMBERS the newest width and re-arms a
+settle timer (`_arm_settle`); the `_resizing` flag gates `_on_body`'s
+per-frame scheduling, and the WHOLE re-fit — the body-width
+itemconfigure (`_apply_width`), fill-height and the scrollregion scan
+— runs ONCE via `_settle` ~`RESIZE_SETTLE_MS` (150 ms) after the LAST
+`<Configure>` ("wait for mouse release"). The width used to stay live
+per frame, but every width write reflows the body and fires a
+`<Configure>` into each CTk child — measured over a synthetic 30-step
+drag: 30 width writes → 55 CTk `_draw` re-renders before vs 0 and 0
+during the drag now (one width write + 2 scans + 5 redraws on
+settle); the first configure of a settled window still applies
+immediately so the viewport never opens with a dead strip. Trade-off
+(owner accepted): mid-drag the content freezes at its pre-drag width
+— a window-bg strip grows (or the content clips) at the right edge —
+and snaps to fit 150 ms after release. The drag stream itself also
+buffers the dashboard events (see **Threading**).
 The module-level `folder_of(drop_path)` (a drop path's
 POSIX parent, `(root)` fallback) is the shared L2 folder identity
 for both the dashboard tree and the Select window.
@@ -152,7 +160,12 @@ reachability fixes:
   and drive the same `_start_site`/`_stop_site`. The button carries the
   **gamepad icon** (`assets/icons/controls.png`, owner 2026-07-19) beside
   the glyph, which flips to `▸ Controls` when collapsed; the state
-  persists (`controls_collapsed`).
+  persists (`controls_collapsed`). The toggle runs behind the shared
+  **`smooth_transition` snapshot cover** (owner 2026-07-20): the swap
+  moves the whole upper window, so `_toggle_collapsed` covers it with
+  a window snapshot, relayouts hidden behind it and fades the cover
+  out over `TRANSITION_FADE_MS` (~260 ms) instead of one hard jump
+  (see **Theming — the snapshot cover**).
 - **Per-agent Settings gear** (owner 2026-07-19) — each `AgentPanel`
   owns its OWN `⚙ Settings` gear button (`assets/icons/settings.png`, on
   the Start/Stop row) that shows/hides THAT agent's collapsible
@@ -162,7 +175,10 @@ reachability fixes:
   the panel stays compact; `_toggle_settings` flips the panel's own
   `settings_collapsed_var` and `_apply_finetune_visibility` packs ↔
   `pack_forget`s the panel's `_finetune_box` (built at the panel's bottom)
-  and swaps the `▾/▸ Settings` caret. The state is per agent, persisted in
+  and swaps the `▾/▸ Settings` caret — the reveal runs behind the same
+  `smooth_transition` snapshot cover as the Controls toggle (owner
+  2026-07-20), since it moves everything below the panel. The state is
+  per agent, persisted in
   that agent's settings (`settings_collapsed`, default collapsed) and
   reflected on load. There is NO global Settings toggle (the 0.0.079
   top-strip one was removed). Collapsing the whole Controls area hides
@@ -190,6 +206,26 @@ reachability fixes:
   unparseable passes through), applied in `_apply_settings`, so a
   stale `1381x2061` (taller than the owner's screen) can never again
   place the window past the screen edge with the bottom unreachable.
+- **The root `<Configure>` watcher** (`_on_root_configure`, owner
+  2026-07-20) — bound `add="+"` on the root at the END of `__init__`
+  (after the saved geometry applies, so startup never arms it), and
+  since every child widget carries the toplevel bindtag, its FIRST
+  line drops child configures (one identity check per frame — the
+  whole added per-frame cost). Two jobs: a **zoomed↔normal state
+  change** is the DISCRETE maximize/restore jump — it runs the
+  `smooth_transition` cover (mutate = nothing; the WM already resized
+  us, the relayout settles behind the cover) and can never fire
+  mid-drag because the state stays `normal` through a whole drag; a
+  **same-state size change** marks a continuous drag active and
+  re-arms a `RESIZE_SETTLE_MS` settle — while active, `_drain_queue`
+  BUFFERS `__event__` messages (dashboard tree/label updates) into
+  `_pending_events` and `_resize_settled` flushes them in order on
+  release, so a live run stops re-rendering tree rows per drag frame
+  (measured: 30 mid-drag events handled during the drag before, 0
+  after — all 30 on settle). This is the ONLY root-level `<Configure>`
+  bind; the audit found no other per-frame `<Configure>` work in
+  gui.py beyond `ScrollFrame` (debounced above) and the Select
+  window's wrap re-flow (now also settle-debounced).
 
 ## The window
 
@@ -489,6 +525,26 @@ key is gone (a stale one in an old settings.json is ignored).
   (or double-click a row) opens the same formatted viewer — a
   collection's whole file, a folder's sheet excerpt, or an image's
   prompt + the saved image.
+- **Status badges** (owner 2026-07-20) — each image row carries small
+  coloured DOTS beside its name for what actually HAPPENED to that
+  image: green `bg` = BG removed, orange `crop` = cropped, blue
+  `upscale` = upscaled, purple `retry` = the one-shot safer retry
+  produced it. A post-save step earns its dot ONLY when it really
+  CHANGED the file (`config.badge_keys_for` maps the runner's
+  `actions` string — a step counts on status `done`, never `nothing`
+  / `unclear` / `FAILED`); `retried` comes from the same
+  `item_progress`/`item_done` payload. The dots are PIL-DRAWN
+  (module `badge_dots`, supersampled + LANCZOS, one cached
+  PhotoImage per key-combination) and attached as the row's Treeview
+  image — Tk 8.6 on Windows renders colour EMOJI as identical
+  monochrome circles (probed live 2026-07-20), so glyph badges were
+  not an option; a row image is the only per-row colour a
+  `ttk.Treeview` offers and sits LEFT of the name. Colours/labels
+  are pure config data (`config.BADGES` — the owner retints there;
+  deliberately theme-agnostic mid-tones that read on both the dark
+  and the cream tree). A tiny mono-font LEGEND line under the
+  Collections header (`● BG removed ● cropped ● upscaled ● safer
+  retry`, each label tinted its badge colour) spells them out.
 
 **`ToolPanel`** (one in-place tool), header + state line then:
 - a progress bar, an aggregate metric label — `avg N% <metric> ·
@@ -606,39 +662,49 @@ label, DocWindow's Text tags) do NOT follow ttk styles and must be
 recomputed from `status()`/`colors` live (Select retains each leaf's
 `advice` + `n_done` to recompute its colour).
 
-**The cross-fade** (owner 2026-07-18): tkinter has no native colour
-transitions, so a live flip repaints as an ugly cascade of half-themed
-frames (black boxes, half-styled spinners). When `animate=True` AND the
-window is on-screen (`winfo_ismapped` + `winfo_viewable`), the whole
-cascade is hidden behind a SNAPSHOT CROSS-FADE: `_snapshot_overlay`
-grabs the current OLD-theme window client area with `PIL.ImageGrab`
-(from `winfo_rootx/rooty/width/height`) into an `ImageTk.PhotoImage`
-(held on the overlay so tk cannot GC it), and mounts it in a
-borderless, topmost, `overrideredirect` Toplevel placed exactly over
-the window at `-alpha` 1.0. The snapshot also carries a BIG CENTRED ICON
-of the theme being switched TO — the SUN going to day, the MOON going to
-night (`_render_theme_cover_icon`, the SAME anti-aliased PIL sun/moon
-renderers as the switch knob, sized to `SWITCH_COVER_ICON_FRAC` = 30 % of
-the window's min dimension) — `alpha_composite`-d INTO the grab so the
-icon fades with the cover. Order matters (owner 2026-07-19, the flash
-fix): the overlay is FORCED fully mapped + painted first —
-`deiconify` → `lift` → `update_idletasks` → `update()` (so DWM actually
-paints the cover on screen) — and ONLY THEN does `_apply_theme_now`
-repaint the REAL window in the new theme UNDERNEATH the cover; one forced
-`update_idletasks` settles that cascade invisibly, and
-`_fade_out_overlay` ramps the overlay's window `-alpha` 1.0 → 0.0 over
-`SWITCH_FADE_MS` (≈500 ms) in `SWITCH_FADE_STEPS` (28) `root.after`
-ticks (ease-out) before destroying it. Forcing the paint before the
-repaint GUARANTEES only the snapshot + sun/moon is ever seen mid-flip,
-never a half-themed cascade. It is a pure visual nicety: any failure
-(ImageGrab unavailable, `-alpha` unsupported) is caught, any partial
-overlay destroyed, and the plain instant `_apply_theme_now` runs instead
-with a one-line log note (root Rule #1 — never a stuck overlay or an
-un-themed app). Caveats: `ImageGrab` grabs SCREEN pixels, so a window
-occluding ours is captured in the snapshot; the app is frozen (static
-snapshot) for the ~500 ms fade, so live dashboard updates are briefly
-hidden. Startup passes `animate=False` (no window yet) — instant flip,
-no overlay.
+**The snapshot cover — `smooth_transition(root, mutate, ...)`** (owner
+2026-07-20, generalizing the 2026-07-18 theme cross-fade into ONE
+shared mechanism, Rule #5): tkinter has no native colour transitions
+and cannot animate a relayout, so a live theme flip repaints as an
+ugly cascade of half-themed frames and a big collapse/expand or a
+maximize/restore lands as one hard jump. The shared helper hides all
+of these: `_snapshot_overlay` grabs the CURRENT window client area
+with `PIL.ImageGrab` (from `winfo_rootx/rooty/width/height`) into an
+`ImageTk.PhotoImage` (held on the overlay so tk cannot GC it) and
+mounts it in a borderless, topmost, `overrideredirect` Toplevel placed
+exactly over the window at `-alpha` 1.0; an optional
+`icon_factory(w, h)` composites a PIL image centred INTO the grab.
+Order matters (owner 2026-07-19, the flash fix): the overlay is FORCED
+fully mapped + painted first — `deiconify` → `lift` →
+`update_idletasks` → `update()` (so DWM actually paints the cover on
+screen) — ONLY THEN does the `mutate` callback run (the theme repaint
+/ the relayout) UNDERNEATH the cover, one forced `update_idletasks`
+settles it invisibly, and `_fade_out_overlay` ramps the overlay's
+window `-alpha` 1.0 → 0.0 (ease-out) before destroying it. Wired to
+FOUR places: the **theme flip** (`apply_theme(animate=True)` passes
+`icon_factory` = the NEXT theme's big sun/moon via
+`_render_theme_cover_icon` at `SWITCH_COVER_ICON_FRAC` = 30 % of the
+window's min dimension, and the ceremonial `SWITCH_FADE_MS` ≈ 500 ms /
+`SWITCH_FADE_STEPS` 28 timing), the **▾ Controls collapse**
+(`_toggle_collapsed`), each agent's **Settings gear**
+(`_toggle_settings`) and the **maximize/restore** jump
+(`_on_root_configure`) — the last three icon-less on the snappier
+default `TRANSITION_FADE_MS` (260 ms) / `TRANSITION_FADE_STEPS` (14).
+It is a pure visual nicety: with no window on screen
+(`winfo_ismapped`/`winfo_viewable`) or on ANY cover failure
+(ImageGrab unavailable, `-alpha` unsupported) the mutate simply runs
+instantly with a one-line log note, any partial overlay destroyed
+(root Rule #1 — the cover can never be the reason a toggle stops
+working); a mutate exception is NEVER masked — it propagates loudly
+while the overlay still fades out via the `finally`. Caveats:
+`ImageGrab` grabs SCREEN pixels, so a window occluding ours is
+captured in the snapshot — on MAXIMIZE the grab covers the NEW
+(bigger) rect, so other windows' pixels ride the cover for its 260 ms
+(they were already visible right there, so nothing leaks; it reads as
+a full-screen dissolve into the maximized app); and the app shows a
+static snapshot for the fade, so live dashboard updates are briefly
+hidden. Startup passes `animate=False` (no window yet) — instant
+flip, no overlay.
 
 **Startup order** (`PainterGui.__init__`) applies the saved theme
 BEFORE building any widget — `register_painter_day()` → load settings
@@ -662,9 +728,21 @@ two track pills via the icon SVG->PIL path (`_render_switch_track`
 rasterizes `switch_night`/`switch_day` from `assets/icons/`), and the
 sun/moon knobs in a rest + a 1.05x hover size (`_render_sun_knob` /
 `_render_moon_knob` draw a supersampled RGBA radial-gradient disc via
-`_radial_disc` — silver moon + 3 craters, gold sun over a blurred
-glow — then LANCZOS-down). It is a FIXED size (it does not follow the
-font zoom), so once is enough. Each `_redraw` just re-places the track
+`_radial_disc`, then LANCZOS-down). The MOON is a real moon (owner
+2026-07-20, replacing the flat 3-crater disc): 7 craters of varied
+sizes (`SWITCH_CRATERS`), each with a subtle alpha-blended lit RIM
+ARC on the side facing the light (`SWITCH_CRATER_RIM*`); TERMINATOR
+shading — brightness ramps from the `SWITCH_MOON_LIGHT_DIR` limb down
+to `SWITCH_MOON_DARK_FLOOR` on the far limb across a smoothstep band
+— darkens surface, craters and rims together so the sphere reads lit
+from one side; and a deterministic low-amplitude value-noise
+MOTTLING (`SWITCH_MOON_NOISE_*` — FIXED seed, identical every build)
+adds faint maria. The SUN stays the gold gradient over a blurred
+glow. The big theme-cover icon reuses these SAME renderers at ~30 %
+of the window (`_render_theme_cover_icon`), so knob and cover
+improved together; the night track pill (starfield SVG) is untouched.
+It is a FIXED size (it does not follow the font zoom), so once is
+enough. Each `_redraw` just re-places the track
 `create_image` (hard-swapped night/day at the knob's midpoint) and the
 knob `create_image` at the animated x. A click toggles state, calls
 `apply_theme(name, animate=True)` (the snapshot cross-fade above) +
@@ -687,7 +765,12 @@ CONCURRENTLY; each tool worker only backs up + processes files under
 its own picked folder and its own `JobTemp` subdir (disjoint writes).
 Every worker touches the window ONLY through the single `self._q`
 queue drained on the tk timer (`_drain_queue` via `root.after`) — so
-every widget mutation runs on the main thread. Queue messages:
+every widget mutation runs on the main thread. The drain hands each
+message to `_dispatch`; during an ACTIVE drag-resize `__event__`
+messages are BUFFERED instead (`_pending_events`) and flushed in
+order by `_resize_settled` (owner 2026-07-20 — dashboard tree/label
+updates stop re-rendering per drag frame; plain log lines and the
+rare control messages still apply immediately). Queue messages:
 `('__event__', slot, ev)` routes to `self.panels.get(slot).handle(ev)`
 (`.get` is the defensive guard for a late event after a panel closed),
 `('__tool_done__', slot)` and `('__worker_done__', key)` reveal the

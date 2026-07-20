@@ -522,6 +522,58 @@ def job_color_pair(kind: str) -> tuple[str, str]:
 # the top row, 6th cell empty), 6→2x3.
 GRID_COLS_BY_COUNT = {1: 1, 2: 2, 3: 3, 4: 2, 5: 2, 6: 2}
 
+
+# --- Dashboard status badges (owner 2026-07-20) ----------------------
+#
+# Small coloured DOT badges beside an image's name in the gen panels'
+# Collections tree, marking what actually HAPPENED to that image: a
+# post-save step earns its badge ONLY when it really CHANGED the file
+# (status "done" in the runner's action string — never a "nothing" /
+# "unclear"), and "retry" marks an image that needed the one-shot SAFER
+# RETRY to generate. PURE DATA — the owner retints/renames here; order =
+# render order. The colours are deliberately THEME-AGNOSTIC mid-tones
+# (like the CHECKER greys) so one dot reads on both the dark and the
+# cream tree background. NOTE: the dots are PIL-DRAWN, not emoji — Tk
+# 8.6 on Windows renders colour emoji as identical monochrome circles
+# (verified live 2026-07-20), so glyph badges cannot be told apart.
+BADGES = {
+    "bg": ("#22c55e", "BG removed"),      # green
+    "crop": ("#f59e0b", "cropped"),       # orange
+    "upscale": ("#3b82f6", "upscaled"),   # blue
+    "retry": ("#a855f7", "safer retry"),  # purple
+}
+# how the runner's post_save action string spells each step
+# ("REMOVE BG: done, CROP: done, UPSCALE: nothing") -> badge key.
+BADGE_ACTION_STEPS = {
+    "REMOVE BG": "bg",
+    "CROP": "crop",
+    "UPSCALE": "upscale",
+}
+BADGE_DONE_STATUS = "done"  # the only status that earns a badge
+# dot geometry (the GUI rasterizes at BADGE_DOT_SS x then LANCZOS-downs)
+BADGE_DOT_PX = 9    # final dot diameter
+BADGE_DOT_GAP_PX = 3  # gap between dots (and before the first)
+BADGE_DOT_SS = 4    # supersample factor for a crisp anti-aliased rim
+
+
+def badge_keys_for(actions: str, retried: bool = False) -> tuple:
+    """The badge keys one image earned, in BADGES (render) order.
+
+    ``actions`` is the runner's post_save description ("REMOVE BG:
+    done, CROP: done, UPSCALE: nothing"); a step counts only when its
+    status is exactly BADGE_DONE_STATUS. ``retried`` adds the safer-
+    retry badge. Unknown segments ("POSTPROCESS: FAILED", free text)
+    are simply ignored — badges only ever assert a positive."""
+    earned = set()
+    for part in actions.split(","):
+        step, _, status = part.partition(":")
+        key = BADGE_ACTION_STEPS.get(step.strip())
+        if key is not None and status.strip() == BADGE_DONE_STATUS:
+            earned.add(key)
+    if retried:
+        earned.add("retry")
+    return tuple(key for key in BADGES if key in earned)
+
 # --- Tool temp / before-after / restore (owner 2026-07-19) -----------
 #
 # The four in-place tools back the ORIGINAL of every file up before they
@@ -578,6 +630,15 @@ SWITCH_SUPERSAMPLE = 4      # render knobs at Nx, then LANCZOS down for crisp ed
 SWITCH_COVER_ICON_FRAC = 0.30  # cover icon diameter = this * min(win W, H)
 SWITCH_COVER_ICON_SS = 2       # supersample for the big cover icon (LANCZOS down)
 
+# The SAME snapshot-cover machinery (gui.smooth_transition, owner
+# 2026-07-20) also hides every DISCRETE relayout jump: the Controls
+# collapse/expand, each agent's Settings-gear toggle, and a window
+# maximize/restore. Those covers fade FASTER than the theme flip — a
+# collapse should feel snappy, not ceremonial; the theme keeps its own
+# SWITCH_FADE_* timing above.
+TRANSITION_FADE_MS = 260    # collapse/settings/maximize cover fade
+TRANSITION_FADE_STEPS = 14  # alpha ramp ticks across TRANSITION_FADE_MS
+
 # --- Smooth window RESIZE (owner 2026-07-19) --------------------------
 # customtkinter re-renders its canvas-drawn rounded widgets on every
 # intermediate <Configure>, so dragging the window edge / maximizing used
@@ -598,18 +659,47 @@ SWITCH_TRACK_DAY_SVG = "switch_day"      # ON track: sky #5ea7ee + clouds pill
 # radial gradient reads as a 3D sphere, not a flat disc
 SWITCH_KNOB_HILIGHT = (0.40, 0.36)
 
-# MOON knob — silver radial gradient (bright centre -> dim edge) + 3
-# darker craters; the offset highlight gives the subtle inner shading.
-SWITCH_MOON_CENTER = "#e8e8e8"   # radial-gradient centre (bright silver)
-SWITCH_MOON_EDGE = "#a0a0a0"     # radial-gradient edge (dim silver)
-SWITCH_CRATER = "#6a7280"        # the 3 craters
+# MOON knob (owner 2026-07-20 — "a real moon with craters"): a silver
+# radial-gradient sphere with TERMINATOR shading (day side toward the
+# light, the far limb falling into shadow), 7 craters of varied sizes
+# each with a lit rim arc, and a subtle deterministic surface mottling.
+SWITCH_MOON_CENTER = "#ececec"   # radial-gradient centre (bright silver)
+SWITCH_MOON_EDGE = "#a8a8a8"     # radial-gradient edge (dim silver)
+SWITCH_CRATER = "#8b93a1"        # crater floor (pre-shading; the
+#                                  terminator darkens it on the far side)
+SWITCH_CRATER_RIM = "#f6f6f2"    # the lit rim arc on each crater
+SWITCH_CRATER_RIM_FRAC = 0.10    # rim stroke width = crater d * this
+SWITCH_CRATER_RIM_ALPHA = 185    # rim arc opacity (alpha-BLENDED onto the
+#                                  disc — a solid near-white arc read as a
+#                                  pac-man ring, not a subtle lit rim)
+SWITCH_CRATER_RIM_ARC_DEG = 140  # rim arc span, centred on the light side
 # each crater: (diameter, centre-x, centre-y) as fractions of the knob
-# diameter, converted from the spec's edge insets
+# diameter — 7 of varied sizes, spread so none overlap
 SWITCH_CRATERS = (
-    (0.31, 0.595, 0.305),
-    (0.25, 0.305, 0.625),
-    (0.16, 0.740, 0.610),
+    (0.28, 0.590, 0.300),
+    (0.21, 0.300, 0.610),
+    (0.14, 0.735, 0.590),
+    (0.11, 0.420, 0.175),
+    (0.09, 0.205, 0.360),
+    (0.13, 0.565, 0.800),
+    (0.08, 0.815, 0.415),
 )
+# TERMINATOR shading: sunlight falls from this 2D direction (x right,
+# y down — negative = upper-left); brightness ramps from 1.0 on the lit
+# limb down to SWITCH_MOON_DARK_FLOOR on the far limb, with the
+# transition band SWITCH_MOON_TERMINATOR_SOFT of the diameter wide.
+SWITCH_MOON_LIGHT_DIR = (-0.62, -0.44)
+SWITCH_MOON_TERMINATOR_SOFT = 0.85  # soft band width (fraction of d)
+SWITCH_MOON_DARK_FLOOR = 0.52       # far-limb brightness multiplier
+# surface MOTTLING: a low-res value-noise grid smoothly upscaled over
+# the disc, +- this many brightness steps; the seed is FIXED so the
+# moon is identical every build (deterministic, owner 2026-07-20).
+SWITCH_MOON_NOISE_SEED = 20260720
+SWITCH_MOON_NOISE_CELLS = 9      # noise grid side (low res -> soft blobs)
+SWITCH_MOON_NOISE_AMPL = 11.0    # +- brightness amplitude of the mottling
+#                                  (6.0 measured invisible at cover size —
+#                                  ~3% of the lit silver; 11 reads as faint
+#                                  maria without getting dirty)
 
 # SUN knob — gold radial gradient (bright centre -> amber edge) with a
 # soft outer glow: a larger low-alpha gold disc behind, GaussianBlur-ed.

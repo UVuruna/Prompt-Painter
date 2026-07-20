@@ -68,6 +68,33 @@ only" reading would wrongly report 0.
 Missing file → `{}`, atomic roundtrip, corrupt and non-object JSON
 → loud stderr but `{}`, never a crash.
 
+### `test_config.py` — Config Helpers
+Pure-data checks with no tkinter import: the per-theme solid-button
+shades (day differs from night, the neutral is LIGHT on day), the
+`fmt_op_duration` / `fmt_pct` formatters, `selection_base_and_rels`,
+`iter_images`, the STYLE clause table, and the dashboard STATUS
+BADGE mapping (owner 2026-07-20) — `badge_keys_for` awards a badge
+only on a `done` step (never nothing/unclear/FAILED), adds `retry`
+from the flag, renders in `BADGES` order, and the badge tables stay
+mutually consistent.
+
+### `test_aspect.py` — Change-Aspect Deform
+The grow-only stretch rule, already-at-ratio byte-unchanged no-ops,
+the optional input filter (off / IF / IF NOT) and loud failures.
+
+### `test_viewer.py` — Viewer Helpers
+The before/after transparency checkerboard (`_checkerboard` /
+`_has_alpha` and the composite promise) and the folder-scoped
+restore set (`rels_in_folder`).
+
+### `test_smooth_transition.py` — Snapshot-Cover Fallbacks
+The shared `gui.smooth_transition` helper headless (owner
+2026-07-20): the mutate callback runs EXACTLY ONCE with no root, an
+unmapped/unviewable root, or a failing cover; the covered path
+forces the overlay painted BEFORE the mutate and fades after (theme
+timing passes through); a mutate exception propagates loudly while
+the overlay still fades — never a stuck cover, never a masked error.
+
 ### `conftest.py` — Import Path
 Makes the `painter` package importable from any pytest invocation.
 

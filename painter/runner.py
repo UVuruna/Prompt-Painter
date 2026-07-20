@@ -311,6 +311,7 @@ def run_sheet(
                 else prompt_suffix
             )
             base = item.prompt + suffix
+            retried = False  # True when the SAFER RETRY produced the image
             try:
                 data, t_send = generate_one(base)
             except ItemRefused as exc:
@@ -321,6 +322,7 @@ def run_sheet(
                     emit({"type": "item_retry"})
                     try:
                         data, t_send = generate_one(SAFER_PREAMBLE + base)
+                        retried = True
                         log("    safer retry SUCCEEDED")
                     except ItemRefused as exc2:
                         reason = str(exc2)
@@ -396,7 +398,10 @@ def run_sheet(
             log(f"    saved {dest} ({size:,} bytes)")
             # count it live right away (dashboard progress + generate
             # avg) — carries everything the dashboard needs to add the
-            # image to its table now, except our-time (needs the pause)
+            # image to its table now, except our-time (needs the pause).
+            # "actions" (the post_save description) + "retried" feed the
+            # per-image STATUS BADGES (owner 2026-07-20).
+            action_str = ", ".join(actions)
             emit(
                 {
                     "type": "item_progress",
@@ -408,6 +413,8 @@ def run_sheet(
                     "orig_res": orig_res,
                     "final_res": final_res,
                     "size": size,
+                    "actions": action_str,
+                    "retried": retried,
                 }
             )
 
@@ -434,6 +441,8 @@ def run_sheet(
                     "orig_res": orig_res,
                     "final_res": final_res,
                     "size": size,
+                    "actions": action_str,
+                    "retried": retried,
                 }
             )
     except TerminalState as exc:

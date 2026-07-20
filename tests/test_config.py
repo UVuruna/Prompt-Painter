@@ -13,11 +13,14 @@ from pathlib import Path
 import pytest
 
 from painter.config import (
+    BADGES,
+    BADGE_ACTION_STEPS,
     BUTTON_FILL,
     BUTTON_TEXT,
     STYLES,
     STYLE_CHOICES,
     STYLE_DEFAULT,
+    badge_keys_for,
     button_fill_pair,
     button_text_pair,
     fmt_op_duration,
@@ -176,3 +179,43 @@ def test_style_none_is_empty_others_are_clauses():
         if name == "None":
             continue
         assert clause.startswith("STYLE:")  # every real style is a clause
+
+
+# --- dashboard status badges (owner 2026-07-20) ------------------------
+# badge_keys_for maps the runner's post_save action string ("REMOVE BG:
+# done, CROP: done, UPSCALE: nothing") + the safer-retry flag to the
+# badge keys a dashboard image row renders as coloured dots.
+
+
+def test_badge_keys_only_done_steps_earn_a_badge():
+    keys = badge_keys_for("REMOVE BG: done, CROP: done, UPSCALE: nothing")
+    assert keys == ("bg", "crop")  # 'nothing' never earns a badge
+
+
+def test_badge_keys_retry_flag_adds_the_retry_badge():
+    assert badge_keys_for("", retried=True) == ("retry",)
+    assert badge_keys_for("UPSCALE: done", retried=True) == (
+        "upscale", "retry",
+    )
+
+
+def test_badge_keys_render_in_badges_order_not_action_order():
+    keys = badge_keys_for("UPSCALE: done, CROP: done, REMOVE BG: done")
+    assert keys == ("bg", "crop", "upscale")  # BADGES (render) order
+
+
+def test_badge_keys_ignore_failures_unclear_and_free_text():
+    assert badge_keys_for("") == ()
+    assert badge_keys_for("POSTPROCESS: FAILED") == ()
+    assert badge_keys_for("REMOVE BG: unclear, CROP: nothing") == ()
+    assert badge_keys_for("some free-form log text") == ()
+
+
+def test_badge_tables_are_consistent():
+    """Every action step maps to a real badge; 'retry' is the one badge
+    with no action step (it comes from the runner's retried flag); every
+    badge is a (#rrggbb colour, label) pair."""
+    assert set(BADGE_ACTION_STEPS.values()) == set(BADGES) - {"retry"}
+    for color, label in BADGES.values():
+        assert color.startswith("#") and len(color) == 7
+        assert label

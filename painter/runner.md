@@ -81,7 +81,12 @@ event) so the dashboard never stalls; the `item_done` event with
   drop_path), `item_progress` (idx, of, gen_s — the live
   count), `item_done` (title, drop_path, gen_s, over_s, orig_res,
   final_res, size), `item_refused`, `sheet_done` (generated) — the
-  GUI dashboard is built from these. Logs the
+  GUI dashboard is built from these. `item_progress` AND `item_done`
+  also carry `actions` (the post_save description string, e.g.
+  `REMOVE BG: done, CROP: done, UPSCALE: nothing`) and `retried`
+  (True when the SAFER RETRY produced the image) — the dashboard's
+  per-image STATUS BADGES map them via `config.badge_keys_for`
+  (owner 2026-07-20). Logs the
   sheet's skipped entries, resumes by FILE EXISTENCE (or drives the
   ticked `only` set, which overrides existence to regenerate),
   drives every pending item, appends `prompt_suffix` (the caller

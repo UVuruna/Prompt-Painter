@@ -49,6 +49,10 @@ from painter.config import (
     ASPECT_FILTER_MODES,
     ASPECT_FILTER_OFF,
     BACKGROUND_CHOICES,
+    BADGES,
+    BADGE_DOT_GAP_PX,
+    BADGE_DOT_PX,
+    BADGE_DOT_SS,
     CDP_URL,
     CHECKER_DARK,
     CHECKER_LIGHT,
@@ -70,6 +74,10 @@ from painter.config import (
     SWITCH_COVER_ICON_FRAC,
     SWITCH_COVER_ICON_SS,
     SWITCH_CRATER,
+    SWITCH_CRATER_RIM,
+    SWITCH_CRATER_RIM_ALPHA,
+    SWITCH_CRATER_RIM_ARC_DEG,
+    SWITCH_CRATER_RIM_FRAC,
     SWITCH_CRATERS,
     SWITCH_FADE_MS,
     SWITCH_FADE_STEPS,
@@ -79,7 +87,13 @@ from painter.config import (
     SWITCH_KNOB_FACTOR,
     SWITCH_KNOB_HILIGHT,
     SWITCH_MOON_CENTER,
+    SWITCH_MOON_DARK_FLOOR,
     SWITCH_MOON_EDGE,
+    SWITCH_MOON_LIGHT_DIR,
+    SWITCH_MOON_NOISE_AMPL,
+    SWITCH_MOON_NOISE_CELLS,
+    SWITCH_MOON_NOISE_SEED,
+    SWITCH_MOON_TERMINATOR_SOFT,
     SWITCH_PAD_PX,
     SWITCH_SUN_CELL_SCALE,
     SWITCH_SUN_CENTER,
@@ -93,6 +107,8 @@ from painter.config import (
     SWITCH_TRACK_NIGHT_SVG,
     THEMES,
     TIMING,
+    TRANSITION_FADE_MS,
+    TRANSITION_FADE_STEPS,
     UPSCALE_ASPECT_DECIMALS,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
@@ -106,6 +122,7 @@ from painter.config import (
     fmt_pct,
     fmt_size,
     iter_images,
+    badge_keys_for,
     button_fill_pair,
     button_text_pair,
     job_color_pair,
@@ -458,21 +475,75 @@ def _radial_disc(
 
 
 def _render_moon_knob(d_px: int, ss: int) -> Image.Image:
-    """The MOON: a silver radial-gradient sphere with 3 darker craters,
-    anti-aliased. ``d_px`` = final diameter, ``ss`` = supersample factor."""
+    """The MOON — a real moon, not a flat disc (owner 2026-07-20).
+
+    Three layers over the silver radial-gradient sphere, all driven by
+    the SWITCH_MOON_* / SWITCH_CRATER* config constants:
+      * 7 CRATERS of varied sizes (darker floors), each with a lit RIM
+        ARC on the side facing the incoming light;
+      * TERMINATOR shading — brightness ramps from the lit limb (the
+        SWITCH_MOON_LIGHT_DIR side) down to SWITCH_MOON_DARK_FLOOR on
+        the far limb across a soft smoothstep band, darkening crater
+        floors and rims with the surface so the sphere reads as lit
+        from one side;
+      * subtle surface MOTTLING — a low-res value-noise grid (FIXED
+        seed, so the moon is identical every build) bicubic-upscaled
+        over the disc, ± SWITCH_MOON_NOISE_AMPL brightness steps.
+    ``d_px`` = final diameter, ``ss`` = supersample factor (rendered at
+    ss x, LANCZOS-downscaled like every knob)."""
+    import numpy as np
+
     s = d_px * ss
     disc = _radial_disc(
         s, SWITCH_MOON_CENTER, SWITCH_MOON_EDGE, SWITCH_KNOB_HILIGHT
     )
     draw = ImageDraw.Draw(disc)
     crater = (*ImageColor.getrgb(SWITCH_CRATER), 255)
+    # the rims live on their own layer and alpha-BLEND onto the disc —
+    # drawing a translucent fill straight into the RGBA disc would
+    # REPLACE the alpha (a see-through ring), and a solid near-white
+    # arc read as a pac-man ring instead of a subtle lit rim
+    rims = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    rim_draw = ImageDraw.Draw(rims)
+    rim = (*ImageColor.getrgb(SWITCH_CRATER_RIM), SWITCH_CRATER_RIM_ALPHA)
+    lx, ly = SWITCH_MOON_LIGHT_DIR
+    # PIL arc degrees (x right, y down, clockwise from 3 o'clock): the
+    # rim arc is centred on the direction the light comes FROM
+    light_deg = math.degrees(math.atan2(ly, lx))
+    half_arc = SWITCH_CRATER_RIM_ARC_DEG / 2
     for cf, cxf, cyf in SWITCH_CRATERS:
         cd = s * cf
         ccx, ccy = cxf * s, cyf * s
-        draw.ellipse(
-            [ccx - cd / 2, ccy - cd / 2, ccx + cd / 2, ccy + cd / 2],
-            fill=crater,
+        box = [ccx - cd / 2, ccy - cd / 2, ccx + cd / 2, ccy + cd / 2]
+        draw.ellipse(box, fill=crater)
+        rim_draw.arc(
+            box, start=light_deg - half_arc, end=light_deg + half_arc,
+            fill=rim, width=max(round(cd * SWITCH_CRATER_RIM_FRAC), ss),
         )
+    disc.alpha_composite(rims)
+    # terminator shading x mottling on the RGB channels (alpha untouched)
+    arr = np.asarray(disc).astype(np.float32)
+    r = s / 2.0
+    yy, xx = np.mgrid[0:s, 0:s].astype(np.float32)
+    nx, ny = (xx - r + 0.5) / r, (yy - r + 0.5) / r
+    # projection onto the light direction: +1 = the lit limb, -1 = far
+    proj = (nx * lx + ny * ly) / math.hypot(lx, ly)
+    soft = SWITCH_MOON_TERMINATOR_SOFT
+    u = np.clip((proj + soft) / (2.0 * soft), 0.0, 1.0)
+    u = u * u * (3.0 - 2.0 * u)  # smoothstep across the terminator band
+    shade = SWITCH_MOON_DARK_FLOOR + (1.0 - SWITCH_MOON_DARK_FLOOR) * u
+    rng = np.random.default_rng(SWITCH_MOON_NOISE_SEED)
+    cells = rng.uniform(-1.0, 1.0, (SWITCH_MOON_NOISE_CELLS,) * 2)
+    noise = Image.fromarray(
+        ((cells + 1.0) * 127.5).astype(np.uint8), "L"
+    ).resize((s, s), Image.BICUBIC)
+    mottle = (
+        np.asarray(noise).astype(np.float32) / 127.5 - 1.0
+    ) * SWITCH_MOON_NOISE_AMPL
+    arr[..., :3] = np.clip(
+        arr[..., :3] * shade[..., None] + mottle[..., None], 0.0, 255.0
+    )
+    disc = Image.fromarray(arr.astype(np.uint8), "RGBA")
     return disc.resize((d_px, d_px), Image.LANCZOS)
 
 
@@ -931,32 +1002,36 @@ def _apply_theme_now(name: str) -> None:
             pass  # closed mid-flip
 
 
-# --- Theme cross-fade (snapshot overlay) -----------------------------
-# tkinter has no native colour transitions, so a LIVE flip repaints as a
-# visible cascade of half-themed frames (black boxes, half-styled
-# spinners). apply_theme(animate=True) hides that cascade: grab the
-# OLD-theme window, show it in a borderless topmost overlay, repaint the
-# real window underneath in the NEW theme, then fade the overlay's window
-# alpha out and destroy it. It is a pure visual nicety — any failure
-# (ImageGrab unavailable, alpha unsupported, an occluded window) degrades
-# to the plain instant flip, never a stuck overlay or an un-themed app.
+# --- Snapshot cover + fade — the ONE transition mechanism ------------
+# tkinter cannot animate a relayout or a palette change: a live theme
+# flip repaints as a visible cascade of half-themed frames, and a big
+# collapse/expand (the Controls toggle, an agent's Settings gear) or a
+# window maximize/restore lands as one hard jump. ONE shared mechanism
+# hides all of these (owner 2026-07-20, generalizing the theme
+# cross-fade — Rule #5): smooth_transition() grabs the window into a
+# borderless topmost overlay, FORCES the cover painted, runs the mutate
+# callback (the theme flip / the relayout) hidden behind it, then fades
+# the overlay's window alpha out. A pure visual nicety — any cover
+# failure (ImageGrab unavailable, alpha unsupported, an unmapped
+# window) degrades to the plain instant mutate, never a stuck overlay.
 
 
-def _snapshot_overlay(root: tk.Misc, target_name: str) -> tk.Toplevel:
-    """Grab the root window's client area (PIL.ImageGrab), composite the
-    NEXT theme's big sun/moon icon centred on it, and mount the result in
-    a borderless, topmost, fully-opaque Toplevel placed exactly over the
-    window. The icon is baked INTO the snapshot (its transparent
-    surroundings blend onto the grab) so the whole cover fades as one.
-    The PhotoImage is held on the overlay (tk keeps no ref of its own) so
-    it survives the whole fade."""
+def _snapshot_overlay(root: tk.Misc, icon_factory=None) -> tk.Toplevel:
+    """Grab the root window's client area (PIL.ImageGrab) and mount it
+    in a borderless, topmost, fully-opaque Toplevel placed exactly over
+    the window. ``icon_factory(w, h)`` may return a PIL RGBA image (the
+    theme flip's big sun/moon) composited centred INTO the snapshot —
+    its transparent surroundings blend onto the grab, so the whole
+    cover fades as one. The PhotoImage is held on the overlay (tk keeps
+    no ref of its own) so it survives the whole fade."""
     x, y = root.winfo_rootx(), root.winfo_rooty()
     w, h = root.winfo_width(), root.winfo_height()
     snap = ImageGrab.grab(bbox=(x, y, x + w, y + h)).convert("RGBA")
-    icon = _render_theme_cover_icon(target_name, min(w, h))
-    snap.alpha_composite(
-        icon, ((w - icon.width) // 2, (h - icon.height) // 2)
-    )
+    if icon_factory is not None:
+        icon = icon_factory(w, h)
+        snap.alpha_composite(
+            icon, ((w - icon.width) // 2, (h - icon.height) // 2)
+        )
     photo = ImageTk.PhotoImage(snap)
     overlay = tk.Toplevel(root)
     overlay.overrideredirect(True)
@@ -973,13 +1048,16 @@ def _snapshot_overlay(root: tk.Misc, target_name: str) -> tk.Toplevel:
     return overlay
 
 
-def _fade_out_overlay(root: tk.Misc, overlay: tk.Toplevel) -> None:
-    """Ramp the overlay's window alpha 1.0 -> 0.0 across SWITCH_FADE_STEPS
-    root.after ticks (ease-out — the stale snapshot clears fast, then
-    eases), then destroy it. A destroyed-mid-fade overlay (TclError) ends
-    the ramp cleanly, so no overlay is ever left stuck on screen."""
-    steps = max(SWITCH_FADE_STEPS, 1)
-    interval = max(round(SWITCH_FADE_MS / steps), 1)
+def _fade_out_overlay(
+    root: tk.Misc, overlay: tk.Toplevel, fade_ms: int, fade_steps: int
+) -> None:
+    """Ramp the overlay's window alpha 1.0 -> 0.0 across ``fade_steps``
+    root.after ticks over ``fade_ms`` (ease-out — the stale snapshot
+    clears fast, then eases), then destroy it. A destroyed-mid-fade
+    overlay (TclError) ends the ramp cleanly, so no overlay is ever
+    left stuck on screen."""
+    steps = max(fade_steps, 1)
+    interval = max(round(fade_ms / steps), 1)
 
     def tick(i: int) -> None:
         try:
@@ -998,45 +1076,77 @@ def _fade_out_overlay(root: tk.Misc, overlay: tk.Toplevel) -> None:
     tick(1)
 
 
-def apply_theme(name: str, animate: bool = False) -> None:
-    """The ONE coherent flip, used by BOTH startup and the toggle.
+def smooth_transition(
+    root,
+    mutate,
+    *,
+    icon_factory=None,
+    fade_ms: int = TRANSITION_FADE_MS,
+    fade_steps: int = TRANSITION_FADE_STEPS,
+) -> None:
+    """Run ``mutate()`` (a relayout / theme repaint) hidden behind a
+    snapshot cover, then fade the cover out — shared by the theme flip,
+    the Controls collapse, each agent's Settings gear and the window
+    maximize/restore cover.
 
-    Startup passes ``animate=False`` (no window exists yet) for an
-    instant flip. The switch passes ``animate=True``: when the window is
-    on-screen the whole repaint cascade is hidden behind a SNAPSHOT
-    CROSS-FADE (see _snapshot_overlay / _fade_out_overlay). The cross-fade
-    is a visual nicety only — any failure in the snapshot/overlay/alpha
-    path is caught, any partial overlay is destroyed, and the plain
-    instant flip runs instead (a one-line note is logged, root Rule #1)."""
-    root = tb.Style().master
-    if not (
-        animate and root is not None
-        and root.winfo_ismapped() and root.winfo_viewable()
-    ):
-        _apply_theme_now(name)
+    The ORDER is what kills the visible jump (owner 2026-07-19): the
+    cover is forced fully mapped + painted by the window manager FIRST
+    (deiconify → lift → update, so DWM really shows it), only then does
+    the mutate run and settle (update_idletasks) behind it, and only
+    then does the fade start. With no window on screen — or on ANY
+    cover failure — the mutate simply runs instantly with a one-line
+    note (root Rule #1): the cover can never be the reason a toggle
+    stops working. ``mutate`` itself is NOT guarded — an exception in
+    it propagates loudly (never masked), with the overlay still fading
+    out via the ``finally`` so nothing sticks."""
+    if root is None or not (root.winfo_ismapped() and root.winfo_viewable()):
+        mutate()
         return
     overlay = None
     try:
-        overlay = _snapshot_overlay(root, name)
-        # FORCE the cover fully mapped + painted by the window manager
-        # BEFORE any theme repaint runs, so the half-themed cascade is
-        # NEVER seen — only the snapshot + the next theme's sun/moon
-        # (owner 2026-07-19; the old order let the cascade flash through).
+        overlay = _snapshot_overlay(root, icon_factory)
+        # FORCE the cover fully mapped + painted BEFORE the mutate, so
+        # the relayout/repaint cascade is NEVER seen — only the snapshot.
         overlay.deiconify()
         overlay.lift()
         overlay.update_idletasks()
         overlay.update()            # DWM actually paints the cover now
-        _apply_theme_now(name)      # repaint the real window BEHIND the cover
-        root.update_idletasks()     # force the cascade to settle, hidden
-        _fade_out_overlay(root, overlay)
-    except Exception as exc:        # visual nicety — never crash the flip
+    except Exception as exc:        # visual nicety — never block the action
         if overlay is not None:
             try:
                 overlay.destroy()
             except tk.TclError:
                 pass
-        print(f"[theme] cross-fade unavailable, flipped instantly: {exc}")
+        print(f"[transition] cover unavailable, mutating instantly: {exc}")
+        mutate()
+        return
+    try:
+        mutate()                    # the change, hidden behind the cover
+        root.update_idletasks()     # settle the relayout, still hidden
+    finally:
+        _fade_out_overlay(root, overlay, fade_ms, fade_steps)
+
+
+def apply_theme(name: str, animate: bool = False) -> None:
+    """The ONE coherent theme flip, used by BOTH startup and the toggle.
+
+    Startup passes ``animate=False`` (no window exists yet) for an
+    instant flip. The switch passes ``animate=True``: the repaint
+    cascade hides behind the shared smooth_transition cover, riding the
+    NEXT theme's big sun/moon icon and the theme's own longer
+    SWITCH_FADE_* timing (a theme flip is ceremonial; the collapse and
+    maximize covers keep the snappier TRANSITION_FADE_* default)."""
+    root = tb.Style().master
+    if not animate or root is None:
         _apply_theme_now(name)
+        return
+    smooth_transition(
+        root,
+        partial(_apply_theme_now, name),
+        icon_factory=lambda w, h: _render_theme_cover_icon(name, min(w, h)),
+        fade_ms=SWITCH_FADE_MS,
+        fade_steps=SWITCH_FADE_STEPS,
+    )
 
 
 def register_painter_day() -> None:
@@ -1094,6 +1204,8 @@ class ScrollFrame(ttk.Frame):
         self._sr_suspended = False  # bulk-build pause (see suspend_...)
         self._resizing = False  # active window-resize debounce (see _on_canvas)
         self._settle_job = None  # the resize-settle after() id
+        self._canvas_w = 0   # the newest canvas width (from <Configure>)
+        self._applied_w = -1  # the body width actually applied (deferred)
         self.canvas = tk.Canvas(self, highlightthickness=0)
         skin_canvas(self.canvas)  # registered so its bg re-tints on a flip
         vbar = ttk.Scrollbar(
@@ -1191,20 +1303,36 @@ class ScrollFrame(ttk.Frame):
         self._unbind_wheel(event)
 
     def _on_canvas(self, event) -> None:
-        if self._stretch:
-            self.canvas.itemconfigure(self._win, width=event.width)
-        # DEBOUNCE (owner 2026-07-19): a window drag / maximize fires
-        # <Configure> many times a second; running the fill-height +
-        # scrollregion bbox scan on EACH is the customtkinter re-render
-        # jank. The width track (above) stays live so content follows the
-        # window, but the heavy re-fit is deferred. The FIRST configure of
-        # a SETTLED window (initial layout / a lone resize) fills height at
-        # once so the viewport never shows a dead strip; once a resize is
-        # underway (_resizing) the re-fit is deferred and runs ONCE on
-        # settle, not per frame.
+        # DEBOUNCE (owner 2026-07-19; width deferred too 2026-07-20): a
+        # window drag / maximize fires <Configure> many times a second.
+        # Running the fill-height + scrollregion bbox scan on EACH was
+        # the original customtkinter re-render jank; the per-frame body
+        # WIDTH itemconfigure that survived that first round was the
+        # rest of it — every width write reflows the body and fires a
+        # <Configure> into each CTk child (measured over a synthetic
+        # 30-step drag: 30 width writes -> 55 CTk _draw re-renders;
+        # deferring the width drops both to 0 during the drag). So
+        # while a resize is underway NOTHING is applied — the newest
+        # width is only remembered — and the whole re-fit (width +
+        # fill-height + scrollregion) runs ONCE on settle. The FIRST
+        # configure of a SETTLED window (initial layout / a lone
+        # resize) still applies immediately so the viewport never opens
+        # with a dead strip. Trade-off (owner accepted 2026-07-20): mid
+        # drag the content freezes at its pre-drag width — a window-bg
+        # strip grows (or the content clips) at the right edge — and
+        # snaps to fit RESIZE_SETTLE_MS after release.
+        self._canvas_w = event.width
         if not self._resizing:
+            self._apply_width()
             self._apply_fill_height()
         self._arm_settle()
+
+    def _apply_width(self) -> None:
+        """Stretch the body window to the newest canvas width — only on
+        a real change (the write itself is what reflows the body)."""
+        if self._stretch and self._canvas_w != self._applied_w:
+            self._applied_w = self._canvas_w
+            self.canvas.itemconfigure(self._win, width=self._canvas_w)
 
     def _arm_settle(self) -> None:
         """Flag an active resize and (re)start the settle timer. Gates
@@ -1217,10 +1345,12 @@ class ScrollFrame(ttk.Frame):
         self._settle_job = self.after(RESIZE_SETTLE_MS, self._settle)
 
     def _settle(self) -> None:
-        """The size settled — clear the resize flag and run ONE re-fit
-        (fill-height + scrollregion), coalesced like ``_on_body``."""
+        """The size settled — clear the resize flag, apply the deferred
+        body width, and run ONE re-fit (fill-height + scrollregion),
+        coalesced like ``_on_body``."""
         self._settle_job = None
         self._resizing = False
+        self._apply_width()
         if self._sr_job is None:
             self._sr_job = self.after_idle(self._recompute_sr)
 
@@ -1484,11 +1614,15 @@ class AgentPanel(ttk.Labelframe):
 
     def _toggle_settings(self) -> None:
         """The gear: flip THIS agent's fine-tune visibility, independently
-        of the other site. The var change persists via its own trace."""
+        of the other site, behind the shared snapshot cover (the reveal
+        moves everything below the panel — bare, it lands as one hard
+        jump). The var change persists via its own trace."""
         self.settings_collapsed_var.set(
             not self.settings_collapsed_var.get()
         )
-        self._apply_finetune_visibility()
+        smooth_transition(
+            self.winfo_toplevel(), self._apply_finetune_visibility
+        )
 
     def upscale_params(self) -> dict:
         """The four upscale-gate numbers as engine kwargs — ValueError
@@ -1635,6 +1769,47 @@ def _scope_stats(
         "tempo": tempo,
         "eta": eta,
     }
+
+
+# --- Status badge dots (owner 2026-07-20) ----------------------------
+# Small coloured dots beside an image row's name in the gen panels'
+# Collections tree — one per post-save step that actually CHANGED the
+# image (config.badge_keys_for over the runner's action string), plus
+# the safer-retry mark. PIL-DRAWN: Tk 8.6 on Windows renders colour
+# emoji as identical monochrome circles (probed live 2026-07-20), so
+# glyph badges cannot be told apart — the dots are rasterized
+# supersampled + LANCZOS like all GUI art and attached as the row's
+# Treeview image (the only per-row colour a ttk.Treeview offers; it
+# sits LEFT of the name). Colours/labels are config data (BADGES); one
+# PhotoImage per key-combination, cached for the process lifetime so
+# tk can never GC a row's image.
+_BADGE_DOTS: dict[tuple[str, ...], ImageTk.PhotoImage] = {}
+
+
+def badge_dots(keys: tuple[str, ...]) -> ImageTk.PhotoImage | None:
+    """The cached dot-strip PhotoImage for one badge-key combination —
+    None when the image earned no badges (the row then carries no
+    image and keeps the plain indent)."""
+    if not keys:
+        return None
+    photo = _BADGE_DOTS.get(keys)
+    if photo is None:
+        ss = BADGE_DOT_SS
+        d, gap = BADGE_DOT_PX * ss, BADGE_DOT_GAP_PX * ss
+        strip = Image.new(
+            "RGBA", (len(keys) * d + (len(keys) - 1) * gap, d), (0, 0, 0, 0)
+        )
+        draw = ImageDraw.Draw(strip)
+        for i, key in enumerate(keys):
+            x = i * (d + gap)
+            draw.ellipse([x, 0, x + d - 1, d - 1], fill=BADGES[key][0])
+        photo = ImageTk.PhotoImage(
+            strip.resize(
+                (strip.width // ss, strip.height // ss), Image.LANCZOS
+            )
+        )
+        _BADGE_DOTS[keys] = photo
+    return photo
 
 
 class JobPanel(ttk.Frame):
@@ -1820,6 +1995,16 @@ class DashPanel(JobPanel):
             hdr, "Show", command=self._show_selected, kind="link",
             icon_name="right", compound="right",
         ).pack(side="right")
+        # the tiny badge legend — one ●+label per config.BADGES entry,
+        # each in its own badge colour (theme-agnostic mid-tones, so ONE
+        # explicit foreground reads on both the dark and the cream tree)
+        legend = ttk.Frame(self)
+        legend.pack(fill="x")
+        for _key, (color, label) in BADGES.items():
+            ttk.Label(
+                legend, text=f"● {label}", foreground=color,
+                font=tk_font("mono"),
+            ).pack(side="left", padx=(0, 10))
         # a real table: each collection is a collapsible parent row, its
         # images the children; the running one shows live, open. Native
         # column headers + both scrollbars
@@ -1968,12 +2153,19 @@ class DashPanel(JobPanel):
             res = event["orig_res"]
             if event["final_res"] not in ("", event["orig_res"]):
                 res = f"{event['orig_res']}→{event['final_res']}"
+            # the status badges this image EARNED (post-save steps that
+            # really changed it + the safer retry) as a PIL dot strip on
+            # the row — badge_keys_for maps the runner's action string
+            dots = badge_dots(
+                badge_keys_for(event["actions"], event["retried"])
+            )
             child = self.tree.insert(
                 fnode, "end", text=PurePosixPath(drop).name,
                 values=(
                     "", f"{event['gen_s']:.0f}s", "…", res, "",
                     fmt_size(event["size"]),
                 ),
+                **({"image": dots} if dots is not None else {}),
             )
             self._child_ids[drop] = child
             self._node_info[child] = {
@@ -2605,6 +2797,17 @@ class PainterGui:
         # (site, source-path, drop-path) -> BooleanVar; missing = ticked
         self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
         self._save_job: str | None = None  # debounced settings save
+        # drag-resize / maximize mitigation (owner 2026-07-20): the
+        # root's own <Configure> stream drives (a) a cover+fade on the
+        # DISCRETE maximize/restore jump and (b) buffering of dashboard
+        # events during a continuous drag, flushed on settle — see
+        # _on_root_configure (bound at the end of __init__, after the
+        # saved geometry is restored, so startup never arms it).
+        self._win_state = ""            # root.state() at the last configure
+        self._win_size = (0, 0)         # root WxH at the last configure
+        self._resize_active = False     # a continuous drag is underway
+        self._resize_settle_job = None  # its settle after() id
+        self._pending_events: list[tuple] = []  # buffered __event__ msgs
 
         # remembered dialog values (owner 2026-07-19): the standalone
         # Upscale dialog's last-used four params and the last aspect W:H —
@@ -2675,6 +2878,12 @@ class PainterGui:
         self._set_collapsed(False)  # deterministic initial packing
         self._apply_settings(self._settings)  # may restore a saved state
         self._wire_persistence()
+        # the maximize/restore + drag-resize watcher — seeded and bound
+        # AFTER the saved geometry is applied, so startup's own
+        # geometry writes never read as a drag or a state jump
+        self._win_state = root.state()
+        self._win_size = (root.winfo_width(), root.winfo_height())
+        root.bind("<Configure>", self._on_root_configure, add="+")
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.after(120, self._drain_queue)
 
@@ -2773,8 +2982,63 @@ class PainterGui:
         self._scroll.refresh()
 
     def _toggle_collapsed(self) -> None:
-        self._set_collapsed(not self._collapsed)
+        # the swap moves the whole upper window — run it behind the
+        # shared snapshot cover so it fades instead of jumping
+        smooth_transition(
+            self.root, partial(self._set_collapsed, not self._collapsed)
+        )
         self._schedule_save()
+
+    # --- maximize/restore cover + drag-resize event buffering ----------
+
+    def _on_root_configure(self, event) -> None:
+        """The root <Configure> watcher (owner 2026-07-20). Two jobs:
+
+        * a zoomed↔normal STATE change is a DISCRETE size jump
+          (maximize / restore) — hide its relayout behind the shared
+          snapshot cover. It can never fire mid-drag: the state stays
+          'normal' through a whole drag, so a continuous resize is
+          never covered;
+        * a same-state SIZE change is part of a continuous drag — mark
+          the resize active and re-arm the settle timer; while active,
+          _drain_queue buffers dashboard events so the trees / live
+          labels stop re-rendering per frame (flushed on settle).
+
+        The handler sits on the ROOT bindtag, which every child widget
+        carries too — the first line drops child configures, keeping
+        the added per-frame cost one identity check."""
+        if event.widget is not self.root:
+            return
+        state = self.root.state()
+        size = (event.width, event.height)
+        if state != self._win_state:
+            prev, self._win_state = self._win_state, state
+            self._win_size = size
+            if {prev, state} <= {"zoomed", "normal"}:
+                # ONE discrete jump — cover it while the relayout
+                # settles behind the cover (mutate: nothing to do, the
+                # WM already resized us; the settle happens inside)
+                smooth_transition(self.root, lambda: None)
+            return
+        if size == self._win_size:
+            return  # a pure move — nothing relayouts, nothing to do
+        self._win_size = size
+        self._resize_active = True
+        if self._resize_settle_job is not None:
+            self.root.after_cancel(self._resize_settle_job)
+        self._resize_settle_job = self.root.after(
+            RESIZE_SETTLE_MS, self._resize_settled
+        )
+
+    def _resize_settled(self) -> None:
+        """The drag ended (RESIZE_SETTLE_MS after the last root
+        <Configure>): flush every dashboard event buffered mid-drag, in
+        arrival order, on the main thread."""
+        self._resize_settle_job = None
+        self._resize_active = False
+        pending, self._pending_events = self._pending_events, []
+        for msg in pending:
+            self._dispatch(msg)
 
     def _clamp_geometry(self, geo: str) -> str:
         """Clamp a restored 'WxH' or 'WxH+X+Y' geometry so it never
@@ -3831,45 +4095,60 @@ class PainterGui:
         try:
             while True:
                 msg = self._q.get_nowait()
-                if isinstance(msg, tuple):
-                    if msg[0] == "__status__":
-                        self.status_var.set(msg[1])
-                    elif msg[0] == "__event__":
-                        # .get is the defensive guard for a late event
-                        # arriving after its panel was closed
-                        panel = self.panels.get(msg[1])
-                        if panel is not None:
-                            panel.handle(msg[2])
-                    elif msg[0] == "__terminal__":
-                        self._handle_terminal(msg[1], msg[2])
-                    elif msg[0] == "__tool_done__":
-                        slot = msg[1]
-                        self.panels[slot].finish()  # reveal CLOSE
-                        self._tool_workers.pop(slot, None)
-                        if not self._tool_workers and not self._running:
-                            self._update_status()
-                    elif msg[0] == "__worker_done__":
-                        key = msg[1]
-                        self._log(f"[{key}] worker finished")
-                        # the worker posts this from its finally block
-                        # while its thread is still technically alive
-                        self._running.discard(key)
-                        self._workers.pop(key, None)
-                        self.agents[key].set_run_state(
-                            running=False,
-                            pending_restart=key in self._restart_jobs,
-                        )
-                        # a pending quota auto-restart keeps the panel
-                        # alive (countdown, no CLOSE yet); otherwise the
-                        # site is done — reveal its CLOSE button
-                        if key not in self._restart_jobs:
-                            self.panels[key].finish()
-                        self._update_status()
-                else:
-                    self._log(str(msg))
+                if (
+                    self._resize_active
+                    and isinstance(msg, tuple)
+                    and msg[0] == "__event__"
+                ):
+                    # mid drag-resize: a dashboard event re-renders tree
+                    # rows / live labels per frame on top of the drag's
+                    # own relayout work — buffer it, flushed in order by
+                    # _resize_settled (owner 2026-07-20)
+                    self._pending_events.append(msg)
+                    continue
+                self._dispatch(msg)
         except queue.Empty:
             pass
         self.root.after(120, self._drain_queue)
+
+    def _dispatch(self, msg) -> None:
+        """Apply ONE worker-queue message to the window (main thread)."""
+        if isinstance(msg, tuple):
+            if msg[0] == "__status__":
+                self.status_var.set(msg[1])
+            elif msg[0] == "__event__":
+                # .get is the defensive guard for a late event
+                # arriving after its panel was closed
+                panel = self.panels.get(msg[1])
+                if panel is not None:
+                    panel.handle(msg[2])
+            elif msg[0] == "__terminal__":
+                self._handle_terminal(msg[1], msg[2])
+            elif msg[0] == "__tool_done__":
+                slot = msg[1]
+                self.panels[slot].finish()  # reveal CLOSE
+                self._tool_workers.pop(slot, None)
+                if not self._tool_workers and not self._running:
+                    self._update_status()
+            elif msg[0] == "__worker_done__":
+                key = msg[1]
+                self._log(f"[{key}] worker finished")
+                # the worker posts this from its finally block
+                # while its thread is still technically alive
+                self._running.discard(key)
+                self._workers.pop(key, None)
+                self.agents[key].set_run_state(
+                    running=False,
+                    pending_restart=key in self._restart_jobs,
+                )
+                # a pending quota auto-restart keeps the panel
+                # alive (countdown, no CLOSE yet); otherwise the
+                # site is done — reveal its CLOSE button
+                if key not in self._restart_jobs:
+                    self.panels[key].finish()
+                self._update_status()
+        else:
+            self._log(str(msg))
 
     # --- settings persistence ------------------------------------------
 
@@ -4539,9 +4818,16 @@ class SelectWindow(tk.Toplevel):
         return max(canvas_width - SELECT_WRAP_RESERVE_PX, SELECT_WRAP_MIN_PX)
 
     def _on_canvas_configure(self, event) -> None:
+        # settle-debounced like the main window's re-fit (owner
+        # 2026-07-20): the wraplength re-flow re-wraps EVERY built
+        # label, and the old after_idle coalescing still ran it several
+        # times across one drag (the loop goes idle between <Configure>
+        # bursts) — now it runs ONCE, RESIZE_SETTLE_MS after the last
+        # canvas <Configure>.
         self._canvas_width = event.width
-        if self._wrap_job is None:
-            self._wrap_job = self.after_idle(self._apply_wrap)
+        if self._wrap_job is not None:
+            self.after_cancel(self._wrap_job)
+        self._wrap_job = self.after(RESIZE_SETTLE_MS, self._apply_wrap)
 
     def _apply_wrap(self) -> None:
         """Re-flow the wrapped names to the settled canvas width — only
