@@ -887,8 +887,12 @@ CONTINUE_NUDGE = "Continue - please finish generating the image."
 # lives in settings.json (gitignored) under GEMINI_KEY_SETTING; the GUI
 # wizard writes it there and painter.ai reads it per call.
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-GEMINI_TEXT_MODEL = "gemini-2.5-flash"    # sheet generator (free tier)
-GEMINI_VISION_MODEL = "gemini-2.5-flash"  # image checker (same model reads images)
+# The stable "-latest" aliases: Google keeps them pointed at a current
+# free-tier flash model, so they don't 404 ("no longer available to new
+# users") or 429 (free_tier limit 0) the way the pinned 2.0/2.5 names did
+# for fresh keys. Verified 200 OK against a new AI Studio key 2026-07-21.
+GEMINI_TEXT_MODEL = "gemini-flash-latest"    # sheet generator (free tier)
+GEMINI_VISION_MODEL = "gemini-flash-latest"  # image checker (multimodal, reads images)
 GEMINI_KEY_SETTING = "gemini_api_key"     # the settings.json key name
 # where the wizard's step-1 button sends the browser (the key page)
 AI_STUDIO_URL = "https://aistudio.google.com/apikey"
