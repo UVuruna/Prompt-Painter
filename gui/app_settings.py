@@ -1,8 +1,9 @@
 """SettingsMixin — the queue/sheet helpers, prerequisite handlers, AI
 features gate, and settings persistence.
 
-Godfile refactor step 7/8 (see gui/___gui.md): the fifth of PainterGui's
-five mixins (see gui/app.py). Owns the Collections queue (Add…/Add
+Godfile refactor step 7/8 (see gui/___gui.md): the sixth of PainterGui's
+six mixins (see gui/app.py — a sixth, CheckerFixerMixin, split out of
+SiteJobsMixin in step 8/8). Owns the Collections queue (Add…/Add
 folder…/Remove/Clear — ``_queue_sheets``/``_add_sheets``/
 ``_add_sheets_folder``/``_remove_sheet``/``_clear_sheets``), the sheet
 parsing/planning helpers shared by the site jobs (``_parse_all``/

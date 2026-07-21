@@ -1,7 +1,8 @@
 """ViewMixin — the Main Menu / running-view state machine.
 
 Godfile refactor step 7/8 (see gui/___gui.md): the second of PainterGui's
-five mixins (see gui/app.py). Owns the three-way ``_view`` switch (menu /
+six mixins (see gui/app.py — a sixth, CheckerFixerMixin, split out of
+SiteJobsMixin in step 8/8). Owns the three-way ``_view`` switch (menu /
 main / running — ``_set_view``/``_go_view``), the Main Menu tile router
 (``_select_tile``/``_tile_handler``), the running view's IconBar wiring
 (``_apply_running_layout``/``_open_tool_panel``/``_click_icon_bar_tile``),

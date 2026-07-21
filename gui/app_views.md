@@ -3,8 +3,9 @@
 **Script:** [View Mixin (script)](app_views.py)
 
 ## Purpose
-`ViewMixin` — the second of `PainterGui`'s five mixins (root Rule #20
-god-file refactor, step 7/8; see [GUI (folder)](___gui.md) and
+`ViewMixin` — the second of `PainterGui`'s six mixins (root Rule #20
+god-file refactor, step 7/8 — a sixth mixin, `CheckerFixerMixin`, was
+split out of `SiteJobsMixin` in step 8/8; see [GUI (folder)](___gui.md) and
 [App (composition)](app.md)). Owns the three-way `_view` switch (menu /
 main / running — `_set_view`/`_go_view`), the Main Menu tile router
 (`_select_tile`/`_tile_handler`, shared with the running view's
@@ -48,7 +49,7 @@ _collapse_btn`, ...) is set by `BuildMixin.__init__`.
 - **No `__init__`, by design (Rule #5).** `BuildMixin` is the single
   place every mixin's shared state is seeded; `ViewMixin` only ever
   reads/mutates it through `self.`, so there is exactly one
-  constructor to reason about across all five mixins.
+  constructor to reason about across all six mixins.
 - **`_on_root_configure`/`_resize_settled`/`_clamp_geometry` stayed in
   `BuildMixin`, not here**, even though they are arguably "view"
   concerns — see [Build Mixin](app_build.md)'s own Design Decisions for

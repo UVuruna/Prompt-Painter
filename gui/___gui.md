@@ -31,34 +31,52 @@ its real owner `_AiDialog` out of `gui/__init__.py` into
 `gui/dialogs.py` (see that module's own Design Decisions). This step
 (6/8) moved the **MENU + DASHBOARD-PANEL classes**: `MainMenu`/
 `IconBar` (`menu.py`), `JobPanel`/`DashPanel` (`dash_panels.py`), and
-`ToolPanel`/`AiCheckPanel`/`DashGrid` (`tool_dash.py`). This step
-(7/8 — the critical one) split the god-class itself: `PainterGui`
-(~3,350 lines, 94 methods) is now composed from FIVE responsibility
-mixins, one file each — `BuildMixin` (`app_build.py`, the constructor +
-widget construction), `ViewMixin` (`app_views.py`, the Main Menu /
-running-view state machine), `SiteJobsMixin` (`app_jobs.py`, the site +
-API-image run loop, dashboard dispatch, Checker AI, Fixer AI),
-`ToolJobsMixin` (`app_tools.py`, the four standalone tools + the AI
-image checker) and `SettingsMixin` (`app_settings.py`, queue/sheet
-management, prerequisite actions, settings persistence) — combined by
-inheritance in `app.py`'s `class PainterGui(BuildMixin, ViewMixin,
-SiteJobsMixin, ToolJobsMixin, SettingsMixin):`, which also carries
-`main()`. `__init__.py` is now a PURE re-export shell: `from .app
-import PainterGui, main` plus every existing `from .submodule import
-(...)` block, unchanged — no class or def body of its own.
+`ToolPanel`/`AiCheckPanel`/`DashGrid` (`tool_dash.py`). Step 7/8 split
+the god-class itself: `PainterGui` (~3,350 lines, 94 methods) was
+composed from FIVE responsibility mixins, one file each — `BuildMixin`
+(`app_build.py`, the constructor + widget construction), `ViewMixin`
+(`app_views.py`, the Main Menu / running-view state machine),
+`SiteJobsMixin` (`app_jobs.py`, the site + API-image run loop,
+dashboard dispatch, Checker AI, Fixer AI), `ToolJobsMixin`
+(`app_tools.py`, the four standalone tools + the AI image checker) and
+`SettingsMixin` (`app_settings.py`, queue/sheet management,
+prerequisite actions, settings persistence) — combined by inheritance
+in `app.py`'s `PainterGui`, which also carries `main()`. `__init__.py`
+became a PURE re-export shell: `from .app import PainterGui, main`
+plus every existing `from .submodule import (...)` block, unchanged —
+no class or def body of its own.
+
+**Step 8/8 (finalize) — one more mixin split, plus cross-project
+verification.** `app_jobs.py` had grown to 1334 lines post-step-7/8 —
+past the ~1000-line Rule #20 budget on its own. Its parallel Checker AI
+and Fixer AI methods (`_maybe_spawn_checker`/`_run_checker_one`/
+`_maybe_spawn_fixer`/`_run_fixer_api`/`_queue_website_fix`/
+`_backup_before_fix`/`_run_image_fix`/`_run_website_fix`/
+`_build_fix_workers`) moved byte-for-byte into a SIXTH mixin,
+`CheckerFixerMixin` (`app_checker_fixer.py`) — `SiteJobsMixin` keeps
+the run loop, the queue pump/dispatch and the post-save composer.
+`PainterGui` is now `class PainterGui(BuildMixin, ViewMixin,
+SiteJobsMixin, CheckerFixerMixin, ToolJobsMixin, SettingsMixin):` (see
+[App (composition)](app.md)). Also removed four now-orphaned top-level
+imports from `gui/__init__.py` (`math`, `webbrowser`,
+`from types import SimpleNamespace`, `from PIL import Image` — none
+used by the file, none referenced as `gui.X` anywhere in `gui/` or
+`tests/`, so none were re-export dependencies either) and ran the full
+cross-project verification pass this step exists for (see
+`REFACTOR-GODFILES.md`, the owner's binding plan, untracked): every
+`gui/*.py` and `painter/**/*.py` file now sits under the ~1000-line
+Rule #20 budget (`gui/app_jobs.py`, the largest, is 979).
 [gui.md](../gui.md) (the pre-existing FEATURE-by-feature script doc,
-one level up) now points readers at these five modules for where the
-described behavior actually lives; step 8/8 is the final cross-project
-verification pass (see `REFACTOR-GODFILES.md`, the owner's binding
-plan, untracked).
+one level up) points readers at these six modules for where the
+described behavior actually lives.
 
 ## Files
 
 ### `app.py` — App (composition)
-`class PainterGui(BuildMixin, ViewMixin, SiteJobsMixin, ToolJobsMixin,
-SettingsMixin):` — no method bodies of its own, just the MRO glue —
-plus `main()` and the `if __name__ == "__main__":` guard. See
-[App (composition)](app.md).
+`class PainterGui(BuildMixin, ViewMixin, SiteJobsMixin,
+CheckerFixerMixin, ToolJobsMixin, SettingsMixin):` — no method bodies
+of its own, just the MRO glue — plus `main()` and the
+`if __name__ == "__main__":` guard. See [App (composition)](app.md).
 
 ### `app_build.py` — Build Mixin
 `BuildMixin` — `PainterGui`'s constructor (the ONLY mixin with
@@ -77,9 +95,16 @@ queries, and the Controls collapse toggle. See [View Mixin](app_views.md).
 `SiteJobsMixin` — the two browser-driven SITE jobs plus the paid-API
 image job's shared run loop, the worker-queue pump/dispatch, the
 per-job Pause toggle and dashboard-panel close, the quota auto-restart
-timers, the post-save pipeline composer, the parallel Checker AI and
-the Fixer AI (both its auto-dispatch half and its manual-button
-worker builders). See [Site Jobs Mixin](app_jobs.md).
+timers, and the post-save pipeline composer. See
+[Site Jobs Mixin](app_jobs.md).
+
+### `app_checker_fixer.py` — Checker/Fixer Mixin
+`CheckerFixerMixin` — split out of `app_jobs.py` in step 8/8 (that
+module had grown past the ~1000-line budget on its own). Owns the
+parallel Checker AI (fired off every saved image, overlapping the next
+item's generation) and the Fixer AI (both its auto-dispatch half and
+its manual-button worker builders shared with `AiCheckPanel`'s own
+report viewer). See [Checker/Fixer Mixin](app_checker_fixer.md).
 
 ### `app_tools.py` — Tool Jobs Mixin
 `ToolJobsMixin` — the four standalone tools' (BG removal / Crop /
@@ -419,3 +444,44 @@ every other mixin's methods reach the SAME instance's attributes via
 mixins in declaration order, and the full suite (617 passed, 1
 skipped) plus the GUI-heavy files individually (260 passed) pass
 unmodified.
+
+**Step 8/8 — `app_jobs.py` split again, into `SiteJobsMixin` +
+`CheckerFixerMixin`.** Post-step-7/8, `app_jobs.py` alone was 1334
+lines — past the ~1000-line Rule #20 budget even after the god-CLASS
+split. The split line was chosen by dependency direction, not by
+line-count halving: `_dispatch` (in `SiteJobsMixin`) calls
+`self._maybe_spawn_checker`/`self._maybe_spawn_fixer`, but NOTHING in
+the checker/fixer methods calls back into a `SiteJobsMixin`-only
+helper — every attribute they read (`self.agents`, `self.panels`,
+`self._job_temps`, `self._q`, `self._running`, `self._log`,
+`self._dashgrid`) is generic `PainterGui` state both mixins already
+share via `BuildMixin.__init__`. So the two halves separate with ZERO
+new coupling: `_dispatch` still calls those two methods by name, now
+resolved through the six-mixin MRO instead of a same-class lookup —
+identical at runtime either way. Imports were re-partitioned to match
+(`AI_CHECK_INSTRUCTIONS`/`dest_for`/`_fixer_decision`/`PurePosixPath`
+moved to `app_checker_fixer.py`; `SiteJobsMixin` kept none of them,
+confirmed by grep before the move, not assumed). Verified the same way
+as step 7/8: `gui.PainterGui.__mro__` shows all six mixins, the full
+suite (617 passed, 1 skipped) and the four checker/fixer/pipeline/
+running-view test files individually (147 passed) pass unmodified, and
+a headless smoke build (menu view, `_collect_settings()`, `destroy()`)
+raises nothing.
+
+**Step 8/8 — the four `gui/__init__.py` imports removed were
+genuinely orphaned by earlier moves, not a drive-by cleanup.** `math`,
+`webbrowser`, `from types import SimpleNamespace` and `from PIL import
+Image` were flagged because `__init__.py` is a re-export SHELL (every
+name a `from .submodule import (...)` block pulls in stays reachable
+as `gui.X` on purpose) — these four are different: nothing in
+`__init__.py` calls `math.*`/`webbrowser.*`/`SimpleNamespace`/`Image`
+any more (their last real callers moved into `app_build.py`/
+`app_settings.py`/`dialogs.py`/etc. in earlier steps), AND no other
+`gui/` module or `tests/*.py` file reaches them as `gui.math`/
+`gui.webbrowser`/`gui.SimpleNamespace`/`gui.Image` (confirmed by grep
+across both trees before removing) — so, unlike every other name in
+the file, they were never serving as part of the package's public
+re-export surface. Every OTHER `gui/__init__.py` import stayed exactly
+as before, including ones `pyflakes` also flags "unused" — that flag
+is EXPECTED for a re-export shell and is not, by itself, evidence of
+dead code.

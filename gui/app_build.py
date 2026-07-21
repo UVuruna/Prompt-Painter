@@ -1,8 +1,10 @@
 """BuildMixin — PainterGui's constructor and widget construction.
 
 Godfile refactor step 7/8 (see gui/___gui.md): PainterGui used to be one
-~3350-line class; it is now composed from five responsibility mixins, one
-file each (see gui/app.py for the composition). BuildMixin is the ONLY
+~3350-line class; it is now composed from six responsibility mixins, one
+file each (see gui/app.py for the composition — a sixth,
+CheckerFixerMixin, split out of SiteJobsMixin in step 8/8). BuildMixin is
+the ONLY
 mixin that defines ``__init__`` — every other mixin's methods run on the
 attributes this constructor sets, via ``self.``. It also owns the
 ``_build_*`` widget-construction helpers, the global font-zoom/wheel-

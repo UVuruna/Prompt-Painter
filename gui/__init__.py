@@ -22,25 +22,21 @@ table) and the detailed **Log**.
 
 from __future__ import annotations
 
-import math
 import queue
 import random
 import re
 import threading
 import time
 import tkinter as tk
-import webbrowser
 from dataclasses import replace
 from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, ttk
-from types import SimpleNamespace
 from typing import Callable
 
 import customtkinter as ctk
 import ttkbootstrap as tb
-from PIL import Image
 
 from painter.config import (
     AI_CALL_PAUSE_S,

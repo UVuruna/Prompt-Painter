@@ -3,10 +3,11 @@
 **Script:** [Build Mixin (script)](app_build.py)
 
 ## Purpose
-`BuildMixin` — the first of `PainterGui`'s five mixins (root Rule #20
-god-file refactor, step 7/8; see [GUI (folder)](___gui.md) and
-[App (composition)](app.md)). The ONLY mixin that defines `__init__` —
-every attribute the other four mixins read (`self.agents`, `self.
+`BuildMixin` — the first of `PainterGui`'s six mixins (root Rule #20
+god-file refactor, step 7/8 — a sixth mixin, `CheckerFixerMixin`, was
+split out of `SiteJobsMixin` in step 8/8; see [GUI (folder)](___gui.md)
+and [App (composition)](app.md)). The ONLY mixin that defines
+`__init__` — every attribute the other five mixins read (`self.agents`, `self.
 _tool_panels`, `self._workers`, `self._job_temps`, `self._view`,
 `self._collapsed`, ...) is set here, once, at construction. Also owns
 the `_build_*` widget-construction helpers it calls from `__init__`

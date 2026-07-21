@@ -1,7 +1,8 @@
 """ToolJobsMixin — the four standalone tools + the AI image checker.
 
-Godfile refactor step 7/8 (see gui/___gui.md): the fourth of PainterGui's
-five mixins (see gui/app.py). Owns every standalone-tool job's Start/Stop
+Godfile refactor step 7/8 (see gui/___gui.md): the fifth of PainterGui's
+six mixins (see gui/app.py — a sixth, CheckerFixerMixin, split out of
+SiteJobsMixin in step 8/8). Owns every standalone-tool job's Start/Stop
 (BG removal / Crop / Upscale / Aspect ratio — ``_start_tool_from_panel``/
 ``_launch_tool_worker``/``_run_tool_job``/``_stop_tool``) and the AI
 image checker's own job (``_start_ai_check``/``_run_ai_check_job``),

@@ -3,8 +3,9 @@
 **Script:** [Settings Mixin (script)](app_settings.py)
 
 ## Purpose
-`SettingsMixin` — the fifth of `PainterGui`'s five mixins (root Rule
-#20 god-file refactor, step 7/8; see [GUI (folder)](___gui.md) and
+`SettingsMixin` — the sixth of `PainterGui`'s six mixins (root Rule
+#20 god-file refactor, step 7/8 — a sixth mixin, `CheckerFixerMixin`,
+was split out of `SiteJobsMixin` in step 8/8; see [GUI (folder)](___gui.md) and
 [App (composition)](app.md)). Owns the Collections queue (Add…/Add
 folder…/Remove/Clear — `_queue_sheets`/`_add_sheets`/
 `_add_sheets_folder`/`_remove_sheet`/`_clear_sheets`), the sheet

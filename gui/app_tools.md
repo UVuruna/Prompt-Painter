@@ -3,8 +3,9 @@
 **Script:** [Tool Jobs Mixin (script)](app_tools.py)
 
 ## Purpose
-`ToolJobsMixin` — the fourth of `PainterGui`'s five mixins (root Rule
-#20 god-file refactor, step 7/8; see [GUI (folder)](___gui.md) and
+`ToolJobsMixin` — the fifth of `PainterGui`'s six mixins (root Rule
+#20 god-file refactor, step 7/8 — a sixth mixin, `CheckerFixerMixin`,
+was split out of `SiteJobsMixin` in step 8/8; see [GUI (folder)](___gui.md) and
 [App (composition)](app.md)). Owns every standalone-tool job's Start/
 worker/Stop — BG removal / Crop / Upscale / Aspect ratio, all four
 panel-driven since GUI rework Phase 14 (`_start_tool_from_panel`/
