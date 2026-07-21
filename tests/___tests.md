@@ -117,6 +117,18 @@ forces the overlay painted BEFORE the mutate and fades after (theme
 timing passes through); a mutate exception propagates loudly while
 the overlay still fades — never a stuck cover, never a masked error.
 
+### `test_filters.py` — Shared Filter Framework
+[Shared Filter Framework](../painter/filters.md)'s `matches()` on
+synthetic `(width, height)` ints, no images: one test per kind (aspect
+exact, aspect range, any side, width, height), IF vs IF NOT for each,
+several conditions ANDed together (a mixed IF/IF-NOT stack, and one
+failing condition vetoing an otherwise-passing stack), the empty-list
+"matches everything" default, the exact-aspect `lo == hi` edge (no
+hidden epsilon — an off-ratio image by one pixel misses it), the "any
+side" both-extremes-at-once semantics (portrait/landscape judged
+identically; one outlier axis fails even when the other is in range),
+and loud `ValueError` on an unrecognised kind/polarity.
+
 ### `conftest.py` — Import Path
 Makes the `painter` package importable from any pytest invocation.
 

@@ -85,6 +85,15 @@ Loads/saves the GUI's remembered choices as `settings.json` at the
 project root (gitignored); a corrupt file is loud but never crashes
 the app. See [Settings](settings.md).
 
+### `filters.py` — Shared Filter Framework
+GUI rework Phase 3 (owner decision 2026-07-21): the pure engine half
+of ONE stackable "what should this tool touch" gate — a
+`FilterCondition` dataclass (kind/polarity/lo/hi) and `matches()`
+ANDing a whole stack against one image's width/height. Meant to
+eventually replace the Aspect tool's scalar filter and Upscale's
+bespoke gate; not wired into any tool yet. See
+[Shared Filter Framework](filters.md).
+
 ## Connections
 
 ### Uses

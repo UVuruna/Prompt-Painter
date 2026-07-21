@@ -255,6 +255,57 @@ ASPECT_FILTER_DEFAULT_FROM = 0.9
 ASPECT_FILTER_DEFAULT_TO = 1.1
 
 
+# --- Shared filter framework (owner decision 2026-07-21) --------------
+#
+# GUI rework Phase 3: ONE stackable "what should this tool touch" gate
+# meant to eventually replace every tool's bespoke filter — the Aspect-
+# only ASPECT_FILTER_* scalar just above, and Upscale's four-field
+# aspect/size gate — with a single reusable shape. The matching LOGIC
+# lives in painter/filters.py (`FilterCondition` + `matches()`, pure/
+# engine-side, no GUI import); this block only holds the stable
+# identifier strings a condition's `kind`/`polarity` fields are built
+# from, so the engine, the tests and the future GUI widget all name the
+# same five kinds and two polarities. Migrating the existing tools onto
+# this framework is a LATER phase — nothing here is wired into a tool
+# yet (Phase 3 only adds the engine + these constants).
+#
+# Five kinds, each a [lo, hi] band tested against one image measurement
+# (see filters.py's docstring for the exact per-kind math): the aspect
+# ratio W/H (EXACT — lo==hi pins a single target point; RANGE — a typed
+# band, IDENTICAL comparison, only the GUI authoring differs), ANY_SIDE
+# (both W and H at once, orientation-agnostic — every side must sit in
+# the band), and the raw WIDTH/HEIGHT in pixels (orientation matters).
+# FILTER_KINDS is the ordered tuple the GUI's kind combobox will list;
+# the values ARE the display text (owner 2026-07-21: same convention as
+# ASPECT_FILTER_MODES above / STYLE_CHOICES below — Rule #4 strings do
+# double duty as UI labels, no separate label table).
+FILTER_KIND_ASPECT_EXACT = "Aspect (exact)"
+FILTER_KIND_ASPECT_RANGE = "Aspect (range)"
+FILTER_KIND_ANY_SIDE = "Any side"
+FILTER_KIND_WIDTH = "Width"
+FILTER_KIND_HEIGHT = "Height"
+FILTER_KINDS = (
+    FILTER_KIND_ASPECT_EXACT,
+    FILTER_KIND_ASPECT_RANGE,
+    FILTER_KIND_ANY_SIDE,
+    FILTER_KIND_WIDTH,
+    FILTER_KIND_HEIGHT,
+)
+
+# a condition PASSES when its measurement is IN [lo, hi] (IF) or OUT of
+# it (IF NOT) — same two words and spelling as the legacy
+# ASPECT_FILTER_IF / ASPECT_FILTER_IF_NOT above, so a future migration
+# reads old mode strings straight across with no translation table.
+FILTER_POLARITY_IF = "IF"
+FILTER_POLARITY_IF_NOT = "IF NOT"
+
+# the settings.json key a saved STACK of conditions (a reusable preset,
+# e.g. "square badges only") will live under once the GUI grows preset
+# save/load (Phase 4). Reserved here so the name is decided once, ahead
+# of the GUI work that reads/writes it.
+FILTER_PRESETS_SETTING = "filter_presets"
+
+
 # --- Settings persistence (owner's #9) -------------------------------
 
 # The GUI's remembered choices; JSON at the project root, gitignored.

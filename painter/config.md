@@ -43,6 +43,10 @@ match.
   the `BADGES` block + `badge_keys_for` (the dashboard status badges)
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`
+- [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
+  `FILTER_KIND_ASPECT_RANGE`, `FILTER_KIND_ANY_SIDE`,
+  `FILTER_KIND_WIDTH`, `FILTER_KIND_HEIGHT`, `FILTER_POLARITY_IF`,
+  `FILTER_POLARITY_IF_NOT`
 - [AI Client & Flows](ai.md) — the `GEMINI_*` / `AI_*` block,
   `SITES` (the re-send reverse map), `STATE_DIRNAME`, `PROJECT_ROOT`
 
@@ -142,6 +146,29 @@ match.
   dialog combobox labels; the defaults pre-fill the ~square band
   (0.9–1.1). Since 0.0.078 the Aspect tool accepts FILES **or** a whole
   FOLDER (the filter makes folders useful — skip the already-good ones).
+- `FILTER_KIND_ASPECT_EXACT` / `FILTER_KIND_ASPECT_RANGE` /
+  `FILTER_KIND_ANY_SIDE` / `FILTER_KIND_WIDTH` / `FILTER_KIND_HEIGHT`,
+  `FILTER_KINDS`, `FILTER_POLARITY_IF` / `FILTER_POLARITY_IF_NOT`,
+  `FILTER_PRESETS_SETTING` — GUI rework Phase 3 (owner decision
+  2026-07-21): the identifier strings behind the new stackable
+  [Shared Filter Framework](filters.md), meant to eventually replace
+  the `ASPECT_FILTER_*` scalar above and Upscale's bespoke gate with
+  ONE reusable `FilterCondition` shape. Five kinds — the aspect ratio
+  W/H (`ASPECT_EXACT` pins `lo == hi` to one point, `ASPECT_RANGE` is a
+  typed band, identical comparison either way), `ANY_SIDE` (both W and
+  H at once, orientation-agnostic: `lo <= min(w,h)` AND
+  `max(w,h) <= hi`), and the raw `WIDTH`/`HEIGHT` in pixels
+  (orientation matters). `FILTER_KINDS` is the ordered tuple the
+  future `FilterEditor`'s kind combobox will list — the values ARE the
+  display text (Rule #4, same convention as `ASPECT_FILTER_MODES` /
+  `STYLE_CHOICES`). `FILTER_POLARITY_IF` / `FILTER_POLARITY_IF_NOT`
+  reuse the legacy `ASPECT_FILTER_IF` / `ASPECT_FILTER_IF_NOT` spelling
+  exactly, so a future settings migration needs no translation table.
+  `FILTER_PRESETS_SETTING` (`"filter_presets"`) reserves the
+  `settings.json` key a saved condition stack will live under once the
+  GUI grows preset save/load (Phase 4). Nothing in the app calls
+  `filters.matches()` yet — Phase 3 ships only the engine + these
+  constants; migrating a tool onto it is later work.
 - `TOOL_IMAGE_EXTENSIONS`, `iter_images(folder)` — the shared image
   enumerator (owner 2026-07-19): every image file (`.png/.jpg/.jpeg/
   .webp`) under a folder, sorted, recursive. ONE home for the
