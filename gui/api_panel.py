@@ -9,12 +9,12 @@ Split out of ``gui/__init__.py`` (Rule #3, god-file refactor step
 ``gui.tool_panels`` — the SAME constants the ToolSettingsPanel family
 and ``AgentPanel`` already share (Rule #5); importing them from that
 leaf module (rather than ``gui/__init__.py``) avoids a circular
-import. ``AI_POLL_MS`` is the one exception: it stays defined in
-``gui/__init__.py`` (also read by ``_AiDialog``, which never moved),
-so ``_arm_probe_poll`` below reaches it through a deferred
+import. ``AI_POLL_MS`` is the one exception: it lives in
+``gui/dialogs.py`` (``_AiDialog`` owns the poll loop it paces), so
+``_arm_probe_poll`` below reaches it through a deferred
 ``import gui`` instead — the same late-binding indirection
 ``gui.theme._pkg()`` already established for a callback that must
-reach back into the still-monolithic part of the package."""
+reach back into a sibling module."""
 
 from __future__ import annotations
 
@@ -412,11 +412,14 @@ class ApiImageGenPanel(ttk.Frame):
         self._arm_probe_poll()
 
     def _arm_probe_poll(self) -> None:
-        # AI_POLL_MS still lives in gui/__init__.py (also read by
-        # _AiDialog, which never moved out of that module) — a deferred
-        # `import gui` here reaches it late, same indirection
-        # gui.theme._pkg() already established for a callback that must
-        # reach back into the still-monolithic part of the package.
+        # AI_POLL_MS lives in gui/dialogs.py (_AiDialog owns the poll
+        # loop it paces) — a deferred `import gui` here reaches it late,
+        # same indirection gui.theme._pkg() already established for a
+        # callback that must reach back into a sibling module without a
+        # module-level import (a real-path import from gui.api_panel
+        # straight to gui.dialogs would work, but the deferred form
+        # keeps this call site identical to gui.viewers.DocWindow's own
+        # AI_POLL_MS read, which IS circular against gui.dialogs).
         import gui
         self._probe_poll_job = self.after(gui.AI_POLL_MS, self._poll_probe)
 

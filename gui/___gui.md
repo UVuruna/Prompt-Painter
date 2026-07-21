@@ -17,19 +17,24 @@ with no dependency on the app's own panels or `PainterGui` itself.
 Step 3/8 moved the **reusable widgets + pure logic + dashboard
 helpers**: `FilterEditor`, `AspectRatioCanvas`, the Tk-free
 module-level functions (`logic.py`), and the shared dashboard support
-helpers (`dash_helpers.py`). Step 4/8 (this step) moved the **three
+helpers (`dash_helpers.py`). Step 4/8 moved the **three
 CONTROL-PANEL classes**: `AgentPanel` (`agent_panel.py`), the whole
 `ToolSettingsPanel` family — base + `BgSettingsPanel`/
 `CropSettingsPanel`/`UpscaleSettingsPanel`/`AspectSettingsPanel`/
 `ImageCheckerSettingsPanel` (`tool_panels.py`) — and `ApiImageGenPanel`
-+ `ApiImageAdapter` (`api_panel.py`). The god-class `PainterGui`
-(~3,350 lines), the dashboards' own panel classes (`JobPanel`/
-`DashPanel`/`ToolPanel`/`AiCheckPanel`/`DashGrid`), `MainMenu`/
-`IconBar`, `SelectWindow`, the AI dialogs and the viewers all still
-live in `__init__.py`, unmoved — [gui.md](../gui.md) (the
-pre-existing script doc, one level up, beside this folder) still
-documents that remaining content; it migrates into further submodules
-in later steps of the same refactor.
++ `ApiImageAdapter` (`api_panel.py`). This step moved the **VIEWER +
+DIALOG Toplevels**: `SelectWindow` (`select_window.py`), `DocWindow`/
+`BeforeAfterWindow`/`_filmstrip_stages`/`StepRestoreWindow`
+(`viewers.py`), and `_ModalToolDialog`/`_AiDialog`/`AiKeyWizard`/
+`AiSheetDialog` (`dialogs.py`) — including `AI_POLL_MS`, which follows
+its real owner `_AiDialog` out of `gui/__init__.py` into
+`gui/dialogs.py` (see that module's own Design Decisions). The
+god-class `PainterGui` (~3,350 lines) and the dashboards' own panel
+classes (`JobPanel`/`DashPanel`/`ToolPanel`/`AiCheckPanel`/`DashGrid`,
+`MainMenu`/`IconBar`) still live in `__init__.py`, unmoved —
+[gui.md](../gui.md) (the pre-existing script doc, one level up,
+beside this folder) still documents that remaining content; it
+migrates into further submodules in later steps of the same refactor.
 
 ## Files
 
@@ -155,6 +160,28 @@ the before/after transparency-checkerboard helpers (`_checkerboard`/
 `_has_alpha`/`_scaled_photo`). Depends on `gui.theme`
 (`TOOL_CHANGED_TAG`/`TOOL_SKIP_TAG`, `skin_tree`).
 
+### `select_window.py` — Select-Images Window
+`SelectWindow` — the per-site tick-list Toplevel over the queued
+Collections (3-level tree: collection -> folder -> image), with the
+chunked Expand-all and coalesced recount that keep a big queue
+responsive. See [Select-Images Window](select_window.md).
+
+### `viewers.py` — Read-Only Viewers
+`DocWindow` (the Markdown/prompt/image viewer, plus its optional
+Fixer-AI manual buttons), `BeforeAfterWindow` (a tool job's
+before/after viewer), `_filmstrip_stages` (the pure per-image
+pipeline-stage list) and `StepRestoreWindow` (the per-step restore
+filmstrip built from it). Also owns the shared `DOC_*`/
+`BEFORE_AFTER_*`/`STEP_RESTORE_*` sizing constants. See
+[Read-Only Viewers](viewers.md).
+
+### `dialogs.py` — Modal Dialogs
+`_ModalToolDialog` (shared centre-on-parent placement), `_AiDialog`
+(the worker-queue poll loop both AI dialogs share, and the owner of
+`AI_POLL_MS`), `AiKeyWizard` (the guided Gemini-API-key onboarding)
+and `AiSheetDialog` ('New collection (AI)…'). See
+[Modal Dialogs](dialogs.md).
+
 ## Connections
 
 ### Uses
@@ -220,14 +247,31 @@ panel modules import from directly (`from .tool_panels import ...`),
 with zero circular-import risk since `tool_panels.py` depends on
 neither of them.
 
-**The one exception: `AI_POLL_MS` stays in `__init__.py`.** Unlike the
-constants above, `AI_POLL_MS` is read by `ApiImageGenPanel` (moved)
-AND `_AiDialog` (not moved, still in `__init__.py`) — moving it to
-either module would just relocate the same circular-import problem
-onto the other caller. `gui/api_panel.py`'s `_arm_probe_poll` instead
-reaches it through a deferred `import gui` inside the method body
-(never at module level) — the identical late-binding idiom
-`gui/theme.py`'s `_pkg()` already established for a callback that
-must reach back into the still-monolithic part of the package; by the
-time `_arm_probe_poll` actually runs (well after import time), the
-`gui` package has always finished initializing.
+**`AI_POLL_MS` followed `_AiDialog` into `gui/dialogs.py`.** Step 4/8
+left it behind in `gui/__init__.py` specifically because `_AiDialog`
+(its only OTHER reader at the time) hadn't moved yet — relocating it
+then would have just moved the same circular-import problem onto
+`ApiImageGenPanel` instead. Now that `_AiDialog` itself has moved (this
+step), the constant follows its real owner. Both `gui/api_panel.py`'s
+`_arm_probe_poll` AND `gui/viewers.py`'s `DocWindow._arm_fix_poll` (an
+unrelated Fixer-AI poll that happens to share the same cadence
+constant) keep reaching it through a deferred `import gui; gui.
+AI_POLL_MS` inside the method body (never at module level) — the
+identical late-binding idiom `gui/theme.py`'s `_pkg()` established —
+rather than a real-path `from .dialogs import AI_POLL_MS`. For
+`gui.viewers` specifically a real-path import WOULD be circular:
+`gui.dialogs` imports `DocWindow` FROM `gui.viewers` (for
+`AiSheetDialog._finish`'s "not loaded" viewer), so `gui.viewers`
+cannot import back from `gui.dialogs` at module level. By the time
+either poll method actually runs (well after import time), the `gui`
+package has always finished initializing.
+
+**Step 5 — the viewer/dialog Toplevels' cross-import shape.**
+`gui/select_window.py` imports `DOC_HEIGHT_FRAC`/`DOC_MAX_FRAC`
+directly from `gui/viewers.py` (the module that names and owns the
+`DOC_*` sizing family) — safe because `gui.viewers` has no dependency
+back on `gui.select_window`. `gui/dialogs.py` imports `DocWindow`
+directly from `gui/viewers.py` for the same reason (one-directional).
+The only cycle risk in this step was `AI_POLL_MS` (see above), solved
+with the same late-binding idiom rather than restructuring either
+module.

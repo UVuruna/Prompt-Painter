@@ -70,11 +70,10 @@ including the "Check API access" gating probe (`_probe_access`/
 `_arm_probe_poll`/`_poll_probe`/`_apply_probe_result`, its own
 private queue+poll mirroring `_AiDialog`'s established pattern since
 this is a `ttk.Frame`, not a `Toplevel`). `_arm_probe_poll` reaches
-`AI_POLL_MS` through a deferred `import gui` — that one constant
-stays defined in `gui/__init__.py` (also read there by `_AiDialog`,
-which never moved), so a real-path import would be circular; see the
-module docstring and `gui.theme._pkg()` for the same established
-late-binding idiom.
+`AI_POLL_MS` through a deferred `import gui` — that constant now lives
+in [Modal Dialogs](dialogs.md) (`_AiDialog` owns the poll loop it
+paces); see the module docstring and `gui.theme._pkg()` for the same
+established late-binding idiom.
 
 ### ApiImageAdapter
 A `SiteDriver`-shaped stand-in — `attach`/`close`/`await_done` are
@@ -85,5 +84,5 @@ no-ops, `submit_prompt` only remembers the prompt text, and
 See [GUI (folder)](___gui.md)'s own "Design Decisions" section for
 why the shared two-column-dense layout constants live in
 `gui.tool_panels` rather than here or in `gui/__init__.py`, and why
-`AI_POLL_MS` alone stays behind in `gui/__init__.py` with a deferred-
-import indirection instead.
+`AI_POLL_MS` lives in [Modal Dialogs](dialogs.md) with a deferred-
+import indirection here instead of a real-path import.
