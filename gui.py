@@ -63,6 +63,10 @@ from painter.config import (
     CHECKER_DARK,
     CHECKER_LIGHT,
     CHECKER_TILE_PX,
+    CLEAN_EDGE_ENABLE,
+    CROP_INK_ALPHA,
+    CROP_MARGIN_PX,
+    CROP_MIN_INK_PX,
     DEFAULT_OUT_DIR,
     FILTER_ASPECT_EXACT_TOL,
     FILTER_KIND_ANY_SIDE,
@@ -96,6 +100,8 @@ from painter.config import (
     MENU_TILE_W,
     NEW_CHAT_CHOICES,
     RESIZE_SETTLE_MS,
+    SAFETY_MAX_REMOVE_FRAC,
+    SAFETY_MAX_REMOVE_FRAC_WHITE,
     SHEETS_DIR,
     SITES,
     STATE_DIRNAME,
@@ -2485,6 +2491,477 @@ class AgentPanel(ttk.Labelframe):
 
 
 # ---------------------------------------------------------------------
+# Standalone-tool settings panels (GUI rework Phase 13)
+# ---------------------------------------------------------------------
+
+
+def _parse_fraction(text: str, field_name: str) -> float:
+    """Parse ONE Advanced-override fraction field (0 < x <= 1) —
+    raises ``ValueError`` naming the field, the same "which field
+    failed" contract every other panel/dialog validator in this file
+    already follows (``_FilterConditionRow.to_condition``,
+    ``AgentPanel.pace_floats`` et al.)."""
+    try:
+        value = float(text.strip())
+    except ValueError:
+        raise ValueError(f"{field_name}: must be a number.") from None
+    if not (0.0 < value <= 1.0):
+        raise ValueError(f"{field_name}: must be greater than 0 and at most 1.")
+    return value
+
+
+def _parse_nonneg_int(text: str, field_name: str) -> int:
+    """Parse ONE Advanced-override whole-number field (>= 0)."""
+    try:
+        value = int(float(text.strip()))
+    except ValueError:
+        raise ValueError(f"{field_name}: must be a whole number.") from None
+    if value < 0:
+        raise ValueError(f"{field_name}: must not be negative.")
+    return value
+
+
+def _parse_int_range(text: str, field_name: str, lo: int, hi: int) -> int:
+    """``_parse_nonneg_int`` plus an inclusive upper bound (the alpha
+    fields are 0-255)."""
+    value = _parse_nonneg_int(text, field_name)
+    if not (lo <= value <= hi):
+        raise ValueError(f"{field_name}: must be between {lo} and {hi}.")
+    return value
+
+
+class ToolSettingsPanel(ttk.Frame):
+    """Base for a standalone in-place tool's PERSISTENT settings panel
+    — BG removal / Crop today (GUI rework Phase 13; Phase 14 gives
+    Upscale/Aspect the same treatment, per the design's own track
+    order). Shown INLINE above Dashboard/Log while its tile is toggled
+    open (``PainterGui._inline_kind`` — see ``PainterGui.
+    _open_tool_panel``), the exact surface website_gen's own
+    ``_controls_box`` already occupies (``_apply_running_layout``),
+    generalized to a second panel family instead of forked.
+
+    Owns: an input picker (**Folder…** — recursive via the shared
+    ``iter_images``, matching every folder-based tool — or **Files…**,
+    mirroring the Aspect tool's own Files/Folder choice), an embedded
+    ``FilterEditor`` (Phase 4) narrowing WHICH images the run touches,
+    an optional **Advanced** collapsible (the Settings-gear idiom
+    ``AgentPanel._toggle_settings`` already established) exposing
+    engine knobs the subclass contributes, and a Start/Pause row —
+    Pause mirrors ``AgentPanel.btn_pause``: a plain label-only toggle,
+    always clickable, never gated on run state (pausing before a job
+    exists is harmless — a fresh Start always clears any stale
+    pre-pause, see ``PainterGui._launch_tool_worker``).
+
+    No literal Stop button: unlike a site job, a standalone tool run
+    (``PainterGui._run_tool_job``) has no should_stop escape hatch —
+    adding one would mean changing that shared worker loop, which this
+    phase's own scope keeps UNCHANGED (bg/crop/upscale/aspect all rely
+    on its exact event contract). The panel's own icon-bar tile already
+    doubles as "dismiss without starting" (clicking it again hides the
+    panel, exactly like website_gen's toggle) — see gui.md for the
+    honest scope note on why a real mid-run Stop is flagged, not built,
+    this round.
+
+    Subclasses (``BgSettingsPanel``/``CropSettingsPanel``) set
+    ``SLOT`` and contribute ``_build_advanced``/``build_func``/
+    ``_advanced_settings``/``_apply_advanced_settings`` (Rule #5 — one
+    shared body, not two near-identical panels). Public surface
+    ``PainterGui._start_tool_from_panel`` reads: ``resolve_input() ->
+    (Path, list[Path])`` (raises ``ValueError`` with an owner-facing
+    message), ``get_conditions() -> list[FilterCondition]`` (proxies
+    ``FilterEditor.get_conditions``, same raise contract),
+    ``build_func() -> Callable[[Path, Log], str]`` (subclass hook —
+    the engine call closed over THIS run's Advanced overrides),
+    ``set_run_state(running)``/``set_paused(is_paused)`` (mirror
+    ``AgentPanel``'s own), and the settings round-trip
+    ``get_settings()``/``apply_settings(stored, conditions=...)``.
+    """
+
+    SLOT: str = ""  # subclass sets this to a JOB_ORDER tool kind
+
+    def __init__(
+        self,
+        master,
+        on_start: Callable[[str], None],
+        on_pause: Callable[[str], None],
+        filter_presets: dict[str, list[dict]] | None = None,
+        on_filter_presets_changed: Callable[[], None] | None = None,
+    ):
+        super().__init__(master, padding=8)
+        self.slot = self.SLOT
+        self._on_start = on_start
+        self._on_pause = on_pause
+        self._input_mode = "folder"  # or "files"
+        self._folder: Path | None = None
+        self._files: list[Path] = []
+
+        head = ttk.Frame(self)
+        head.pack(fill="x")
+        ctk.CTkLabel(
+            head, text="", image=icon(JOB_LOGO[self.slot]), width=22,
+            fg_color="transparent", bg_color=theme_pair("bg"),
+        ).pack(side="left", padx=(0, 4))
+        ttk.Label(
+            head, text=f"{JOB_LABEL[self.slot]} — settings",
+            style="Head.TLabel",
+        ).pack(side="left")
+
+        pick_row = ttk.Frame(self)
+        pick_row.pack(fill="x", pady=(8, 2))
+        rounded_button(
+            pick_row, "Folder…", command=self._pick_folder, kind="info",
+            width=90,
+        ).pack(side="left")
+        rounded_button(
+            pick_row, "Files…", command=self._pick_files, kind="info",
+            width=90,
+        ).pack(side="left", padx=(6, 0))
+        self._picked_var = tk.StringVar(value="(pick a folder or files)")
+        ttk.Label(
+            pick_row, textvariable=self._picked_var, style="Muted.TLabel",
+        ).pack(side="left", padx=(10, 0))
+
+        ttk.Label(
+            self,
+            text="Filter — which images this run touches (empty = all):",
+        ).pack(anchor="w", pady=(8, 2))
+        self.filter = FilterEditor(
+            self, presets=filter_presets,
+            on_presets_changed=on_filter_presets_changed,
+        )
+        self.filter.pack(fill="x")
+
+        # the Advanced collapsible — the SAME Settings-gear idiom
+        # AgentPanel._toggle_settings/_apply_finetune_visibility already
+        # established, applied to a subclass-built body instead of the
+        # per-agent fine-tune block
+        adv_head = ttk.Frame(self)
+        adv_head.pack(fill="x", pady=(10, 0))
+        ttk.Label(adv_head, text="Advanced", style="Head.TLabel").pack(
+            side="left"
+        )
+        self._advanced_btn = rounded_button(
+            adv_head, SETTINGS_GLYPH_COLLAPSED,
+            command=self._toggle_advanced, icon_name="settings",
+        )
+        self._advanced_btn.pack(side="left", padx=(6, 0))
+        self._advanced_collapsed_var = tk.BooleanVar(value=True)
+        self._advanced_box = ttk.Frame(self)
+        self._build_advanced(self._advanced_box)
+        self._apply_advanced_visibility()
+
+        btn_row = ttk.Frame(self)
+        btn_row.pack(fill="x", pady=(10, 0))
+        self.btn_start = rounded_button(
+            btn_row, "Start", command=lambda: self._on_start(self.slot),
+            kind="success", icon_name="start", width=90,
+        )
+        self.btn_start.pack(side="left")
+        # the pause toggle — a plain neutral button, ALWAYS clickable
+        # (no filled/outline availability dance), exactly like
+        # AgentPanel.btn_pause; see this class's own docstring for why
+        # there is no third Stop button beside it.
+        self.btn_pause = rounded_button(
+            btn_row, "Pause", command=lambda: self._on_pause(self.slot),
+            kind="secondary", width=70,
+        )
+        self.btn_pause.pack(side="left", padx=6)
+        self.set_run_state(running=False)
+
+    # --- input picker ----------------------------------------------
+
+    def _pick_folder(self) -> None:
+        folder = filedialog.askdirectory(
+            title=f"Folder with images — {JOB_LABEL[self.slot]} runs"
+            " IN PLACE"
+        )
+        if not folder:
+            return
+        self._input_mode = "folder"
+        self._folder = Path(folder)
+        self._files = []
+        n = len(iter_images(self._folder))
+        self._picked_var.set(f"Folder: {self._folder}  ({n} image(s))")
+
+    def _pick_files(self) -> None:
+        picks = filedialog.askopenfilenames(
+            title=f"Image files — {JOB_LABEL[self.slot]} runs IN PLACE",
+            filetypes=[
+                ("Images", "*.png *.jpg *.jpeg *.webp"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not picks:
+            return
+        self._input_mode = "files"
+        self._folder = None
+        self._files = [Path(p) for p in picks]
+        self._picked_var.set(f"{len(self._files)} file(s) picked")
+
+    def resolve_input(self) -> tuple[Path, list[Path]]:
+        """(base folder, candidate files) for THIS run — raises
+        ``ValueError`` when nothing has been picked yet. Folder mode
+        RE-SCANS live (``iter_images``) so a folder edited since the
+        pick is honored, matching every existing folder-based tool;
+        Files mode replays the exact picked list, based via
+        ``config.selection_base_and_rels`` (a selection spanning
+        sub-folders still groups/restores correctly, mirroring the
+        Aspect tool)."""
+        if self._input_mode == "folder":
+            if self._folder is None:
+                raise ValueError("Pick a folder or files first.")
+            return self._folder, iter_images(self._folder)
+        if not self._files:
+            raise ValueError("Pick a folder or files first.")
+        base, _rels = selection_base_and_rels(self._files)
+        return base, list(self._files)
+
+    # --- filter ------------------------------------------------------
+
+    def get_conditions(self) -> list[filters.FilterCondition]:
+        return self.filter.get_conditions()
+
+    # --- Advanced (subclass hooks) ------------------------------------
+
+    def _build_advanced(self, box: ttk.Frame) -> None:
+        """Subclass hook — populate ``box`` with this tool's own engine
+        knobs. Base no-op (never reached directly — ``SLOT``/this
+        method are always overridden together)."""
+
+    def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
+        """Subclass hook — a ``(path, log) -> str`` callable wrapping
+        the engine function with THIS run's Advanced overrides. Raises
+        ``ValueError`` (naming the field) on an unparsable override."""
+        raise NotImplementedError
+
+    def _advanced_settings(self) -> dict:
+        """Subclass hook — this tool's Advanced fields as a JSON-safe
+        dict, folded into ``get_settings()``."""
+        return {}
+
+    def _apply_advanced_settings(self, stored: dict) -> None:
+        """Subclass hook — the inverse of ``_advanced_settings``;
+        missing keys keep the current defaults."""
+
+    def _apply_advanced_visibility(self) -> None:
+        collapsed = self._advanced_collapsed_var.get()
+        if collapsed:
+            self._advanced_box.pack_forget()
+        else:
+            self._advanced_box.pack(fill="x", pady=(2, 0))
+        self._advanced_btn.configure(
+            text=SETTINGS_GLYPH_COLLAPSED if collapsed
+            else SETTINGS_GLYPH_EXPANDED
+        )
+
+    def _toggle_advanced(self) -> None:
+        self._advanced_collapsed_var.set(
+            not self._advanced_collapsed_var.get()
+        )
+        smooth_transition(
+            self.winfo_toplevel(), self._apply_advanced_visibility
+        )
+
+    # --- run state -----------------------------------------------------
+
+    def set_run_state(self, running: bool) -> None:
+        """Start is available unless this slot's job is already
+        running (mirrors ``AgentPanel.set_run_state``'s Start half —
+        there is no Stop button here to also style, see this class's
+        docstring)."""
+        style_action_button(self.btn_start, "success", not running)
+
+    def set_paused(self, is_paused: bool) -> None:
+        self.btn_pause.configure(text="Resume" if is_paused else "Pause")
+
+    # --- settings round-trip -------------------------------------------
+
+    def get_settings(self) -> dict:
+        data = {
+            "conditions": [
+                filters.condition_to_dict(c)
+                for c in self.filter.get_conditions()
+            ],
+            "advanced_collapsed": self._advanced_collapsed_var.get(),
+        }
+        data.update(self._advanced_settings())
+        return data
+
+    def apply_settings(
+        self, stored: dict,
+        conditions: list[filters.FilterCondition] | None = None,
+    ) -> None:
+        """Missing keys keep the current defaults — same contract as
+        every other panel's ``apply_settings`` in this file.
+        ``conditions`` (GUI rework Phase 4 convention) is the ALREADY-
+        PARSED replacement for the FilterEditor's stack; ``None`` (a
+        fresh settings.json) leaves it at its construction-time empty
+        default. The CALLER (``PainterGui._apply_settings``) owns
+        parsing the raw JSON, same as ``AgentPanel.apply_settings``."""
+        if conditions is not None:
+            self.filter.set_conditions(conditions)
+        if "advanced_collapsed" in stored:
+            self._advanced_collapsed_var.set(
+                bool(stored["advanced_collapsed"])
+            )
+        self._apply_advanced_visibility()
+        self._apply_advanced_settings(stored)
+
+
+class BgSettingsPanel(ToolSettingsPanel):
+    """BG removal's persistent settings panel (GUI rework Phase 13).
+
+    Advanced exposes the SAFETY GUARD fractions ``remove_background``
+    aborts past (owner 2026-07-19's "never destroy an image" rule) —
+    NOT the border-halo-cleanup toggle the design's own phase notes
+    mention: that constant (``CLEAN_EDGE_ENABLE``) is only ever read by
+    ``crop_transparent`` (its docstring: "only serves to ENABLE a
+    tighter crop") — ``remove_background`` never calls
+    ``clean_edge_halo`` at all, so surfacing it here would silently do
+    nothing (root Rule #1). It lives on ``CropSettingsPanel`` instead,
+    where it actually affects behaviour; see that class's own
+    docstring."""
+
+    SLOT = "bg"
+
+    def _build_advanced(self, box: ttk.Frame) -> None:
+        ttk.Label(
+            box,
+            text="Safety guard — abort a removal that would clear more"
+            " than:",
+        ).pack(anchor="w", pady=(0, 2))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="black bg", width=10).pack(side="left")
+        self.safety_black_var = tk.StringVar(
+            value=f"{SAFETY_MAX_REMOVE_FRAC:.2f}"
+        )
+        rounded_entry(
+            row, width=60, textvariable=self.safety_black_var,
+            justify="center",
+        ).pack(side="left")
+        ttk.Label(row, text="(fraction, e.g. 0.40)").pack(
+            side="left", padx=(6, 0)
+        )
+        row2 = ttk.Frame(box)
+        row2.pack(fill="x", pady=2)
+        ttk.Label(row2, text="white bg", width=10).pack(side="left")
+        self.safety_white_var = tk.StringVar(
+            value=f"{SAFETY_MAX_REMOVE_FRAC_WHITE:.2f}"
+        )
+        rounded_entry(
+            row2, width=60, textvariable=self.safety_white_var,
+            justify="center",
+        ).pack(side="left")
+
+    def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
+        from painter.postprocess import remove_background
+
+        black = _parse_fraction(self.safety_black_var.get(), "black bg safety")
+        white = _parse_fraction(self.safety_white_var.get(), "white bg safety")
+        return lambda path, log: remove_background(
+            path, log,
+            safety_max_remove_frac=black,
+            safety_max_remove_frac_white=white,
+        )
+
+    def _advanced_settings(self) -> dict:
+        return {
+            "safety_black": self.safety_black_var.get(),
+            "safety_white": self.safety_white_var.get(),
+        }
+
+    def _apply_advanced_settings(self, stored: dict) -> None:
+        if "safety_black" in stored:
+            self.safety_black_var.set(stored["safety_black"])
+        if "safety_white" in stored:
+            self.safety_white_var.set(stored["safety_white"])
+
+
+class CropSettingsPanel(ToolSettingsPanel):
+    """Crop's persistent settings panel (GUI rework Phase 13).
+
+    Advanced exposes every knob ``crop_transparent`` actually reads:
+    the border-halo cleanup toggle (``clean_edge_enable`` — only ever
+    serves to ENABLE a tighter crop, see ``painter/postprocess.md``),
+    the safety MARGIN kept around the content box, and the ink-
+    detection thresholds (the alpha floor + the minimum ink pixels a
+    row/col needs to count as content). ``CLEAN_EDGE_ALPHA`` (the
+    halo's OWN alpha threshold, a finer sub-knob of the toggle above)
+    stays at its config default — not surfaced as a field this round,
+    unlike the other four, which the design explicitly asked for."""
+
+    SLOT = "crop"
+
+    def _build_advanced(self, box: ttk.Frame) -> None:
+        self.clean_edge_var = tk.BooleanVar(value=CLEAN_EDGE_ENABLE)
+        rounded_switch(
+            box, "Clean faint border halo before cropping (tighter crop)",
+            self.clean_edge_var,
+        ).pack(anchor="w", pady=(0, 4))
+
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="margin px", width=10).pack(side="left")
+        self.margin_var = tk.StringVar(value=str(CROP_MARGIN_PX))
+        rounded_entry(
+            row, width=60, textvariable=self.margin_var, justify="center",
+        ).pack(side="left")
+
+        row2 = ttk.Frame(box)
+        row2.pack(fill="x", pady=2)
+        ttk.Label(row2, text="ink alpha", width=10).pack(side="left")
+        self.ink_alpha_var = tk.StringVar(value=str(CROP_INK_ALPHA))
+        rounded_entry(
+            row2, width=60, textvariable=self.ink_alpha_var, justify="center",
+        ).pack(side="left")
+        ttk.Label(row2, text="0-255").pack(side="left", padx=(6, 0))
+
+        row3 = ttk.Frame(box)
+        row3.pack(fill="x", pady=2)
+        ttk.Label(row3, text="min ink px", width=10).pack(side="left")
+        self.min_ink_var = tk.StringVar(value=str(CROP_MIN_INK_PX))
+        rounded_entry(
+            row3, width=60, textvariable=self.min_ink_var, justify="center",
+        ).pack(side="left")
+
+    def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
+        from painter.postprocess import crop_transparent
+
+        margin = _parse_nonneg_int(self.margin_var.get(), "margin px")
+        ink_alpha = _parse_int_range(
+            self.ink_alpha_var.get(), "ink alpha", 0, 255
+        )
+        min_ink = _parse_nonneg_int(self.min_ink_var.get(), "min ink px")
+        clean_enable = self.clean_edge_var.get()
+        return lambda path, log: crop_transparent(
+            path, log,
+            clean_edge_enable=clean_enable,
+            crop_margin_px=margin,
+            crop_ink_alpha=ink_alpha,
+            crop_min_ink_px=min_ink,
+        )
+
+    def _advanced_settings(self) -> dict:
+        return {
+            "clean_edge_enable": self.clean_edge_var.get(),
+            "margin_px": self.margin_var.get(),
+            "ink_alpha": self.ink_alpha_var.get(),
+            "min_ink_px": self.min_ink_var.get(),
+        }
+
+    def _apply_advanced_settings(self, stored: dict) -> None:
+        if "clean_edge_enable" in stored:
+            self.clean_edge_var.set(bool(stored["clean_edge_enable"]))
+        if "margin_px" in stored:
+            self.margin_var.set(stored["margin_px"])
+        if "ink_alpha" in stored:
+            self.ink_alpha_var.set(stored["ink_alpha"])
+        if "min_ink_px" in stored:
+            self.min_ink_var.set(stored["min_ink_px"])
+
+
+# ---------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------
 
@@ -4594,6 +5071,29 @@ class PainterGui:
             self._main_view,
             on_select=self._click_icon_bar_tile, on_menu=self._request_menu,
         )
+        # GUI rework Phase 13: PERSISTENT settings panels for the
+        # standalone tools — BG removal / Crop today (Phase 14 gives
+        # Upscale/Aspect the same treatment). Children of _main_view
+        # like _controls_box/_icon_bar, shown/hidden by
+        # _apply_running_layout via _inline_kind (generalizing
+        # website_gen's own single-panel toggle to this dict); left
+        # unpacked here.
+        self._tool_panels: dict[str, ToolSettingsPanel] = {
+            "bg": BgSettingsPanel(
+                self._main_view,
+                on_start=self._start_tool_from_panel,
+                on_pause=self._toggle_pause_job,
+                filter_presets=self._filter_presets,
+                on_filter_presets_changed=self._on_filter_presets_changed,
+            ),
+            "crop": CropSettingsPanel(
+                self._main_view,
+                on_start=self._start_tool_from_panel,
+                on_pause=self._toggle_pause_job,
+                filter_presets=self._filter_presets,
+                on_filter_presets_changed=self._on_filter_presets_changed,
+            ),
+        }
 
         self.status_var = tk.StringVar(value="idle")
         ttk.Label(
@@ -4862,7 +5362,19 @@ class PainterGui:
         the now-visible queue + per-site Start buttons, same as always.
         ``_tile_handler`` is shared with the running view's IconBar
         (``_click_icon_bar_tile``, GUI rework Phase 11) — ONE mapping,
-        not two copies (Rule #5)."""
+        not two copies (Rule #5).
+
+        GUI rework Phase 13: bg/crop now have their OWN persistent
+        panel (``_tool_panels``) and skip the "main" hop entirely,
+        going straight to "running" with it shown inline
+        (``_open_tool_panel``) — routing them through ``_go_view
+        ("main")`` first, like every other tile, would reveal-then-
+        immediately-hide the old controls box behind a wasted extra
+        fade (``_open_tool_panel`` transitions straight to "running"
+        itself). Every other tile's routing is UNCHANGED."""
+        if tile_id in self._tool_panels:
+            self._open_tool_panel(tile_id)
+            return
         self._go_view("main")
         handler = self._tile_handler(tile_id)
         if handler is not None:
@@ -4874,14 +5386,25 @@ class PainterGui:
         ``_select_tile``'s docstring) and for the disabled
         "api_image_gen" placeholder (never reaches a caller: MainMenu
         binds no click on a disabled tile, and IconBar disables its own
-        button the same way — Phase 19 wires the real handler in)."""
+        button the same way — Phase 19 wires the real handler in).
+
+        GUI rework Phase 13: bg/crop route to ``_open_tool_panel`` —
+        their new persistent settings panel — instead of the old
+        ``_start_tool`` modal (which no longer handles either slot;
+        see ``_start_tool``'s own docstring). In practice neither
+        ``_select_tile`` nor ``_click_icon_bar_tile`` ever reaches
+        this dict entry for them (both special-case the panel toggle
+        before falling through here — ``_select_tile`` to skip a
+        wasted view hop, ``_click_icon_bar_tile`` implicitly via this
+        same mapping), but this stays a COMPLETE, truthful "tile id ->
+        its action" table regardless of which caller consults it."""
         return {
             "website_gen": None,
             "ai_sheet_gen": self._new_collection_ai,
             "api_image_gen": None,
             "image_checker": self._start_ai_check,
-            "bg": partial(self._start_tool, "bg"),
-            "crop": partial(self._start_tool, "crop"),
+            "bg": partial(self._open_tool_panel, "bg"),
+            "crop": partial(self._open_tool_panel, "crop"),
             "upscale": partial(self._start_tool, "upscale"),
             "aspect": partial(self._start_tool, "aspect"),
         }[tile_id]
@@ -4921,11 +5444,13 @@ class PainterGui:
 
     def _apply_running_layout(self) -> None:
         """Reconcile the region above the notebook for the running
-        view: the IconBar is always shown; ``_controls_box``
-        additionally shows, INLINE, only while the owner has the
-        website_gen tile toggled open (``_inline_kind``) — every other
-        functionality still launches through its existing modal/dialog
-        handler (Phase 13-15 give them a real persistent panel; see
+        view: the IconBar is always shown; AT MOST ONE inline settings
+        surface additionally shows, keyed by ``_inline_kind`` —
+        ``_controls_box`` for "website_gen", or the matching
+        ``ToolSettingsPanel`` from ``_tool_panels`` (GUI rework Phase
+        13: bg/crop today, Phase 14 adds upscale/aspect the same way).
+        Every functionality WITHOUT an entry in ``_tool_panels`` still
+        launches through its existing modal/dialog handler (see
         ``_click_icon_bar_tile``). The SAME pack_forget/pack(before=
         self.notebook) technique ``_set_collapsed`` already proves
         safe, one container lower — nothing destroyed, only shown/
@@ -4933,11 +5458,40 @@ class PainterGui:
         only meaningful while ``_view == "running"``."""
         self._controls_box.pack_forget()
         self._compact_box.pack_forget()
+        for panel in self._tool_panels.values():
+            panel.pack_forget()
         self._icon_bar.pack(fill="x", before=self.notebook)
         if self._inline_kind == "website_gen":
             self._controls_box.pack(fill="x", before=self.notebook)
+        elif self._inline_kind in self._tool_panels:
+            self._tool_panels[self._inline_kind].pack(
+                fill="x", before=self.notebook
+            )
         self._icon_bar.set_active(self._active_tile_ids())
         self._scroll.refresh()
+
+    def _open_tool_panel(self, tile_id: str) -> None:
+        """Toggle ONE standalone tool's persistent settings panel
+        (``_tool_panels`` — BG/Crop today, GUI rework Phase 13) inline
+        above Dashboard/Log — generalizes website_gen's own
+        ``_controls_box`` toggle (``_click_icon_bar_tile``, Phase 11)
+        to a second panel family. Reached from BOTH the Main Menu
+        (``_select_tile``, always ``_view == "menu"``) and the running
+        view's IconBar (``_click_icon_bar_tile``'s generic
+        ``_tile_handler`` fallthrough, always already ``_view ==
+        "running"``) — ONE method, not two copies (Rule #5).
+
+        Entering "running" for the FIRST time with NO job active yet
+        (the Main Menu path) is a new but SAFE transition: ``_next_view``
+        keeps the view "running" even at zero active jobs once entered
+        (see its own docstring), and ``_active_kinds()`` only ever
+        counts REAL workers — an open settings panel with nothing
+        started yet is invisible to it, so an explicit Menu click still
+        navigates away cleanly."""
+        if self._view != "running":
+            self._go_view("running")  # resets _inline_kind to None
+        self._inline_kind = None if self._inline_kind == tile_id else tile_id
+        self._apply_running_layout()
 
     def _request_menu(self) -> None:
         """The Menu affordance's shared handler (the pinned top-strip
@@ -4966,13 +5520,16 @@ class PainterGui:
         any running job's own hidden panel"). A NOT-running tile
         toggles its inline settings/launch surface: "website_gen"
         shows/hides the existing ``_controls_box`` (the queue + both
-        AgentPanels) right above the Dashboard/Log; every other
-        functionality still launches through its EXISTING modal/dialog
-        handler (``_tile_handler`` — the SAME one the Main Menu itself
-        uses), since Phase 13-15 are what give bg/crop/upscale/aspect/
-        the AI checker a real persistent panel — until then, opening
-        that dialog IS the tile's launch surface, and it disturbs
-        nothing else (always its own Toplevel)."""
+        AgentPanels) right above the Dashboard/Log; "bg"/"crop" route
+        through ``_tile_handler`` to ``_open_tool_panel`` (GUI rework
+        Phase 13), toggling their OWN persistent ``ToolSettingsPanel``
+        the exact same way; every other functionality (upscale/aspect/
+        image_checker/ai_sheet_gen) still launches through its EXISTING
+        modal/dialog handler (``_tile_handler`` — the SAME mapping the
+        Main Menu itself uses), since Phase 14/15 are what give THEM a
+        real persistent panel — until then, opening that dialog IS the
+        tile's launch surface, and it disturbs nothing else (always its
+        own Toplevel)."""
         kinds = TILE_JOB_KINDS.get(tile_id, ())
         if set(kinds) & self._active_kinds():
             self.notebook.select(0)
@@ -5278,19 +5835,31 @@ class PainterGui:
         if kind in self.agents:
             self.agents[kind].set_paused(is_paused)
         self.panels[kind].set_paused(is_paused)
+        if kind in self._tool_panels:
+            # GUI rework Phase 13: keep the persistent panel's OWN
+            # Pause/Resume label in sync too — it may be the panel the
+            # very next line reveals (see below), or already hidden
+            # (the owner navigated elsewhere) and simply catching up
+            # for whenever it is opened again.
+            self._tool_panels[kind].set_paused(is_paused)
         self._log(f"[{kind}] {'paused' if is_paused else 'resumed'}")
         # GUI rework Phase 11 (spec item 4): Pause RETURNS the settings
-        # panel "for future tasks" — today that only means something
-        # for website_gen (chatgpt/gemini), the one functionality with
-        # a real persistent panel (_controls_box); the four tools + the
-        # AI checker have none yet (Phase 13-15), so this is a no-op
-        # for them beyond the ToolPanel/AiCheckPanel Pause/Resume toggle
-        # already handled above. Resuming never hides it back — only a
-        # fresh Start (of either site) or the owner's own icon-bar
-        # toggle does that.
-        if is_paused and kind in ("chatgpt", "gemini") and self._view == "running":
-            self._inline_kind = "website_gen"
-            self._apply_running_layout()
+        # panel "for future tasks" — website_gen (chatgpt/gemini) shows
+        # the shared _controls_box; bg/crop (GUI rework Phase 13) show
+        # their OWN ToolSettingsPanel via _tool_panels, the same way
+        # _open_tool_panel does. upscale/aspect/the AI checker have no
+        # persistent panel yet (Phase 14/15), so this is a no-op for
+        # them beyond the ToolPanel/AiCheckPanel Pause/Resume toggle
+        # already handled above. Resuming never hides a revealed panel
+        # back — only a fresh Start or the owner's own icon-bar toggle
+        # does that.
+        if is_paused and self._view == "running":
+            if kind in ("chatgpt", "gemini"):
+                self._inline_kind = "website_gen"
+                self._apply_running_layout()
+            elif kind in self._tool_panels:
+                self._inline_kind = kind
+                self._apply_running_layout()
 
     def _open_instructions(self) -> None:
         path = Path(__file__).resolve().parent / "instructions.md"
@@ -5595,18 +6164,6 @@ class PainterGui:
     # --- the in-place tools (each its own concurrent job + panel) ------
 
     @staticmethod
-    def _tool_func(kind: str):
-        """The engine function behind a PARAMETERLESS tool (bg / crop).
-        Aspect binds its ratio and Upscale its four gate params in
-        _start_tool. Lazy import so the GUI opens even while the engine
-        modules build."""
-        if kind == "bg":
-            from painter.postprocess import remove_background
-            return remove_background
-        from painter.postprocess import crop_transparent
-        return crop_transparent
-
-    @staticmethod
     def _iter_images(folder: Path) -> list[Path]:
         return iter_images(folder)
 
@@ -5647,12 +6204,20 @@ class PainterGui:
         self._schedule_save()
 
     def _start_tool(self, slot: str) -> None:
-        """Start ONE in-place tool as its OWN job: pick a folder (aspect
-        asks for a ratio first), confirm, then back up + process every
-        image under it on a dedicated worker thread, reporting into the
-        slot's own dashboard panel. One job per kind — a second click
-        while it runs is refused; up to all four tools + both sites run
-        in parallel (6 panels)."""
+        """Start Upscale or Aspect ratio as its OWN job: pop the
+        tool's modal (a ratio + gate, or a min-side + gate), confirm,
+        then back up + process every image under the pick on a
+        dedicated worker thread, reporting into the slot's own
+        dashboard panel. One job per kind — a second click while it
+        runs is refused; up to all four tools + both sites run in
+        parallel (6 panels).
+
+        GUI rework Phase 13: BG removal / Crop no longer reach this
+        method — they route through their own persistent
+        ``ToolSettingsPanel`` (``_open_tool_panel`` /
+        ``_start_tool_from_panel``) instead of this modal
+        askdirectory+confirm flow; Phase 14 converts Upscale/Aspect
+        the same way, at which point this method retires."""
         if slot in self._tool_workers:
             messagebox.showerror(
                 "PromptPainter",
@@ -5728,44 +6293,39 @@ class PainterGui:
                 f" already at {ratio_w}:{ratio_h} are skipped untouched."
             )
         else:
-            # only the upscale branch below ever populates this; BG/Crop
-            # leave it empty, making the shared _filter_files() call a
-            # no-op for them (mirrors the Aspect branch's own unconditional
-            # call above)
-            upscale_conditions: list[filters.FilterCondition] = []
-            if slot == "upscale":
-                # Upscale asks its min-side + FilterEditor gate first
-                # (owner 2026-07-19; GUI rework Phase 6 replaced the old
-                # four scalar fields with ONE min-side spinner + a
-                # stacked FilterEditor), PRE-FILLED with the last-used
-                # values; then runs folder-based like BG/Crop with that
-                # gate bound.
-                choice = UpscaleParamsDialog(
-                    self.root,
-                    {
-                        "min_side": self._upscale_tool_minside,
-                        "conditions": self._upscale_tool_conditions,
-                    },
-                    presets=self._filter_presets,
-                    on_presets_changed=self._on_filter_presets_changed,
-                ).result
-                if choice is None:
-                    return
-                self._remember_upscale_tool_params(choice)
-                upscale_conditions = choice["conditions"]
-                up_params = _upscale_params_from_side_and_filter(
-                    choice["min_side"], upscale_conditions
-                )
-                from painter.upscale import upscale_if_small
+            # slot == "upscale" — the only kind left reaching this
+            # branch since GUI rework Phase 13 moved bg/crop to their
+            # own panel (see this method's docstring).
+            #
+            # Upscale asks its min-side + FilterEditor gate first
+            # (owner 2026-07-19; GUI rework Phase 6 replaced the old
+            # four scalar fields with ONE min-side spinner + a
+            # stacked FilterEditor), PRE-FILLED with the last-used
+            # values; then runs folder-based with that gate bound.
+            choice = UpscaleParamsDialog(
+                self.root,
+                {
+                    "min_side": self._upscale_tool_minside,
+                    "conditions": self._upscale_tool_conditions,
+                },
+                presets=self._filter_presets,
+                on_presets_changed=self._on_filter_presets_changed,
+            ).result
+            if choice is None:
+                return
+            self._remember_upscale_tool_params(choice)
+            upscale_conditions = choice["conditions"]
+            up_params = _upscale_params_from_side_and_filter(
+                choice["min_side"], upscale_conditions
+            )
+            from painter.upscale import upscale_if_small
 
-                func = (
-                    lambda path, log: upscale_if_small(
-                        path, log, **up_params
-                    )
+            func = (
+                lambda path, log: upscale_if_small(
+                    path, log, **up_params
                 )
-                label = f"Upscale ≥{up_params['min_width']}px min side"
-            else:
-                func = self._tool_func(slot)
+            )
+            label = f"Upscale ≥{up_params['min_width']}px min side"
             folder = filedialog.askdirectory(
                 title=f"Folder with images — {label} runs IN PLACE"
             )
@@ -5778,8 +6338,7 @@ class PainterGui:
             # how a stacked Width/Height/Any-side condition — or a SECOND
             # aspect condition — gets honored, since the simple upscale
             # kwargs above can only express ONE aspect band; see
-            # _upscale_params_from_side_and_filter's docstring). A no-op
-            # for BG/Crop (upscale_conditions is always [] for them).
+            # _upscale_params_from_side_and_filter's docstring).
             total_before = len(files)
             files = _filter_files(files, upscale_conditions, self._log)
             filt_note = (
@@ -5795,7 +6354,58 @@ class PainterGui:
             )
         if not messagebox.askyesno("PromptPainter", message):
             return
+        self._launch_tool_worker(slot, label, func, folder_path, files)
 
+    def _start_tool_from_panel(self, slot: str) -> None:
+        """Start button on a persistent ``ToolSettingsPanel`` (BG/Crop,
+        GUI rework Phase 13) — reads the panel's OWN input pick +
+        filter + Advanced overrides instead of popping ``_start_tool``'s
+        modal askdirectory+confirm (dropped here: the panel itself,
+        deliberately configured then Started, already IS the
+        confirmation), pre-filters via the SAME ``_filter_files`` every
+        other tool/Aspect/Upscale already uses, then hands off to the
+        UNCHANGED ``_launch_tool_worker`` tail shared with
+        ``_start_tool`` (one-job-per-kind guard, JobTemp, worker spawn,
+        dashboard reveal)."""
+        if slot in self._tool_workers:
+            messagebox.showerror(
+                "PromptPainter",
+                f"{JOB_LABEL[slot]} is already running — wait for it to"
+                " finish, or Close its panel.",
+            )
+            return
+        panel = self._tool_panels[slot]
+        try:
+            folder_path, files = panel.resolve_input()
+            conditions = panel.get_conditions()
+            func = panel.build_func()
+        except ValueError as exc:
+            messagebox.showerror("PromptPainter", str(exc))
+            return
+        files = _filter_files(files, conditions, self._log)
+        self._launch_tool_worker(slot, JOB_LABEL[slot], func, folder_path, files)
+        panel.set_run_state(running=True)
+        # Start hides the launching panel (spec item 4, mirrors
+        # _start_site's own "_inline_kind = None" — but ALSO forces an
+        # immediate re-layout: _sync_running_state (inside
+        # _launch_tool_worker) is a no-op here because the view is
+        # ALREADY "running" — the panel can only be visible while it
+        # is — so nothing else would re-pack the region above the
+        # notebook without this explicit call.
+        self._inline_kind = None
+        self._apply_running_layout()
+
+    def _launch_tool_worker(
+        self, slot: str, label: str, func, folder_path: Path,
+        files: list[Path],
+    ) -> None:
+        """Shared tail for EVERY standalone-tool Start — the modal-
+        driven ones (upscale/aspect today; Phase 14 converts them) and
+        the panel-driven ones (bg/crop, GUI rework Phase 13): create
+        this run's JobTemp, reveal the dashboard ``ToolPanel``, spawn
+        ``_run_tool_job`` on its own daemon thread. Extracted out of
+        ``_start_tool`` so it and ``_start_tool_from_panel`` share ONE
+        body (Rule #5) instead of the same dozen lines twice."""
         # a finished panel for this slot may still be on screen — clear
         # its old temp before the new job takes the slot
         old = self._job_temps.pop(slot, None)
@@ -6669,6 +7279,11 @@ class PainterGui:
                 # on an idle panel (owner 2026-07-21)
                 if slot in self._paused:
                     self._toggle_pause_job(slot)
+                if slot in self._tool_panels:
+                    # GUI rework Phase 13: re-enable the panel's own
+                    # Start button — "aicheck" has no entry here (its
+                    # own panel is AiCheckPanel, not a ToolSettingsPanel)
+                    self._tool_panels[slot].set_run_state(running=False)
                 if not self._tool_workers and not self._running:
                     self._update_status()
                 self._sync_running_state()  # GUI rework Phase 11
@@ -6729,6 +7344,17 @@ class PainterGui:
             "agents": {
                 key: panel.get_settings()
                 for key, panel in self.agents.items()
+            },
+            # GUI rework Phase 13: each standalone tool's PERSISTENT
+            # settings panel (BG/Crop today) — its filter stack +
+            # Advanced overrides, same round-trip shape as "agents"
+            # above. The picked folder/files are NEVER persisted (every
+            # tool has always asked fresh — matches the standalone
+            # Upscale/Aspect dialogs' own "remembered VALUES, not the
+            # picked path" convention).
+            "tool_panels": {
+                slot: panel.get_settings()
+                for slot, panel in self._tool_panels.items()
             },
         }
 
@@ -6801,6 +7427,17 @@ class PainterGui:
             panel.apply_settings(
                 agent_stored, upscale_conditions=upscale_conditions
             )
+
+        # GUI rework Phase 13: each standalone tool's PERSISTENT
+        # settings panel — same "missing key = keep default" contract
+        # as every other field, mirroring the "agents" loop above.
+        for slot, panel in self._tool_panels.items():
+            panel_stored = dict(stored.get("tool_panels", {}).get(slot, {}))
+            conditions = None
+            raw_conditions = panel_stored.get("conditions")
+            if isinstance(raw_conditions, list):
+                conditions = _parse_condition_dicts(raw_conditions, self._log)
+            panel.apply_settings(panel_stored, conditions=conditions)
 
         # remembered dialog values (owner 2026-07-19): the standalone
         # Upscale gate and the last aspect W:H (each agent's own

@@ -187,6 +187,25 @@ def test_ambiguous_background_is_unclear_and_untouched(tmp_path):
     assert any("UNCLEAR" in line for line in logs)
 
 
+def test_safety_override_lets_a_larger_removal_through(tmp_path):
+    """GUI rework Phase 13: safety_max_remove_frac is a REAL per-call
+    override, not silently ignored — the SAME image the default guard
+    aborts on ('unclear') is accepted ('done') once the caller raises
+    the ceiling above the measured removal (~0.974 here)."""
+    rgb = np.zeros((100, 100, 3), dtype=np.uint8)  # mostly black void
+    rgb[42:58, 42:58] = 220                        # tiny bright subject
+
+    img = tmp_path / "dark.png"
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    assert remove_background(img, print) == "unclear"  # default guard aborts
+
+    img2 = tmp_path / "dark2.png"
+    Image.fromarray(rgb, mode="RGB").save(img2, "PNG")
+    assert remove_background(
+        img2, print, safety_max_remove_frac=0.995,
+    ) == "done"
+
+
 def test_real_errors_are_loud(tmp_path):
     broken = tmp_path / "broken.png"
     broken.write_bytes(b"this is not a png")
@@ -282,6 +301,46 @@ def test_margin_clamps_at_the_image_edge(tmp_path):
     assert crop_transparent(img, print) == "done"
     with Image.open(img) as out:
         assert out.size == (10 + CROP_MARGIN_PX, 10 + CROP_MARGIN_PX)
+
+
+def test_crop_margin_px_override_changes_the_output_size(tmp_path):
+    """GUI rework Phase 13: crop_margin_px is a REAL per-call override
+    — the same content box crops tighter with margin=0 than with the
+    config default."""
+    img = tmp_path / "margin0.png"
+    arr = np.zeros((100, 100, 4), dtype=np.uint8)
+    arr[40:70, 40:70] = (200, 30, 30, 255)  # 30x30 solid content
+    save_rgba(img, arr)
+    assert crop_transparent(img, print, crop_margin_px=0) == "done"
+    with Image.open(img) as out:
+        assert out.size == (30, 30)  # exactly the content box, no margin
+
+
+def test_crop_clean_edge_enable_false_keeps_a_border_faint_pixel(tmp_path):
+    """GUI rework Phase 13: clean_edge_enable=False is a REAL override
+    — a border-connected FAINT (sub-ink) pixel sitting just inside the
+    eventual crop box survives at its original alpha when disabled,
+    but is zeroed by the default (True). The pixel is deliberately
+    below CROP_INK_ALPHA so content_bbox's own box is IDENTICAL either
+    way — only the SAVED PIXELS differ."""
+    arr = np.zeros((100, 100, 4), dtype=np.uint8)
+    arr[40:70, 40:70] = (200, 30, 30, 255)   # solid 30x30 subject
+    faint = CLEAN_EDGE_ALPHA - 10
+    # just inside the eventual crop box's top-left corner: content box
+    # (40,40,70,70) + CROP_MARGIN_PX(4) margin -> (36,36,74,74)
+    arr[36, 36, 3] = faint
+
+    on = tmp_path / "halo_on.png"
+    save_rgba(on, arr)
+    assert crop_transparent(on, print) == "done"
+    with Image.open(on) as out:
+        assert np.asarray(out)[0, 0, 3] == 0  # cleaned by the default
+
+    off = tmp_path / "halo_off.png"
+    save_rgba(off, arr)
+    assert crop_transparent(off, print, clean_edge_enable=False) == "done"
+    with Image.open(off) as out2:
+        assert np.asarray(out2)[0, 0, 3] == faint  # survives, override honored
 
 
 # --- ink-based bbox + border-halo cleanup (the OldAge.png fix) --------

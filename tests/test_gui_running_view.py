@@ -12,13 +12,22 @@ wiring gets a screenshot" split (___tests.md):
   active any more) tested directly, no GUI construction at all.
 * the ``PainterGui`` methods that consume it (``_active_kinds``/
   ``_active_tile_ids``/``_sync_running_state``/``_apply_running_layout``/
-  ``_request_menu``/``_click_icon_bar_tile``/``_tile_handler``) run for
-  REAL through a small duck-typed ``FakeGui`` — the SAME convention
-  test_gui_pipeline.py's own ``FakeGui`` uses for ``_compose_post_save``
-  (never a full ``PainterGui``: a heavy ``__init__``, and every other
-  phase's tests avoid it too). ``IconBar`` itself is a real, cheap-to-
-  construct widget: button count/ids, the one permanently-disabled
-  placeholder, and ``set_active``'s filled/outline recolouring.
+  ``_request_menu``/``_click_icon_bar_tile``/``_tile_handler``/
+  ``_open_tool_panel``) run for REAL through a small duck-typed
+  ``FakeGui`` — the SAME convention test_gui_pipeline.py's own
+  ``FakeGui`` uses for ``_compose_post_save`` (never a full
+  ``PainterGui``: a heavy ``__init__``, and every other phase's tests
+  avoid it too). ``IconBar`` itself is a real, cheap-to-construct
+  widget: button count/ids, the one permanently-disabled placeholder,
+  and ``set_active``'s filled/outline recolouring.
+
+GUI rework Phase 13 adds ``_tool_panels`` (BG/Crop's own persistent
+``ToolSettingsPanel`` — a REAL ``ttk.Frame`` stand-in here,
+``_RecordingToolPanel``, so ``_apply_running_layout``'s pack/
+pack_forget is exercised for real, same as ``_controls_box``/
+``_compact_box`` already are) and ``_open_tool_panel`` (the shared
+toggle both ``_select_tile`` and ``_click_icon_bar_tile`` now route
+bg/crop through instead of the old ``_start_tool`` modal).
 """
 
 from __future__ import annotations
@@ -114,6 +123,8 @@ class FakeGui:
     _tile_handler = gui.PainterGui._tile_handler
     _apply_running_layout = gui.PainterGui._apply_running_layout
     _toggle_pause_job = gui.PainterGui._toggle_pause_job
+    _open_tool_panel = gui.PainterGui._open_tool_panel
+    _select_tile = gui.PainterGui._select_tile
 
     def __init__(self, root):
         self._running: set[str] = set()
@@ -125,6 +136,14 @@ class FakeGui:
 
         self._controls_box = ttk.Frame(root)
         self._compact_box = ttk.Frame(root)
+        # GUI rework Phase 13: BG/Crop's own persistent settings panel
+        # stand-ins — real ttk.Frames so _apply_running_layout's pack/
+        # pack_forget is exercised for real (see this module's own
+        # docstring); upscale/aspect/aicheck deliberately have NO entry
+        # here, matching PainterGui._tool_panels' real Phase-13 scope.
+        self._tool_panels: dict[str, _RecordingToolPanel] = {
+            "bg": _RecordingToolPanel(root), "crop": _RecordingToolPanel(root),
+        }
         self.notebook = ttk.Notebook(root)
         self.notebook.add(ttk.Frame(self.notebook), text="Dashboard")
         self.notebook.add(ttk.Frame(self.notebook), text="Log")
@@ -175,6 +194,21 @@ class _RecordingPanel:
     ever calls ``set_paused`` on these."""
 
     def __init__(self):
+        self.paused_calls: list[bool] = []
+
+    def set_paused(self, is_paused: bool) -> None:
+        self.paused_calls.append(is_paused)
+
+
+class _RecordingToolPanel(ttk.Frame):
+    """Stands in for a BgSettingsPanel/CropSettingsPanel entry in
+    ``FakeGui._tool_panels`` (GUI rework Phase 13) — a REAL
+    ``ttk.Frame`` (so ``_apply_running_layout``'s pack/pack_forget is
+    exercised for real) plus a recorded ``set_paused``, the only other
+    thing ``_toggle_pause_job`` calls on it."""
+
+    def __init__(self, master):
+        super().__init__(master)
         self.paused_calls: list[bool] = []
 
     def set_paused(self, is_paused: bool) -> None:
@@ -250,6 +284,29 @@ def test_apply_running_layout_shows_controls_box_only_while_website_gen_inline(
     assert fake._controls_box.winfo_manager() == ""
 
 
+def test_apply_running_layout_shows_a_tool_panel_only_while_its_inline(root):
+    """GUI rework Phase 13: _inline_kind also keys into _tool_panels
+    (BG/Crop) — AT MOST ONE inline surface (website_gen's controls_box
+    OR one tool panel) shows at a time."""
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._inline_kind = "bg"
+    gui.PainterGui._apply_running_layout(fake)
+    assert fake._tool_panels["bg"].winfo_manager() == "pack"
+    assert fake._tool_panels["crop"].winfo_manager() == ""
+    assert fake._controls_box.winfo_manager() == ""
+
+    fake._inline_kind = "crop"
+    gui.PainterGui._apply_running_layout(fake)
+    assert fake._tool_panels["bg"].winfo_manager() == ""
+    assert fake._tool_panels["crop"].winfo_manager() == "pack"
+
+    fake._inline_kind = None
+    gui.PainterGui._apply_running_layout(fake)
+    assert fake._tool_panels["bg"].winfo_manager() == ""
+    assert fake._tool_panels["crop"].winfo_manager() == ""
+
+
 def test_apply_running_layout_hides_a_stale_compact_box(root):
     """Phase 10's collapsed strip is meaningless during "running" — the
     IconBar owns this whole region instead, even if the app was
@@ -314,16 +371,36 @@ def test_click_icon_bar_tile_website_gen_toggles_the_inline_panel(root):
 def test_click_icon_bar_tile_a_not_running_tool_invokes_its_existing_handler(
     root,
 ):
-    """bg/crop/upscale/aspect have no persistent panel yet (Phase
-    13-15) — clicking still launches through the SAME handler the Main
-    Menu itself uses (_tile_handler), undisturbed by some OTHER job
-    that keeps running."""
+    """upscale/aspect have no persistent panel yet (Phase 14) —
+    clicking still launches through the SAME handler the Main Menu
+    itself uses (_tile_handler), undisturbed by some OTHER job that
+    keeps running. (bg/crop DO have one now — GUI rework Phase 13 —
+    see test_click_icon_bar_tile_bg_not_running_opens_its_inline_panel
+    below.)"""
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._running = {"chatgpt"}
+    gui.PainterGui._click_icon_bar_tile(fake, "upscale")
+    assert fake.start_tool_calls == ["upscale"]
+    assert fake._inline_kind is None  # website_gen panel never touched
+
+
+def test_click_icon_bar_tile_bg_not_running_opens_its_inline_panel(root):
+    """bg/crop DO have a persistent settings panel now (GUI rework
+    Phase 13) — clicking while not running toggles it inline (via
+    _tile_handler's _open_tool_panel entry), exactly like website_gen's
+    own toggle, instead of the old _start_tool modal."""
     fake = FakeGui(root)
     fake._view = "running"
     fake._running = {"chatgpt"}
     gui.PainterGui._click_icon_bar_tile(fake, "bg")
-    assert fake.start_tool_calls == ["bg"]
-    assert fake._inline_kind is None  # website_gen panel never touched
+    assert fake.start_tool_calls == []  # never the old modal path
+    assert fake._inline_kind == "bg"
+    assert fake._tool_panels["bg"].winfo_manager() == "pack"
+
+    gui.PainterGui._click_icon_bar_tile(fake, "bg")  # click again -> hides
+    assert fake._inline_kind is None
+    assert fake._tool_panels["bg"].winfo_manager() == ""
 
 
 def test_click_icon_bar_tile_ai_sheet_gen_always_opens_its_dialog(root):
@@ -353,6 +430,46 @@ def test_tile_handler_covers_every_menu_tile_id_without_raising(root):
 
 
 # ---------------------------------------------------------------------
+# _select_tile — the Main Menu path (GUI rework Phase 13's bg/crop
+# shortcut around the usual "main" hop)
+# ---------------------------------------------------------------------
+
+
+def test_select_tile_bg_from_menu_skips_main_and_opens_the_panel_in_running(
+    root,
+):
+    """Every OTHER tile goes menu -> "main" -> its handler; bg/crop
+    skip straight to "running" with their panel shown, avoiding a
+    reveal-then-immediately-hide of the old controls box."""
+    fake = FakeGui(root)
+    fake._view = "menu"
+    gui.PainterGui._select_tile(fake, "bg")
+    assert fake.view_log == ["running"]  # never visited "main"
+    assert fake._view == "running"
+    assert fake._inline_kind == "bg"
+    assert fake._tool_panels["bg"].winfo_manager() == "pack"
+    assert fake.start_tool_calls == []  # never the old modal path
+
+
+def test_select_tile_website_gen_still_goes_through_main_unmodified(root):
+    fake = FakeGui(root)
+    fake._view = "menu"
+    gui.PainterGui._select_tile(fake, "website_gen")
+    assert fake.view_log == ["main"]
+    assert fake._inline_kind is None  # controls_box shows via "main" itself
+
+
+def test_select_tile_upscale_still_goes_through_main_and_its_own_handler(
+    root,
+):
+    fake = FakeGui(root)
+    fake._view = "menu"
+    gui.PainterGui._select_tile(fake, "upscale")
+    assert fake.view_log == ["main"]
+    assert fake.start_tool_calls == ["upscale"]
+
+
+# ---------------------------------------------------------------------
 # _toggle_pause_job — Pause "returns the settings panel" (spec item 4)
 # ---------------------------------------------------------------------
 
@@ -372,16 +489,37 @@ def test_toggle_pause_job_on_a_site_reveals_the_website_gen_panel_while_running(
 
 
 def test_toggle_pause_job_on_a_tool_never_touches_the_inline_panel(root):
-    """bg/crop/upscale/aspect/aicheck have no persistent settings panel
-    yet (Phase 13-15) — pausing one is a no-op beyond its own existing
-    Pause/Resume toggle (already reflected via panels[kind].set_paused)."""
+    """upscale/aspect/aicheck have no persistent settings panel yet
+    (Phase 14/15) — pausing one is a no-op beyond its own existing
+    Pause/Resume toggle (already reflected via panels[kind].set_paused).
+    (bg/crop DO have one now — GUI rework Phase 13 — see
+    test_toggle_pause_job_on_bg_reveals_its_own_inline_panel below.)"""
+    fake = FakeGui(root)
+    fake._view = "running"
+    gui.PainterGui._toggle_pause_job(fake, "upscale")
+    assert "upscale" in fake._paused
+    assert fake.panels["upscale"].paused_calls == [True]
+    assert "upscale" not in fake.agents  # tools have no AgentPanel entry
+    assert fake._inline_kind is None
+
+
+def test_toggle_pause_job_on_bg_reveals_its_own_inline_panel(root):
+    """bg/crop DO have a persistent settings panel now (GUI rework
+    Phase 13) — pausing one reveals it inline, mirroring website_gen's
+    own reveal, and keeps the panel's OWN Pause/Resume label in sync."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._toggle_pause_job(fake, "bg")
     assert "bg" in fake._paused
     assert fake.panels["bg"].paused_calls == [True]
-    assert "bg" not in fake.agents  # tools have no AgentPanel entry
-    assert fake._inline_kind is None
+    assert fake._tool_panels["bg"].paused_calls == [True]
+    assert fake._inline_kind == "bg"
+    assert fake._tool_panels["bg"].winfo_manager() == "pack"
+
+    gui.PainterGui._toggle_pause_job(fake, "bg")  # resume
+    assert fake._tool_panels["bg"].paused_calls == [True, False]
+    assert fake._inline_kind == "bg"  # still there — only Start hides it
+    assert fake._tool_panels["bg"].winfo_manager() == "pack"
 
 
 def test_toggle_pause_job_outside_running_view_never_touches_the_layout(root):

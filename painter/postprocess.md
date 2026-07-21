@@ -47,6 +47,22 @@ a no-op — only for real errors (`PostprocessError`, loud).
 A failed step is LOUD but never kills the run (the runner catches,
 counts and reports it; the raw image stays saved).
 
+**Per-call overrides** (GUI rework Phase 13, owner 2026-07-21): both
+functions accept OPTIONAL keyword-only arguments — one per config
+constant they read — defaulting to the matching constant, so every
+EXISTING caller (which passes neither) keeps today's exact byte-for-
+byte behaviour. [GUI](../gui.md)'s new `BgSettingsPanel`/
+`CropSettingsPanel` (a standalone tool's persistent settings panel) is
+the one caller that overrides them, per run, via each panel's
+Advanced collapsible: `remove_background`'s
+`safety_max_remove_frac`/`safety_max_remove_frac_white` (the SAFETY
+GUARD ceilings below) and `crop_transparent`'s `clean_edge_enable`/
+`clean_edge_alpha`/`crop_margin_px`/`crop_ink_alpha`/`crop_min_ink_px`.
+The site-generation pipeline ([GUI](../gui.md)'s own composed hook)
+and [Main (Entry Point)](../main.md) still call both with no
+overrides — the config constants remain the single source of truth
+for every run that doesn't explicitly override them.
+
 ## Connections
 
 ### Uses
@@ -68,9 +84,13 @@ counts and reports it; the raw image stays saved).
 - `deps_error() -> str | None` — `None` when numpy/scipy/Pillow are
   importable; otherwise the reason. Callers refuse to start instead
   of failing on every item.
-- `remove_background(path, log) -> str` — `"done" | "nothing" |
-  "unclear"`, in place; `"unclear"` covers both an ambiguous background
-  and a SAFETY-guard abort (removal too large — original untouched).
-  Raises `PostprocessError` on real failure.
-- `crop_transparent(path, log) -> str` — `"done" | "nothing"`, in
-  place; raises `PostprocessError` on real failure.
+- `remove_background(path, log, *, safety_max_remove_frac=SAFETY_MAX_REMOVE_FRAC,
+  safety_max_remove_frac_white=SAFETY_MAX_REMOVE_FRAC_WHITE) -> str` —
+  `"done" | "nothing" | "unclear"`, in place; `"unclear"` covers both
+  an ambiguous background and a SAFETY-guard abort (removal too large
+  — original untouched). Raises `PostprocessError` on real failure.
+- `crop_transparent(path, log, *, clean_edge_enable=CLEAN_EDGE_ENABLE,
+  clean_edge_alpha=CLEAN_EDGE_ALPHA, crop_margin_px=CROP_MARGIN_PX,
+  crop_ink_alpha=CROP_INK_ALPHA, crop_min_ink_px=CROP_MIN_INK_PX) ->
+  str` — `"done" | "nothing"`, in place; raises `PostprocessError` on
+  real failure.

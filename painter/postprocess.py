@@ -56,7 +56,13 @@ def deps_error() -> str | None:
     return None
 
 
-def remove_background(path: Path, log: Log) -> str:
+def remove_background(
+    path: Path,
+    log: Log,
+    *,
+    safety_max_remove_frac: float = SAFETY_MAX_REMOVE_FRAC,
+    safety_max_remove_frac_white: float = SAFETY_MAX_REMOVE_FRAC_WHITE,
+) -> str:
     """Clear one saved image's background in place.
 
     Returns "done" (white/black background cleared), "nothing"
@@ -65,6 +71,13 @@ def remove_background(path: Path, log: Log) -> str:
     path's guard fraction — it ate the subject — so the ORIGINAL is
     left untouched and reported for manual handling). Raises
     ``PostprocessError`` on a real failure.
+
+    ``safety_max_remove_frac``/``safety_max_remove_frac_white``
+    (GUI rework Phase 13) are OPTIONAL per-call overrides of the two
+    SAFETY GUARD fractions below, defaulting to the config constants —
+    every existing caller that passes neither keeps today's exact
+    behaviour; ``BgSettingsPanel``'s Advanced collapsible is the one
+    caller that overrides them, per run.
     """
     from PIL import Image
 
@@ -87,10 +100,10 @@ def remove_background(path: Path, log: Log) -> str:
                 return "unclear"
             if action == "white":
                 out, removed = remove_white_border(im, white_full, white_edge)
-                guard = SAFETY_MAX_REMOVE_FRAC_WHITE
+                guard = safety_max_remove_frac_white
             else:
                 out, removed = remove_black_background(im)
-                guard = SAFETY_MAX_REMOVE_FRAC
+                guard = safety_max_remove_frac
         # SAFETY GUARD: never destroy an image. A removal that clears
         # more than the path's guard fraction ate the subject (a dark
         # subject keyed as black background, or a flood that leaked
@@ -111,17 +124,26 @@ def remove_background(path: Path, log: Log) -> str:
         ) from exc
 
 
-def crop_transparent(path: Path, log: Log) -> str:
+def crop_transparent(
+    path: Path,
+    log: Log,
+    *,
+    clean_edge_enable: bool = CLEAN_EDGE_ENABLE,
+    clean_edge_alpha: int = CLEAN_EDGE_ALPHA,
+    crop_margin_px: int = CROP_MARGIN_PX,
+    crop_ink_alpha: int = CROP_INK_ALPHA,
+    crop_min_ink_px: int = CROP_MIN_INK_PX,
+) -> str:
     """Clean the faint border halo, then autocrop, in place.
 
-    The halo cleanup (``clean_edge_halo`` when ``CLEAN_EDGE_ENABLE``)
+    The halo cleanup (``clean_edge_halo`` when ``clean_edge_enable``)
     only serves to ENABLE a tighter crop: faint pixels connected to the
     image border — the stray line / halo hugging the frame — are zeroed
     so they no longer drag the content box out to the edge. The image is
     then cropped to its INK-BASED content box (a row/col needs
-    ``CROP_MIN_INK_PX`` pixels at alpha >= ``CROP_INK_ALPHA``, so a
+    ``crop_min_ink_px`` pixels at alpha >= ``crop_ink_alpha``, so a
     sparse faint line no longer defeats the crop) plus the
-    ``CROP_MARGIN_PX`` safety margin.
+    ``crop_margin_px`` safety margin.
 
     The rule is strictly DIMENSIONAL (owner 2026-07-19): "done" only when
     the cropped output resolution is SMALLER than the input on some side
@@ -131,6 +153,11 @@ def crop_transparent(path: Path, log: Log) -> str:
     zeroed pixels (that cleanup is then discarded, never written; there
     is no such thing as a halo-only "done"). Raises ``PostprocessError``
     on a real failure.
+
+    Every keyword above (GUI rework Phase 13) is an OPTIONAL per-call
+    override of the matching config constant, so an omitted argument
+    reproduces today's exact byte-for-byte behaviour; ``CropSettingsPanel``'s
+    Advanced collapsible is the one caller that overrides them, per run.
     """
     from PIL import Image
 
@@ -140,20 +167,20 @@ def crop_transparent(path: Path, log: Log) -> str:
         with Image.open(path) as im:
             rgba = im.convert("RGBA")
 
-        if CLEAN_EDGE_ENABLE:
-            rgba, _ = clean_edge_halo(rgba, CLEAN_EDGE_ALPHA)
+        if clean_edge_enable:
+            rgba, _ = clean_edge_halo(rgba, clean_edge_alpha)
 
-        box = content_bbox(rgba, CROP_INK_ALPHA, CROP_MIN_INK_PX)
+        box = content_bbox(rgba, crop_ink_alpha, crop_min_ink_px)
         if box is None:
             # no solid content to crop to (fully transparent / faint
             # speckle only) -> no crop possible -> 0px change -> SKIPPED
             return "nothing"
 
         width, height = rgba.size
-        left = max(0, box[0] - CROP_MARGIN_PX)
-        top = max(0, box[1] - CROP_MARGIN_PX)
-        right = min(width, box[2] + CROP_MARGIN_PX)
-        bottom = min(height, box[3] + CROP_MARGIN_PX)
+        left = max(0, box[0] - crop_margin_px)
+        top = max(0, box[1] - crop_margin_px)
+        right = min(width, box[2] + crop_margin_px)
+        bottom = min(height, box[3] + crop_margin_px)
         # CHANGED vs SKIPPED by EXACT resolution (owner 2026-07-19): the
         # crop counts ONLY when the output size differs from the input on
         # SOME side (>= 1px). A box + margin that lands on the full frame

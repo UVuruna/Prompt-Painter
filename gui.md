@@ -289,10 +289,10 @@ that view, otherwise the swap runs behind the shared `smooth_transition`
 snapshot cover exactly like `_toggle_collapsed` (see **Theming — the
 snapshot cover**), so it fades instead of jumping.
 
-**Tile routing** (`PainterGui._select_tile(tile_id)`) — picking ANY
-tile first calls `_go_view("main")`, then, for every functionality but
-Website GEN, invokes the SAME existing, UNMODIFIED handler the
-always-visible toolbar already called before this phase:
+**Tile routing** (`PainterGui._select_tile(tile_id)`) — picking a tile
+WITHOUT its own persistent panel (`_tool_panels`) calls `_go_view
+("main")`, then invokes the SAME existing, UNMODIFIED handler the
+always-visible toolbar already called before Phase 10:
 
 | Tile id | Handler |
 |---|---|
@@ -300,18 +300,26 @@ always-visible toolbar already called before this phase:
 | `ai_sheet_gen` | `_new_collection_ai()` |
 | `api_image_gen` | none (disabled tile — `_select_tile` is never reached; Phase 19 wires the adapter) |
 | `image_checker` | `_start_ai_check()` |
-| `bg` / `crop` / `upscale` / `aspect` | `_start_tool(slot)` |
+| `bg` / `crop` | `_open_tool_panel(slot)` — GUI rework Phase 13, see below |
+| `upscale` / `aspect` | `_start_tool(slot)` |
 
-None of these handlers changed AT ALL — `_start_tool` still opens its
-own file/folder picker (and, for aspect/upscale, its own modal dialog)
-and still ends by selecting the Dashboard tab (`self.notebook.select
-(0)`), which now simply happens to already be visible because the view
-switch ran first. A minimal **"Menu"** button (plain text — no icon
-asset fits "menu/home" yet, and DESIGN.md's emoji policy rules out a
-hamburger glyph standing in for a real one) sits in the pinned top
-strip beside the Day/Night switch and the Controls toggle — reachable
-from "menu"/"main"; **Running view** below is what happens while a job
-is actually going.
+`upscale`/`aspect` are UNCHANGED — `_start_tool` still opens its own
+file/folder picker + its own modal dialog and still ends by selecting
+the Dashboard tab (`self.notebook.select(0)`), which now simply
+happens to already be visible because the view switch ran first.
+`bg`/`crop` (GUI rework Phase 13) instead go straight to `_open_tool_panel`
+and SKIP the `_go_view("main")` hop entirely — going through "main"
+first, like every other tile, would reveal-then-immediately-hide the
+old controls box behind a wasted extra fade, since `_open_tool_panel`
+itself transitions straight to "running" (see **Standalone-tool
+settings panels** under **The window**, and **Running view** below
+for how it shares `_inline_kind`/`_apply_running_layout` with
+website_gen's own toggle). A minimal **"Menu"** button (plain text —
+no icon asset fits "menu/home" yet, and DESIGN.md's emoji policy rules
+out a hamburger glyph standing in for a real one) sits in the pinned
+top strip beside the Day/Night switch and the Controls toggle —
+reachable from "menu"/"main"; **Running view** below is what happens
+while a job is actually going.
 
 ## Running view (GUI rework Phase 11)
 
@@ -334,12 +342,24 @@ container down, inside `_main_view`, via a new `_apply_running_layout`:
 def _apply_running_layout(self) -> None:
     self._controls_box.pack_forget()
     self._compact_box.pack_forget()
+    for panel in self._tool_panels.values():
+        panel.pack_forget()
     self._icon_bar.pack(fill="x", before=self.notebook)
     if self._inline_kind == "website_gen":
         self._controls_box.pack(fill="x", before=self.notebook)
+    elif self._inline_kind in self._tool_panels:
+        self._tool_panels[self._inline_kind].pack(
+            fill="x", before=self.notebook
+        )
     self._icon_bar.set_active(self._active_tile_ids())
     self._scroll.refresh()
 ```
+
+(GUI rework Phase 13 generalized the single `"website_gen"` special
+case above to a small `_inline_kind -> panel` lookup over
+`self._tool_panels` — BG/Crop's own `ToolSettingsPanel` today, Phase
+14 growing the dict to Upscale/Aspect. AT MOST ONE inline surface
+shows at a time either way.)
 
 Entering `"running"` also disables the Controls-collapse toggle
 (collapsed/expanded is meaningless once neither `_controls_box` nor
@@ -405,24 +425,30 @@ to a NAMED semantic kind like `"success"`/`"danger"`) to an arbitrary
 - if the tile's `TILE_JOB_KINDS` are CURRENTLY active, the click just
   selects the Dashboard tab — never a settings toggle for a running
   job, and that job's own panel stays exactly as hidden as before;
-- `"website_gen"` is the ONE tile with a real persistent inline
-  surface today: the click toggles `self._inline_kind` and re-runs
-  `_apply_running_layout`, showing/hiding the EXISTING `_controls_box`
-  (the queue + BOTH `AgentPanel`s) right above the Dashboard/Log —
-  nothing new was built, Phase 10's own controls area is simply
-  repacked into a different slot;
-- every OTHER not-running tile (`bg`/`crop`/`upscale`/`aspect`/
-  `image_checker`/`ai_sheet_gen`) still launches through the EXISTING
-  modal/dialog handler — `_tile_handler(tile_id)`, the SAME mapping
-  `_select_tile` uses (extracted once, Rule #5, so the Main Menu and
-  the running view never carry two copies of "what does this tile
-  do"). **Honest scope note:** those five have no PERSISTENT settings
-  panel of their own yet — Phases 13-15 build `ToolSettingsPanel`/
-  `BgSettingsPanel`/etc. on top of this phase; until then, "toggle the
-  inline surface" for them means "open the SAME folder-picker + confirm
-  dialog the toolbar button already opened before Phase 10", which
-  disturbs nothing else (always its own Toplevel) but is not literally
-  a persistent panel the owner can leave open to inspect later.
+- `"website_gen"` is a persistent inline surface: the click toggles
+  `self._inline_kind` and re-runs `_apply_running_layout`, showing/
+  hiding the EXISTING `_controls_box` (the queue + BOTH `AgentPanel`s)
+  right above the Dashboard/Log — nothing new was built, Phase 10's
+  own controls area is simply repacked into a different slot;
+- `"bg"`/`"crop"` (GUI rework Phase 13) are ALSO a persistent inline
+  surface now — routed through the SAME generic fallthrough below
+  (`_tile_handler("bg")` now resolves to `partial(self._open_tool_panel,
+  "bg")` instead of the old `_start_tool` modal), toggling their OWN
+  `ToolSettingsPanel` (see **Standalone-tool settings panels** under
+  **The window**) the exact same way;
+- every OTHER not-running tile (`upscale`/`aspect`/`image_checker`/
+  `ai_sheet_gen`) still launches through the EXISTING modal/dialog
+  handler — `_tile_handler(tile_id)`, the SAME mapping `_select_tile`
+  uses (extracted once, Rule #5, so the Main Menu and the running view
+  never carry two copies of "what does this tile do"). **Honest scope
+  note:** those four have no PERSISTENT settings panel of their own
+  yet — Phase 14/15 build `ToolSettingsPanel` subclasses for
+  upscale/aspect and a panel for the AI checker on top of this phase;
+  until then, "toggle the inline surface" for them means "open the
+  SAME folder-picker + confirm dialog the toolbar button already
+  opened before Phase 10", which disturbs nothing else (always its
+  own Toplevel) but is not literally a persistent panel the owner can
+  leave open to inspect later.
 
 **Start/Pause/Stop view semantics** (spec item 4), wired into the
 EXISTING handlers — none forked:
@@ -430,10 +456,11 @@ EXISTING handlers — none forked:
 | Action | What changes |
 |---|---|
 | **Start** (`_start_site`) | Unconditionally clears `_inline_kind` (Start hides the launching tool's OWN settings panel — website_gen's is shared by both sites, so EITHER starting hides it) then calls `_sync_running_state()` — auto-enters `"running"` on the first job. |
-| **Start** (`_start_tool` / `_start_ai_check`) | Calls `_sync_running_state()` after the worker starts — same auto-enter; tools have no inline panel to hide (see above). |
-| **Pause** (`_toggle_pause_job`) | Unchanged pause/resume bookkeeping, PLUS: pausing `chatgpt`/`gemini` while `_view == "running"` sets `_inline_kind = "website_gen"` and re-applies the layout — "Pause returns the settings panel for future tasks" (spec item 4). Resuming never hides it again — only a fresh Start (of either site) or the owner's own icon click does. A no-op for the five tool/checker kinds (no persistent panel yet) and outside `"running"` (already fully visible there). |
-| **Stop** (`_stop_site`) | UNCHANGED — signals the stop event; the worker exits on its own next poll and posts `__worker_done__`, which calls `_sync_running_state()` (recolours the icon; the design's "STOP … returns to the main menu" reads as "the Menu click that follows now succeeds", not an auto-jump — see below). |
-| **Close** (`_close_panel`) | UNCHANGED — the existing `_dashgrid.remove`/`reset_finished`/`JobTemp.clear`. By the time a panel's Close button is even reachable, `finish()` has already run and that kind is already out of `_active_kinds()`, so no additional Phase 11 bookkeeping is needed here. |
+| **Start** (`_start_tool` / `_start_ai_check`) | Calls `_sync_running_state()` after the worker starts — same auto-enter; upscale/aspect/the AI checker have no inline panel to hide (see above). |
+| **Start** (`_start_tool_from_panel`, GUI rework Phase 13 — bg/crop) | Clears `_inline_kind` AND explicitly re-calls `_apply_running_layout()` (unlike the two rows above: the panel can ONLY be visible while ALREADY `"running"`, so `_sync_running_state()`'s own view-transition check is always a no-op here — see `_launch_tool_worker`'s shared tail, which `_sync_running_state()` too). |
+| **Pause** (`_toggle_pause_job`) | Unchanged pause/resume bookkeeping, PLUS: pausing `chatgpt`/`gemini` while `_view == "running"` sets `_inline_kind = "website_gen"`; pausing `bg`/`crop` sets `_inline_kind` to that SAME slot (GUI rework Phase 13) — either way `_apply_running_layout()` re-applies the layout ("Pause returns the settings panel for future tasks", spec item 4), and the revealed `ToolSettingsPanel`'s OWN Pause/Resume label is kept in sync too (`_tool_panels[kind].set_paused`). Resuming never hides it again — only a fresh Start or the owner's own icon click does. A no-op for upscale/aspect/the AI checker (no persistent panel yet) and outside `"running"` (already fully visible there). |
+| **Stop** (`_stop_site`) | UNCHANGED — signals the stop event; the worker exits on its own next poll and posts `__worker_done__`, which calls `_sync_running_state()` (recolours the icon; the design's "STOP … returns to the main menu" reads as "the Menu click that follows now succeeds", not an auto-jump — see below). Standalone tools (bg/crop/upscale/aspect) have NO Stop — `_run_tool_job`'s loop has no should_stop escape hatch, deliberately unchanged by Phase 13 (see **Standalone-tool settings panels** under **The window**). |
+| **Close** (`_close_panel`) | UNCHANGED — the existing `_dashgrid.remove`/`reset_finished`/`JobTemp.clear`. By the time a panel's Close button is even reachable, `finish()` has already run and that kind is already out of `_active_kinds()`, so no additional Phase 11 bookkeeping is needed here. `__tool_done__`'s dispatch ALSO now re-enables the finished slot's `ToolSettingsPanel` Start button (`set_run_state(running=False)`) when one exists. |
 | **Menu** (`_request_menu`, shared by the pinned button and IconBar's own) | Routes through `_next_view(…, menu_requested=True)` — navigates to `"menu"` once `active_count == 0`, otherwise refused with a status-bar hint ("Stop every running job before returning to the menu."). |
 
 **Reading "Stop … returns to the main menu" (spec item 4) precisely:**
@@ -470,11 +497,13 @@ one is never touched, the site job driven through fake
 `SiteDriver`/`run_sheet` so no Chrome/network is needed) confirmed: (1)
 Website GEN → Start → IconBar + Dashboard only, controls hidden,
 `website_gen` tile filled; (2) clicking the BG-removal icon while
-`chatgpt` "runs" starts a REAL local bg job alongside it — BOTH tiles
-filled, BOTH dashboard panels visible, controls still hidden,
-`chatgpt`'s own panel undisturbed; (3) Stop + Close everything, then
-Menu → the full-screen 8-tile menu again, Controls/Menu restored to
-their pre-running spots.
+`chatgpt` "runs" starts a REAL local bg job alongside it (0.0.09x-era
+behaviour — GUI rework Phase 13 replaced the direct-start click with
+opening BG's own settings panel first, see below) — BOTH tiles filled,
+BOTH dashboard panels visible, controls still hidden, `chatgpt`'s own
+panel undisturbed; (3) Stop + Close everything, then Menu → the
+full-screen 8-tile menu again, Controls/Menu restored to their
+pre-running spots.
 
 ## The window
 
@@ -691,15 +720,19 @@ their pre-running spots.
   2026-07-19, replacing the old emoji: BG removal cyan/teal, Crop amber,
   Upscale violet, Aspect ratio magenta — colours in `config.JOB_COLORS`,
   icons `bg`/`crop`/`upscale`/`aspect` via `config.JOB_LOGO` + `icon()`).
-  A click (`_start_tool`)
-  refuses a second job of the SAME kind (a messagebox — one job per
-  kind), opens the input pick + a confirm, then spawns
+  Everything from here through the end of this bullet — the JobTemp
+  backup, the timing, the "changed" contract, the dashboard panel
+  itself — is SHARED by all four tools UNCHANGED (`_run_tool_job`'s
+  worker loop + event contract, `ToolPanel`'s rendering); GUI rework
+  Phase 13 only changed HOW the run is configured for BG/Crop — see
+  **Standalone-tool settings panels** right below for that half.
+  **Upscale**/**Aspect ratio** still launch the OLD way: a click
+  (`_start_tool`) refuses a second job of the SAME kind (a messagebox
+  — one job per kind), opens the input pick + a confirm, then spawns
   `_run_tool_job` on a daemon thread; the engine function
-  (`remove_background` / `crop_transparent` / `upscale_if_small` /
-  `change_aspect`) runs over the picked images, in order.
-  **BG removal / Crop** pick a FOLDER (`askdirectory`) and run over
-  every image under it. **Upscale** (owner 2026-07-19; simplified GUI
-  rework Phase 6) is folder-based too, but first pops
+  (`upscale_if_small` / `change_aspect`) runs over the picked images,
+  in order. **Upscale** (owner 2026-07-19; simplified GUI
+  rework Phase 6) is folder-based, and first pops
   `UpscaleParamsDialog` — a modal asking ONE min-side Spinner (px) plus
   an embedded stacked `FilterEditor` (deciding WHICH images qualify —
   same widget/engine as Aspect's own filter below), PRE-FILLED with the
@@ -758,6 +791,102 @@ their pre-running spots.
   ALPHA, not dimensions. The engine returns "nothing" for a true
   byte-unchanged no-op (crop: a 0px-change box), so a "done" is always a
   real change. The panel shows the tool's own PARAMETER + timing (below).
+- **Standalone-tool settings panels** — `ToolSettingsPanel(ttk.Frame)`
+  + `BgSettingsPanel`/`CropSettingsPanel` (GUI rework Phase 13; Phase
+  14 gives Upscale/Aspect the same treatment) REPLACE the old
+  askdirectory+confirm modal for BG removal and Crop with a
+  PERSISTENT panel shown inline above Dashboard/Log — the exact
+  surface website_gen's own `_controls_box` occupies (see **Running
+  view**'s `_apply_running_layout`/`_inline_kind`), reached via
+  `PainterGui._open_tool_panel(tile_id)` from either the Main Menu
+  (`_select_tile`) or the running view's IconBar
+  (`_click_icon_bar_tile`'s generic `_tile_handler` fallthrough) — ONE
+  shared toggle, not two copies (Rule #5). Each panel owns:
+  * an **input picker** — **Folder…** (`askdirectory` → the shared
+    `iter_images`, re-scanned LIVE at Start so a folder edited after
+    the pick is honored) or **Files…** (`askopenfilenames`, based via
+    `config.selection_base_and_rels` like the Aspect tool) — BG/Crop
+    gain the Files choice Aspect always had;
+  * an embedded **`FilterEditor`** (see below) narrowing WHICH images
+    the run touches — a capability BG/Crop never had before this
+    phase;
+  * an **Advanced** collapsible (the SAME Settings-gear idiom
+    `AgentPanel._toggle_settings` established) exposing engine knobs
+    as PER-RUN overrides: `BgSettingsPanel` — the two SAFETY GUARD
+    fractions `remove_background` aborts past (`safety_max_remove_frac`
+    black / `safety_max_remove_frac_white` white); `CropSettingsPanel`
+    — every knob `crop_transparent` reads (the border-halo cleanup
+    toggle, the safety margin, the ink-detection alpha + minimum ink
+    pixels). **Deviation from the design's own phase notes:** those
+    notes assign the halo-cleanup toggle to BG's Advanced section, but
+    the real code only ever wires `CLEAN_EDGE_ENABLE` into
+    `crop_transparent` (its own docstring: "only serves to ENABLE a
+    tighter crop") — `remove_background` never calls `clean_edge_halo`
+    at all, so putting the toggle on BG's panel would silently do
+    nothing (root Rule #1). It lives on Crop's panel instead, where it
+    is real. [Postprocess](painter/postprocess.md)'s `remove_background`/
+    `crop_transparent` gained matching OPTIONAL keyword-only
+    parameters, one per constant, defaulting to the config value — an
+    ADDITIVE signature change (every existing caller passes neither
+    and keeps today's exact behaviour), not a wrapper (root Rule #6);
+  * **Start**/**Pause** buttons. Start (`PainterGui.
+    _start_tool_from_panel`) reads the panel's OWN
+    `resolve_input()`/`get_conditions()`/`build_func()` (each raising
+    `ValueError` — shown as a messagebox — instead of the old modal's
+    inline validation), pre-filters via the SAME module-level
+    `_filter_files` every other tool already uses, then hands off to
+    `_launch_tool_worker` — a NEW helper extracted from `_start_tool`'s
+    own tail so the modal-driven path (upscale/aspect) and the
+    panel-driven path (bg/crop) share ONE body (Rule #5) instead of
+    the same dozen lines twice. **`_run_tool_job`'s worker spawn +
+    event contract are UNCHANGED** — `ToolPanel.handle` needed no
+    edits at all. Pause reuses `_toggle_pause_job` — see **Running
+    view**'s Start/Pause/Stop table above for how it reveals the panel
+    again mid-run, keeping ITS OWN Pause/Resume label in sync with the
+    dashboard `ToolPanel`'s. **No literal Stop button:** a standalone
+    tool run has no should_stop escape hatch (`_run_tool_job`'s own
+    docstring), and threading one through would mean changing that
+    shared worker loop — explicitly out of scope this phase. Dismissing
+    the panel without starting is already possible via the SAME
+    icon-bar toggle that opened it (click "BG removal" again); flagged
+    as a candidate for a real mid-run Stop in a future phase, not
+    half-wired here.
+  * a settings round-trip — `get_settings()`/`apply_settings(stored,
+    conditions=…)` mirror `AgentPanel`'s own contract (missing key =
+    keep default); `PainterGui._collect_settings`/`_apply_settings`
+    persist each panel under a new `"tool_panels"` key
+    (`{slot: panel.get_settings()}`) — the picked folder/files are
+    NEVER persisted (every tool has always asked fresh; only the
+    filter stack + Advanced overrides survive a restart, same
+    "remembered VALUE, not the picked path" convention the standalone
+    Upscale/Aspect dialogs already established).
+
+  **Verified (0.0.1xx):** `tests/test_gui_tool_panels.py` (pure
+  `_filter_files` + the Advanced-field parsers; `resolve_input`/
+  `get_conditions`/`build_func` against a real withdrawn-root panel;
+  a monkeypatched `postprocess.remove_background`/`crop_transparent`
+  proving a NON-default override reaches the engine call; the settings
+  round-trip; `PainterGui._start_tool_from_panel`'s pre-filter path
+  end to end through a duck-typed `FakeGuiForPanel`, its
+  `_run_tool_job` a RECORDING stand-in) plus 3 new engine-level tests
+  in `tests/test_postprocess.py` (the safety/margin/clean-edge
+  overrides each produce an observably different result than the
+  default) plus updated `tests/test_gui_running_view.py` coverage
+  (`_open_tool_panel`, `_select_tile`'s bg/crop shortcut, the
+  generalized `_apply_running_layout`/`_toggle_pause_job`) — full
+  suite green throughout. Real-window screenshots (Day theme,
+  settings.json redirected to a scratch file, 65 synthetic images —
+  never DOMY Watch, never the project's own `out/`) confirmed the full
+  BG removal flow: Menu → BG tile → panel with a folder + 2 stacked
+  conditions (`Aspect (range)`/`Any side`) → Start → panel hides,
+  IconBar tile fills, dashboard shows "(N/63) …" running → Pause
+  clicked genuinely MID-RUN → panel reappears (folder/conditions still
+  intact), its Start button correctly DISABLED, its Resume label in
+  sync with the dashboard's own → Resume → run completes ("done — 63
+  changed, 0 skipped", matching the filter's own exclusion of the 2
+  off-ratio images) → switching to the Crop panel (Advanced expanded,
+  all 4 fields at their config defaults) leaves the finished BG
+  dashboard panel completely undisturbed.
 - **FilterEditor** (GUI rework Phase 4, `ttk.Frame`) — the reusable
   stacked-condition widget wrapping [Shared Filter
   Framework](painter/filters.md): zero or more removable ROWS (each a
@@ -771,19 +900,22 @@ their pre-running spots.
   (naming the offending kind) on an unparsable or inverted row rather
   than returning a partial list; the embedding dialog/panel catches it
   and shows a messagebox (`AspectRatioDialog._run` does exactly this).
-  Callers as of GUI rework Phase 6: `AspectRatioDialog` (a MODAL
+  Callers as of GUI rework Phase 13: `AspectRatioDialog` (a MODAL
   dialog's optional input filter — reads `get_conditions()` once, on
   Files…/Folder…), each `AgentPanel`'s upscale-gate block AND
-  `UpscaleParamsDialog` (BOTH now embed a FilterEditor the same way,
+  `UpscaleParamsDialog` (BOTH embed a FilterEditor the same way,
   pre-seeded with one Aspect (range) condition — see **The two AGENT
-  PANELS** and the Upscale tool description above). The two EMBEDDED,
-  always-visible callers (AgentPanel, unlike the modal dialogs) have no
+  PANELS** and the Upscale tool description above), and — unseeded,
+  empty by default — `BgSettingsPanel`/`CropSettingsPanel` (see
+  **Standalone-tool settings panels** above). The EMBEDDED,
+  always-visible callers (every one but the modal dialogs) have no
   "Run"/"OK" moment to read `get_conditions()` at, so their conditions
-  are captured FRESH every settings save (`AgentPanel.get_settings`)
-  rather than through a per-keystroke `tk.Variable` trace like every
-  other persisted field — never silently lost (the debounced autosave
-  any OTHER field edit schedules, or the app's close-time save, both
-  pick up the current widget state), just not INSTANTLY scheduled by
+  are captured FRESH every settings save (`AgentPanel.get_settings`/
+  `ToolSettingsPanel.get_settings`) rather than through a per-keystroke
+  `tk.Variable` trace like every other persisted field — never
+  silently lost (the debounced autosave any OTHER field edit
+  schedules, or the app's close-time save, both pick up the current
+  widget state), just not INSTANTLY scheduled by
   a filter-only edit the way e.g. the min-side spinner is.
   **Exact-aspect tolerance** (fixes Phase 3's flagged caveat): a pinned
   "Aspect (exact)" `lo == hi` is a razor-thin float equality a REAL
@@ -1630,11 +1762,13 @@ LAST item right as Pause was clicked — the for-loop just ends, so the
 toggle is never revisited — would otherwise leave a phantom "paused"
 button/state on an now-idle panel, and a bad carry-over would silently
 pre-pause the NEXT run of that kind. Two guards close this: every
-`_start_*` method (`_start_site`, `_start_tool`, `_start_ai_check`)
-clears a stale pause for its kind BEFORE spawning the worker (a fresh
-Start never begins pre-paused), and the `__worker_done__` /
-`__tool_done__` dispatch handlers ALSO clear it the moment a job
-finishes (so an idle/finished panel never shows a stale "Resume").
+`_start_*` method (`_start_site`, `_start_tool`, `_start_ai_check`,
+and — via `_launch_tool_worker`'s shared tail, GUI rework Phase 13 —
+`_start_tool_from_panel`) clears a stale pause for its kind BEFORE
+spawning the worker (a fresh Start never begins pre-paused), and the
+`__worker_done__` / `__tool_done__` dispatch handlers ALSO clear it
+the moment a job finishes (so an idle/finished panel never shows a
+stale "Resume").
 `_stop_site` clears it too when actually stopping a running site —
 belt-and-suspenders with the `should_stop` re-check inside the wait,
 which already lets a PAUSED run stop promptly either way.
@@ -1651,7 +1785,14 @@ items" is satisfied, and the gap is cosmetic, never functional.
 **GUI rework Phase 11** extends `_toggle_pause_job` at its tail (the
 bookkeeping above is otherwise untouched): pausing a SITE while the
 running view is up also reveals its settings panel — see **Running
-view**'s Start/Pause/Stop table below.
+view**'s Start/Pause/Stop table below. **GUI rework Phase 13** widens
+the SAME tail to bg/crop: pausing either while the running view is up
+reveals ITS OWN `ToolSettingsPanel` the identical way (`_inline_kind`
+set to that slot), and additionally keeps the revealed panel's own
+Pause/Resume button label in sync (`_tool_panels[kind].set_paused`) —
+upscale/aspect/the AI checker still have no persistent panel to
+reveal, so pausing them stays exactly the no-op it always was beyond
+their own dashboard button.
 
 ## Connections
 
