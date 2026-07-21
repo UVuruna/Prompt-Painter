@@ -111,9 +111,13 @@ documented reaction is opening the guided wizard.
   `OK` → `[]`; `DEFECTS:` + dash lines → the list; anything else is
   a loud `AiError` (never guessed).
 - `check_one_image(src, out_base, instructions, *, model=..., log,
-  check=None) -> dict` — the pure per-image driver the GUI worker
-  loops over (Rule #5, offline-testable — `check` defaults to this
-  module's `check_image`, so a test injects a per-image mock). Times
+  check=None) -> dict` — the pure per-image driver TWO independent GUI
+  callers now share (Rule #5, offline-testable — `check` defaults to
+  this module's `check_image`, so a test injects a per-image mock): the
+  standalone batch checker's worker loop (`_run_ai_check_job`) and, GUI
+  rework Phase 16, the SITE dashboard's parallel per-item checker
+  (`PainterGui._run_checker_one`, one bare call per saved image, no
+  loop of its own). Times
   the call, parses the answer, MERGES the flag (or CLEARS a fixed
   image's old one) and returns the row the panel renders:
   `{rel (=flag_key), kind ('flagged'/'ok'/'error'), defects, raw

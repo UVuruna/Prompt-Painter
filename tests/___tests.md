@@ -379,6 +379,47 @@ with a real `queue.Queue`; the checker's own version monkeypatches
 `painter.ai.check_one_image` (no network, no API quota spent) so the
 in-flight (mocked) vision call still finishes before the halt.
 
+### `test_gui_checker.py` — Checker AI, Parallel Per-Item Check
+GUI rework Phase 16. Four halves: `AgentPanel`'s new `checker_var`
+(default OFF — a real Tk root, the SAME `make_panel`/`root` convention
+as every other GUI-phase file — in `_PERSIST`/`_vars()`, round-trips
+through `get_settings`/`apply_settings`, a missing key on an old
+settings.json keeps the default); the SHARED module-level report
+helpers `ai_check_tag` (pure — flagged is the CHANGED tag, ok/error
+both SKIP) and `ai_check_image_file` (promoted from `AiCheckPanel`'s
+own private `_file_for`, relative-joins/absolute-passthrough), plus a
+Rule #5 proof that `AiCheckPanel`'s double-click viewer and
+`DashPanel`'s new 'Check…' viewer render the IDENTICAL report (both
+monkeypatched `DocWindow` calls compared byte-for-byte) for the
+identical checked image; `DashPanel`'s new check-status column
+(`item_checking`→"checking…", `item_checked`→"OK"/"flagged N"/"error"
++ the shared tag, an unknown/late row a silent no-op like `item_done`
+already tolerates) and `_check_results`' lifetime (survives a
+`sheet_start` new-collection reset, unlike `_child_ids` — cleared only
+by `reset()`, mirroring `_node_info`) plus `_show_check`'s three states
+(no row selected / no result yet / the happy path opening a real
+DocWindow, monkeypatched — same convention test_gui_pipeline.py's own
+`_show_steps` tests use); and `PainterGui._maybe_spawn_checker`/
+`_run_checker_one` run for REAL through a small duck-typed
+`_FakeGuiForChecker` (`.agents`/`.panels`/a real `queue.Queue` —
+`_run_checker_one`/`_maybe_spawn_checker` themselves ALIASED onto the
+class, the SAME test_gui_running_view.py convention, so `self.
+_run_checker_one(...)` inside the unbound `_maybe_spawn_checker`
+resolves) carrying a REAL `DashPanel`: checker OFF is a deterministic
+no-op (returns before touching the queue or starting any thread, so no
+sleep is needed to prove it); checker ON marks "checking…"
+SYNCHRONOUSLY then a mocked `painter.ai.check_one_image` (no network,
+no API quota spent) posts `item_checked` back onto the queue, awaited
+with a bounded `Queue.get(timeout=...)` — never a sleep loop — for the
+ok/flagged/error(NoKey-shaped) cases alike; a non-site key and a panel
+with no `out_base` yet are both no-ops; `_run_checker_one`'s OWN outer
+safety net is proven by mocking `check_one_image` to RAISE directly (an
+`OSError`, simulating a file vanishing mid-race) — the posted event is
+still a graceful 'error', never an unhandled thread exception; and
+`PainterGui._dispatch` itself is proven to route `item_progress` (and
+ONLY that event type — NOT `item_done`, NOT a tool panel's own events)
+through the spawn.
+
 ### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.
 Also the session-scoped `tk_root` fixture (GUI rework Phase 4) — ONE

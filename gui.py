@@ -431,6 +431,10 @@ AI_CHECK_DEFECT_COL_PX = 64   # the checker tree's 'Defects' count column
 AI_CHECK_TIME_COL_PX = 64     # the checker tree's per-image 'Time' column
 AI_CHECK_FIRST_COL_PX = 230   # the checker tree's 'First defect' column
 AI_CHECK_LOG_EVERY = 5      # checker progress log cadence (paced calls are slow)
+# DashPanel's own check-status column (GUI rework Phase 16) — the
+# parallel per-item Checker AI's "checking…"/"OK"/"flagged N"/"error"
+# indicator, appended after Size in the site dashboard's image rows.
+DASH_CHECK_COL_PX = 92
 
 # --- Main window: min size, on-screen clamp, wheel, collapse (Rule #4) -
 # The whole window is vertically scrollable so a stale-tall geometry can
@@ -1838,8 +1842,8 @@ class AgentPanel(ttk.Labelframe):
     # the keys persisted per agent in the settings file
     _PERSIST = (
         "background", "style", "bg_removal", "crop", "upscale", "report",
-        "safer_retry", "continue_nudge", "new_chat", "pause_min", "pause_max",
-        "act_min", "act_max",
+        "safer_retry", "continue_nudge", "checker", "new_chat", "pause_min",
+        "pause_max", "act_min", "act_max",
         # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
         # Phase 6: the old up_minw/up_minh/up_aspmin/up_aspmax four-field
         # gate collapsed into ONE min-side spinner — the embedded
@@ -1909,6 +1913,14 @@ class AgentPanel(ttk.Labelframe):
         # (NoImage: done edge fired, empty answer, no marker) — owner
         # 2026-07-20; ON by default so the stuck case self-heals
         self.continue_nudge_var = tk.BooleanVar(value=True)
+        # the parallel per-item Checker AI (GUI rework Phase 16, owner's
+        # UV/prompt.txt item 1: "dok generise sledecu sliku paralelno
+        # ona koja je generisana cek jer provjeri"): OFF by default — it
+        # spends a paced Gemini vision call PER SAVED IMAGE, so it is an
+        # explicit opt-in cost, not a free default like Safer
+        # retry/Continue nudge beside it. See PainterGui.
+        # _maybe_spawn_checker for the spawn side.
+        self.checker_var = tk.BooleanVar(value=False)
         self.new_chat_var = tk.StringVar(value="collection")
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
@@ -2018,6 +2030,14 @@ class AgentPanel(ttk.Labelframe):
         )
         rounded_switch(row, "Continue nudge", self.continue_nudge_var).pack(
             side="left"
+        )
+        # the parallel Checker AI (GUI rework Phase 16) sits right beside
+        # Safer retry/Continue nudge — the owner's other "watch this run
+        # and self-correct" switches — even though it works differently
+        # (checks the SAVED image on a background thread instead of
+        # reacting to a refusal/stall; see PainterGui._maybe_spawn_checker)
+        rounded_switch(row, "AI checker", self.checker_var).pack(
+            side="left", padx=8
         )
 
         row = ttk.Frame(self)
@@ -2427,6 +2447,7 @@ class AgentPanel(ttk.Labelframe):
             "report": self.report_var,
             "safer_retry": self.safer_var,
             "continue_nudge": self.continue_nudge_var,
+            "checker": self.checker_var,
             "new_chat": self.new_chat_var,
             "pause_min": self.pause_min_var,
             "pause_max": self.pause_max_var,
@@ -3442,7 +3463,10 @@ def ai_check_doc_md(
     VERBATIM raw model response under 'Full AI response:' — so the owner
     sees EXACTLY what the vision model said, not only the parsed
     bullets. The raw goes in a code fence (rendered monospace,
-    verbatim)."""
+    verbatim). SHARED (GUI rework Phase 16, Rule #5): both
+    ``AiCheckPanel``'s own double-click viewer and ``DashPanel``'s
+    per-row 'Check…' report viewer call this SAME function, so the two
+    surfaces can never render a checked image's report differently."""
     parts = [f"# {PurePosixPath(rel).name}\n", f"`{rel}`\n"]
     if defects:
         bullets = "\n".join(f"- {d}" for d in defects)
@@ -3450,6 +3474,31 @@ def ai_check_doc_md(
     if raw is not None:
         parts.append(f"**Full AI response:**\n\n```\n{raw.strip()}\n```\n")
     return "\n".join(parts)
+
+
+def ai_check_image_file(rel: str, out_base: Path) -> Path:
+    """The image file behind one flag key — the SAME round-trip the
+    checker's ``flag_key`` reverses (``ai.flag_file``), so a report
+    viewer can never open a different image than the one that was
+    actually checked. SHARED (GUI rework Phase 16, promoted from
+    ``AiCheckPanel``'s own private ``_file_for``, Rule #5): both
+    ``AiCheckPanel`` and ``DashPanel``'s per-row 'Check…' viewer
+    resolve through this ONE function."""
+    from painter import ai
+
+    return ai.flag_file(rel, out_base)
+
+
+def ai_check_tag(kind: str) -> str:
+    """The Treeview status TAG for one checked image's 'kind'
+    ('flagged'/'ok'/'error') — SHARED (GUI rework Phase 16, Rule #5) by
+    ``AiCheckPanel``'s own defect rows and ``DashPanel``'s per-image
+    check-status column, so a flagged image pops the same striking
+    colour in both views. Only 'flagged' needs attention (the bright
+    CHANGED tag); 'ok' and 'error' both stay muted (SKIP) — the actual
+    wording ("OK" vs "error"/"!") already tells them apart, no separate
+    colour is needed for that distinction."""
+    return TOOL_CHANGED_TAG if kind == "flagged" else TOOL_SKIP_TAG
 
 
 def build_job_tree(panel, col_specs, height: int = 8) -> ttk.Treeview:
@@ -3651,7 +3700,13 @@ class DashPanel(JobPanel):
     """One generation site's live view: current collection, whole-task
     totals, timings and the collections history table.
 
-    Driven only by the runner's structured events (main thread).
+    Driven by structured events on the main thread — the runner's own
+    (``item_progress``/``item_done``/...) PLUS, since GUI rework Phase
+    16, the parallel Checker AI's ``item_checking``/``item_checked``
+    (posted by ``PainterGui._maybe_spawn_checker``/``_run_checker_one``
+    onto the SAME worker queue, never by the runner itself) — every
+    event still funnels through the identical ``handle(event)`` entry
+    point regardless of which thread ultimately produced it.
     """
 
     def __init__(self, master, kind: str, on_show=None, on_close=None):
@@ -3777,6 +3832,13 @@ class DashPanel(JobPanel):
         rounded_button(
             hdr, "Steps…", command=self._show_steps, kind="link",
         ).pack(side="right", padx=(0, 6))
+        # the parallel Checker AI's per-row report (GUI rework Phase
+        # 16) — a THIRD separate surface from 'Show' (prompt+image) and
+        # 'Steps…' (pipeline restore), same focused-row idiom, never
+        # overloaded onto either (mirrors _show_steps's own reasoning)
+        rounded_button(
+            hdr, "Check…", command=self._show_check, kind="link",
+        ).pack(side="right", padx=(0, 6))
         # the tiny badge legend — one ●+label per config.BADGES entry,
         # each in its own badge colour (theme-agnostic mid-tones, so ONE
         # explicit foreground reads on both the dark and the cream tree)
@@ -3795,7 +3857,7 @@ class DashPanel(JobPanel):
         # three levels: collection > folder > image. Aggregate rows
         # (collection, folder) fill Done/Time/Size; image rows fill
         # AI/Ours/Res/Size. Everything stays column-aligned.
-        cols = ("done", "ai", "our", "res", "time", "size")
+        cols = ("done", "ai", "our", "res", "time", "size", "check")
         self.tree = ttk.Treeview(wrap, columns=cols, height=8)
         self.tree.heading("#0", text="Name")
         # stretch=False EVERYWHERE: widening Name grows the tree's
@@ -3809,6 +3871,10 @@ class DashPanel(JobPanel):
             ("res", "Res", 100, "center"),
             ("time", "Time", 64, "e"),
             ("size", "Size", 72, "e"),
+            # the parallel Checker AI's per-image status (GUI rework
+            # Phase 16) — "checking…" / "OK" / "flagged N" / "error",
+            # blank for a site where the checker never ran
+            ("check", "Check", DASH_CHECK_COL_PX, "center"),
         ):
             self.tree.heading(cid, text=txt)
             self.tree.column(cid, width=w, minwidth=w, anchor=anc,
@@ -3873,6 +3939,48 @@ class DashPanel(JobPanel):
             on_restored=partial(self.refresh_image_row, info["drop"]),
         )
 
+    # --- the parallel Checker AI's per-row report (GUI rework Phase 16) -
+
+    def _show_check(self) -> None:
+        """The 'Check…' button: the SAME report a checker batch row's
+        double-click shows (``ai_check_doc_md`` + ``ai_check_image_file``
+        — the shared module-level helpers, Rule #5), for the focused
+        row's PARALLEL check result. A separate surface from 'Show'
+        (prompt+image) and 'Steps…' (pipeline restore) — never
+        overloaded onto either, same reasoning as ``_show_steps``.
+        ``_check_results`` outlives a single collection (cleared only by
+        ``reset()``, unlike ``_child_ids`` — see its own assignment in
+        ``reset()``), so this works for any past row in the current run,
+        not only the one just checked."""
+        info = self._node_info.get(self.tree.focus())
+        if not info or info["level"] != "image":
+            messagebox.showinfo(
+                "PromptPainter",
+                "Select one image row first — Check shows the AI"
+                " checker's report for a single saved image.",
+            )
+            return
+        result = self._check_results.get(info["drop"])
+        if result is None:
+            messagebox.showinfo(
+                "PromptPainter",
+                "No AI check for this image — turn on this site's 'AI"
+                " checker' switch before Start, or it has not finished"
+                " checking this one yet.",
+            )
+            return
+        rel = result["rel"]
+        defects = result.get("defects")
+        raw = result.get("raw")
+        md = ai_check_doc_md(rel, defects, raw)
+        image = ai_check_image_file(rel, self.out_base or Path("."))
+        DocWindow(
+            self.winfo_toplevel(), rel, md,
+            copy_text=raw if raw is not None else "\n".join(defects or []),
+            hint="Exactly what the vision model reported for this image.",
+            image_path=image if image.is_file() else None,
+        )
+
     def refresh_image_row(self, drop: str) -> None:
         """Re-read ONE row's resolution/size straight off disk — the
         per-step viewer's refresh after a 'Restore to here' click.
@@ -3935,6 +4043,13 @@ class DashPanel(JobPanel):
         self._new_theme("—", 0)
         self.tree.delete(*self.tree.get_children())
         self._node_info.clear()
+        # the parallel Checker AI's results (GUI rework Phase 16) — rel
+        # + drop_path -> the full item_checked event, so 'Check…' can
+        # open ANY past row's report. Scoped like _node_info (the WHOLE
+        # run), NOT like _child_ids (reset every collection, see
+        # _new_theme) — a late checker result must stay reachable even
+        # after the run has moved on to the next collection.
+        self._check_results: dict[str, dict] = {}
         self.task_prog_var.set(f"0 / {task_total}")
         self.task_bar.configure(maximum=max(task_total, 1), value=0)
         self.theme_name_var.set("—")
@@ -4003,7 +4118,7 @@ class DashPanel(JobPanel):
                 fnode, "end", text=PurePosixPath(drop).name,
                 values=(
                     "", f"{event['gen_s']:.0f}s", "…", res, "",
-                    fmt_size(event["size"]),
+                    fmt_size(event["size"]), "",
                 ),
                 **({"image": dots} if dots is not None else {}),
             )
@@ -4037,7 +4152,7 @@ class DashPanel(JobPanel):
             fnode = self._ensure_folder(folder_of(drop))
             rnode = self.tree.insert(
                 fnode, "end", text=PurePosixPath(drop).name or "refused",
-                values=("", "", "", "REFUSED", "", ""),
+                values=("", "", "", "REFUSED", "", "", ""),
             )
             if drop:
                 self._node_info[rnode] = {
@@ -4048,6 +4163,39 @@ class DashPanel(JobPanel):
             self.image_var.set(self.image_var.get() + "  (safer retry…)")
         elif kind == "item_nudge":
             self.image_var.set(self.image_var.get() + "  (continue nudge…)")
+        elif kind == "item_checking":
+            # the parallel Checker AI (GUI rework Phase 16) just started
+            # for this row — posted SYNCHRONOUSLY by PainterGui.
+            # _maybe_spawn_checker (main thread, right after item_progress
+            # creates the row), never through the worker queue, so it
+            # always lands before the background thread's own eventual
+            # item_checked.
+            child = self._child_ids.get(event["drop_path"])
+            if child is not None:
+                self.tree.set(child, "check", "checking…")
+        elif kind == "item_checked":
+            # the background checker thread's result (ai.check_one_image,
+            # via PainterGui._run_checker_one) — kind is 'flagged'/'ok'/
+            # 'error' (ai.NoKey/AiError already turned into 'error' by
+            # check_one_image itself, or by _run_checker_one's own outer
+            # safety net; Rule #1: loud on the row, never fatal to this
+            # run). Stored in _check_results REGARDLESS of whether the
+            # row is still reachable via _child_ids (a late result after
+            # the collection moved on) — see _check_results' own comment
+            # in reset().
+            drop = event["drop_path"]
+            self._check_results[drop] = event
+            child = self._child_ids.get(drop)
+            if child is not None:
+                check_kind = event["kind"]
+                if check_kind == "flagged":
+                    text = f"flagged {len(event['defects'])}"
+                elif check_kind == "error":
+                    text = "error"
+                else:
+                    text = "OK"
+                self.tree.set(child, "check", text)
+                self.tree.item(child, tags=(ai_check_tag(check_kind),))
         elif kind == "sheet_done":
             self._finalize_theme()
             self.image_var.set("—")
@@ -4081,7 +4229,7 @@ class DashPanel(JobPanel):
             self._folder_stats[folder] = {"done": 0, "size": 0, "time": 0.0}
             node = self.tree.insert(
                 parent, "end", text=folder, open=True,
-                values=("0", "", "", "", "", fmt_size(0)),
+                values=("0", "", "", "", "", fmt_size(0), ""),
             )
             self._folder_nodes[folder] = node
             self._node_info[node] = {
@@ -4094,7 +4242,7 @@ class DashPanel(JobPanel):
         wall = time.monotonic() - self._t_theme
         return (
             f"{self._theme_done}/{self._theme_pending}", "", "", "",
-            fmt_duration(wall), fmt_size(self._theme_bytes),
+            fmt_duration(wall), fmt_size(self._theme_bytes), "",
         )
 
     def _update_parent(self) -> None:
@@ -4109,7 +4257,7 @@ class DashPanel(JobPanel):
                 node,
                 values=(
                     str(st["done"]), "", "", "",
-                    fmt_duration(st["time"]), fmt_size(st["size"]),
+                    fmt_duration(st["time"]), fmt_size(st["size"]), "",
                 ),
             )
 
@@ -4624,29 +4772,21 @@ class AiCheckPanel(JobPanel):
         if defects:
             # the CHANGED (striking) bucket — this image needs work
             values = (str(len(defects)), time_txt, defects[0])
-            tags = (TOOL_CHANGED_TAG,)
+            kind = "flagged"
         elif error:
             values = ("!", time_txt, "API error — see the Log")
-            tags = (TOOL_SKIP_TAG,)
+            kind = "error"
         else:
             values = ("OK", time_txt, "")
-            tags = (TOOL_SKIP_TAG,)
+            kind = "ok"
         row = self.tree.insert(
             fnode, "end", text=PurePosixPath(rel).name, values=values,
-            tags=tags,
+            tags=(ai_check_tag(kind),),
         )
         self._node_info[row] = {"level": "image", "rel": rel}
         self._image_rows[rel] = row
 
     # --- the defect viewer + panel actions ------------------------------
-
-    def _file_for(self, rel: str) -> Path:
-        """The image file behind one flag key — the SAME round-trip the
-        checker's ``flag_key`` reverses (``ai.flag_file``), so the viewer
-        can never open a different image than the one that was flagged."""
-        from painter import ai
-
-        return ai.flag_file(rel, self.out_base or Path("."))
 
     def _on_activate(self, _event) -> None:
         """Double-click ANY checked row (flagged, OK or error) → a
@@ -4662,7 +4802,7 @@ class AiCheckPanel(JobPanel):
         if not defects and raw is None:
             return  # nothing was captured for this row
         md = ai_check_doc_md(rel, defects, raw)
-        image = self._file_for(rel)
+        image = ai_check_image_file(rel, self.out_base or Path("."))
         DocWindow(
             self.winfo_toplevel(), rel, md,
             copy_text=raw if raw is not None else "\n".join(defects or []),
@@ -7596,6 +7736,12 @@ class PainterGui:
                 panel = self.panels.get(msg[1])
                 if panel is not None:
                     panel.handle(msg[2])
+                    # GUI rework Phase 16: the parallel Checker AI hangs
+                    # off the SAME item_progress event the dashboard row
+                    # was just built from — zero runner.py changes (see
+                    # _maybe_spawn_checker's own docstring)
+                    if msg[2].get("type") == "item_progress":
+                        self._maybe_spawn_checker(msg[1], msg[2])
             elif msg[0] == "__terminal__":
                 self._handle_terminal(msg[1], msg[2])
             elif msg[0] == "__tool_done__":
@@ -7662,6 +7808,91 @@ class PainterGui:
                 self._sync_running_state()  # GUI rework Phase 11
         else:
             self._log(str(msg))
+
+    # --- Checker AI — parallel per-item check (GUI rework Phase 16) ----
+
+    def _maybe_spawn_checker(self, key: str, event: dict) -> None:
+        """The owner's "dok generise sledecu sliku paralelno ona koja je
+        generisana cek jer provjeri" (UV/prompt.txt item 1): fired from
+        ``_dispatch`` for EVERY ``item_progress``, on the site whose
+        image it just saved. A no-op unless ``key`` is a SITE (not a
+        tool/aicheck slot) with its AgentPanel's ``checker_var`` ON —
+        read LIVE at every call (not captured once at Start), so the
+        owner can flip it mid-run and it takes effect from the next
+        saved image.
+
+        By the time ``item_progress`` fires, ``run_sheet`` has already
+        written the FINAL post-processed bytes to disk (the post_save
+        hook runs before it emits the event — see runner.py) — so this
+        is the earliest possible moment to start the check, and it
+        overlaps BOTH the remaining "our time" pause AND the next
+        item's whole generation, which is the entire point (ZERO
+        runner.py changes: this hangs off an event the dashboard
+        already consumes, per the binding design doc's Findings).
+
+        The "checking…" marker is applied SYNCHRONOUSLY here (already
+        on the main thread, same as ``panel.handle`` right above this
+        call in ``_dispatch``) so it appears instantly; the actual
+        vision call runs on a daemon thread (``_run_checker_one``) that
+        posts its OWN ``item_checked`` event back onto the SAME queue
+        once it completes — never blocking this method or the run
+        loop."""
+        agent = self.agents.get(key)
+        if agent is None or not agent.checker_var.get():
+            return  # not a site, or this site's checker is off
+        dash = self.panels.get(key)
+        if dash is None or dash.out_base is None:
+            return  # panel closed, or somehow not started yet
+        drop_path = event["drop_path"]
+        dash.handle({"type": "item_checking", "drop_path": drop_path})
+        src = dash.out_base / dest_for(drop_path, key)
+        threading.Thread(
+            target=self._run_checker_one,
+            args=(key, drop_path, src, dash.out_base),
+            daemon=True,
+        ).start()
+
+    def _run_checker_one(
+        self, key: str, drop_path: str, src: Path, out_base: Path,
+    ) -> None:
+        """ONE saved image's vision check, entirely on its own daemon
+        thread — the background half of ``_maybe_spawn_checker``. Posts
+        exactly one ``item_checked`` event back onto the shared GUI
+        queue, routed to ``key``'s DashPanel exactly like every other
+        site event (``_dispatch``'s ``__event__`` branch).
+
+        ``ai.check_one_image`` already turns a per-image ``AiError``
+        (including ``NoKey`` — a subclass, see painter/ai.py) into an
+        'error' result dict instead of raising (the same loud-but-
+        never-fatal contract the standalone AI-check batch job already
+        relies on) — so in the common case this method never needs its
+        own except clause for that. The outer ``except Exception`` below
+        is the extra safety net for anything ELSE that could escape
+        (e.g. the file vanishing under a race, a disk-full flag-file
+        write) so a checker thread can NEVER die silently and NEVER
+        touches — let alone kills — the generation run it is checking
+        (Rule #1: loud, visible on the row, non-fatal)."""
+        from painter import ai
+
+        emit = lambda ev: self._q.put(("__event__", key, ev))
+        log = lambda msg: self._q.put(f"[{key} checker] {msg}")
+        try:
+            result = ai.check_one_image(
+                src, out_base, AI_CHECK_INSTRUCTIONS, log=log,
+            )
+            emit({
+                "type": "item_checked", "drop_path": drop_path,
+                "kind": result["kind"], "defects": result["defects"],
+                "raw": result["raw"], "rel": result["rel"],
+                "time": result["time"],
+            })
+        except Exception as exc:
+            log(f"FAIL {src.name}: {exc}")
+            emit({
+                "type": "item_checked", "drop_path": drop_path,
+                "kind": "error", "defects": [], "raw": str(exc),
+                "rel": ai.flag_key(src, out_base), "time": 0.0,
+            })
 
     # --- settings persistence ------------------------------------------
 

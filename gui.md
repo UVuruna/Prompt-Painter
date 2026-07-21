@@ -599,7 +599,11 @@ pre-running spots.
   (owner 2026-07-20 — ON by default; on a stuck `NoImage` response
   the runner sends `CONTINUE_NUDGE` once into the same chat to un-stick
   ChatGPT before giving up, passed to `run_sheet(continue_nudge=…)`),
-  the **New chat** mode,
+  **AI checker**
+  (`checker_var`, GUI rework Phase 16, OFF by default — it spends a
+  paced Gemini vision call PER SAVED IMAGE, an explicit opt-in cost
+  unlike its free neighbours; see **Checker AI — parallel per-item
+  check** below), the **New chat** mode,
   its own **Start / Pause / Stop** trio (owner 2026-07-21 adds
   **Pause** between them — a plain neutral `btn_pause` whose LABEL
   alone flips Pause ↔ Resume, wired to the shared `_toggle_pause_job`;
@@ -1725,8 +1729,13 @@ never match a queued collection). **Double-click ANY checked row**
 parsed defects (when any), the **verbatim** AI response under "Full AI
 response:" and the image itself — so the owner sees exactly what the
 model said about this exact image (the raw response also resolves the
-"is this the right image?" doubt: the viewer opens `ai.flag_file`, the
-same round-trip the worker's `flag_key` reverses). Two panel actions:
+"is this the right image?" doubt: the viewer opens the image via
+`ai_check_image_file`, the same `ai.flag_key` round-trip reversed).
+Both `ai_check_doc_md` and `ai_check_image_file` are MODULE-LEVEL
+functions (Rule #5) — `ai_check_image_file` was promoted from this
+panel's own private `_file_for` in GUI rework Phase 16 so `DashPanel`'s
+own report viewer (below) can resolve the identical round-trip; neither
+panel keeps a private copy. Two panel actions:
 
 - **Send flagged to generator** → `_resend_flagged`:
   `ai.plan_resend` (pure, GUI-free) reverses each flag key to its
@@ -1740,6 +1749,100 @@ same round-trip the worker's `flag_key` reverses). Two panel actions:
   already-running site are LOUD log skips.
 - **Clear flags** → `_clear_ai_flags` (`ai.clear_flag_keys`) wipes
   this run's entries and marks the rows `cleared`.
+
+### Checker AI — parallel per-item check (GUI rework Phase 16)
+The owner's UV/prompt.txt item 1 ("dok generise sledecu sliku
+paralelno ona koja je generisana cek jer provjeri ... ako je ukljucen
+samo cek jer onda samo dobije pored slike i riport"): while a SITE
+generates its NEXT image, the image it just saved gets checked in the
+background — no separate job slot, no separate Start button, just a
+per-agent `checker_var` switch (see the two AGENT PANELS above) that
+makes `DashPanel`'s own rows sprout a check-status column.
+
+**Zero `runner.py` changes** — the binding design doc's key finding:
+`run_sheet` already emits `item_progress` (with the `drop_path`) the
+INSTANT a saved image's post-save pipeline finishes, well before it,
+so `PainterGui._dispatch`'s existing `__event__` branch just calls a
+new `_maybe_spawn_checker(slot, event)` right after `panel.handle(event)`,
+for EVERY `item_progress` (not `item_done` — deliberately: `item_progress`
+fires BEFORE the "our time" pause, so starting the check there
+overlaps BOTH the remaining pause AND the whole of the next item's
+generation, not just the second half of it).
+
+`_maybe_spawn_checker`:
+1. No-ops unless `slot` is a SITE (`self.agents.get(slot)`, so a
+   tool/aicheck event is silently ignored) with THAT site's
+   `checker_var` ON — read LIVE on every call, not captured once at
+   Start, so flipping the switch mid-run takes effect from the next
+   saved image.
+2. Applies `{"type": "item_checking", "drop_path": ...}` to the site's
+   `DashPanel` SYNCHRONOUSLY (already on the main thread, same call
+   stack as `panel.handle` right above it in `_dispatch`) — the row's
+   Check column reads "checking…" the instant this method returns, no
+   queue round-trip needed for that part.
+3. Starts a bare `threading.Thread(target=self._run_checker_one, args=(slot,
+   drop_path, src, out_base), daemon=True)` — fire-and-forget, no
+   `_stop_events`/`_pause_events` entry (a one-shot vision call, not a
+   loop with a between-items boundary to poll; Stop/Pause never wait on
+   it, and a trailing checker thread from a job the owner already
+   Stopped/Closed just posts into a `self.panels.get()` that may by
+   then be gone — the SAME defensive `.get()` guard every other late
+   event already relies on).
+
+`_run_checker_one` (the thread body) calls `ai.check_one_image(src,
+out_base, AI_CHECK_INSTRUCTIONS, log=...)` — the SAME pure driver
+`_run_ai_check_job` already uses for the standalone batch checker
+(Rule #5, zero new engine code) — and posts exactly one
+`{"type": "item_checked", "drop_path": ..., "kind": ..., "defects": ...,
+"raw": ..., "rel": ..., "time": ...}` back onto the ordinary
+`self._q`/`__event__` channel, routed to the SAME site's `DashPanel`
+exactly like any other event. `ai.check_one_image` already turns a
+per-image `AiError` (including `NoKey` — a subclass) into a
+`kind="error"` result instead of raising, so the row shows `error`
+plainly and the run is never touched — the SAME loud-but-never-fatal
+contract `AiCheckPanel`'s own batch job already relies on. An outer
+`except Exception` around the whole call is the extra safety net for
+anything ELSE that could escape (a file vanishing mid-race, a flag-file
+write hitting a full disk) — Rule #1: a checker thread can never die
+silently, and it can never reach back into the generation run it is
+checking.
+
+`DashPanel`'s Collections tree gains an eighth column, **Check**
+(`DASH_CHECK_COL_PX` — gui.py's own Rule #4 geometry constant, beside
+the `AI_CHECK_*` block it sits next to), blank for a site that never had the
+checker on: `item_checking` sets "checking…"; `item_checked` sets
+"OK" / `"flagged {n}"` / "error" and tints the row with the SAME
+`ai_check_tag(kind)` module-level helper `AiCheckPanel`'s own rows use
+(`TOOL_CHANGED_TAG` for flagged — POPS, needs attention; `TOOL_SKIP_TAG`
+for OK/error — muted, the wording alone tells them apart). Results land
+in `self._check_results: dict[drop_path, event]`, scoped like
+`_node_info` (the WHOLE run, cleared only by `reset()`) rather than
+like `_child_ids` (reset every `sheet_start` — see **Per-step restore
+viewer** above for the identical existing trade-off `refresh_image_row`
+already accepts): a checker result for an OLDER, already-rolled-over
+collection stays reachable even though its row can no longer be found
+by `drop_path` for a LIVE update. A new **Check…** button sits beside
+**Show**/**Steps…** in the Collections sub-header — a THIRD separate
+surface, never overloaded onto the tree's own double-click —
+`DashPanel._show_check` resolves the focused row's `_check_results`
+entry and opens the identical `DocWindow`/`ai_check_doc_md`/
+`ai_check_image_file` report `AiCheckPanel`'s own double-click shows
+(Rule #5: one report renderer, two launch surfaces — proven by
+`tests/test_gui_checker.py`'s own side-by-side comparison of both
+panels' captured `DocWindow` arguments for the identical checked
+image).
+
+**`AiCheckPanel`'s own standalone batch flow is fully independent** —
+it never calls into `_maybe_spawn_checker`/`_run_checker_one`, and the
+two paths only ever share the SAME append-only `<out>/_state/
+ai_flags.json` (`ai.record_flag`/`clear_flag`'s existing load-merge-save
+contract, already safe for two independent writers). The owner can run
+a Website GEN job with its checker ON and a standalone AI-check batch
+at the same time; both calls funnel through `ai.py`'s ONE
+`_last_call_t` pacing gate (see **Threading** below), so under load the
+parallel checker can trail generation by more than one image — an
+expected UX characteristic (Risk #7 in the binding design doc), not a
+bug.
 
 ## Theming
 Two coordinated palettes — **night** (the built-in `darkly`, kept
@@ -1935,6 +2038,16 @@ per-step backups**). The AI
 DIALOGS (`AiKeyWizard`'s Test, `AiSheetDialog`'s two calls) run their
 API work on short-lived daemon threads too, feeding a per-dialog queue
 polled with `after` (`_AiDialog` — the workers never touch a widget).
+The Checker AI (GUI rework Phase 16) adds a DIFFERENT shape again: not
+one thread per JOB, but one short-lived daemon thread PER SAVED IMAGE
+on a site whose `checker_var` is on (`_maybe_spawn_checker`/
+`_run_checker_one`) — UNBOUNDED in count and untracked by
+`_stop_events`/`_workers` (a one-shot vision call has no loop to poll a
+should_stop on; see **Checker AI — parallel per-item check** above for
+why that is fine). It posts its own `item_checked` back onto the SAME
+`self._q` the site's OWN worker also feeds, so the two interleave
+freely on one queue exactly like any other pair of concurrent workers
+here.
 Every worker touches the window ONLY through the single `self._q`
 queue drained on the tk timer (`_drain_queue` via `root.after`) — so
 every widget mutation runs on the main thread. The drain hands each
