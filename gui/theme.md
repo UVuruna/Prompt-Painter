@@ -16,12 +16,19 @@ Also owns the shared snapshot-cover transition, `smooth_transition`:
 grabs the window into a borderless topmost overlay, forces it fully
 painted, runs a mutate callback (a theme flip / a relayout) hidden
 behind it, then fades the cover out — the ONE mechanism behind the
-theme flip itself, the Controls collapse, each agent's Settings gear
-reveal and a window maximize/restore jump. A pure visual nicety: any
-cover failure (no display grab, alpha unsupported, an unmapped
-window) degrades to the plain instant mutate, and the mutate itself
-is never guarded — an exception in it propagates loudly (root Rule
-#1), with the overlay still fading out via a `finally`.
+theme flip itself, the Controls collapse, each agent's Settings-gear
+reveal and each tool panel's Advanced-section reveal. A pure visual
+nicety: any cover failure (no display grab, alpha unsupported, an
+unmapped window) degrades to the plain instant mutate, and the mutate
+itself is never guarded — an exception in it propagates loudly (root
+Rule #1), with the overlay still fading out via a `finally`.
+
+**NOT used for a window maximize/restore** (owner 2026-07-21 perf fix,
+reverting owner 2026-07-20's own use of it there) — a real-window repro
+proved covering that OS-level state jump breaks it (the window gets
+stuck at its old size, or renders corrupted on restore) instead of
+hiding it. See [Build Mixin](app_build.md)'s `_on_root_configure` for
+the full story.
 
 Split out of the former single-file `gui.py` (root Rule #20 god-file
 refactor, step 2/8).

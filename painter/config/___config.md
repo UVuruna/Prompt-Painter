@@ -89,11 +89,16 @@ LIGHT sand fill, never the dark warm-grey that read brown on the
 cream window); the Day/Night switch's full image-based art block
 (`SWITCH_*` — geometry, the theme cross-fade timing, the moon's
 craters/terminator/mottling, the sun's glow); the SAME
-`smooth_transition` cover timing for non-theme relayouts
-(`TRANSITION_FADE_MS`/`_STEPS`); and the window-resize/ScrollFrame
-debounce constants (`RESIZE_SETTLE_MS`, `SCROLL_FILL_HEIGHT_POLL_MS`)
-— grouped here as the GUI's broader "visual mechanics" tuning, since
-neither fits any other domain module. Pure hex/number data — no
+`smooth_transition` cover timing for the OTHER discrete Tk-level
+relayouts it still covers — the Controls collapse, a Settings gear, an
+Advanced section (`TRANSITION_FADE_MS`/`_STEPS`; NOT a window maximize/
+restore any more — owner 2026-07-21 perf fix, see `gui/app_build.md`);
+and the window-resize/ScrollFrame debounce constant `RESIZE_SETTLE_MS`
+— grouped here as the GUI's broader "visual mechanics" tuning, since it
+fits no other domain module. (`SCROLL_FILL_HEIGHT_POLL_MS`, the
+ScrollFrame fill_height self-heal poll interval, was REMOVED in the
+same perf fix — the re-fit is now fully event-driven, see
+[ScrollFrame](../../gui/scroll.md).) Pure hex/number data — no
 tkinter/PIL import — so the engine and tests stay framework-free. A
 leaf module.
 

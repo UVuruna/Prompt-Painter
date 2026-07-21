@@ -182,12 +182,14 @@ SWITCH_COVER_ICON_FRAC = 0.30  # cover icon diameter = this * min(win W, H)
 SWITCH_COVER_ICON_SS = 2       # supersample for the big cover icon (LANCZOS down)
 
 # The SAME snapshot-cover machinery (gui.smooth_transition, owner
-# 2026-07-20) also hides every DISCRETE relayout jump: the Controls
-# collapse/expand, each agent's Settings-gear toggle, and a window
-# maximize/restore. Those covers fade FASTER than the theme flip — a
-# collapse should feel snappy, not ceremonial; the theme keeps its own
-# SWITCH_FADE_* timing above.
-TRANSITION_FADE_MS = 260    # collapse/settings/maximize cover fade
+# 2026-07-20) also hides every DISCRETE Tk-level relayout jump: the
+# Controls collapse/expand, each agent's Settings-gear toggle, and each
+# tool panel's Advanced-section toggle. Those covers fade FASTER than
+# the theme flip — a collapse should feel snappy, not ceremonial; the
+# theme keeps its own SWITCH_FADE_* timing above. NOT used for a window
+# maximize/restore (owner 2026-07-21 perf fix — covering that OS-level
+# state jump broke it; see gui/app_build.py's _on_root_configure).
+TRANSITION_FADE_MS = 260    # collapse/settings cover fade
 TRANSITION_FADE_STEPS = 14  # alpha ramp ticks across TRANSITION_FADE_MS
 
 # --- Smooth window RESIZE (owner 2026-07-19) --------------------------
@@ -200,25 +202,25 @@ TRANSITION_FADE_STEPS = 14  # alpha ramp ticks across TRANSITION_FADE_MS
 # ONCE, this many ms after the LAST <Configure> ("wait for mouse release").
 RESIZE_SETTLE_MS = 150
 
-# --- ScrollFrame fill_height self-heal (owner 2026-07-21 workflow fix) -
-# The fill_height re-fit above only re-triggers from an ACTUAL canvas
-# resize (a real window resize/maximize) or an explicit refresh() call —
-# once _apply_fill_height has ever forced the embedded body's height via
+# --- ScrollFrame fill_height re-fit (owner 2026-07-21 workflow fix; made
+# event-driven 2026-07-21 perf fix) -------------------------------------
+# The fill_height re-fit above re-triggers from an ACTUAL canvas resize
+# (a real window resize/maximize) or an explicit refresh() call — once
+# _apply_fill_height has ever forced the embedded body's height via
 # canvas itemconfigure, body's OWN <Configure> stops firing in response
 # to its nested content simply growing (a canvas "window" item's forced
 # dimension is now externally pinned, decoupled from the child's natural
 # pack-driven size request), so a content-height change from a widget
-# that has no reference to the ScrollFrame to call refresh() on (e.g. an
-# AgentPanel's Settings-gear reveal) — or even the FIRST settle during
-# construction, if it happens to land before the whole tree has finished
-# growing — can leave the scrollregion stuck too short forever, with the
-# real bottom of the content unreachable on a short window. A cheap
-# periodic comparison (cost: two winfo reads + one int compare) self-
-# heals regardless of WHICH caller forgot to refresh — current or
-# future — rather than requiring every content-height-changing widget
-# in the file to hold a reference to the ScrollFrame and remember to
-# call it.
-SCROLL_FILL_HEIGHT_POLL_MS = 250
+# with no reference to the ScrollFrame (e.g. an AgentPanel's Settings-
+# gear reveal, or a ToolSettingsPanel's Advanced-section reveal) would
+# otherwise leave the scrollregion stuck too short, with the real bottom
+# of the content unreachable on a short window. THIS USED TO BE self-
+# healed by a perpetual after() poll re-checking the fit forever, even
+# fully idle — the owner reported the constant background timer as
+# visible scroll jank ("renders so badly it's horrible"). Replaced with
+# an explicit ``on_layout_change`` callback each such panel calls right
+# after its own reveal (wired by PainterGui to ``ScrollFrame.refresh``)
+# — zero timers, zero idle cost.
 
 # the two track pill SVGs (stems, resolved in assets/icons) — reused
 # straight from the owner's website switch, so the starfield / sky-clouds

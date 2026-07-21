@@ -1,8 +1,10 @@
 """ScrollFrame — a vertically (optionally also horizontally) scrollable
-frame: self-healing fill-height (a periodic poll catches a content-
-height change no caller remembered to ``refresh()``), resize-debounced
-re-fit (a window drag applies its width/height/scrollregion pass ONCE,
-on settle) and mouse-wheel binding scoped to hover.
+frame: event-driven fill-height (recomputed from the events that
+actually change content/viewport height, plus an explicit ``refresh()``
+call after a structural change no caller's own ``<Configure>`` would
+catch), resize-debounced re-fit (a window drag applies its width/
+height/scrollregion pass ONCE, on settle) and mouse-wheel binding
+scoped to hover.
 
 Split out of gui/__init__.py (Rule #3, god-file refactor step 2/8)."""
 
@@ -11,7 +13,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from painter.config import RESIZE_SETTLE_MS, SCROLL_FILL_HEIGHT_POLL_MS
+from painter.config import RESIZE_SETTLE_MS
 
 from .theme import skin_canvas
 
@@ -28,15 +30,23 @@ class ScrollFrame(ttk.Frame):
     with it the body keeps its natural width and a horizontal bar
     appears.
 
-    ``fill_height=True`` additionally self-heals (owner 2026-07-21
-    workflow fix, ``_poll_fill_height``): whenever the embedded body's
-    true required height grows past what was last applied — a Settings
-    gear reveal, a filter row added, anything with no reference to THIS
-    ScrollFrame to call ``refresh()`` on, or even the very first settle
-    at construction — a cheap periodic check (``config.
-    SCROLL_FILL_HEIGHT_POLL_MS``) catches the mismatch and recomputes,
-    so a short window can always reach the true bottom of the content
-    by scrollbar or wheel, regardless of which caller forgot to ask.
+    ``fill_height=True`` additionally keeps the body at least as tall
+    as the canvas (``_apply_fill_height``) so a short window can always
+    reach the true bottom of the content by scrollbar or wheel. This
+    used to be self-healed by a perpetual ``after()`` poll (owner
+    2026-07-21 workflow fix) that re-checked the fit every
+    ``SCROLL_FILL_HEIGHT_POLL_MS`` forever, even fully idle — the
+    owner's own "scroll renders so badly it's horrible" report (owner
+    2026-07-21, workflow-fix follow-up): a constant background timer
+    competing with the UI thread's paint/event work. Replaced with
+    PURE events (owner 2026-07-21, perf fix): the re-fit fires from
+    ``<Configure>`` on the canvas (a real viewport resize) and the body
+    (nested content naturally growing) exactly as before, PLUS an
+    explicit ``refresh()`` call at every structural change that the
+    poll used to catch instead — a Settings-gear/Advanced-section
+    reveal nested arbitrarily deep below this ScrollFrame, wired
+    through each panel's own ``on_layout_change`` callback (see
+    ``AgentPanel``/``ToolSettingsPanel``). No timer runs when idle.
     """
 
     def __init__(
@@ -47,8 +57,8 @@ class ScrollFrame(ttk.Frame):
         # fill_height: keep the body AT LEAST as tall as the canvas, so a
         # child packed expand=True (the notebook) fills the whole viewport
         # when the content is shorter than the window (see
-        # _apply_fill_height) — and self-heals via _poll_fill_height, see
-        # the class docstring above.
+        # _apply_fill_height) — event-driven re-fit, see the class
+        # docstring above (refresh()/on_layout_change for nested reveals).
         self._fill_height = fill_height
         self._fill_h = 0  # last forced body height (change-guarded loop break)
         self._sr_job = None  # coalesced scrollregion pass (see _on_body)
@@ -57,7 +67,6 @@ class ScrollFrame(ttk.Frame):
         self._settle_job = None  # the resize-settle after() id
         self._canvas_w = 0   # the newest canvas width (from <Configure>)
         self._applied_w = -1  # the body width actually applied (deferred)
-        self._poll_job = None  # the fill_height self-heal poll after() id
         self.canvas = tk.Canvas(self, highlightthickness=0)
         skin_canvas(self.canvas)  # registered so its bg re-tints on a flip
         vbar = ttk.Scrollbar(
@@ -87,8 +96,9 @@ class ScrollFrame(ttk.Frame):
         # while the pointer is still over it) so it never fires on a
         # dead widget; and cancel any pending scrollregion pass
         self.canvas.bind("<Destroy>", self._on_destroy)
-        if self._fill_height:
-            self._poll_fill_height()  # self-arms its own next tick, see below
+        # fill_height's first real fit runs off the canvas's OWN initial
+        # <Configure> (every Tk widget gets one on first map) via
+        # _on_canvas below — no separate construction-time kick needed.
 
     def _on_body(self, _event) -> None:
         # COALESCE: one expand that grids dozens of children fires a
@@ -143,42 +153,20 @@ class ScrollFrame(ttk.Frame):
 
     def refresh(self) -> None:
         """Re-fit after a structural change (collapse/expand) — coalesced
-        like _on_body so a burst of changes triggers one settle."""
+        like _on_body so a burst of changes triggers one settle. This is
+        the explicit event side of fill_height's re-fit: once
+        ``_apply_fill_height`` has ever forced ``body``'s actual height
+        via canvas ``itemconfigure``, body's OWN ``<Configure>`` stops
+        firing from nested content simply growing (the canvas now
+        dictates body's real size, decoupled from its children's
+        pack-driven request) — so any widget that reveals/hides content
+        UNDER a fill_height ScrollFrame (a Settings-gear or Advanced-
+        section toggle, arbitrarily deep in the tree) MUST call this
+        (or a callback wired to it, e.g. ``on_layout_change``) after the
+        reveal. No poll backstops a caller that forgets — see the class
+        docstring's 2026-07-21 perf-fix note."""
         if self._sr_job is None:
             self._sr_job = self.after_idle(self._recompute_sr)
-
-    def _poll_fill_height(self) -> None:
-        """Self-heal for ``fill_height`` (owner 2026-07-21 workflow fix —
-        see ``config.SCROLL_FILL_HEIGHT_POLL_MS``'s own comment for the
-        full mechanism this guards against): once ``_apply_fill_height``
-        has ever forced ``body``'s actual height via canvas
-        ``itemconfigure``, body's OWN ``<Configure>`` stops firing from
-        nested content simply growing (the canvas now dictates body's
-        real size, decoupled from its children's pack-driven request),
-        so ``_on_body`` can go quiet forever even while
-        ``body.winfo_reqheight()`` keeps climbing — a content-height
-        change from a widget with no reference to THIS ScrollFrame to
-        call ``refresh()`` on would otherwise leave the scrollregion
-        stuck too short, unreachable, until an actual window resize
-        happens to fix it as a side effect. Recomputes the SAME target
-        ``_apply_fill_height`` would (cheap: two winfo reads, one
-        compare) and only schedules the real recompute pass on a
-        genuine mismatch — self-reschedules every
-        ``SCROLL_FILL_HEIGHT_POLL_MS`` until the widget is destroyed."""
-        try:
-            target = max(
-                self.canvas.winfo_height(), self.body.winfo_reqheight()
-            )
-            if (
-                target != self._fill_h and self._sr_job is None
-                and not self._resizing
-            ):
-                self._sr_job = self.after_idle(self._recompute_sr)
-        except tk.TclError:
-            return  # destroyed between polls — let the poll chain end
-        self._poll_job = self.after(
-            SCROLL_FILL_HEIGHT_POLL_MS, self._poll_fill_height
-        )
 
     def _on_destroy(self, event) -> None:
         if self._sr_job is not None:
@@ -187,9 +175,6 @@ class ScrollFrame(ttk.Frame):
         if self._settle_job is not None:
             self.after_cancel(self._settle_job)
             self._settle_job = None
-        if self._poll_job is not None:
-            self.after_cancel(self._poll_job)
-            self._poll_job = None
         self._unbind_wheel(event)
 
     def _on_canvas(self, event) -> None:

@@ -112,6 +112,7 @@ class AgentPanel(ttk.Labelframe):
         filter_presets: dict[str, list[dict]] | None = None,
         on_filter_presets_changed: Callable[[], None] | None = None,
         on_log: Callable[[str], None] | None = None,
+        on_layout_change: Callable[[], None] | None = None,
     ):
         super().__init__(master)
         self.site_key = site_key
@@ -122,6 +123,15 @@ class AgentPanel(ttk.Labelframe):
         # gui_*.py test's own make_panel()) still works, same pattern as
         # on_filter_presets_changed below
         self._on_log = on_log or (lambda _msg: None)
+        # PainterGui wires this to the outer fill_height ScrollFrame's
+        # own refresh() (owner 2026-07-21 perf fix, replacing the old
+        # perpetual self-heal poll): the Settings-gear reveal below
+        # changes this panel's own content height, several parents deep
+        # under that ScrollFrame, with no reference of its own to it —
+        # see ScrollFrame.refresh's own docstring for why this call is
+        # required. A no-op default keeps every headless make_panel() in
+        # the test suite working unchanged.
+        self._on_layout_change = on_layout_change or (lambda: None)
         # the SHARED filter-preset library (GUI rework Phase 6) — the
         # same dict/callback PainterGui hands every FilterEditor
         # instance (see filters.py's module docstring: one preset
@@ -642,13 +652,20 @@ class AgentPanel(ttk.Labelframe):
         """The gear: flip THIS agent's fine-tune visibility, independently
         of the other site, behind the shared snapshot cover (the reveal
         moves everything below the panel — bare, it lands as one hard
-        jump). The var change persists via its own trace."""
+        jump). The var change persists via its own trace. The re-fit
+        (``_on_layout_change``) runs INSIDE the covered mutate, alongside
+        the pack/pack_forget itself, so the outer ScrollFrame's
+        scrollregion settles hidden behind the same cover — never a
+        visible post-fade jump."""
         self.settings_collapsed_var.set(
             not self.settings_collapsed_var.get()
         )
-        smooth_transition(
-            self.winfo_toplevel(), self._apply_finetune_visibility
-        )
+
+        def mutate() -> None:
+            self._apply_finetune_visibility()
+            self._on_layout_change()
+
+        smooth_transition(self.winfo_toplevel(), mutate)
 
     def _on_force_aspect_canvas_drag(self, w: int, h: int) -> None:
         """``AspectRatioCanvas.on_change`` — a drag mirrored into the W/H

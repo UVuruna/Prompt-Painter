@@ -16,9 +16,17 @@ the `_build_*` widget-construction helpers it calls from `__init__`
 `_zoom_wheel`/`_zoom_key`/`_zoom_step`) and wheel routing
 (`_bind_wheel_routing`/`_inner_wheel`), `_relayout_agents` (the
 per-site visibility reconciler `_build_compact` wires onto every
-`AgentPanel.visible_var`), and the maximize/restore cover + drag-resize
-event-buffering watcher (`_on_root_configure`/`_resize_settled`/
-`_clamp_geometry`) bound at the tail of `__init__`.
+`AgentPanel.visible_var`), and the drag-resize event-buffering watcher
+(`_on_root_configure`/`_resize_settled`/`_clamp_geometry`) bound at the
+tail of `__init__`. A window maximize/restore is tracked in
+`_on_root_configure` for bookkeeping ONLY (owner 2026-07-21 perf fix) —
+it is deliberately NOT wrapped in `smooth_transition` any more (it was,
+2026-07-20 through 2026-07-21): a real-window repro proved the cover
+breaks the OS-level transition itself (the window gets stuck at its
+old size on maximize, or renders a corrupted frame on restore) while
+Tk's own `state()`/`winfo_*` insist the change already happened. See
+`_on_root_configure`'s own docstring for the full mechanism and why the
+OS/DWM's native animation needs no help from us.
 
 Owns the window-sizing/collapse-glyph constants every other mixin that
 touches the same widgets needs: `WINDOW_MIN_W`/`WINDOW_MIN_H`/
@@ -51,7 +59,8 @@ duplicated, Rule #5).
 - [Standalone-Tool Settings Panels](tool_panels.md) — the base +
   five concrete panels
 - [The Theme Engine](theme.md) — `apply_theme`, `register_painter_day`,
-  `skin_listbox`, `skin_text`, `smooth_transition`
+  `skin_listbox`, `skin_text` (NOT `smooth_transition` — removed
+  2026-07-21 perf fix, see Design Decisions)
 
 ### Used by
 - [App (composition)](app.md) — `PainterGui(BuildMixin, ...)`
@@ -66,8 +75,24 @@ duplicated, Rule #5).
   source of truth for construction).
 - **The maximize/restore/drag-resize watcher stayed here rather than
   moving to `ViewMixin`.** It is armed once, at the tail of `__init__`,
-  and its job (cover a discrete window-state jump, buffer dashboard
-  events mid-drag) is about the ROOT WINDOW itself, not about which
-  app view is showing — grouping it with the constructor that seeds
-  its state (`self._win_state`/`self._win_size`/`self._resize_active`)
-  keeps that state and its one reader together (Rule #5).
+  and its job (buffer dashboard events mid-drag; track window state) is
+  about the ROOT WINDOW itself, not about which app view is showing —
+  grouping it with the constructor that seeds its state
+  (`self._win_state`/`self._win_size`/`self._resize_active`) keeps that
+  state and its one reader together (Rule #5).
+- **Maximize/restore is NOT covered by `smooth_transition` (owner
+  2026-07-21 perf fix, reverting owner 2026-07-20's own addition of
+  it).** The owner reported "lag + a BUG when I click MAXIMIZE"; a real
+  Windows repro (screenshots, ImageGrab) proved the cover itself was the
+  bug — creating the borderless topmost overlay Toplevel and force-
+  painting it while the WM is mid-transition interrupts the actual
+  resize/repaint, so the real window stays stuck at its OLD size
+  (maximize) or renders a corrupted frame (restore) even though Tk's own
+  `state()`/`winfo_width`/`winfo_height` already report the change. A
+  bare `ttkbootstrap.Window` with none of this code maximizes cleanly;
+  patching out ONLY the `smooth_transition` call (keeping everything
+  else — ScrollFrame's own settle-debounced re-fit included) also
+  maximizes/restores cleanly. The OS/DWM already animates the state
+  change smoothly on its own; the cover was never needed here, only for
+  our OWN Tk-level jumps (theme flip, Controls collapse, a Settings
+  gear/Advanced section) where no native transition exists.

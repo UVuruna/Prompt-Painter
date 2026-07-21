@@ -44,6 +44,13 @@ import ...`) with no circular import back into the still-monolithic
   (`UpscaleSettingsPanel.build_func`)
 - [Theme (script)](theme.py) — `THEME_TOPLEVELS`, `smooth_transition`
   (the Advanced-gear reveal animation)
+- [ScrollFrame](scroll.md) — indirectly, via the optional
+  `on_layout_change` constructor callback: `PainterGui` wires it to the
+  outer fill_height `ScrollFrame`'s own `refresh()` (owner 2026-07-21
+  perf fix, replacing an old perpetual self-heal poll) — `_toggle_
+  advanced` calls it right after `_apply_advanced_visibility`, inside
+  the same `smooth_transition`-covered mutate. Defaults to a no-op so
+  every headless panel in the test suite still works unchanged.
 - [Themed Widget Toolkit](widgets.md) — `Spinner`, the numeric-field
   parsers (`_parse_fraction`/`_parse_nonneg_int`/`_parse_int_range`),
   `rounded_button`/`rounded_entry`/`rounded_switch`,

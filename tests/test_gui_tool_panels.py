@@ -380,6 +380,42 @@ def test_advanced_collapsible_starts_hidden_and_toggles(root):
     assert panel._advanced_box.winfo_manager() == "pack"
 
 
+def test_toggle_advanced_calls_on_layout_change_after_the_reveal(root):
+    """The real click path (_toggle_advanced, not the bare
+    _apply_advanced_visibility above): the outer ScrollFrame's refresh
+    hook (owner 2026-07-21 perf fix, replacing the old perpetual
+    self-heal poll) must fire exactly once per toggle, AFTER the box is
+    actually packed/forgotten — on a withdrawn root smooth_transition's
+    own mapped/viewable guard fails, so mutate runs instantly and
+    synchronously, making the ordering directly observable here."""
+    calls: list[str] = []
+    panel = gui.CropSettingsPanel(
+        root, on_start=lambda *_a: None, on_pause=lambda *_a: None,
+        on_stop=lambda *_a: None, on_layout_change=lambda: calls.append(
+            panel_box_state()
+        ),
+    )
+
+    def panel_box_state() -> str:
+        return panel._advanced_box.winfo_manager()
+
+    panel._toggle_advanced()  # collapsed -> expanded
+    assert panel._advanced_box.winfo_manager() == "pack"
+    assert calls == ["pack"]
+
+    panel._toggle_advanced()  # expanded -> collapsed
+    assert panel._advanced_box.winfo_manager() == ""
+    assert calls == ["pack", ""]
+
+
+def test_on_layout_change_defaults_to_a_harmless_noop(root):
+    """Every OTHER make_panel() in this suite passes no on_layout_change
+    at all — must not raise."""
+    panel = make_panel(gui.CropSettingsPanel, root)
+    panel._toggle_advanced()  # must not raise
+    assert panel._advanced_box.winfo_manager() == "pack"
+
+
 # ---------------------------------------------------------------------
 # Settings round-trip
 # ---------------------------------------------------------------------

@@ -28,6 +28,13 @@ Rule #20 god-file refactor, step 4/8) — a single class, ~825 lines.
   (`upscale_params()`)
 - [Theme (script)](theme.py) — `THEME_TOPLEVELS`, `smooth_transition`
   (the Settings-gear reveal animation)
+- [ScrollFrame](scroll.md) — indirectly, via the optional
+  `on_layout_change` constructor callback: `PainterGui` wires it to the
+  outer fill_height `ScrollFrame`'s own `refresh()` (owner 2026-07-21
+  perf fix, replacing an old perpetual self-heal poll) — `_toggle_
+  settings` calls it right after `_apply_finetune_visibility`, inside
+  the same `smooth_transition`-covered mutate. Defaults to a no-op so
+  every headless `AgentPanel` in the test suite still works unchanged.
 - [Themed Widget Toolkit](widgets.md) — `Spinner`,
   `rounded_button`/`rounded_combo`/`rounded_entry`/`rounded_switch`,
   `style_action_button`, `tk_font`

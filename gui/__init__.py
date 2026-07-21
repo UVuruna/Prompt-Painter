@@ -68,7 +68,6 @@ from painter.config import (
     MENU_TILE_RADIUS,
     MENU_TILE_W,
     RESIZE_SETTLE_MS,
-    SCROLL_FILL_HEIGHT_POLL_MS,
     SHEETS_DIR,
     SITES,
     STEP_RESTORE_CURRENT_LABEL,

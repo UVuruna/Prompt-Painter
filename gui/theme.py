@@ -198,15 +198,26 @@ def _apply_theme_now(name: str) -> None:
 # --- Snapshot cover + fade — the ONE transition mechanism ------------
 # tkinter cannot animate a relayout or a palette change: a live theme
 # flip repaints as a visible cascade of half-themed frames, and a big
-# collapse/expand (the Controls toggle, an agent's Settings gear) or a
-# window maximize/restore lands as one hard jump. ONE shared mechanism
-# hides all of these (owner 2026-07-20, generalizing the theme
-# cross-fade — Rule #5): smooth_transition() grabs the window into a
-# borderless topmost overlay, FORCES the cover painted, runs the mutate
-# callback (the theme flip / the relayout) hidden behind it, then fades
-# the overlay's window alpha out. A pure visual nicety — any cover
-# failure (ImageGrab unavailable, alpha unsupported, an unmapped
+# collapse/expand (the Controls toggle, an agent's Settings gear, a
+# tool panel's Advanced section) lands as one hard jump. ONE shared
+# mechanism hides all of these (owner 2026-07-20, generalizing the
+# theme cross-fade — Rule #5): smooth_transition() grabs the window
+# into a borderless topmost overlay, FORCES the cover painted, runs the
+# mutate callback (the theme flip / the relayout) hidden behind it,
+# then fades the overlay's window alpha out. A pure visual nicety — any
+# cover failure (ImageGrab unavailable, alpha unsupported, an unmapped
 # window) degrades to the plain instant mutate, never a stuck overlay.
+#
+# NOT used for a window maximize/restore (owner 2026-07-21 perf fix,
+# reverting owner 2026-07-20's own use of it there): a real Windows
+# repro proved covering that OS-level state jump breaks it — creating
+# the topmost overlay while the WM is mid-transition interrupts the
+# real resize/repaint, leaving the window visibly stuck at its old
+# size (or corrupted on restore) despite Tk's own state()/winfo_*
+# insisting the change already happened. The OS/DWM already animates
+# maximize/restore smoothly on its own; see
+# ``BuildMixin._on_root_configure`` in gui/app_build.py for the full
+# story and the fix.
 
 
 def _snapshot_overlay(root: tk.Misc, icon_factory=None) -> tk.Toplevel:
@@ -291,8 +302,9 @@ def smooth_transition(
 ) -> None:
     """Run ``mutate()`` (a relayout / theme repaint) hidden behind a
     snapshot cover, then fade the cover out — shared by the theme flip,
-    the Controls collapse, each agent's Settings gear and the window
-    maximize/restore cover.
+    the Controls collapse, each agent's Settings gear and each tool
+    panel's Advanced section (NOT the window maximize/restore — see the
+    module-level note above this function's own section header).
 
     The ORDER is what kills the visible jump (owner 2026-07-19): the
     cover is forced fully mapped + painted by the window manager FIRST

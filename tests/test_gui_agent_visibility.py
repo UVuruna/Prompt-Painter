@@ -242,6 +242,41 @@ def test_apply_settings_restoring_upscale_false_hides_the_gate_box(root):
     assert panel._upscale_gate_box.winfo_manager() == ""
 
 
+# --- Settings gear -> on_layout_change (owner 2026-07-21 perf fix) ------
+
+
+def test_toggle_settings_calls_on_layout_change_after_the_reveal(root):
+    """The real click path (_toggle_settings, not the bare
+    _apply_finetune_visibility): the outer ScrollFrame's refresh hook
+    (owner 2026-07-21 perf fix, replacing the old perpetual self-heal
+    poll) must fire exactly once per toggle, AFTER the fine-tune box is
+    actually packed/forgotten — on a withdrawn root smooth_transition's
+    own mapped/viewable guard fails, so mutate runs instantly and
+    synchronously, making the ordering directly observable here."""
+    calls: list[str] = []
+    panel = make_panel(root, on_log=None)
+    panel._on_layout_change = lambda: calls.append(
+        panel._finetune_box.winfo_manager()
+    )
+
+    assert panel.settings_collapsed_var.get() is True  # starts collapsed
+    panel._toggle_settings()  # collapsed -> expanded
+    assert panel._finetune_box.winfo_manager() == "pack"
+    assert calls == ["pack"]
+
+    panel._toggle_settings()  # expanded -> collapsed
+    assert panel._finetune_box.winfo_manager() == ""
+    assert calls == ["pack", ""]
+
+
+def test_toggle_settings_on_layout_change_defaults_to_a_harmless_noop(root):
+    """Every OTHER make_panel() in this suite passes no on_layout_change
+    at all — must not raise."""
+    panel = make_panel(root)
+    panel._toggle_settings()  # must not raise
+    assert panel._finetune_box.winfo_manager() == "pack"
+
+
 # ---------------------------------------------------------------------
 # PainterGui._relayout_agents — via a duck-typed FakeGui
 # ---------------------------------------------------------------------

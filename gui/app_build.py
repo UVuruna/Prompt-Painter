@@ -9,11 +9,12 @@ mixin that defines ``__init__`` — every other mixin's methods run on the
 attributes this constructor sets, via ``self.``. It also owns the
 ``_build_*`` widget-construction helpers, the global font-zoom/wheel-
 routing bindings, ``_relayout_agents`` (the per-site visibility
-reconciler wired up in ``_build_compact``), and the maximize/restore
-cover + drag-resize event-buffering watcher (``_on_root_configure`` /
-``_resize_settled`` / ``_clamp_geometry``) — all bound at the tail of
-``__init__``, so they naturally live beside the constructor that arms
-them.
+reconciler wired up in ``_build_compact``), and the drag-resize event-
+buffering watcher (``_on_root_configure`` / ``_resize_settled`` /
+``_clamp_geometry`` — maximize/restore is tracked for bookkeeping only,
+see ``_on_root_configure``'s own docstring on why it is NOT covered) —
+all bound at the tail of ``__init__``, so they naturally live beside
+the constructor that arms them.
 """
 
 from __future__ import annotations
@@ -49,7 +50,6 @@ from .theme import (
     register_painter_day,
     skin_listbox,
     skin_text,
-    smooth_transition,
 )
 from .tool_dash import AiCheckPanel, DashGrid, ToolPanel
 from .tool_panels import (
@@ -251,6 +251,7 @@ class BuildMixin:
                 on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
+                on_layout_change=self._scroll.refresh,
             ),
             "crop": CropSettingsPanel(
                 self._main_view,
@@ -259,6 +260,7 @@ class BuildMixin:
                 on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
+                on_layout_change=self._scroll.refresh,
             ),
             "upscale": UpscaleSettingsPanel(
                 self._main_view,
@@ -267,6 +269,7 @@ class BuildMixin:
                 on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
+                on_layout_change=self._scroll.refresh,
             ),
             "aspect": AspectSettingsPanel(
                 self._main_view,
@@ -275,6 +278,7 @@ class BuildMixin:
                 on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
+                on_layout_change=self._scroll.refresh,
             ),
             # the AI checker's own persistent panel (GUI rework Phase
             # 15) — keyed by its MENU_TILES id ("image_checker"), NOT
@@ -295,6 +299,7 @@ class BuildMixin:
                 on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
+                on_layout_change=self._scroll.refresh,
             ),
             # API Image GEN (GUI rework Phase 19) — keyed by its
             # MENU_TILES id ("api_image_gen"), NOT its JOB_ORDER slot
@@ -533,17 +538,31 @@ class BuildMixin:
         self._scroll.refresh()
 
     def _on_root_configure(self, event) -> None:
-        """The root <Configure> watcher (owner 2026-07-20). Two jobs:
+        """The root <Configure> watcher. One job now:
 
-        * a zoomed↔normal STATE change is a DISCRETE size jump
-          (maximize / restore) — hide its relayout behind the shared
-          snapshot cover. It can never fire mid-drag: the state stays
-          'normal' through a whole drag, so a continuous resize is
-          never covered;
         * a same-state SIZE change is part of a continuous drag — mark
           the resize active and re-arm the settle timer; while active,
           _drain_queue buffers dashboard events so the trees / live
           labels stop re-rendering per frame (flushed on settle).
+
+        A zoomed<->normal STATE change (maximize/restore) is tracked
+        for bookkeeping ONLY (owner 2026-07-21 perf fix — previously
+        wrapped in the shared smooth_transition snapshot cover, owner
+        2026-07-20). Measured with a real window: covering it BREAKS
+        the maximize/restore instead of hiding it — creating and
+        force-painting the borderless topmost overlay Toplevel while
+        Windows is mid-transition interrupts the OS's own resize/
+        repaint, leaving the real window stuck at its OLD size (or,
+        on restore, a corrupted double-painted frame) while Tk's own
+        ``state()``/``winfo_width``/``winfo_height`` insist the change
+        already happened. The OS/DWM already animates maximize/restore
+        smoothly on its own — no cover was ever needed here, only for
+        our OWN discrete Tk-level jumps (theme flip, Controls collapse,
+        a Settings gear) where no native transition exists. Removing
+        the cover fixes both the visible 'stuck small window' and the
+        'lag' the owner reported, with zero loss (the ScrollFrame's own
+        settle-debounced re-fit still runs off the canvas's real
+        <Configure>, converging in one frame — no visible cascade).
 
         The handler sits on the ROOT bindtag, which every child widget
         carries too — the first line drops child configures, keeping
@@ -553,13 +572,8 @@ class BuildMixin:
         state = self.root.state()
         size = (event.width, event.height)
         if state != self._win_state:
-            prev, self._win_state = self._win_state, state
+            self._win_state = state
             self._win_size = size
-            if {prev, state} <= {"zoomed", "normal"}:
-                # ONE discrete jump — cover it while the relayout
-                # settles behind the cover (mutate: nothing to do, the
-                # WM already resized us; the settle happens inside)
-                smooth_transition(self.root, lambda: None)
             return
         if size == self._win_size:
             return  # a pure move — nothing relayouts, nothing to do
@@ -674,6 +688,7 @@ class BuildMixin:
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
                 on_log=self._log,
+                on_layout_change=self._scroll.refresh,
             )
             panel.grid(row=0, column=i, sticky="nsew", padx=4)
             self._agents_frame.columnconfigure(i, weight=1)

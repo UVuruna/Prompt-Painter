@@ -187,12 +187,20 @@ class ToolSettingsPanel(ttk.Frame):
         on_stop: Callable[[str], None],
         filter_presets: dict[str, list[dict]] | None = None,
         on_filter_presets_changed: Callable[[], None] | None = None,
+        on_layout_change: Callable[[], None] | None = None,
     ):
         super().__init__(master, padding=8)
         self.slot = self.SLOT
         self._on_start = on_start
         self._on_pause = on_pause
         self._on_stop = on_stop
+        # PainterGui wires this to the outer fill_height ScrollFrame's
+        # own refresh() (owner 2026-07-21 perf fix — see AgentPanel's
+        # identical field for the full rationale): the Advanced-section
+        # reveal below changes this panel's own content height with no
+        # reference of its own to that ScrollFrame. A no-op default
+        # keeps every headless make_panel()-style test working.
+        self._on_layout_change = on_layout_change or (lambda: None)
         self._input_mode = "folder"  # or "files"
         self._folder: Path | None = None
         self._files: list[Path] = []
@@ -454,9 +462,12 @@ class ToolSettingsPanel(ttk.Frame):
         self._advanced_collapsed_var.set(
             not self._advanced_collapsed_var.get()
         )
-        smooth_transition(
-            self.winfo_toplevel(), self._apply_advanced_visibility
-        )
+
+        def mutate() -> None:
+            self._apply_advanced_visibility()
+            self._on_layout_change()
+
+        smooth_transition(self.winfo_toplevel(), mutate)
 
     # --- run state -----------------------------------------------------
 
