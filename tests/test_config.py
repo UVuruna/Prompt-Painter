@@ -17,11 +17,13 @@ from painter.config import (
     BADGE_ACTION_STEPS,
     BUTTON_FILL,
     BUTTON_TEXT,
+    JOB_ORDER,
     MENU_TILES,
     MENU_TILE_RADIUS,
     STYLES,
     STYLE_CHOICES,
     STYLE_DEFAULT,
+    TILE_JOB_KINDS,
     badge_keys_for,
     button_fill_pair,
     button_text_pair,
@@ -305,3 +307,38 @@ def test_menu_tiles_only_api_image_gen_is_disabled():
 
 def test_menu_tile_radius_matches_the_design_system_card_bracket():
     assert MENU_TILE_RADIUS == 16  # DESIGN.md "cards, panels": 12-16px
+
+
+# --- TILE_JOB_KINDS (GUI rework Phase 11) -------------------------------
+# The running view's IconBar live-status map: which JOB_ORDER kind(s)
+# light up a given MENU_TILES id up. Pure data, same "no tkinter" home
+# as MENU_TILES itself.
+
+
+def test_tile_job_kinds_has_exactly_one_entry_per_menu_tile():
+    assert set(TILE_JOB_KINDS) == {tile.id for tile in MENU_TILES}
+
+
+def test_tile_job_kinds_only_reference_real_job_order_kinds():
+    for tile_id, kinds in TILE_JOB_KINDS.items():
+        for kind in kinds:
+            assert kind in JOB_ORDER, f"{tile_id}: unknown kind {kind!r}"
+
+
+def test_tile_job_kinds_website_gen_spans_both_sites():
+    assert TILE_JOB_KINDS["website_gen"] == ("chatgpt", "gemini")
+
+
+def test_tile_job_kinds_the_two_ai_dialogs_have_no_dashboard_job():
+    """Neither 'New collection (AI)' nor the (disabled) API Image GEN
+    tile has a JOB_ORDER kind of its own — they only ever launch, they
+    never light up in the IconBar."""
+    assert TILE_JOB_KINDS["ai_sheet_gen"] == ()
+    assert TILE_JOB_KINDS["api_image_gen"] == ()
+
+
+def test_tile_job_kinds_every_job_order_kind_is_reachable_from_some_tile():
+    """The inverse coverage check: no JOB_ORDER kind is an orphan the
+    IconBar could never reflect."""
+    referenced = {k for kinds in TILE_JOB_KINDS.values() for k in kinds}
+    assert referenced == set(JOB_ORDER)

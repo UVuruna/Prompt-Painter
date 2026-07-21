@@ -139,6 +139,7 @@ from painter.config import (
     SWITCH_TRACK_DAY_SVG,
     SWITCH_TRACK_NIGHT_SVG,
     THEMES,
+    TILE_JOB_KINDS,
     TIMING,
     TRANSITION_FADE_MS,
     TRANSITION_FADE_STEPS,
@@ -436,6 +437,7 @@ WHEEL_DELTA_UNIT = 120      # one mouse-wheel notch (event.delta per detent)
 COMPACT_CLUSTER_GAP_PX = 24  # gap between the two agent clusters when collapsed
 COLLAPSE_GLYPH_EXPANDED = "▾  Controls"   # toggle label while controls show
 COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
+ICON_BAR_GAP_PX = 4  # gap between IconBar tile buttons (GUI rework Phase 11)
 # each AgentPanel's own Settings gear (owner 2026-07-19) shows/hides THAT
 # agent's fine-tune — its pause range, action-delay range and upscale-gate
 # fields — independently of the other site; HIDDEN by default so the panel
@@ -1492,6 +1494,31 @@ def style_action_button(
             state="disabled", fg_color="transparent", border_width=1,
             border_color=color, text_color=color,
             text_color_disabled=color,
+        )
+
+
+def _style_icon_bar_button(
+    btn: ctk.CTkButton, color: tuple[str, str], active: bool
+) -> None:
+    """IconBar tile colouring (GUI rework Phase 11) — generalizes
+    ``style_action_button``'s filled/outline language from a NAMED
+    semantic kind to an arbitrary ``(day, night)`` accent pair (a
+    ``MENU_TILES``/``JOB_COLORS`` tuple): ACTIVE (one of the tile's
+    ``TILE_JOB_KINDS`` has a live job right now) = FILLED with the
+    accent; IDLE = a quiet outline in the same accent. UNLIKE
+    ``style_action_button``, both states stay ``state="normal"`` — an
+    idle tile is exactly what the owner clicks to configure/launch the
+    next tool (IconBar itself disables the ONE permanently-disabled
+    placeholder tile separately)."""
+    if active:
+        btn.configure(
+            fg_color=color, border_width=0,
+            hover_color=_darken_pair(color), text_color=status_pair("btn_text"),
+        )
+    else:
+        btn.configure(
+            fg_color="transparent", border_width=1, border_color=color,
+            text_color=color, hover_color=theme_pair("dark"),
         )
 
 
@@ -4182,6 +4209,96 @@ class MainMenu(ttk.Frame):
         return card
 
 
+def _next_view(
+    current: str, active_count: int, menu_requested: bool = False,
+) -> str:
+    """Pure view-transition decision (GUI rework Phase 11) — no Tk, so
+    it is unit-testable on its own. ``current`` is today's
+    ``PainterGui._view`` ("menu" / "main" / "running"); ``active_count``
+    is ``len(PainterGui._active_kinds())`` — every JOB_ORDER kind with a
+    live worker right now; ``menu_requested`` is True only on an
+    explicit Menu-button click (the pinned top-strip one outside
+    "running", IconBar's own copy during it).
+
+    Rules (owner 2026-07-21, binding design doc, Phase 11):
+
+    * a Menu click is honoured ONLY once NOTHING is active — refused
+      (view unchanged) otherwise, however many jobs are still running;
+    * absent a Menu click, ANY active job forces "running" — the
+      auto-enter-on-first-start rule (0 -> >=1 while on "menu" or
+      "main" lands on "running");
+    * once "running", it STAYS "running" even as jobs finish one by
+      one, all the way down to zero — Stop closing the LAST active job
+      never auto-navigates by itself; only a SUBSEQUENT explicit Menu
+      click does (see the first rule above);
+    * otherwise the view is simply unchanged (covers "menu"/"main"
+      while genuinely idle — nothing here needs to move).
+    """
+    if menu_requested:
+        return "menu" if active_count == 0 else current
+    if active_count > 0:
+        return "running"
+    return current
+
+
+class IconBar(ttk.Frame):
+    """The compact top strip shown while ``PainterGui._view ==
+    "running"`` (GUI rework Phase 11): one small button per
+    ``config.MENU_TILES`` functionality, plus a "Menu" button on the
+    right (the pinned top-strip one steps aside while this is up — see
+    ``PainterGui._set_view``, one Menu affordance visible at a time).
+
+    A tile's colour FILLS IN while any of its ``config.TILE_JOB_KINDS``
+    has a live job right now (``_style_icon_bar_button`` — the SAME
+    filled/outline language ``style_action_button`` already uses for
+    Start/Stop, generalized to an arbitrary accent pair) and sits as a
+    quiet outline otherwise; clicking a lit tile focuses the Dashboard
+    instead of a settings toggle (``PainterGui._click_icon_bar_tile``
+    decides — this class only renders, it never decides). Built ONCE
+    alongside the rest of the app; ``PainterGui`` packs/unpacks the
+    whole bar and calls ``set_active`` after every job start/stop so
+    the colours stay live."""
+
+    def __init__(
+        self, parent,
+        on_select: Callable[[str], None], on_menu: Callable[[], None],
+    ):
+        super().__init__(parent, padding=(0, 4))
+        self._buttons: dict[str, ctk.CTkButton] = {}
+        for tile in MENU_TILES:
+            btn = rounded_button(
+                self, tile.label, icon_name=tile.icon,
+                command=partial(on_select, tile.id) if tile.enabled else None,
+            )
+            btn.pack(side="left", padx=(0, ICON_BAR_GAP_PX))
+            self._buttons[tile.id] = btn
+            if not tile.enabled:
+                # the one permanently-disabled placeholder (api_image_gen,
+                # same as MainMenu's own tile — Phase 19 wires it up):
+                # muted and inert, never touched by set_active again
+                _style_icon_bar_button(btn, tile.color, active=False)
+                btn.configure(state="disabled")
+        # plain text, no icon — same constraint the pinned top-strip
+        # Menu button already documents (no "menu/home" icon asset
+        # exists, and DESIGN.md's emoji policy rules out a hamburger
+        # glyph standing in for one); "controls" would be actively
+        # WRONG here — that stem is the gamepad glyph the UNRELATED
+        # Controls-collapse toggle already owns, right beside this bar
+        rounded_button(self, "Menu", command=on_menu).pack(side="right")
+        self.set_active(set())
+
+    def set_active(self, active_ids: set[str]) -> None:
+        """Recolour every ENABLED tile: FILLED while its id is in
+        ``active_ids``, a quiet outline otherwise. Called by
+        ``PainterGui`` after every change to the running job set."""
+        for tile in MENU_TILES:
+            if not tile.enabled:
+                continue
+            _style_icon_bar_button(
+                self._buttons[tile.id], tile.color, tile.id in active_ids
+            )
+
+
 class PainterGui:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -4311,6 +4428,13 @@ class PainterGui:
         # state — _collapsed (the Controls toggle) keeps working
         # unmodified, independently, in either view.
         self._view = "menu"
+        # GUI rework Phase 11: which tile's inline settings surface (if
+        # any) shows above the Dashboard/Log while _view == "running" —
+        # only "website_gen" has a real one today (_controls_box itself;
+        # every other functionality still launches through its existing
+        # modal/dialog handler — see _click_icon_bar_tile). Inert, never
+        # read, outside "running".
+        self._inline_kind: str | None = None
         self._main_view = ttk.Frame(outer)
         self._menu_view = MainMenu(outer, on_select=self._select_tile)
 
@@ -4324,6 +4448,16 @@ class PainterGui:
         self._build_toolbar(self._controls_box)
         self._build_compact(self._main_view)
         self._build_views(self._main_view)
+        # GUI rework Phase 11: the running view's icon bar — a child of
+        # _main_view like _controls_box/_compact_box/self.notebook, so
+        # _apply_running_layout can pack/forget it with the exact same
+        # before=self.notebook technique (needs self.notebook to exist,
+        # hence built AFTER _build_views); left unpacked here — only
+        # _set_view("running") ever packs it.
+        self._icon_bar = IconBar(
+            self._main_view,
+            on_select=self._click_icon_bar_tile, on_menu=self._request_menu,
+        )
 
         self.status_var = tk.StringVar(value="idle")
         ttk.Label(
@@ -4343,14 +4477,19 @@ class PainterGui:
             command=self._toggle_collapsed, icon_name="controls",
         )
         self._collapse_btn.pack(side="right", padx=(0, 8))
-        # GUI rework Phase 10: minimal "back to the Main Menu" affordance
-        # — Phase 11 turns this into a proper icon bar; for now, one
+        # "back to the Main Menu" affordance (GUI rework Phase 10): one
         # plain-text button (no icon asset fits "menu/home" yet, and
         # DESIGN.md's emoji policy rules out a hamburger glyph standing
-        # in for one) always reachable in the pinned top strip, like the
-        # switch/collapse toggle either side of it.
+        # in for one) in the pinned top strip, like the switch/collapse
+        # toggle either side of it — reachable from "menu"/"main".
+        # GUI rework Phase 11: while "running", IconBar shows its OWN
+        # Menu button instead (one Menu affordance on screen at a time —
+        # see _set_view) and this one steps aside; both route through
+        # _request_menu, which REFUSES the jump while any job is still
+        # active (design: "back to menu only once nothing is running,
+        # and only on an explicit Menu click").
         self._menu_btn = rounded_button(
-            self._top_strip, "Menu", command=lambda: self._go_view("menu"),
+            self._top_strip, "Menu", command=self._request_menu,
         )
         self._menu_btn.pack(side="left")
 
@@ -4481,7 +4620,21 @@ class PainterGui:
         packed into 'outer' changes. Not persisted (every launch starts
         at "menu", see __init__) and deliberately its OWN state, never
         entangled with ``_collapsed`` — the Controls toggle keeps
-        working unmodified, independently, in either view."""
+        working unmodified, independently, in either view.
+
+        GUI rework Phase 11 adds a THIRD value, "running": at THIS
+        level it packs exactly like "main" (the else branch below is
+        byte-identical to Phase 10) — the difference lives ONE
+        container down, inside ``_main_view``, where
+        ``_apply_running_layout`` swaps the controls_box/compact_box
+        region for the IconBar (plus the optional website_gen inline
+        panel). Entering "running" also disables the Controls-collapse
+        toggle (collapsed/expanded is meaningless when neither
+        controls_box nor compact_box is what's showing) and hands the
+        Menu affordance to IconBar's own copy; leaving it restores
+        both via the SAME ``_set_collapsed`` Phase 10 already proves
+        safe."""
+        was_running = self._view == "running"
         self._view = view
         if view == "menu":
             self._main_view.pack_forget()
@@ -4489,6 +4642,20 @@ class PainterGui:
         else:
             self._menu_view.pack_forget()
             self._main_view.pack(fill="both", expand=True)
+        if view == "running":
+            if not was_running:
+                # Start hides the LAUNCHING tool's own settings panel
+                # (spec item 4) — a fresh entry into "running" never
+                # inherits a stale inline toggle from a previous run
+                self._inline_kind = None
+            self._menu_btn.pack_forget()
+            self._collapse_btn.configure(state="disabled")
+            self._apply_running_layout()
+        elif was_running:
+            self._icon_bar.pack_forget()
+            self._menu_btn.pack(side="left")
+            self._collapse_btn.configure(state="normal")
+            self._set_collapsed(self._collapsed)
         self._scroll.refresh()
 
     def _go_view(self, view: str) -> None:
@@ -4500,24 +4667,136 @@ class PainterGui:
         smooth_transition(self.root, partial(self._set_view, view))
 
     def _select_tile(self, tile_id: str) -> None:
-        """One Main Menu tile picked: reveal the existing app (Phase 11
-        turns this into a proper icon bar) and, for every functionality
-        but Website GEN, invoke the SAME existing handler the old
-        always-visible toolbar button already called — UNMODIFIED, this
-        phase only changes what is VISIBLE when it runs. Website GEN has
-        no single handler of its own — the owner drives the now-visible
-        queue + per-site Start buttons, same as before this phase."""
+        """One Main Menu tile picked: reveal the existing app and, for
+        every functionality but Website GEN, invoke the SAME existing
+        handler the old always-visible toolbar button already called —
+        UNMODIFIED, Phase 10 only changed what is VISIBLE when it runs.
+        Website GEN has no single handler of its own — the owner drives
+        the now-visible queue + per-site Start buttons, same as always.
+        ``_tile_handler`` is shared with the running view's IconBar
+        (``_click_icon_bar_tile``, GUI rework Phase 11) — ONE mapping,
+        not two copies (Rule #5)."""
         self._go_view("main")
-        handler = {
+        handler = self._tile_handler(tile_id)
+        if handler is not None:
+            handler()
+
+    def _tile_handler(self, tile_id: str) -> Callable[[], None] | None:
+        """The existing, unmodified action one ``MENU_TILES`` id runs.
+        ``None`` for "website_gen" (no single handler — see
+        ``_select_tile``'s docstring) and for the disabled
+        "api_image_gen" placeholder (never reaches a caller: MainMenu
+        binds no click on a disabled tile, and IconBar disables its own
+        button the same way — Phase 19 wires the real handler in)."""
+        return {
             "website_gen": None,
             "ai_sheet_gen": self._new_collection_ai,
-            "api_image_gen": None,  # disabled tile — never reaches here
+            "api_image_gen": None,
             "image_checker": self._start_ai_check,
             "bg": partial(self._start_tool, "bg"),
             "crop": partial(self._start_tool, "crop"),
             "upscale": partial(self._start_tool, "upscale"),
             "aspect": partial(self._start_tool, "aspect"),
         }[tile_id]
+
+    # --- Running view (GUI rework Phase 11) -----------------------------
+
+    def _active_kinds(self) -> set[str]:
+        """Every JOB_ORDER kind with a live worker right now — sites via
+        ``_running``, tools + the AI checker via ``_tool_workers``. The
+        single source of truth ``_next_view``/``_apply_running_layout``/
+        ``_request_menu`` all read; call after any change to either
+        set (``_sync_running_state`` is that call site)."""
+        return self._running | set(self._tool_workers)
+
+    def _active_tile_ids(self) -> set[str]:
+        """Which ``MENU_TILES`` ids currently have at least one active
+        job — drives ``IconBar.set_active`` via ``config.TILE_JOB_KINDS``."""
+        active = self._active_kinds()
+        return {
+            tile_id for tile_id, kinds in TILE_JOB_KINDS.items()
+            if set(kinds) & active
+        }
+
+    def _sync_running_state(self) -> None:
+        """Call after ANY change to ``_running``/``_tool_workers`` (a
+        job started, or its worker finished): reconciles the view via
+        the pure ``_next_view`` and, whenever the result IS "running",
+        refreshes the IconBar's live-status colours. Never itself
+        decides to LEAVE "running" — that only happens through
+        ``_request_menu`` (an explicit Menu click), per ``_next_view``'s
+        own rules."""
+        target = _next_view(self._view, len(self._active_kinds()))
+        if target != self._view:
+            self._go_view(target)
+        if self._view == "running":
+            self._icon_bar.set_active(self._active_tile_ids())
+
+    def _apply_running_layout(self) -> None:
+        """Reconcile the region above the notebook for the running
+        view: the IconBar is always shown; ``_controls_box``
+        additionally shows, INLINE, only while the owner has the
+        website_gen tile toggled open (``_inline_kind``) — every other
+        functionality still launches through its existing modal/dialog
+        handler (Phase 13-15 give them a real persistent panel; see
+        ``_click_icon_bar_tile``). The SAME pack_forget/pack(before=
+        self.notebook) technique ``_set_collapsed`` already proves
+        safe, one container lower — nothing destroyed, only shown/
+        hidden. Callable repeatedly (every inline toggle re-runs it);
+        only meaningful while ``_view == "running"``."""
+        self._controls_box.pack_forget()
+        self._compact_box.pack_forget()
+        self._icon_bar.pack(fill="x", before=self.notebook)
+        if self._inline_kind == "website_gen":
+            self._controls_box.pack(fill="x", before=self.notebook)
+        self._icon_bar.set_active(self._active_tile_ids())
+        self._scroll.refresh()
+
+    def _request_menu(self) -> None:
+        """The Menu affordance's shared handler (the pinned top-strip
+        button outside "running", IconBar's own copy during it) —
+        routed through ``_next_view`` so a click while any job is still
+        active is a safe, clearly-explained no-op (design: "back to
+        menu only once nothing is running, and only on an explicit
+        Menu click")."""
+        active = self._active_kinds()
+        target = _next_view(self._view, len(active), menu_requested=True)
+        if target == self._view:
+            if active:
+                self.status_var.set(
+                    "Stop every running job before returning to the menu."
+                )
+            return
+        self._go_view(target)
+
+    def _click_icon_bar_tile(self, tile_id: str) -> None:
+        """One IconBar tile clicked while ``_view == "running"``.
+
+        A tile whose job kind(s) (``TILE_JOB_KINDS``) are CURRENTLY
+        active just focuses the Dashboard tab — it is NOT a settings
+        toggle for a running job, and that job's own panel stays
+        exactly as hidden as the design requires ("without disturbing
+        any running job's own hidden panel"). A NOT-running tile
+        toggles its inline settings/launch surface: "website_gen"
+        shows/hides the existing ``_controls_box`` (the queue + both
+        AgentPanels) right above the Dashboard/Log; every other
+        functionality still launches through its EXISTING modal/dialog
+        handler (``_tile_handler`` — the SAME one the Main Menu itself
+        uses), since Phase 13-15 are what give bg/crop/upscale/aspect/
+        the AI checker a real persistent panel — until then, opening
+        that dialog IS the tile's launch surface, and it disturbs
+        nothing else (always its own Toplevel)."""
+        kinds = TILE_JOB_KINDS.get(tile_id, ())
+        if set(kinds) & self._active_kinds():
+            self.notebook.select(0)
+            return
+        if tile_id == "website_gen":
+            self._inline_kind = (
+                None if self._inline_kind == "website_gen" else "website_gen"
+            )
+            self._apply_running_layout()
+            return
+        handler = self._tile_handler(tile_id)
         if handler is not None:
             handler()
 
@@ -4797,6 +5076,18 @@ class PainterGui:
             self.agents[kind].set_paused(is_paused)
         self.panels[kind].set_paused(is_paused)
         self._log(f"[{kind}] {'paused' if is_paused else 'resumed'}")
+        # GUI rework Phase 11 (spec item 4): Pause RETURNS the settings
+        # panel "for future tasks" — today that only means something
+        # for website_gen (chatgpt/gemini), the one functionality with
+        # a real persistent panel (_controls_box); the four tools + the
+        # AI checker have none yet (Phase 13-15), so this is a no-op
+        # for them beyond the ToolPanel/AiCheckPanel Pause/Resume toggle
+        # already handled above. Resuming never hides it back — only a
+        # fresh Start (of either site) or the owner's own icon-bar
+        # toggle does that.
+        if is_paused and kind in ("chatgpt", "gemini") and self._view == "running":
+            self._inline_kind = "website_gen"
+            self._apply_running_layout()
 
     def _open_instructions(self) -> None:
         path = Path(__file__).resolve().parent / "instructions.md"
@@ -5330,6 +5621,7 @@ class PainterGui:
         )
         self._tool_workers[slot] = worker
         worker.start()
+        self._sync_running_state()  # GUI rework Phase 11
 
     def _run_tool_job(
         self, slot, label, func, folder, files, temp, pause_event,
@@ -5498,6 +5790,7 @@ class PainterGui:
         )
         self._tool_workers["aicheck"] = worker
         worker.start()
+        self._sync_running_state()  # GUI rework Phase 11
 
     def _run_ai_check_job(self, folder, files, out_base, pause_event) -> None:
         """The checker worker: prune stale flags (regenerated files),
@@ -5950,6 +6243,13 @@ class PainterGui:
         )
         self._workers[key] = worker
         worker.start()
+        # GUI rework Phase 11: Start hides the launching tool's own
+        # settings panel (spec item 4) — website_gen's is the whole
+        # _controls_box, shared by both sites, so ANY site starting
+        # hides it; the owner reopens it (IconBar's website_gen tile)
+        # to configure/start the other one while this one runs.
+        self._inline_kind = None
+        self._sync_running_state()
 
     def _drive_site(
         self, key, sheets, out_base, timing, post_save, suffix,
@@ -6168,6 +6468,7 @@ class PainterGui:
                     self._toggle_pause_job(slot)
                 if not self._tool_workers and not self._running:
                     self._update_status()
+                self._sync_running_state()  # GUI rework Phase 11
             elif msg[0] == "__worker_done__":
                 key = msg[1]
                 self._log(f"[{key}] worker finished")
@@ -6187,6 +6488,7 @@ class PainterGui:
                 if key not in self._restart_jobs:
                     self.panels[key].finish()
                 self._update_status()
+                self._sync_running_state()  # GUI rework Phase 11
         else:
             self._log(str(msg))
 

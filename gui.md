@@ -309,9 +309,172 @@ and still ends by selecting the Dashboard tab (`self.notebook.select
 switch ran first. A minimal **"Menu"** button (plain text — no icon
 asset fits "menu/home" yet, and DESIGN.md's emoji policy rules out a
 hamburger glyph standing in for a real one) sits in the pinned top
-strip beside the Day/Night switch and the Controls toggle, always
-reachable, calling `_go_view("menu")`; Phase 11 turns this into a
-proper icon bar with a live-status indicator per running job.
+strip beside the Day/Night switch and the Controls toggle — reachable
+from "menu"/"main"; **Running view** below is what happens while a job
+is actually going.
+
+## Running view (GUI rework Phase 11)
+
+While ANY job is going, the visible surface shrinks to exactly what
+the owner needs to watch it: a compact **`IconBar(ttk.Frame)`** (one
+small button per `config.MENU_TILES`, plus a "Menu" button) sits above
+the SAME Dashboard/Log `Notebook` Phase 10 already built; the big
+controls area (Collections queue, Output row, both `AgentPanel`s, the
+tool/AI toolbar rows) is hidden entirely — not destroyed, just
+unpacked, the exact `_set_collapsed` pack_forget/pack idiom Phase 10
+already leaned on for the menu/main swap, applied one container
+further down.
+
+**`_view` gains a third value, `"running"`.** `_set_view` packs it at
+the OUTER level exactly like `"main"` (the `_main_view`/`_menu_view`
+branch is byte-identical to Phase 10) — everything new happens one
+container down, inside `_main_view`, via a new `_apply_running_layout`:
+
+```python
+def _apply_running_layout(self) -> None:
+    self._controls_box.pack_forget()
+    self._compact_box.pack_forget()
+    self._icon_bar.pack(fill="x", before=self.notebook)
+    if self._inline_kind == "website_gen":
+        self._controls_box.pack(fill="x", before=self.notebook)
+    self._icon_bar.set_active(self._active_tile_ids())
+    self._scroll.refresh()
+```
+
+Entering `"running"` also disables the Controls-collapse toggle
+(collapsed/expanded is meaningless once neither `_controls_box` nor
+`_compact_box` is what's showing) and hands the Menu affordance to
+IconBar's own copy — the pinned top-strip button `pack_forget`s itself
+so only ONE "Menu" is ever on screen; leaving `"running"` reverses
+both and calls `_set_collapsed(self._collapsed)` to restore whichever
+of controls/compact was showing before, unmodified.
+
+**The transition rules live in one pure, Tk-free function**, unit-
+tested directly (`tests/test_gui_running_view.py`):
+
+```python
+def _next_view(
+    current: str, active_count: int, menu_requested: bool = False,
+) -> str:
+    if menu_requested:
+        return "menu" if active_count == 0 else current
+    if active_count > 0:
+        return "running"
+    return current
+```
+
+- **any** active job forces `"running"` — the auto-enter-on-first-start
+  rule (0 → ≥1 while on `"menu"` or `"main"` lands on `"running"`);
+- it then STAYS `"running"` through every Stop, all the way down to
+  zero active jobs — closing the LAST job never auto-navigates by
+  itself;
+- `"menu"` is reachable again ONLY on an explicit Menu click, and ONLY
+  once `active_count == 0` — a click while anything is still active is
+  a refused no-op (a status-bar hint explains why).
+
+`PainterGui._active_kinds()` (`self._running | set(self._tool_workers)`
+— sites + tools + the AI checker, ONE set) is the single source of
+truth every running-view method reads; `_active_tile_ids()` maps it
+back through the NEW `config.TILE_JOB_KINDS` dict (which
+`JOB_ORDER` kind(s) light up which `MENU_TILES` id — `website_gen` is
+the one entry spanning two kinds, the two AI dialogs map to `()` since
+neither has a dashboard job). **`_sync_running_state()`** is the ONE
+call site that reconciles both after every change: called at the end
+of `_start_site`/`_start_tool`/`_start_ai_check` (right after their
+worker thread starts) and from the `__worker_done__`/`__tool_done__`
+dispatch branches (right after a kind is dropped from `_running`/
+`_tool_workers`) — it recomputes `_next_view` and, whenever the result
+IS `"running"`, refreshes `IconBar.set_active`. It is deliberately the
+ONLY place that can ENTER `"running"`; leaving it only ever happens
+through `_request_menu`.
+
+**IconBar** reuses `MENU_TILES` exactly like `MainMenu` does (one
+factory, not two copies): a `rounded_button` per tile (icon + label),
+the ONE permanently-disabled `api_image_gen` placeholder styled once
+at construction and never touched again, plus a "Menu" button.
+`set_active(active_ids)` recolours every enabled tile — FILLED with
+its accent while active, a quiet outline otherwise — via a new
+`_style_icon_bar_button(btn, color, active)`, which generalizes the
+existing `style_action_button`'s filled/outline language (today keyed
+to a NAMED semantic kind like `"success"`/`"danger"`) to an arbitrary
+`(day, night)` accent pair, so it works for any `MENU_TILES`/
+`JOB_COLORS` tuple without a new visual language.
+
+**Clicking an IconBar tile — `_click_icon_bar_tile(tile_id)`:**
+
+- if the tile's `TILE_JOB_KINDS` are CURRENTLY active, the click just
+  selects the Dashboard tab — never a settings toggle for a running
+  job, and that job's own panel stays exactly as hidden as before;
+- `"website_gen"` is the ONE tile with a real persistent inline
+  surface today: the click toggles `self._inline_kind` and re-runs
+  `_apply_running_layout`, showing/hiding the EXISTING `_controls_box`
+  (the queue + BOTH `AgentPanel`s) right above the Dashboard/Log —
+  nothing new was built, Phase 10's own controls area is simply
+  repacked into a different slot;
+- every OTHER not-running tile (`bg`/`crop`/`upscale`/`aspect`/
+  `image_checker`/`ai_sheet_gen`) still launches through the EXISTING
+  modal/dialog handler — `_tile_handler(tile_id)`, the SAME mapping
+  `_select_tile` uses (extracted once, Rule #5, so the Main Menu and
+  the running view never carry two copies of "what does this tile
+  do"). **Honest scope note:** those five have no PERSISTENT settings
+  panel of their own yet — Phases 13-15 build `ToolSettingsPanel`/
+  `BgSettingsPanel`/etc. on top of this phase; until then, "toggle the
+  inline surface" for them means "open the SAME folder-picker + confirm
+  dialog the toolbar button already opened before Phase 10", which
+  disturbs nothing else (always its own Toplevel) but is not literally
+  a persistent panel the owner can leave open to inspect later.
+
+**Start/Pause/Stop view semantics** (spec item 4), wired into the
+EXISTING handlers — none forked:
+
+| Action | What changes |
+|---|---|
+| **Start** (`_start_site`) | Unconditionally clears `_inline_kind` (Start hides the launching tool's OWN settings panel — website_gen's is shared by both sites, so EITHER starting hides it) then calls `_sync_running_state()` — auto-enters `"running"` on the first job. |
+| **Start** (`_start_tool` / `_start_ai_check`) | Calls `_sync_running_state()` after the worker starts — same auto-enter; tools have no inline panel to hide (see above). |
+| **Pause** (`_toggle_pause_job`) | Unchanged pause/resume bookkeeping, PLUS: pausing `chatgpt`/`gemini` while `_view == "running"` sets `_inline_kind = "website_gen"` and re-applies the layout — "Pause returns the settings panel for future tasks" (spec item 4). Resuming never hides it again — only a fresh Start (of either site) or the owner's own icon click does. A no-op for the five tool/checker kinds (no persistent panel yet) and outside `"running"` (already fully visible there). |
+| **Stop** (`_stop_site`) | UNCHANGED — signals the stop event; the worker exits on its own next poll and posts `__worker_done__`, which calls `_sync_running_state()` (recolours the icon; the design's "STOP … returns to the main menu" reads as "the Menu click that follows now succeeds", not an auto-jump — see below). |
+| **Close** (`_close_panel`) | UNCHANGED — the existing `_dashgrid.remove`/`reset_finished`/`JobTemp.clear`. By the time a panel's Close button is even reachable, `finish()` has already run and that kind is already out of `_active_kinds()`, so no additional Phase 11 bookkeeping is needed here. |
+| **Menu** (`_request_menu`, shared by the pinned button and IconBar's own) | Routes through `_next_view(…, menu_requested=True)` — navigates to `"menu"` once `active_count == 0`, otherwise refused with a status-bar hint ("Stop every running job before returning to the menu."). |
+
+**Reading "Stop … returns to the main menu" (spec item 4) precisely:**
+the binding design doc is explicit that "menu" is reachable "only when
+NO jobs are active AND the owner clicks Menu" — Stop (even of the
+LAST job) does not, by itself, jump anywhere; it makes the Menu click
+that follows finally succeed. This keeps the existing, tested Stop→
+finish→Close lifecycle (the owner can still review a finished panel
+before dismissing it) completely intact rather than force-closing it
+the moment Stop is clicked.
+
+**Non-regression:** the Main Menu (Phase 10) is unchanged and still
+the app's front door; every job kind still starts/pauses/stops exactly
+as before (none of `_start_site`/`_start_tool`/`_start_ai_check`/
+`_stop_site`/`_close_panel`'s own bodies were rewritten, only extended
+at their tail); the Dashboard/Log, per-job panels, before/after +
+`StepRestoreWindow`, Select window, Day/Night theming, font zoom,
+scroll and settings persistence are all untouched — Phase 11 only
+changes what is PACKED where, via the same `pack_forget`/`pack`
+technique already proven safe in Phase 10.
+
+**Verified (0.0.09x):** full suite green (386 tests, up from 345) plus
+`tests/test_gui_running_view.py` — `_next_view`'s rules table above,
+`_active_kinds`/`_active_tile_ids`/`_sync_running_state`/
+`_apply_running_layout`/`_request_menu`/`_click_icon_bar_tile`/
+`_toggle_pause_job`'s new reveal, all run through a duck-typed
+`FakeGui` (never a full `PainterGui` — its `__init__` is too heavy for
+a unit test, same convention every other GUI-phase test file already
+follows), plus real-widget `IconBar` construction/click/`set_active`
+checks; `config.TILE_JOB_KINDS` coverage lives in `test_config.py`
+beside `MENU_TILES`'s own pure-data tests. Real-window screenshots (Day
+theme, settings.json redirected to a scratch file so the owner's real
+one is never touched, the site job driven through fake
+`SiteDriver`/`run_sheet` so no Chrome/network is needed) confirmed: (1)
+Website GEN → Start → IconBar + Dashboard only, controls hidden,
+`website_gen` tile filled; (2) clicking the BG-removal icon while
+`chatgpt` "runs" starts a REAL local bg job alongside it — BOTH tiles
+filled, BOTH dashboard panels visible, controls still hidden,
+`chatgpt`'s own panel undisturbed; (3) Stop + Close everything, then
+Menu → the full-screen 8-tile menu again, Controls/Menu restored to
+their pre-running spots.
 
 ## The window
 
@@ -1445,6 +1608,11 @@ line prints) before the pause is honored at ITS first item boundary;
 no generation happens in the gap, only a log line's timing looks a
 beat early. Scoped out of this phase — the letter of "checked between
 items" is satisfied, and the gap is cosmetic, never functional.
+
+**GUI rework Phase 11** extends `_toggle_pause_job` at its tail (the
+bookkeeping above is otherwise untouched): pausing a SITE while the
+running view is up also reveals its settings panel — see **Running
+view**'s Start/Pause/Stop table below.
 
 ## Connections
 

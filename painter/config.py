@@ -788,6 +788,26 @@ MENU_TILES: tuple[MenuTile, ...] = (
     ),
 )
 
+# which JOB_ORDER kind(s) each MENU_TILES id represents — the running
+# view's IconBar (GUI rework Phase 11) reads this to decide whether a
+# tile is currently "live" (config.JOB_COLORS-tinted) vs idle: a
+# running job's kind is checked against ITS tile's entry here, never
+# the other way around, so a new job kind never needs an IconBar code
+# change, only a data one. "website_gen" is the one tile spanning TWO
+# kinds (it lights up while EITHER site runs); the two AI dialogs
+# (`ai_sheet_gen`/`api_image_gen`) have no dashboard job of their own,
+# hence the empty tuples — they never light up, only ever launch.
+TILE_JOB_KINDS: dict[str, tuple[str, ...]] = {
+    "website_gen": ("chatgpt", "gemini"),
+    "ai_sheet_gen": (),
+    "api_image_gen": (),
+    "image_checker": ("aicheck",),
+    "bg": ("bg",),
+    "crop": ("crop",),
+    "upscale": ("upscale",),
+    "aspect": ("aspect",),
+}
+
 
 # --- Tool temp / before-after / restore (owner 2026-07-19) -----------
 #

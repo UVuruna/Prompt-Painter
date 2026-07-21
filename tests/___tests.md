@@ -104,7 +104,12 @@ a label/description and an icon stem that resolves to a real file
 under `assets/icons/`, only `api_image_gen` is disabled, and
 `MENU_TILE_RADIUS` matches DESIGN.md's card-radius bracket (16). Real
 `MainMenu`/`_view` Tk wiring gets a screenshot, not a pytest — see
-gui.py's own "barely Tk-unit-tested by design" convention below.
+gui.py's own "barely Tk-unit-tested by design" convention below. GUI
+rework Phase 11 adds `TILE_JOB_KINDS` coverage — every `MENU_TILES` id
+has an entry, every kind it lists is a real `JOB_ORDER` member,
+`website_gen` maps to both gen sites, the two AI dialogs map to `()`,
+and (the inverse check) every `JOB_ORDER` kind is reachable from some
+tile.
 
 ### `test_aspect.py` — Change-Aspect Deform
 The grow-only stretch rule, already-at-ratio byte-unchanged no-ops,
@@ -247,6 +252,42 @@ own live JobTemp/live path, and an `on_restored` callback that is
 `refresh_image_row` itself, proven by calling it and checking the row's
 `res` column updates); `refresh_image_row` re-reads a row's resolution/
 size straight off disk and is a no-op for an unknown drop path.
+
+### `test_gui_running_view.py` — Running View (Icon Bar + Start/Pause/Stop)
+GUI rework Phase 11. Two halves: `gui._next_view(current, active_count,
+menu_requested=False)` is the pure, Tk-free view-transition decision —
+tested directly (no GUI at all) for every rule the binding design doc
+states: any active job forces `"running"` from `"menu"`/`"main"`; it
+STAYS `"running"` through every active count including a drop to zero
+(Stop of the last job never auto-navigates by itself); a Menu click is
+honoured ONLY once `active_count == 0`, refused otherwise; idle
+`"menu"`/`"main"` are left alone. The `PainterGui` methods that consume
+it (`_active_kinds` / `_active_tile_ids` / `_sync_running_state` /
+`_apply_running_layout` / `_request_menu` / `_click_icon_bar_tile` /
+`_tile_handler` / `_toggle_pause_job`'s new reveal) run for REAL
+through a small duck-typed `FakeGui` (the SAME convention
+test_gui_pipeline.py's own `FakeGui` uses for `_compose_post_save` —
+never a full `PainterGui`, whose `__init__` is too heavy for a unit
+test) — the running-view methods this needs (`_active_kinds` etc.) are
+ALIASED onto `FakeGui` as class attributes rather than reimplemented,
+so `self._active_kinds()` calls inside an unbound `PainterGui` method
+resolve correctly even though `self` is the fake. Covers: entering
+`"running"` on the first job, never leaving it on its own when a job
+finishes, the IconBar recolouring on both, `_apply_running_layout`'s
+controls-box-only-while-website_gen-inline packing (and never showing
+a stale collapsed strip), `_request_menu`'s refuse-while-active status
+hint, `_click_icon_bar_tile`'s three branches (already-active → focus
+Dashboard, website_gen → toggle the real inline `_controls_box`, every
+other not-running tile → its EXISTING modal/dialog handler via
+`_tile_handler`, shared with `_select_tile` — one mapping, not two),
+and `_toggle_pause_job`'s Phase 11 addition (pausing a SITE reveals the
+website_gen panel; pausing a TOOL/the checker or pausing outside
+`"running"` is a no-op; Resume never hides it again). `IconBar` itself
+gets real-widget checks: one button per `MENU_TILES` id, only
+`api_image_gen` starts disabled, a click calls `on_select` with the
+tile id, the Menu button calls `on_menu`, and `set_active` fills/
+outlines buttons via their `border_width` (0 filled / 1 outline) —
+never touching the disabled placeholder.
 
 ### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.

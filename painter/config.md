@@ -49,7 +49,8 @@ match.
   `FILTER_POLARITY_*`/`FILTER_PRESETS_SETTING`/`FILTER_ASPECT_EXACT_TOL`
   block behind `FilterEditor` and the migrated `AspectRatioDialog`, and
   (GUI rework Phase 10) `MenuTile`/`MENU_TILES`/`MENU_TILE_*` behind
-  `MainMenu`
+  `MainMenu`, and (GUI rework Phase 11) `TILE_JOB_KINDS` behind the
+  running view's `IconBar`
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`, `ASPECT_LABEL_DECIMALS`
 - [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
@@ -443,6 +444,16 @@ match.
   today's 8 tiles, gap/icon-size/border-width — `_HOVER_PX` is the
   ONE thing that changes on a tile's hover, a border-width widen with
   no fill-colour cascade to keep in sync).
+- `TILE_JOB_KINDS` — a `{MENU_TILES id: (JOB_ORDER kind, ...)}` dict
+  (GUI rework Phase 11) behind [GUI](../gui.md)'s running-view
+  `IconBar`: which kind(s) light a tile up while at least one is
+  active (`website_gen` → `("chatgpt", "gemini")`, the five tool/
+  checker tiles → their own single matching kind, the two AI dialogs
+  → `()` since neither has a dashboard job of its own). PURE DATA
+  again — a new job kind only ever needs a data change here, never an
+  `IconBar` code change; `test_tile_job_kinds_*` in `test_config.py`
+  checks coverage BOTH ways (every `MENU_TILES` id has an entry, every
+  `JOB_ORDER` kind is reachable from some tile).
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text, style=None)` — the
   rule block appended to every prompt: the chosen background (each
