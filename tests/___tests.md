@@ -127,10 +127,44 @@ failing condition vetoing an otherwise-passing stack), the empty-list
 hidden epsilon — an off-ratio image by one pixel misses it), the "any
 side" both-extremes-at-once semantics (portrait/landscape judged
 identically; one outlier axis fails even when the other is in range),
-and loud `ValueError` on an unrecognised kind/polarity.
+and loud `ValueError` on an unrecognised kind/polarity. GUI rework
+Phase 4 added the JSON-safe (de)serializer pair: `condition_to_dict`'s
+four flat fields, a REAL `json.dumps`/`loads` round-trip (not just a
+dict compare), `condition_from_dict` as the exact inverse across every
+kind/polarity combination, int-to-float coercion for a hand-edited
+settings.json, and loud `KeyError`/`ValueError` on a missing field or
+an unparsable bound.
 
-### `conftest.py` — Import Path
+### `test_gui_filters.py` — FilterEditor + the Aspect-Filter Migration
+GUI rework Phase 4. Two halves: the settings migration
+(`gui._migrate_legacy_aspect_filter`) is pure and Tk-free — the
+owner's REAL saved dict (`{"from": 0.9, "to": 1.1, "mode": "IF NOT"}`)
+becomes exactly one `FILTER_KIND_ASPECT_RANGE` condition with the same
+numbers/polarity, `off`/a missing mode becomes an empty list, an
+unrecognised mode raises loudly, and `gui._parse_condition_dicts`
+drops (never crashes on) a malformed condition dict with a log line.
+`FilterEditor` itself is a REAL `ttk.Frame`/CTk widget — the suite's
+FIRST tests to construct one for real, sharing `conftest.py`'s
+session-scoped `tk_root` (see its docstring for why a second,
+independently created-and-destroyed root breaks gui.py's process-
+lifetime icon cache: `TclError: image "pyimageN" doesn't exist`).
+Covers `get_conditions()`/`set_conditions()` round-tripping (empty,
+seeded-at-construction, multiple mixed kinds, replace-not-append), a
+row-level `ValueError` on an unparsable or inverted bound, the
+"Aspect (exact)" tolerance-band round-trip (`lo`/`hi` widen by
+`FILTER_ASPECT_EXACT_TOL` on read-out, centred on the original ratio,
+and the widened band actually matches a real 1000x1001 near-square),
+and the preset Save/Load/Delete cycle — the caller's OWN injected
+`presets` dict sees the mutation, the `on_presets_changed` callback
+fires exactly once per Save/Delete, and the widget still works with
+neither injected (a private in-memory dict).
+
+### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.
+Also the session-scoped `tk_root` fixture (GUI rework Phase 4) — ONE
+real, withdrawn, never-mainloop'd `tb.Window` every Tk-constructing
+test in the suite shares (see its docstring for why a second
+independent root breaks gui.py's icon cache).
 
 ### `fixtures/` — Contract-Violation Sheets
 `unpaired.md`, `no_h1.md`, `bad_paths.md` — tiny synthetic sheets,
@@ -139,8 +173,10 @@ one violation each.
 ## Connections
 
 ### Uses
-- [Sheet Parser](../painter/sheet_parser.md) and
-  [Run Loop](../painter/runner.md) — the units under test
+- [Sheet Parser](../painter/sheet_parser.md),
+  [Run Loop](../painter/runner.md), [Shared Filter
+  Framework](../painter/filters.md) and [GUI](../gui.md) — the units
+  under test
 - DOMY Watch `research/prompts/archetype/` — the golden input
 
 ### Used by

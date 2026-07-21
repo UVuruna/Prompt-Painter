@@ -305,6 +305,19 @@ FILTER_POLARITY_IF_NOT = "IF NOT"
 # of the GUI work that reads/writes it.
 FILTER_PRESETS_SETTING = "filter_presets"
 
+# GUI rework Phase 4 (fixes Phase 3's flagged caveat): a pinned "Aspect
+# (exact)" condition is a razor-thin `lo == hi` float-equality test —
+# correct for the engine (see filters.py's "no hidden epsilon" design
+# decision) but useless authored raw, since a REAL decoded image's
+# width/height division almost never lands on that exact double (a
+# "square" export at 1000x1001 divides to 0.999000999..., not 1.0).
+# The GUI's FilterEditor widget authors this kind from a SINGLE typed
+# ratio and widens it into the band [ratio - tol, ratio + tol] before
+# building the FilterCondition, so ordinary near-square exports still
+# match; `matches()` itself is unchanged — this only affects what the
+# widget WRITES into a condition's lo/hi for this one kind.
+FILTER_ASPECT_EXACT_TOL = 0.02
+
 
 # --- Settings persistence (owner's #9) -------------------------------
 

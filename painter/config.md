@@ -39,8 +39,11 @@ match.
   `prompt_suffix`; GUI also `STYLES`/`STYLE_CHOICES`/`STYLE_DEFAULT`,
   `RESIZE_SETTLE_MS`, the `ASPECT_FILTER_*` constants, `iter_images`,
   `iter_md_files`,
-  the `SWITCH_*`/`TRANSITION_FADE_*` theming-and-cover art block, and
-  the `BADGES` block + `badge_keys_for` (the dashboard status badges)
+  the `SWITCH_*`/`TRANSITION_FADE_*` theming-and-cover art block, the
+  `BADGES` block + `badge_keys_for` (the dashboard status badges), and
+  (GUI rework Phase 4) the `FILTER_KIND_*`/`FILTER_KINDS`/
+  `FILTER_POLARITY_*`/`FILTER_PRESETS_SETTING`/`FILTER_ASPECT_EXACT_TOL`
+  block behind `FilterEditor` and the migrated `AspectRatioDialog`
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`
 - [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
@@ -164,11 +167,27 @@ match.
   `STYLE_CHOICES`). `FILTER_POLARITY_IF` / `FILTER_POLARITY_IF_NOT`
   reuse the legacy `ASPECT_FILTER_IF` / `ASPECT_FILTER_IF_NOT` spelling
   exactly, so a future settings migration needs no translation table.
-  `FILTER_PRESETS_SETTING` (`"filter_presets"`) reserves the
-  `settings.json` key a saved condition stack will live under once the
-  GUI grows preset save/load (Phase 4). Nothing in the app calls
-  `filters.matches()` yet — Phase 3 ships only the engine + these
-  constants; migrating a tool onto it is later work.
+  `FILTER_PRESETS_SETTING` (`"filter_presets"`) is the `settings.json`
+  key the shared preset LIBRARY lives under — one flat
+  `{name: [condition-dict, ...]}` dict every `FilterEditor` instance
+  reads/writes (GUI rework Phase 4 wired this in: `gui.FilterEditor` +
+  `AspectRatioDialog`, its first caller — see [GUI](../gui.md)).
+- `FILTER_ASPECT_EXACT_TOL` (`0.02`) — GUI rework Phase 4, fixes Phase
+  3's flagged caveat: a pinned "Aspect (exact)" condition is a
+  razor-thin `lo == hi` float-equality test (correct for the engine —
+  see [Shared Filter Framework](filters.md)'s "no hidden epsilon"
+  design decision) but useless authored raw, since a REAL decoded
+  image's width/height division almost never lands on that exact
+  double (a "square" export at 1000x1001 divides to 0.999000999...,
+  not 1.0). `FilterEditor` authors this kind from a SINGLE typed ratio
+  and widens it into `[ratio - tol, ratio + tol]` before building the
+  `FilterCondition`, so ordinary near-square exports still match;
+  `matches()` itself is unchanged by this constant — it only affects
+  what the widget WRITES into a condition's `lo`/`hi` for this one
+  kind. The widget's OWN pixel-geometry constants (row field widths,
+  decimals, preset combo width) live in `gui.py`'s own Rule #4 block
+  instead, alongside every other dialog's `*_ENTRY_W`/`*_PAD_PX` —
+  this file only holds the one engine-relevant tolerance.
 - `TOOL_IMAGE_EXTENSIONS`, `iter_images(folder)` — the shared image
   enumerator (owner 2026-07-19): every image file (`.png/.jpg/.jpeg/
   .webp`) under a folder, sorted, recursive. ONE home for the

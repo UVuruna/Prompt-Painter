@@ -52,6 +52,20 @@ OUTSIDE it for the condition to PASS:
 (owner decision 2026-07-21: stacking is AND, each condition further
 narrows what gets through). An empty list matches everything — no
 conditions means no filter, process everything.
+
+WIRED IN — GUI rework Phase 4
+------------------------------
+``FilterEditor`` (``gui.py``) is the reusable stacked-condition widget
+this module was built for; the standalone Aspect-ratio tool
+(``AspectRatioDialog``) is its first caller, replacing the old scalar
+``ASPECT_FILTER_*`` from/to/mode dialog fields one-for-one (a settings
+migration converts an owner's already-saved scalar filter into a single
+``FILTER_KIND_ASPECT_RANGE`` condition — see ``gui._migrate_legacy_
+aspect_filter``). ``condition_to_dict``/``condition_from_dict`` below
+are the JSON-safe (de)serializers that let a condition stack round-trip
+through ``settings.json`` — both the Aspect tool's own remembered
+filter and the shared preset library under
+``config.FILTER_PRESETS_SETTING``.
 """
 
 from __future__ import annotations
@@ -122,3 +136,32 @@ def matches(width: int, height: int, conditions: list[FilterCondition]) -> bool:
     list matches everything (no filter = process everything).
     """
     return all(_condition_passes(width, height, c) for c in conditions)
+
+
+def condition_to_dict(condition: FilterCondition) -> dict:
+    """One condition -> a JSON-safe dict (``settings.json`` / a saved
+    preset) — the flat field-for-field shape ``kind``/``polarity``/
+    ``lo``/``hi``, no encoding beyond what ``json.dumps`` already
+    handles natively."""
+    return {
+        "kind": condition.kind,
+        "polarity": condition.polarity,
+        "lo": condition.lo,
+        "hi": condition.hi,
+    }
+
+
+def condition_from_dict(data: dict) -> FilterCondition:
+    """The inverse of ``condition_to_dict`` — a JSON-loaded dict back
+    into a ``FilterCondition``. Raises ``KeyError``/``TypeError``/
+    ``ValueError`` loudly (root Rule #1) on a malformed dict — an
+    absent field, or a ``lo``/``hi`` that will not ``float()`` — rather
+    than silently fabricating a condition from partial data; a caller
+    reading untrusted persisted data (a hand-edited ``settings.json``)
+    is expected to catch and report, not this function to guess."""
+    return FilterCondition(
+        kind=data["kind"],
+        polarity=data["polarity"],
+        lo=float(data["lo"]),
+        hi=float(data["hi"]),
+    )

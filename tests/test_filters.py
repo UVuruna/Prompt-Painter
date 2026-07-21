@@ -10,6 +10,8 @@ default, and the exact-aspect (``lo == hi``) float-equality edge the
 module docstring documents (no hidden epsilon).
 """
 
+import json
+
 import pytest
 
 from painter.config import (
@@ -22,7 +24,12 @@ from painter.config import (
     FILTER_POLARITY_IF,
     FILTER_POLARITY_IF_NOT,
 )
-from painter.filters import FilterCondition, matches
+from painter.filters import (
+    FilterCondition,
+    condition_from_dict,
+    condition_to_dict,
+    matches,
+)
 
 
 def cond(kind: str, polarity: str, lo: float, hi: float) -> FilterCondition:
@@ -198,3 +205,60 @@ def test_unknown_polarity_raises():
     bogus = cond(FILTER_KIND_WIDTH, "not-a-real-polarity", 0, 1)
     with pytest.raises(ValueError):
         matches(100, 100, [bogus])
+
+
+# --- JSON-safe (de)serialization (GUI rework Phase 4) --------------------
+# settings.json / a saved preset stores a condition STACK as a plain list
+# of these dicts (config.FILTER_PRESETS_SETTING's documented shape).
+
+
+def test_condition_to_dict_has_the_four_flat_fields():
+    c = cond(FILTER_KIND_ASPECT_RANGE, FILTER_POLARITY_IF_NOT, 0.9, 1.1)
+    assert condition_to_dict(c) == {
+        "kind": FILTER_KIND_ASPECT_RANGE,
+        "polarity": FILTER_POLARITY_IF_NOT,
+        "lo": 0.9,
+        "hi": 1.1,
+    }
+
+
+def test_condition_to_dict_is_json_serializable():
+    c = cond(FILTER_KIND_WIDTH, FILTER_POLARITY_IF, 100, 500)
+    # round-trips through an ACTUAL json.dumps/loads, like settings.json
+    # itself, not just a plain dict comparison
+    reloaded = json.loads(json.dumps(condition_to_dict(c)))
+    assert condition_from_dict(reloaded) == c
+
+
+def test_condition_from_dict_is_the_exact_inverse():
+    for kind in FILTER_KINDS:
+        for polarity in (FILTER_POLARITY_IF, FILTER_POLARITY_IF_NOT):
+            c = cond(kind, polarity, 12.5, 34.75)
+            assert condition_from_dict(condition_to_dict(c)) == c
+
+
+def test_condition_from_dict_coerces_lo_hi_to_float():
+    """A hand-edited settings.json might hold whole-number JSON ints for
+    lo/hi (e.g. Width/Height in pixels) — condition_from_dict must not
+    choke on that, matches()'s own arithmetic already tolerates int/float
+    mixing, but FilterCondition's declared shape is float."""
+    data = {
+        "kind": FILTER_KIND_WIDTH, "polarity": FILTER_POLARITY_IF,
+        "lo": 100, "hi": 500,
+    }
+    c = condition_from_dict(data)
+    assert c.lo == 100.0 and isinstance(c.lo, float)
+    assert c.hi == 500.0 and isinstance(c.hi, float)
+
+
+def test_condition_from_dict_raises_loudly_on_missing_field():
+    with pytest.raises(KeyError):
+        condition_from_dict({"kind": FILTER_KIND_WIDTH, "lo": 1, "hi": 2})
+
+
+def test_condition_from_dict_raises_loudly_on_unparsable_bound():
+    with pytest.raises(ValueError):
+        condition_from_dict({
+            "kind": FILTER_KIND_WIDTH, "polarity": FILTER_POLARITY_IF,
+            "lo": "not-a-number", "hi": 2,
+        })

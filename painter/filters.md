@@ -9,10 +9,17 @@ bespoke filter — the Aspect tool's own scalar `ASPECT_FILTER_*`
 (`from`/`to`/mode`) and Upscale's four-field aspect/size gate — with a
 single reusable shape. This module is the PURE, engine-side half:
 no PIL, no tkinter, just arithmetic on the `(width, height)` a caller
-already has from a decoded image. The GUI widget that edits a stack
-(`FilterEditor`) and the migration of the existing tools onto this
-framework are LATER phases (4+) — nothing here is wired into a tool
-yet; today only its own tests exercise it.
+already has from a decoded image.
+
+**Wired in since Phase 4:** [GUI](../gui.md)'s `FilterEditor` widget
+edits a condition stack through this module's `FilterCondition` /
+`condition_to_dict` / `condition_from_dict`, and the standalone
+Aspect-ratio tool (`AspectRatioDialog`) is its first caller — replacing
+the old scalar `ASPECT_FILTER_*` dialog fields one-for-one, with a
+one-time settings migration (`gui._migrate_legacy_aspect_filter`) for
+an owner who already had a scalar filter saved. Upscale's own gate and
+the BG/Crop tools stay on their pre-existing behaviour until a later
+phase migrates them too.
 
 ## The Model — one shape, five kinds
 A `FilterCondition` is `(kind, polarity, lo, hi)`. `kind` (a
@@ -63,9 +70,10 @@ ratio" check.
   `FILTER_POLARITY_IF_NOT`
 
 ### Used by
-- Nobody yet. GUI rework Phase 4+ wires this into a new `FilterEditor`
-  widget and migrates the Aspect tool's `ASPECT_FILTER_*` scalar and
-  Upscale's bespoke gate onto it.
+- [GUI](../gui.md) — `FilterEditor` (the reusable stacked-condition
+  widget) and `AspectRatioDialog` (its first caller, GUI rework
+  Phase 4). Upscale's bespoke gate and the BG/Crop tools are still
+  unmigrated — later phases.
 
 ## Classes
 
@@ -79,6 +87,17 @@ ratio" check.
   -> bool` — whether an image PASSES the whole stacked filter (i.e.
   should be processed). Every condition must pass (AND); an empty list
   matches everything.
+- `condition_to_dict(condition: FilterCondition) -> dict` /
+  `condition_from_dict(data: dict) -> FilterCondition` — the JSON-safe
+  (de)serializers (GUI rework Phase 4) behind every place a condition
+  STACK is persisted: settings.json's `aspect_filter_conditions` key,
+  and the shared preset library under `config.FILTER_PRESETS_SETTING`
+  (`{name: [condition-dict, ...]}`). `condition_from_dict` raises
+  `KeyError`/`TypeError`/`ValueError` loudly (root Rule #1) on a
+  malformed dict — an absent field or an unparsable `lo`/`hi` — rather
+  than fabricating a condition from partial data; callers reading
+  untrusted persisted data (a hand-edited settings.json) catch and
+  report instead (see `gui._parse_condition_dicts`).
 
 ## Design Decisions
 
@@ -109,3 +128,13 @@ ratio" check.
   `ValueError` immediately (root Rule #1) rather than silently passing
   or failing every image — a typo in a hand-built condition (or a
   future settings-file migration bug) surfaces at once.
+- **The exact-aspect tolerance lives in the GUI layer, not here**
+  (`config.FILTER_ASPECT_EXACT_TOL`, GUI rework Phase 4). This
+  module's own "no hidden epsilon" design decision above still holds
+  literally — `matches()` never adds slop of its own. What changed is
+  WHO chooses `lo`/`hi` for an "Aspect (exact)" condition: `FilterEditor`
+  authors it from a single typed ratio and widens it into
+  `[ratio - tol, ratio + tol]` before ever constructing the
+  `FilterCondition`, so the ENGINE still only ever sees a plain
+  closed-interval containment test — it has no idea the interval was
+  derived from one number instead of two.

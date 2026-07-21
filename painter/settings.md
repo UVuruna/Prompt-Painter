@@ -18,15 +18,25 @@ The dict SHAPE lives with the GUI (`_collect_settings` /
 2026-07-19 it also carries `settings_collapsed` (the per-agent
 fine-tune collapse), `upscale_tool` (the standalone Upscale dialog's
 last-used four gate params), `aspect_ratio` (the last W:H entered in
-the Aspect dialog), `aspect_filter` (the Aspect dialog's last input
-FILTER — `from`/`to`/`mode`), a per-agent `style` (the rendering-style
+the Aspect dialog), a per-agent `style` (the rendering-style
 dropdown, under `agents.<site>`), and per-agent `up_minw`/`up_minh`/
 `up_aspmin`/`up_aspmax` under `agents.<site>` — all plain JSON scalars
 and small dicts, so this module round-trips them with zero special
 handling. Since owner 2026-07-20 it also carries `gemini_api_key` —
 the AI features' free AI Studio key, written by the GUI's guided
 wizard and read back by [AI Client & Flows](ai.md) on every call;
-it is a CREDENTIAL, one more reason this file stays gitignored.
+it is a CREDENTIAL, one more reason this file stays gitignored. GUI
+rework Phase 4 (2026-07-21) replaced the Aspect dialog's old scalar
+`aspect_filter` (`from`/`to`/`mode`) with `aspect_filter_conditions` —
+a list of [Shared Filter Framework](filters.md) condition dicts — and
+added `filter_presets` (a `{name: [condition-dict, ...]}` library
+shared by every `FilterEditor` instance, not just the Aspect tool).
+The OLD `aspect_filter` key is read ONCE (a one-time migration in
+`gui._migrate_legacy_aspect_filter`, only when the new key is absent)
+and never written back — like any key the GUI stops emitting, it
+simply drops off disk on the next save (this module always writes
+the WHOLE dict it is given, never a merge — see `save_settings`
+below).
 
 ## Connections
 

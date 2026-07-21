@@ -36,6 +36,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, ttk
+from typing import Callable
 
 import customtkinter as ctk
 import ttkbootstrap as tb
@@ -51,7 +52,7 @@ from painter.config import (
     ASPECT_FILTER_DEFAULT_FROM,
     ASPECT_FILTER_DEFAULT_TO,
     ASPECT_FILTER_IF,
-    ASPECT_FILTER_MODES,
+    ASPECT_FILTER_IF_NOT,
     ASPECT_FILTER_OFF,
     BACKGROUND_CHOICES,
     BADGES,
@@ -63,6 +64,16 @@ from painter.config import (
     CHECKER_LIGHT,
     CHECKER_TILE_PX,
     DEFAULT_OUT_DIR,
+    FILTER_ASPECT_EXACT_TOL,
+    FILTER_KIND_ANY_SIDE,
+    FILTER_KIND_ASPECT_EXACT,
+    FILTER_KIND_ASPECT_RANGE,
+    FILTER_KIND_HEIGHT,
+    FILTER_KIND_WIDTH,
+    FILTER_KINDS,
+    FILTER_POLARITY_IF,
+    FILTER_POLARITY_IF_NOT,
+    FILTER_PRESETS_SETTING,
     GEMINI_KEY_SETTING,
     GEMINI_VISION_MODEL,
     GRID_COLS_BY_COUNT,
@@ -141,7 +152,7 @@ from painter.config import (
     status_pair,
     theme_pair,
 )
-from painter import jobtemp
+from painter import filters, jobtemp
 from painter.settings import load_settings, save_settings
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
@@ -338,6 +349,19 @@ BEFORE_AFTER_IMG_PAD_PX = 60  # slack subtracted from the width for the images
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
 ASPECT_DIALOG_ENTRY_W = 64  # px width of each W / H field in the ratio dialog
 ASPECT_DIALOG_PAD_PX = 16   # padding around the ratio dialog body
+
+# --- FilterEditor — the reusable stacked-filter widget (GUI rework
+# Phase 4, wraps painter.filters). Pure Tk pixel geometry only; the
+# engine-side kind/polarity strings and the exact-aspect tolerance live
+# in painter/config.py alongside the rest of the FILTER_* constants —
+# this block is gui.py's own Rule #4 home, same split as every other
+# dialog's *_ENTRY_W / *_PAD_PX above.
+FILTER_ROW_KIND_W = 132      # kind combo (fits "Aspect (exact)")
+FILTER_ROW_POLARITY_W = 78   # the IF / IF NOT combo
+FILTER_ROW_ENTRY_W = 64      # each lo/hi (or single ratio) numeric field
+FILTER_ROW_DECIMALS = 3      # aspect kinds' lo/hi/ratio display precision
+FILTER_ROW_GAP_PX = 6        # vertical gap between stacked rows / sections
+FILTER_PRESET_COMBO_W = 160  # the saved-preset name combo
 
 # --- AI dialogs: key wizard / sheet generator / checker (Rule #4) -----
 AI_KEY_ENTRY_W = 380        # the wizard's key entry width (px)
@@ -783,7 +807,10 @@ def rounded_entry(parent, width: int = 140, **kwargs) -> ctk.CTkEntry:
 def rounded_combo(
     parent, values, variable, width: int = 140, **kwargs
 ) -> ctk.CTkComboBox:
-    """A rounded read-only dropdown bound to ``variable``."""
+    """A rounded dropdown bound to ``variable`` — read-only by default
+    (pass ``state="normal"`` to also allow free typing, e.g. the
+    FilterEditor preset-name combo, which doubles as a "type a new
+    name to save" field)."""
     opts = _input_colors()
     opts.update(
         button_color=theme_pair("secondary"),
@@ -793,10 +820,11 @@ def rounded_combo(
         dropdown_text_color=theme_pair("fg"),
     )
     opts.update(kwargs)
+    state = opts.pop("state", "readonly")
     field = ctk.CTkComboBox(
         parent, values=list(values), variable=variable, width=width,
         height=INPUT_HEIGHT, corner_radius=INPUT_RADIUS, border_width=1,
-        state="readonly", font=ctk_font("root"),
+        state=state, font=ctk_font("root"),
         dropdown_font=ctk_font("root"), **opts,
     )
     _untheme_inner_entry(field)
@@ -1415,6 +1443,301 @@ def style_action_button(
             border_color=color, text_color=color,
             text_color_disabled=color,
         )
+
+
+# the unit suffix shown per kind (a display nicety mirroring the old
+# single-filter dialog's trailing "W/H" label) — aspect kinds compare a
+# ratio, ANY_SIDE/WIDTH/HEIGHT compare raw pixels
+_FILTER_UNIT_LABEL: dict[str, str] = {
+    FILTER_KIND_ASPECT_EXACT: "W/H",
+    FILTER_KIND_ASPECT_RANGE: "W/H",
+    FILTER_KIND_ANY_SIDE: "px",
+    FILTER_KIND_WIDTH: "px",
+    FILTER_KIND_HEIGHT: "px",
+}
+
+
+def _filter_row_display_bounds(condition: filters.FilterCondition) -> tuple[str, str]:
+    """One condition's lo/hi as the STRINGS a row's fields should show.
+
+    "Aspect (exact)" is authored from a single RATIO field (see
+    ``_FilterConditionRow.to_condition``, which widens it back out by
+    ``FILTER_ASPECT_EXACT_TOL``): displayed here as the MIDPOINT of the
+    stored ``[lo, hi]`` band — the inverse operation, so a round-trip
+    through set_conditions()/get_conditions() reproduces the same band
+    as long as the tolerance constant hasn't changed in between. Aspect
+    (range) shows both bounds at ``FILTER_ROW_DECIMALS``; the pixel
+    kinds (any side / width / height) show plain integers-if-whole via
+    ``:g`` rather than a padded decimal (800, not 800.000)."""
+    if condition.kind == FILTER_KIND_ASPECT_EXACT:
+        text = f"{(condition.lo + condition.hi) / 2:.{FILTER_ROW_DECIMALS}f}"
+        return text, text
+    if condition.kind == FILTER_KIND_ASPECT_RANGE:
+        return (
+            f"{condition.lo:.{FILTER_ROW_DECIMALS}f}",
+            f"{condition.hi:.{FILTER_ROW_DECIMALS}f}",
+        )
+    return f"{condition.lo:g}", f"{condition.hi:g}"
+
+
+class _FilterConditionRow(ttk.Frame):
+    """One stacked row inside a ``FilterEditor``: kind + polarity
+    combos, one or two numeric fields, and a remove button — bridges a
+    single ``FilterCondition`` to live Tk Vars and back.
+
+    "Aspect (exact)" is special-cased to ONE visible numeric field (a
+    target RATIO, not a lo/hi pair): ``to_condition`` widens it into a
+    ``[ratio - FILTER_ASPECT_EXACT_TOL, ratio + FILTER_ASPECT_EXACT_TOL]``
+    band so a real decoded image actually matches (Phase 3's flagged
+    razor-thin-equality caveat — see ``config.FILTER_ASPECT_EXACT_TOL``).
+    Every other kind shows both a FROM and a TO field, stored verbatim.
+    Switching a row's kind does NOT reinterpret or clear whatever is
+    already typed — the field(s) simply show/hide; the owner retypes
+    the value for the newly-chosen kind, same as picking a different
+    kind was always going to need a different number anyway."""
+
+    def __init__(
+        self, parent, condition: filters.FilterCondition,
+        on_remove: Callable[["_FilterConditionRow"], None],
+    ):
+        super().__init__(parent)
+        self._on_remove = on_remove
+        self.kind_var = tk.StringVar(value=condition.kind)
+        self.polarity_var = tk.StringVar(value=condition.polarity)
+        lo_text, hi_text = _filter_row_display_bounds(condition)
+        self.lo_var = tk.StringVar(value=lo_text)
+        self.hi_var = tk.StringVar(value=hi_text)
+
+        rounded_combo(
+            self, FILTER_KINDS, self.kind_var, width=FILTER_ROW_KIND_W,
+        ).pack(side="left", padx=(0, 6))
+        rounded_combo(
+            self, (FILTER_POLARITY_IF, FILTER_POLARITY_IF_NOT),
+            self.polarity_var, width=FILTER_ROW_POLARITY_W,
+        ).pack(side="left", padx=(0, 6))
+        self.lo_entry = rounded_entry(
+            self, width=FILTER_ROW_ENTRY_W, textvariable=self.lo_var,
+            justify="center",
+        )
+        self.lo_entry.pack(side="left")
+        self._dash = ttk.Label(self, text="–")
+        self.hi_entry = rounded_entry(
+            self, width=FILTER_ROW_ENTRY_W, textvariable=self.hi_var,
+            justify="center",
+        )
+        self._unit = ttk.Label(self, text="")
+        rounded_button(
+            self, "✕", command=lambda: self._on_remove(self),
+            kind="danger-outline", width=INPUT_HEIGHT,
+        ).pack(side="right")
+
+        self.kind_var.trace_add("write", lambda *_a: self._sync_layout())
+        self._sync_layout()
+
+    def _sync_layout(self) -> None:
+        """Show the TO field + unit suffix for every kind except
+        "Aspect (exact)" (one ratio field only); re-packed with
+        ``after=`` each call so the left-to-right order is correct
+        regardless of how many times the kind has flipped back and
+        forth."""
+        kind = self.kind_var.get()
+        exact = kind == FILTER_KIND_ASPECT_EXACT
+        self._dash.pack_forget()
+        self.hi_entry.pack_forget()
+        self._unit.pack_forget()
+        last = self.lo_entry
+        if not exact:
+            self._dash.pack(side="left", padx=4, after=self.lo_entry)
+            self.hi_entry.pack(side="left", padx=(0, 6), after=self._dash)
+            last = self.hi_entry
+        self._unit.configure(text=_FILTER_UNIT_LABEL.get(kind, ""))
+        self._unit.pack(side="left", padx=(4, 0), after=last)
+
+    def to_condition(self) -> filters.FilterCondition:
+        """This row's live edit -> a ``FilterCondition``. Raises
+        ``ValueError`` (naming the offending kind) on an unparsable or
+        inverted bound — the caller (``FilterEditor.get_conditions``)
+        lets this propagate; ITS caller decides how to surface it."""
+        kind = self.kind_var.get()
+        polarity = self.polarity_var.get()
+        try:
+            lo_raw = float(self.lo_var.get().strip())
+        except ValueError:
+            raise ValueError(
+                f"{kind}: the value must be a number."
+            ) from None
+        if kind == FILTER_KIND_ASPECT_EXACT:
+            return filters.FilterCondition(
+                kind=kind, polarity=polarity,
+                lo=lo_raw - FILTER_ASPECT_EXACT_TOL,
+                hi=lo_raw + FILTER_ASPECT_EXACT_TOL,
+            )
+        try:
+            hi_raw = float(self.hi_var.get().strip())
+        except ValueError:
+            raise ValueError(
+                f"{kind}: the TO value must be a number."
+            ) from None
+        if lo_raw > hi_raw:
+            raise ValueError(f"{kind}: FROM must be <= TO.")
+        return filters.FilterCondition(
+            kind=kind, polarity=polarity, lo=lo_raw, hi=hi_raw,
+        )
+
+
+class FilterEditor(ttk.Frame):
+    """Reusable stacked-filter editor (GUI rework Phase 4) — the UI
+    half of [Shared Filter Framework](painter/filters.md): zero or
+    more removable condition rows, an "+ Add condition" button, and a
+    PRESET row (save / load / delete a NAMED condition stack). Stacked
+    conditions AND together (``painter.filters.matches``, owner
+    decision 2026-07-21) — an empty stack matches everything.
+
+    Public API: ``get_conditions() -> list[FilterCondition]`` (raises
+    ``ValueError`` — see ``_FilterConditionRow.to_condition`` — on an
+    unparsable row; never returns a partial/best-effort list) and
+    ``set_conditions(conditions)`` (rebuilds the row stack from
+    scratch).
+
+    Presets are a SHARED library (one settings.json key, every
+    FilterEditor instance reads/writes the same names) — optional
+    dependency injection, not a hard requirement: pass the owner's
+    live ``presets`` dict (mutated IN PLACE by Save/Delete — the
+    caller's own reference sees the change immediately) and an
+    ``on_presets_changed`` callback to persist through it (e.g.
+    ``PainterGui._schedule_save``, mirroring every other "remembered
+    choice" setter). Omitted, the widget still works standalone (a
+    private in-memory dict for the widget's own lifetime) — this is
+    what makes a headless construction in a test possible with no
+    PainterGui or settings.json involved at all."""
+
+    def __init__(
+        self,
+        parent,
+        conditions: list[filters.FilterCondition] | None = None,
+        presets: dict[str, list[dict]] | None = None,
+        on_presets_changed: Callable[[], None] | None = None,
+        **kwargs,
+    ):
+        super().__init__(parent, **kwargs)
+        self._presets = presets if presets is not None else {}
+        self._on_presets_changed = on_presets_changed
+        self._rows: list[_FilterConditionRow] = []
+
+        self._rows_box = ttk.Frame(self)
+        self._rows_box.pack(fill="x")
+
+        add_row = ttk.Frame(self)
+        add_row.pack(fill="x", pady=(FILTER_ROW_GAP_PX, 0))
+        rounded_button(
+            add_row, "+ Add condition", command=self._add_default_row,
+            icon_name="add", kind="secondary-outline",
+        ).pack(side="left")
+
+        preset_row = ttk.Frame(self)
+        preset_row.pack(fill="x", pady=(FILTER_ROW_GAP_PX, 0))
+        ttk.Label(preset_row, text="Preset").pack(side="left", padx=(0, 6))
+        self._preset_var = tk.StringVar(value="")
+        self._preset_combo = rounded_combo(
+            preset_row, sorted(self._presets), self._preset_var,
+            width=FILTER_PRESET_COMBO_W, state="normal",
+        )
+        self._preset_combo.pack(side="left", padx=(0, 6))
+        rounded_button(
+            preset_row, "Save", command=self._save_preset, kind="success",
+        ).pack(side="left", padx=(0, 4))
+        rounded_button(
+            preset_row, "Load", command=self._load_preset, kind="info",
+        ).pack(side="left", padx=(0, 4))
+        rounded_button(
+            preset_row, "Delete", command=self._delete_preset,
+            kind="danger-outline",
+        ).pack(side="left")
+
+        for c in (conditions or []):
+            self._add_row(c)
+
+    # --- rows ------------------------------------------------------
+
+    def _add_default_row(self) -> None:
+        """The "+ Add condition" button's command — a fresh row seeded
+        with the ~square aspect-range band, the same default the OLD
+        single-filter dialog pre-filled (owner 2026-07-19)."""
+        self._add_row(filters.FilterCondition(
+            kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
+            lo=ASPECT_FILTER_DEFAULT_FROM, hi=ASPECT_FILTER_DEFAULT_TO,
+        ))
+
+    def _add_row(self, condition: filters.FilterCondition) -> None:
+        row = _FilterConditionRow(self._rows_box, condition, self._remove_row)
+        row.pack(fill="x", pady=(0, FILTER_ROW_GAP_PX))
+        self._rows.append(row)
+
+    def _remove_row(self, row: _FilterConditionRow) -> None:
+        self._rows.remove(row)
+        row.destroy()
+
+    # --- public API ------------------------------------------------
+
+    def get_conditions(self) -> list[filters.FilterCondition]:
+        return [row.to_condition() for row in self._rows]
+
+    def set_conditions(self, conditions: list[filters.FilterCondition]) -> None:
+        for row in self._rows:
+            row.destroy()
+        self._rows.clear()
+        for c in conditions:
+            self._add_row(c)
+
+    # --- presets -----------------------------------------------------
+
+    def _save_preset(self) -> None:
+        name = self._preset_var.get().strip()
+        if not name:
+            messagebox.showerror(
+                "PromptPainter", "Enter a preset name first.", parent=self,
+            )
+            return
+        try:
+            conditions = self.get_conditions()
+        except ValueError as exc:
+            messagebox.showerror("PromptPainter", str(exc), parent=self)
+            return
+        self._presets[name] = [
+            filters.condition_to_dict(c) for c in conditions
+        ]
+        self._refresh_preset_values()
+        if self._on_presets_changed is not None:
+            self._on_presets_changed()
+
+    def _load_preset(self) -> None:
+        name = self._preset_var.get().strip()
+        if name not in self._presets:
+            messagebox.showerror(
+                "PromptPainter", f"No saved preset named {name!r}.",
+                parent=self,
+            )
+            return
+        self.set_conditions([
+            filters.condition_from_dict(d) for d in self._presets[name]
+        ])
+
+    def _delete_preset(self) -> None:
+        name = self._preset_var.get().strip()
+        if name not in self._presets:
+            messagebox.showerror(
+                "PromptPainter", f"No saved preset named {name!r}.",
+                parent=self,
+            )
+            return
+        del self._presets[name]
+        self._preset_var.set("")
+        self._refresh_preset_values()
+        if self._on_presets_changed is not None:
+            self._on_presets_changed()
+
+    def _refresh_preset_values(self) -> None:
+        self._preset_combo.configure(values=sorted(self._presets))
 
 
 class AgentPanel(ttk.Labelframe):
@@ -3080,6 +3403,94 @@ class DashGrid(ttk.Frame):
 # Main window
 # ---------------------------------------------------------------------
 
+def _filter_files(
+    files: list[Path], conditions: list[filters.FilterCondition],
+    log: Callable[[str], None],
+) -> list[Path]:
+    """Keep only the paths whose CURRENT pixel size passes the stacked
+    filter (``painter.filters.matches`` — AND across every condition,
+    owner decision 2026-07-21). An empty ``conditions`` list is a
+    no-op — the common case — and opens nothing; the raw ``files``
+    list comes back unchanged. A path PIL cannot open is EXCLUDED with
+    a loud log line rather than aborting the whole picker (root Rule
+    #1/#7: the caller's file dialog is external input — e.g. an
+    "All files" pick could include a non-image by mistake)."""
+    if not conditions:
+        return list(files)
+    kept = []
+    for path in files:
+        try:
+            with Image.open(path) as im:
+                width, height = im.size
+        except Exception as exc:
+            log(f"FILTER: cannot read {path.name} ({exc}) — excluded")
+            continue
+        if filters.matches(width, height, conditions):
+            kept.append(path)
+    return kept
+
+
+def _parse_condition_dicts(
+    dicts: list, log: Callable[[str], None]
+) -> list[filters.FilterCondition]:
+    """Best-effort parse of a JSON-loaded condition-dict list
+    (settings.json's ``aspect_filter_conditions`` or a preset) into
+    ``FilterCondition``s. A malformed entry is DROPPED with a loud log
+    line rather than crashing the whole settings load — mirrors
+    ``painter.settings.load_settings``'s own "a corrupt file loses the
+    remembered choice, never the app" precedent, applied to one key."""
+    out = []
+    for d in dicts:
+        try:
+            out.append(filters.condition_from_dict(d))
+        except (TypeError, KeyError, ValueError) as exc:
+            log(f"SETTINGS: dropping unreadable filter condition {d!r} ({exc})")
+    return out
+
+
+def _migrate_legacy_aspect_filter(stored: dict) -> list[dict]:
+    """One-time migration (GUI rework Phase 4, owner decision
+    2026-07-21): the OLD scalar aspect-tool filter — settings.json's
+    ``aspect_filter`` key, ``{"from": float, "to": float, "mode":
+    ASPECT_FILTER_OFF/_IF/_IF_NOT}`` — into the NEW stacked-conditions
+    shape (a list of ``painter.filters.condition_to_dict`` dicts, the
+    same JSON shape ``aspect_filter_conditions`` and a saved preset
+    both use).
+
+    ``off`` carried no filtering, so it becomes an EMPTY list — an
+    empty conditions list already matches everything, no special-
+    casing needed downstream. ``IF``/``IF NOT`` becomes exactly ONE
+    ``FILTER_KIND_ASPECT_RANGE`` condition with the SAME from/to/
+    polarity numbers: ``matches()``'s ``lo <= ratio <= hi`` containment
+    (IF) / its negation (IF NOT) is arithmetically identical to
+    ``change_aspect``'s own old ``filter_from <= cur <= filter_to``
+    check, so behaviour is preserved exactly, only the container shape
+    changes. Pure and Tk-free (no ``self``, no widget) — callable
+    straight from a settings dict, e.g. the owner's real
+    ``{"from": 0.9, "to": 1.1, "mode": "IF NOT"}``.
+
+    Raises ``ValueError`` loudly (root Rule #1) on an unrecognised
+    ``mode`` string — a scenario the OLD dialog itself could never
+    have written, so this is corrupt/foreign data, not a case to
+    silently coerce; the caller (``PainterGui._apply_settings``)
+    catches it and falls back to no filter, same as any other corrupt
+    settings.json value."""
+    mode = stored.get("mode", ASPECT_FILTER_OFF)
+    if mode == ASPECT_FILTER_OFF:
+        return []
+    if mode not in (ASPECT_FILTER_IF, ASPECT_FILTER_IF_NOT):
+        raise ValueError(f"unrecognised legacy aspect_filter mode: {mode!r}")
+    lo = float(stored.get("from", ASPECT_FILTER_DEFAULT_FROM))
+    hi = float(stored.get("to", ASPECT_FILTER_DEFAULT_TO))
+    polarity = (
+        FILTER_POLARITY_IF_NOT if mode == ASPECT_FILTER_IF_NOT
+        else FILTER_POLARITY_IF
+    )
+    return [filters.condition_to_dict(filters.FilterCondition(
+        kind=FILTER_KIND_ASPECT_RANGE, polarity=polarity, lo=lo, hi=hi,
+    ))]
+
+
 class PainterGui:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -3159,14 +3570,22 @@ class PainterGui:
         self._aspect_ratio: tuple[int, int] = (
             ASPECT_DEFAULT_W, ASPECT_DEFAULT_H
         )
-        # the aspect tool's remembered optional INPUT FILTER (owner
-        # 2026-07-19): a W/H range + a mode (off / IF / IF NOT). Off by
-        # default; the dialog pre-fills the ~square band when first used.
-        self._aspect_filter: dict = {
-            "from": ASPECT_FILTER_DEFAULT_FROM,
-            "to": ASPECT_FILTER_DEFAULT_TO,
-            "mode": ASPECT_FILTER_OFF,
-        }
+        # the aspect tool's remembered optional INPUT FILTER — GUI
+        # rework Phase 4: a stacked list of FilterCondition (was a
+        # single from/to/mode scalar dict through 0.0.094; a one-time
+        # migration in _apply_settings converts an owner's already-
+        # saved scalar the first time it loads, see
+        # _migrate_legacy_aspect_filter). Empty = no filter, process
+        # every image — the dialog's own "+ Add condition" is how the
+        # owner starts narrowing.
+        self._aspect_filter_conditions: list[filters.FilterCondition] = []
+        # the shared filter-preset LIBRARY every FilterEditor instance
+        # reads/writes (config.FILTER_PRESETS_SETTING) — a plain
+        # {name: [condition-dict, ...]} dict, mutated IN PLACE by the
+        # widget itself; this reference is what makes a preset saved
+        # while e.g. the Aspect dialog is open available to a BG/Crop/
+        # Upscale FilterEditor later (Phase 6/13/14) without a reload.
+        self._filter_presets: dict[str, list[dict]] = {}
 
         # the top strip (theme switch + collapse toggle) is PINNED outside
         # the scroll so the toggle is reachable even when the content
@@ -3924,10 +4343,24 @@ class PainterGui:
         self._aspect_ratio = (ratio_w, ratio_h)
         self._schedule_save()
 
-    def _remember_aspect_filter(self, filt: dict) -> None:
-        """Persist the aspect tool's last-used INPUT FILTER (from / to /
-        mode) so the dialog pre-fills it next time (owner 2026-07-19)."""
-        self._aspect_filter = dict(filt)
+    def _remember_aspect_filter_conditions(
+        self, conditions: list[filters.FilterCondition]
+    ) -> None:
+        """Persist the aspect tool's last-used stacked FILTER so the
+        dialog pre-fills it next time (owner 2026-07-19; conditions
+        since GUI rework Phase 4)."""
+        self._aspect_filter_conditions = list(conditions)
+        self._schedule_save()
+
+    def _on_filter_presets_changed(self) -> None:
+        """A FilterEditor mutates ``self._filter_presets`` (the shared
+        dict reference passed at construction) IN PLACE on Save/Delete
+        — this just schedules the debounced settings save (the same
+        ``_schedule_save`` every other remembered choice already uses)
+        so the change survives the next autosave/close instead of
+        being silently dropped by ``_collect_settings``'s next
+        full-file rewrite (settings.json is always a full overwrite,
+        never a merge — see ``_save_now``)."""
         self._schedule_save()
 
     def _remember_upscale_params(self, params: dict) -> None:
@@ -3961,22 +4394,26 @@ class PainterGui:
             # tools stay folder-based. The dialog PRE-FILLS the last-used
             # ratio + filter (both remembered). (owner 2026-07-19)
             choice = AspectRatioDialog(
-                self.root, *self._aspect_ratio, self._aspect_filter
+                self.root, *self._aspect_ratio,
+                conditions=self._aspect_filter_conditions,
+                presets=self._filter_presets,
+                on_presets_changed=self._on_filter_presets_changed,
             ).result
             if choice is None:
                 return
             ratio_w, ratio_h = choice["ratio"]
-            filt = choice["filter"]
+            conditions = choice["conditions"]
             self._remember_aspect_ratio(ratio_w, ratio_h)
-            self._remember_aspect_filter(filt)
+            self._remember_aspect_filter_conditions(conditions)
             from painter.aspect import change_aspect
 
+            # the GUI pre-filters WHICH FILES are touched (below) via
+            # filters.matches() itself now — change_aspect's OWN scalar
+            # filter_from/filter_to/filter_mode stay at their off
+            # defaults, unused (its signature is otherwise untouched —
+            # GUI rework Phase 4)
             func = (
-                lambda path, log: change_aspect(
-                    path, ratio_w, ratio_h, log,
-                    filter_from=filt["from"], filter_to=filt["to"],
-                    filter_mode=filt["mode"],
-                )
+                lambda path, log: change_aspect(path, ratio_w, ratio_h, log)
             )
             label = f"Aspect {ratio_w}:{ratio_h}"
             if choice["input"] == "folder":
@@ -3999,17 +4436,19 @@ class PainterGui:
                     return
                 folder_path, _rels = selection_base_and_rels(picks)
                 files = [Path(p) for p in picks]
+            total_before = len(files)
+            files = _filter_files(files, conditions, self._log)
             filt_note = (
-                f"\nFilter: {filt['mode']} {filt['from']}–{filt['to']} (W/H)"
-                if filt["mode"] != ASPECT_FILTER_OFF else ""
+                f"\nFilter: {len(conditions)} condition(s) —"
+                f" {len(files)} of {total_before} image(s) match"
+                if conditions else ""
             )
             message = (
                 f"DEFORM {len(files)} image(s)\n\n"
                 f"to a {ratio_w}:{ratio_h} aspect ratio?{filt_note}\n\n"
                 "A non-proportional STRETCH written IN PLACE — the"
                 " originals are backed up so you can Restore. Images"
-                f" already at {ratio_w}:{ratio_h} (or filtered out) are"
-                " skipped untouched."
+                f" already at {ratio_w}:{ratio_h} are skipped untouched."
             )
         else:
             if slot == "upscale":
@@ -4868,7 +5307,13 @@ class PainterGui:
             GEMINI_KEY_SETTING: self._gemini_key,
             "upscale_tool": dict(self._upscale_tool_params),
             "aspect_ratio": list(self._aspect_ratio),
-            "aspect_filter": dict(self._aspect_filter),
+            "aspect_filter_conditions": [
+                filters.condition_to_dict(c)
+                for c in self._aspect_filter_conditions
+            ],
+            FILTER_PRESETS_SETTING: {
+                name: list(rows) for name, rows in self._filter_presets.items()
+            },
             "agents": {
                 key: panel.get_settings()
                 for key, panel in self.agents.items()
@@ -4911,11 +5356,47 @@ class PainterGui:
             isinstance(saved_ratio, (list, tuple)) and len(saved_ratio) == 2
         ):
             self._aspect_ratio = (int(saved_ratio[0]), int(saved_ratio[1]))
-        saved_filter = stored.get("aspect_filter")
-        if isinstance(saved_filter, dict):
-            for k in self._aspect_filter:
-                if k in saved_filter:
-                    self._aspect_filter[k] = saved_filter[k]
+
+        # the aspect tool's stacked filter (GUI rework Phase 4): the
+        # NEW key wins when present; otherwise a ONE-TIME LOUD
+        # migration reads the OLD scalar key exactly once — it is
+        # never written back (see _collect_settings, which no longer
+        # emits "aspect_filter" at all — the key naturally drops off
+        # disk on the next save, the same way a stale "sash" key does)
+        saved_conditions = stored.get("aspect_filter_conditions")
+        if isinstance(saved_conditions, list):
+            self._aspect_filter_conditions = _parse_condition_dicts(
+                saved_conditions, self._log
+            )
+        else:
+            legacy = stored.get("aspect_filter")
+            if isinstance(legacy, dict):
+                try:
+                    migrated = _migrate_legacy_aspect_filter(legacy)
+                except (TypeError, ValueError) as exc:
+                    self._log(
+                        f"MIGRATION: legacy aspect_filter {legacy!r} is"
+                        f" unreadable ({exc}) — starting with no aspect"
+                        " filter"
+                    )
+                    migrated = []
+                else:
+                    self._log(
+                        "MIGRATION: legacy 'aspect_filter' setting"
+                        f" {legacy!r} -> {len(migrated)} condition(s), now"
+                        " under 'aspect_filter_conditions' (one-time; the"
+                        " old key stays on disk unread from now on)"
+                    )
+                self._aspect_filter_conditions = _parse_condition_dicts(
+                    migrated, self._log
+                )
+
+        saved_presets = stored.get(FILTER_PRESETS_SETTING)
+        if isinstance(saved_presets, dict):
+            self._filter_presets = {
+                str(name): list(rows) for name, rows in saved_presets.items()
+                if isinstance(rows, list)
+            }
 
         if stored.get("geometry"):
             self.root.geometry(self._clamp_geometry(stored["geometry"]))
@@ -5583,22 +6064,25 @@ class _ModalToolDialog(tk.Toplevel):
 class AspectRatioDialog(_ModalToolDialog):
     """The MODAL prompt for the standalone 'Aspect ratio…' deform tool.
 
-    Asks THREE things (owner 2026-07-19):
+    Asks THREE things (owner 2026-07-19; the filter became a stacked
+    FilterEditor in GUI rework Phase 4):
       * the target OUTPUT ratio — two positive-integer fields W and H,
         PRE-FILLED with the last-used ratio (first run 16:9);
-      * an optional INPUT FILTER on each image's CURRENT ratio (W/H) —
-        a [from, to] range plus a mode (off / IF / IF NOT), remembered;
+      * an optional stacked INPUT FILTER on each image's CURRENT
+        size/ratio — zero or more ANDed conditions, remembered;
       * whether the input is individual FILES or a whole FOLDER — the two
         action buttons ('Files…' / 'Folder…') encode the choice.
 
     ``result`` is ``None`` on Cancel / Escape, else a dict
-    ``{"ratio": (w, h), "filter": {"from": float|None, "to": float|None,
-    "mode": str}, "input": "files"|"folder"}``. Themed like the app."""
+    ``{"ratio": (w, h), "conditions": list[FilterCondition],
+    "input": "files"|"folder"}``. Themed like the app."""
 
     def __init__(
         self, master,
         default_w: int = ASPECT_DEFAULT_W, default_h: int = ASPECT_DEFAULT_H,
-        filter_defaults: dict | None = None,
+        conditions: list[filters.FilterCondition] | None = None,
+        presets: dict[str, list[dict]] | None = None,
+        on_presets_changed: Callable[[], None] | None = None,
     ):
         super().__init__(master)
         self.title("Change aspect ratio")
@@ -5607,17 +6091,6 @@ class AspectRatioDialog(_ModalToolDialog):
         self.result: dict | None = None
         self._w_var = tk.StringVar(value=str(default_w))
         self._h_var = tk.StringVar(value=str(default_h))
-        fd = filter_defaults or {}
-        _dec = UPSCALE_ASPECT_DECIMALS
-        self._mode_var = tk.StringVar(
-            value=fd.get("mode", ASPECT_FILTER_OFF)
-        )
-        self._from_var = tk.StringVar(
-            value=f"{fd.get('from', ASPECT_FILTER_DEFAULT_FROM):.{_dec}f}"
-        )
-        self._to_var = tk.StringVar(
-            value=f"{fd.get('to', ASPECT_FILTER_DEFAULT_TO):.{_dec}f}"
-        )
 
         body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
         body.pack(fill="both", expand=True)
@@ -5643,29 +6116,19 @@ class AspectRatioDialog(_ModalToolDialog):
         )
         self._h_entry.pack(side="left")
 
-        # --- optional INPUT FILTER on the current ratio ----------------
+        # --- optional stacked INPUT FILTER on the current size/ratio ---
         ttk.Label(
             body,
             text=(
-                "Optional filter on each image's CURRENT ratio (W/H)\n"
-                "— off = process every image:"
+                "Optional filter on each image's CURRENT size/ratio\n"
+                "— no conditions = process every image:"
             ),
         ).pack(anchor="w", pady=(14, 6))
-        filt = ttk.Frame(body)
-        filt.pack(anchor="w")
-        rounded_combo(
-            filt, ASPECT_FILTER_MODES, self._mode_var, width=88,
-        ).pack(side="left", padx=(0, 10))
-        rounded_entry(
-            filt, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._from_var,
-            justify="center",
-        ).pack(side="left")
-        ttk.Label(filt, text="–").pack(side="left", padx=6)
-        rounded_entry(
-            filt, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._to_var,
-            justify="center",
-        ).pack(side="left")
-        ttk.Label(filt, text="W/H").pack(side="left", padx=(4, 0))
+        self._filter_editor = FilterEditor(
+            body, conditions=conditions, presets=presets,
+            on_presets_changed=on_presets_changed,
+        )
+        self._filter_editor.pack(fill="x")
 
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(16, 0))
@@ -5692,10 +6155,9 @@ class AspectRatioDialog(_ModalToolDialog):
         self.wait_window(self)
 
     def _run(self, input_mode: str) -> None:
-        """Validate the ratio (positive whole numbers) and, when the mode
-        is not off, the filter range (positive reals, FROM <= TO); then
-        close with ``result`` set for the chosen ``input_mode``. A bad
-        value stays open with a loud message."""
+        """Validate the ratio (positive whole numbers) and the filter
+        editor's rows, then close with ``result`` set for the chosen
+        ``input_mode``. A bad value stays open with a loud message."""
         try:
             ratio_w = int(self._w_var.get().strip())
             ratio_h = int(self._h_var.get().strip())
@@ -5712,35 +6174,15 @@ class AspectRatioDialog(_ModalToolDialog):
             )
             return
 
-        mode = self._mode_var.get()
-        filt_from = filt_to = None
-        if mode != ASPECT_FILTER_OFF:
-            try:
-                filt_from = float(self._from_var.get().strip())
-                filt_to = float(self._to_var.get().strip())
-            except ValueError:
-                messagebox.showerror(
-                    "PromptPainter",
-                    "The filter range must be numbers (or set the mode to"
-                    " off).", parent=self,
-                )
-                return
-            if filt_from <= 0 or filt_to <= 0:
-                messagebox.showerror(
-                    "PromptPainter",
-                    "The filter range must be positive.", parent=self,
-                )
-                return
-            if filt_from > filt_to:
-                messagebox.showerror(
-                    "PromptPainter",
-                    "Filter FROM must be <= TO.", parent=self,
-                )
-                return
+        try:
+            conditions = self._filter_editor.get_conditions()
+        except ValueError as exc:
+            messagebox.showerror("PromptPainter", str(exc), parent=self)
+            return
 
         self.result = {
             "ratio": (ratio_w, ratio_h),
-            "filter": {"from": filt_from, "to": filt_to, "mode": mode},
+            "conditions": conditions,
             "input": input_mode,
         }
         self.destroy()

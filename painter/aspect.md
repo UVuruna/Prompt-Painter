@@ -53,9 +53,16 @@ is written back as PNG. Verified by hand (must reproduce exactly):
 
 ### Used by
 - [GUI](../gui.md) — the standalone **"Aspect ratio…"** toolbar button
-  (its `AspectRatioDialog` asks for `W : H` + the optional filter + a
-  files-or-folder choice, then the run reuses the generic standalone-tool
-  plumbing with the ratio and filter bound in)
+  (its `AspectRatioDialog` asks for `W : H` + an optional STACKED
+  filter — a `FilterEditor`, GUI rework Phase 4, replacing this
+  module's own scalar `filter_from`/`filter_to`/`filter_mode` params in
+  the GUI's call — + a files-or-folder choice). The GUI now pre-filters
+  WHICH FILES are passed to `change_aspect` itself, via
+  `painter.filters.matches()`, so it always calls this function with
+  its filter args at their unused `off` defaults; this function's OWN
+  `filter_from`/`filter_to`/`filter_mode` parameters are unchanged and
+  still exercised directly by `test_aspect.py` and the CLI — nothing
+  here was touched by that migration
 
 ## Functions
 

@@ -378,21 +378,25 @@ reachability fixes:
   with those params bound. **Aspect ratio** pops the `AspectRatioDialog`
   first — a modal with two positive-integer fields **W** and **H**
   (PRE-FILLED with the last-used ratio `self._aspect_ratio`; first run
-  16 : 9), an optional INPUT FILTER (owner 2026-07-19 — a `mode`
-  combobox `off` / `IF` / `IF NOT` plus a `from`–`to` W/H range,
-  PRE-FILLED from `self._aspect_filter`), and TWO action buttons
-  **Folder…** / **Files…** that encode the input choice: a folder can
-  hold images of DIFFERENT ratios, so the tool accepts a whole FOLDER
-  (`askdirectory` → `_iter_images`) OR individual FILES (`askopenfilenames`,
-  multi-select) — the filter is what makes a folder useful (skip the
-  already-good ones). `.result` is `{ratio, filter, input}`; the run binds
-  `ratio_w/ratio_h` and `filter_from/filter_to/filter_mode` into
-  `change_aspect`, and the confirm warns it DEFORMS the N images (a
-  non-proportional stretch written in place). Both modals share
-  `_ModalToolDialog` (the centre-on-parent placement). A file selection is
-  keyed by `config.selection_base_and_rels` (the common-ancestor folder
-  + each file's relative path), so picks spanning sub-folders still group
-  under their folder node and restore correctly. Each image's ORIGINAL is
+  16 : 9), an optional STACKED input filter (GUI rework Phase 4,
+  replacing the old single from/to/mode block — see **FilterEditor**
+  below), and TWO action buttons **Folder…** / **Files…** that encode
+  the input choice: a folder can hold images of DIFFERENT ratios, so
+  the tool accepts a whole FOLDER (`askdirectory` → `_iter_images`) OR
+  individual FILES (`askopenfilenames`, multi-select) — the filter is
+  what makes a folder useful (skip the already-good ones). `.result` is
+  `{ratio, conditions, input}`; the run pre-filters the picked file
+  list itself via module-level `_filter_files` (opens each candidate,
+  keeps only those `painter.filters.matches()` passes — an EMPTY
+  condition list is a no-op, opens nothing) BEFORE the confirm dialog,
+  so its "DEFORM N image(s)" count is always the POST-filter count, and
+  `change_aspect` runs with its own scalar filter args at their
+  (unused) off defaults — its signature is untouched by this migration.
+  Both modals share `_ModalToolDialog` (the centre-on-parent placement).
+  A file selection is keyed by `config.selection_base_and_rels` (the
+  common-ancestor folder + each file's relative path), so picks
+  spanning sub-folders still group under their folder node and restore
+  correctly. Each image's ORIGINAL is
   BACKED UP first (`painter/jobtemp.py`, see **Temp / before-after /
   restore**), so `done` = the file was changed (its backup kept,
   before→after measured and shown), REFUSED = the engine said
@@ -412,6 +416,46 @@ reachability fixes:
   ALPHA, not dimensions. The engine returns "nothing" for a true
   byte-unchanged no-op (crop: a 0px-change box), so a "done" is always a
   real change. The panel shows the tool's own PARAMETER + timing (below).
+- **FilterEditor** (GUI rework Phase 4, `ttk.Frame`) — the reusable
+  stacked-condition widget wrapping [Shared Filter
+  Framework](painter/filters.md): zero or more removable ROWS (each a
+  kind combo from `FILTER_KINDS`, an IF/IF-NOT polarity combo, and
+  either ONE numeric field — "Aspect (exact)", a target ratio, see
+  below — or a lo/hi pair for every other kind), a rounded "+ Add
+  condition" button seeding a fresh ~square Aspect-range row, and a
+  PRESET row (an editable `rounded_combo` of saved names + Save / Load
+  / Delete). Public API `get_conditions() -> list[FilterCondition]` /
+  `set_conditions(conditions)` — `get_conditions` raises `ValueError`
+  (naming the offending kind) on an unparsable or inverted row rather
+  than returning a partial list; the embedding dialog/panel catches it
+  and shows a messagebox (`AspectRatioDialog._run` does exactly this).
+  **Exact-aspect tolerance** (fixes Phase 3's flagged caveat): a pinned
+  "Aspect (exact)" `lo == hi` is a razor-thin float equality a REAL
+  decoded image's W/H division almost never lands on, so ITS row shows
+  only ONE ratio field — `to_condition` widens it into
+  `[ratio - FILTER_ASPECT_EXACT_TOL, ratio + FILTER_ASPECT_EXACT_TOL]`
+  (0.02) before building the `FilterCondition`; the reverse display
+  (`_filter_row_display_bounds`) shows the stored band's MIDPOINT, so a
+  round-trip through set/get reproduces the same band as long as the
+  tolerance constant is unchanged. **Presets are a SHARED library** —
+  ONE `settings.json` key (`config.FILTER_PRESETS_SETTING`,
+  `{name: [condition-dict, ...]}`) every `FilterEditor` instance reads
+  and writes via dependency injection, not a direct file open: the
+  constructor takes the owner's live `presets` dict (mutated IN PLACE
+  by Save/Delete) and an `on_presets_changed` callback
+  (`PainterGui._on_filter_presets_changed` → `_schedule_save`, the same
+  debounce every other remembered choice already uses) — both are
+  OPTIONAL, so a standalone construction (a test, or a future panel
+  with no PainterGui yet) still works against a private in-memory
+  dict. This split matters: `_collect_settings`/`_save_now` always
+  overwrite the WHOLE settings.json from `PainterGui`'s own in-memory
+  fields (never a merge — see **Settings persistence** below), so a
+  preset saved anywhere MUST live in `PainterGui._filter_presets` (not
+  only on disk) or the next unrelated autosave — even the one
+  `_on_close` always fires — would silently erase it.
+  `FilterCondition<->dict` (de)serialization
+  (`painter.filters.condition_to_dict`/`condition_from_dict`) is what
+  makes both settings.json persistence and presets JSON-safe.
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause (the toggle button, owner 2026-07-21)** — indefinite, not
@@ -519,13 +563,39 @@ reachability fixes:
   reads the key back from disk per call), `upscale_tool`
   (the standalone Upscale dialog's last-used `min_width`/`min_height`/
   `aspect_min`/`aspect_max`), `aspect_ratio` (the last `[W, H]` from
-  the Aspect dialog), `aspect_filter` (that dialog's last input filter —
-  `from`/`to`/`mode`), and `agents.<site>` with `background`, `style`
+  the Aspect dialog), `aspect_filter_conditions` (GUI rework Phase 4 —
+  `self._aspect_filter_conditions`, a list of
+  `painter.filters.condition_to_dict` dicts; REPLACES the old scalar
+  `aspect_filter` from/to/mode dict), `filter_presets`
+  (`config.FILTER_PRESETS_SETTING` — the shared `FilterEditor` preset
+  library, `{name: [condition-dict, ...]}`), and `agents.<site>` with
+  `background`, `style`
   (the rendering-style dropdown), `bg_removal`, `crop`, `upscale`,
   `report`, `safer_retry`, `continue_nudge`, `new_chat`,
   `pause_min/max`, `act_min/max`,
   the per-agent upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`,
   and that agent's `settings_collapsed`.
+
+  **The `aspect_filter` -> `aspect_filter_conditions` migration** (GUI
+  rework Phase 4, owner decision 2026-07-21): `_apply_settings` prefers
+  the NEW key when present; otherwise, if the OLD scalar `aspect_filter`
+  key is on disk (an owner who used the tool before this phase), a
+  ONE-TIME LOUD migration (`gui._migrate_legacy_aspect_filter`, logged
+  via `self._log`) converts it to an equivalent single-condition list —
+  `off` -> an empty list (already "matches everything"), `IF`/`IF NOT`
+  -> one `FILTER_KIND_ASPECT_RANGE` condition with the SAME from/to/
+  polarity numbers, so behaviour is preserved exactly. The old key is
+  read ONCE and never rewritten: `_collect_settings` simply no longer
+  emits `aspect_filter` at all, so — like the old top-level `sash` /
+  `settings_collapsed` keys before it — it naturally drops off disk on
+  the very next save (this module always writes the WHOLE dict it is
+  given, never a merge). A malformed `aspect_filter_conditions` entry,
+  or an `aspect_filter` whose `mode` isn't one of the three legacy
+  strings, is DROPPED with a loud log line rather than crashing startup
+  (`gui._parse_condition_dicts` / a caught `ValueError` around the
+  migration call) — the same "a corrupt file loses the remembered
+  choice, never the app" precedent `painter.settings.load_settings`
+  already sets.
 
 ## The Dashboard — per-JOB panels (owner 2026-07-19)
 The dashboard shows one panel PER RUNNING JOB, up to SEVEN in parallel:
@@ -975,6 +1045,7 @@ items" is satisfied, and the gap is cosmetic, never functional.
   [Postprocess](painter/postprocess.md), [Upscale](painter/upscale.md),
   [Change Aspect Ratio](painter/aspect.md), [Job Temp](painter/jobtemp.md),
   [AI Client & Flows](painter/ai.md),
+  [Shared Filter Framework](painter/filters.md),
   [Settings](painter/settings.md), [Config](painter/config.md)
 
 ### Used by
