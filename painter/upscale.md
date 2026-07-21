@@ -23,10 +23,20 @@ skipped cleanly. The GUI passes PER-AGENT values (each site's own
 fine-tune block) and the standalone Upscale dialog's remembered four
 params; the config defaults are the shipped values.
 
-**Native 4x only:** the binary always runs the x4plus model's
+**Model:** `-n UPSCALE_MODEL` picks the ncnn net (config data). Switched
+2026-07-21 (owner research) from the general-purpose `realesrgan-x4plus`
+to `realesrgan-x4plus-anime` (the anime-6B net) — art-tuned for this
+project's flat-colour / cell-shaded rondels and badges, where x4plus
+over-smooths fine linework. A/B-verified live on a real 592x592 output:
+visibly crisper eye/hair/line detail, higher edge energy (Laplacian
+variance ~328 vs ~264), no colour shift or banding regression, and
+~2.4x faster (3.3s vs 8.0s at 4x). Both models ship in
+`tools/realesrgan/models/`; flip the constant back to try the other.
+
+**Native 4x only:** the binary always runs the configured model's
 native 4x and LANCZOS brings the result down to the exact target.
 Non-native `-s 2/3` runs were verified LIVE (2026-07-18, a real
-rondel) to corrupt the output — tile misalignment, lost detail.
+rondel, x4plus) to corrupt the output — tile misalignment, lost detail.
 
 ## Connections
 

@@ -105,7 +105,12 @@ match.
   `UPSCALE_MINDIM_STEP`, `UPSCALE_ASPECT_STEP`,
   `UPSCALE_ASPECT_DECIMALS` — the Real-ESRGAN upscaler: where the
   downloaded binary lives (`tools/`, gitignored), the official
-  release zip, and the FOUR editable gate DEFAULTS (owner 2026-07-19,
+  release zip, `UPSCALE_MODEL` (the ncnn net passed as `-n`;
+  `realesrgan-x4plus-anime` since 2026-07-21 research — art-tuned for
+  this project's flat-colour rondels/badges, A/B-verified visibly
+  crisper than the general-purpose `realesrgan-x4plus` with no colour
+  shift or banding regression, see [Upscale](upscale.md)), and the
+  FOUR editable gate DEFAULTS (owner 2026-07-19,
   reproducing the old locked `min_px=800`/`aspect_tol=0.1` rule) —
   an image qualifies when its aspect W/H is within
   `[UPSCALE_ASPECT_MIN, UPSCALE_ASPECT_MAX]` (0.9–1.1) AND

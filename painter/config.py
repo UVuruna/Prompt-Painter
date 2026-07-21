@@ -196,7 +196,17 @@ UPSCALE_ZIP_URL = (
     "https://github.com/xinntao/Real-ESRGAN/releases/download/"
     "v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip"
 )
-UPSCALE_MODEL = "realesrgan-x4plus"
+# Model (owner research 2026-07-21): the anime-6B net is ART-TUNED for
+# flat-colour / cell-shaded illustration — this project's stained-glass
+# rondels and badges — where the general-purpose x4plus over-smooths fine
+# linework. A/B-verified live (realesrgan-ncnn-vulkan -n <model> -s 4) on
+# a real 592x592 output (a Greek-pantheon rondel): x4plus-anime showed
+# visibly crisper eye/hair/line detail, higher edge energy (Laplacian
+# variance ~328 vs ~264), no colour shift (<1/255 mean RGB delta) or
+# banding regression, a smaller PNG, and ran ~2.4x faster (3.3s vs 8.0s).
+# Flip back to "realesrgan-x4plus" if a future asset style suits the
+# smoother general-purpose net better.
+UPSCALE_MODEL = "realesrgan-x4plus-anime"
 # Gating (owner 2026-07-19: now FOUR editable params, defaults reproduce
 # the old locked 2026-07-18 rule). An image qualifies ONLY if its aspect
 # ratio W/H is within [UPSCALE_ASPECT_MIN, UPSCALE_ASPECT_MAX] (the
