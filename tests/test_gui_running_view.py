@@ -18,8 +18,11 @@ wiring gets a screenshot" split (___tests.md):
   ``FakeGui`` uses for ``_compose_post_save`` (never a full
   ``PainterGui``: a heavy ``__init__``, and every other phase's tests
   avoid it too). ``IconBar`` itself is a real, cheap-to-construct
-  widget: button count/ids, the one permanently-disabled placeholder,
-  and ``set_active``'s filled/outline recolouring.
+  widget: button count/ids and ``set_active``'s filled/outline
+  recolouring (GUI rework Phase 19 wires up the LAST tile that used to
+  start permanently disabled, "api_image_gen" — every tile is now a
+  real, clickable button; see test_gui_api_image.py for its OWN
+  gating, which disables Start on ITS panel instead, live).
 
 GUI rework Phase 13 adds ``_tool_panels`` (BG/Crop's own persistent
 ``ToolSettingsPanel`` — a REAL ``ttk.Frame`` stand-in here,
@@ -150,17 +153,18 @@ class FakeGui:
         self._compact_box = ttk.Frame(root)
         # all FIVE standalone-job settings-panel stand-ins (bg/crop, GUI
         # rework Phase 13; upscale/aspect, Phase 14; the AI checker,
-        # Phase 15) — real ttk.Frames so _apply_running_layout's pack/
-        # pack_forget is exercised for real (see this module's own
-        # docstring). Keyed by MENU_TILES id, exactly like the real
-        # PainterGui._tool_panels — "image_checker", NOT "aicheck" (its
-        # own JOB_ORDER slot): _tool_panel_key is the bridge tested
-        # below.
+        # Phase 15; API Image GEN, Phase 19) — real ttk.Frames so
+        # _apply_running_layout's pack/pack_forget is exercised for real
+        # (see this module's own docstring). Keyed by MENU_TILES id,
+        # exactly like the real PainterGui._tool_panels — "image_checker"
+        # NOT "aicheck", "api_image_gen" NOT "api_image" (their own
+        # JOB_ORDER slots): _tool_panel_key is the bridge tested below.
         self._tool_panels: dict[str, _RecordingToolPanel] = {
             "bg": _RecordingToolPanel(root), "crop": _RecordingToolPanel(root),
             "upscale": _RecordingToolPanel(root),
             "aspect": _RecordingToolPanel(root),
             "image_checker": _RecordingToolPanel(root),
+            "api_image_gen": _RecordingToolPanel(root),
         }
         self.notebook = ttk.Notebook(root)
         self.notebook.add(ttk.Frame(self.notebook), text="Dashboard")
@@ -450,10 +454,31 @@ def test_click_icon_bar_tile_ai_sheet_gen_always_opens_its_dialog(root):
     assert fake.new_collection_calls == 1
 
 
-def test_tile_handler_website_gen_and_the_disabled_tile_have_no_handler(root):
+def test_tile_handler_website_gen_has_no_single_handler(root):
+    """website_gen is the ONE tile with no single handler — the owner
+    drives the now-visible queue + per-site Start buttons instead (see
+    _select_tile's own docstring). Every other tile, including
+    "api_image_gen" since GUI rework Phase 19, resolves to a real
+    callable — see test_tile_handler_covers_every_menu_tile_id_without_
+    raising below and test_select_tile_bg_from_menu_skips_main_and_
+    opens_the_panel_in_running's own sibling coverage."""
     fake = FakeGui(root)
     assert gui.PainterGui._tile_handler(fake, "website_gen") is None
-    assert gui.PainterGui._tile_handler(fake, "api_image_gen") is None
+
+
+def test_tile_handler_api_image_gen_opens_its_own_panel(root):
+    """GUI rework Phase 19: api_image_gen now resolves to the SAME
+    _open_tool_panel toggle bg/crop/upscale/aspect/image_checker
+    already use — no more disabled placeholder. Proven by calling the
+    returned handler and observing the SAME toggle those tiles'
+    own tests check (Rule #5 — no partial-internals introspection)."""
+    fake = FakeGui(root)
+    fake._view = "running"
+    handler = gui.PainterGui._tile_handler(fake, "api_image_gen")
+    assert handler is not None
+    handler()
+    assert fake._inline_kind == "api_image_gen"
+    assert fake._tool_panels["api_image_gen"].winfo_manager() == "pack"
 
 
 def test_tile_handler_covers_every_menu_tile_id_without_raising(root):
@@ -631,13 +656,15 @@ def test_icon_bar_has_one_button_per_menu_tile(root):
     assert set(bar._buttons) == {tile.id for tile in MENU_TILES}
 
 
-def test_icon_bar_only_the_disabled_tile_starts_disabled(root):
+def test_icon_bar_no_tile_starts_disabled(root):
+    """GUI rework Phase 19 wires up the last placeholder
+    ("api_image_gen") — every IconBar button is now live."""
     bar = gui.IconBar(root, on_select=lambda *_a: None, on_menu=lambda: None)
     disabled = {
         tile_id for tile_id, btn in bar._buttons.items()
         if btn.cget("state") == "disabled"
     }
-    assert disabled == {"api_image_gen"}
+    assert disabled == set()
 
 
 def test_icon_bar_click_calls_on_select_with_the_tile_id(root):
@@ -648,6 +675,18 @@ def test_icon_bar_click_calls_on_select_with_the_tile_id(root):
     )
     bar._buttons["bg"].invoke()
     assert clicked == ["bg"]
+
+
+def test_icon_bar_api_image_gen_click_now_calls_on_select_too(root):
+    """The one button that used to be permanently disabled (command=
+    None) now fires on_select with its tile id like any other."""
+    clicked = []
+    bar = gui.IconBar(
+        root, on_select=lambda tile_id: clicked.append(tile_id),
+        on_menu=lambda: None,
+    )
+    bar._buttons["api_image_gen"].invoke()
+    assert clicked == ["api_image_gen"]
 
 
 def test_icon_bar_menu_button_calls_on_menu(root):
@@ -678,8 +717,12 @@ def test_icon_bar_set_active_fills_active_tiles_and_outlines_the_rest(root):
             assert bar._buttons[tile.id].cget("border_width") == 1
 
 
-def test_icon_bar_set_active_never_touches_the_disabled_placeholder(root):
+def test_icon_bar_set_active_fills_api_image_gen_like_any_other_tile(root):
+    """GUI rework Phase 19: "api_image_gen" used to be the one
+    permanently-disabled placeholder set_active skipped outright; now
+    it participates in the SAME live-status recolouring as every other
+    enabled tile (no special case left in IconBar/set_active)."""
     bar = gui.IconBar(root, on_select=lambda *_a: None, on_menu=lambda: None)
-    before = bar._buttons["api_image_gen"].cget("state")
-    bar.set_active({"api_image_gen"})  # nonsensical input, must be a no-op
-    assert bar._buttons["api_image_gen"].cget("state") == before
+    bar.set_active({"api_image_gen"})
+    assert bar._buttons["api_image_gen"].cget("border_width") == 0
+    assert bar._buttons["bg"].cget("border_width") == 1

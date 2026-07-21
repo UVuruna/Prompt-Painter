@@ -13,10 +13,11 @@ beside the images, every run resumes, and a quota stop with a known
 reset time auto-restarts that site (countdown on its panel). All
 remembered choices persist in settings.json.
 
-Two views (tabs): a **Dashboard** (up to six per-JOB panels — the two
-sites plus the four in-place tools — in a responsive grid that
-re-flows as jobs start and close, each with its own progress, timings
-and table) and the detailed **Log**.
+Two views (tabs): a **Dashboard** (up to eight per-JOB panels — the
+two websites, the paid-API image generation job, the four in-place
+tools and the AI image checker — in a responsive grid that re-flows
+as jobs start and close, each with its own progress, timings and
+table) and the detailed **Log**.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, ttk
+from types import SimpleNamespace
 from typing import Callable
 
 import customtkinter as ctk
@@ -45,6 +47,8 @@ from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageGrab, ImageTk
 from painter.config import (
     AI_CALL_PAUSE_S,
     AI_CHECK_INSTRUCTIONS,
+    AI_IMAGE_GATE_MESSAGE,
+    AI_IMAGE_PROBE_PROMPT,
     AI_STUDIO_URL,
     AI_TEST_PROMPT,
     ASPECT_DEFAULT_H,
@@ -78,6 +82,7 @@ from painter.config import (
     FILTER_POLARITY_IF,
     FILTER_POLARITY_IF_NOT,
     FILTER_PRESETS_SETTING,
+    GEMINI_IMAGE_MODEL,
     GEMINI_KEY_SETTING,
     GEMINI_VISION_MODEL,
     GRID_COLS_BY_COUNT,
@@ -3354,6 +3359,434 @@ class ImageCheckerSettingsPanel(ToolSettingsPanel):
         ).pack(anchor="w")
 
 
+class ApiImageGenPanel(ttk.Frame):
+    """API Image GEN's persistent settings panel (GUI rework Phase 19)
+    — menu-hosted exactly like the ``ToolSettingsPanel`` family
+    (``PainterGui._tool_panels["api_image_gen"]``, reached the SAME way
+    via ``_open_tool_panel``/``_click_icon_bar_tile``), but this panel
+    does NOT subclass ``ToolSettingsPanel``: its input is the SAME
+    queued ``.md`` sheet Collections list Website GEN already drives
+    (``PainterGui._sheets``), never a folder of already-existing
+    images, so a "Folder…/Files…" picker would be actively wrong here.
+    It mirrors ``AgentPanel`` instead — background/style dropdowns
+    feeding the SAME ``config.prompt_suffix`` machinery, the composable
+    post-save switches (BG removal/Crop/Force Aspect Ratio/Upscale,
+    see ``PainterGui._compose_post_save``, called with THIS panel
+    passed explicitly since it is not one of ``self.agents``), and its
+    own Start/Pause/Stop trio — while ``get_settings``/``apply_settings``
+    use the SAME ``(stored, conditions=...)`` shape ``ToolSettingsPanel``
+    already has, so it round-trips through the EXISTING generic
+    "tool_panels" settings loop with no changes there either.
+
+    BG/Crop/Force-Aspect/Upscale default ON — unlike ``AgentPanel``'s
+    own defaults (BG/Crop/Upscale ON, Force Aspect OFF) — because the
+    paid image model cannot render a REAL transparent background
+    (UV/prompt.txt item 3: "ne moze TRANSPARENT pa mora BG removal i
+    CROP sve redom"), so every generated image needs the full cleanup
+    pipeline by default; the background dropdown defaults to "white"
+    (a background the model CAN render, for BG removal to key out)
+    instead of borrowing a site's own ``default_background``.
+
+    GATING (owner decision, Phase 19 spec item 5): the owner's key has
+    ZERO free-tier quota for the paid image model TODAY
+    (``ai.PaidFeatureRequired``) — **Check API access** runs one cheap
+    probe call on a background thread (its OWN private queue+poll,
+    mirroring ``_AiDialog``'s established pattern — this panel is a
+    ``ttk.Frame``, not a ``Toplevel``, so it cannot literally subclass
+    that Toplevel-only base) and, when the free-tier-zero signal fires,
+    disables Start with a clear message (``AI_IMAGE_GATE_MESSAGE``)
+    instead of leaving the owner to discover it mid-run. This is a
+    CONVENIENCE, not the only guard: a real run started without probing
+    first is caught the SAME way by ``ApiImageAdapter.extract_image``
+    (mapped to ``driver.TerminalState`` — the identical quota-stop
+    plumbing every site already has)."""
+
+    def __init__(
+        self, master,
+        on_start: Callable[[], None], on_pause: Callable[[str], None],
+        on_stop: Callable[[str], None],
+        filter_presets: dict[str, list[dict]] | None = None,
+        on_filter_presets_changed: Callable[[], None] | None = None,
+    ):
+        super().__init__(master, padding=8)
+        self._on_start = on_start
+        self._on_pause = on_pause
+        self._on_stop = on_stop
+        self._filter_presets = filter_presets
+        self._on_filter_presets_changed = on_filter_presets_changed
+        self._running = False
+        # set by a Check-API-access probe; gates Start until a probe
+        # clears it again (or the app restarts) — see _apply_probe_result
+        self.access_gated = False
+
+        head = ttk.Frame(self)
+        head.pack(fill="x")
+        ctk.CTkLabel(
+            head, text="", image=icon(JOB_LOGO["api_image"]), width=22,
+            fg_color="transparent", bg_color=theme_pair("bg"),
+        ).pack(side="left", padx=(0, 4))
+        ttk.Label(
+            head, text=f"{JOB_LABEL['api_image']} — settings",
+            style="Head.TLabel",
+        ).pack(side="left")
+
+        ttk.Label(
+            self,
+            text="Generates the SAME queued Collections (.md sheets) as"
+            " Website GEN, through the paid Gemini image API instead of"
+            " a browser tab.",
+            style="Muted.TLabel", wraplength=JOB_PANEL_BANNER_WRAP_PX,
+        ).pack(anchor="w", pady=(6, 4))
+
+        # background/style — the SAME prompt_suffix machinery every
+        # AgentPanel already feeds (Rule #5); "white" default (not a
+        # site's own default_background) since the model cannot render
+        # real transparency — see this class's own docstring
+        self.background_var = tk.StringVar(value="white")
+        self.style_var = tk.StringVar(value=STYLE_DEFAULT)
+        row = ttk.Frame(self)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Background:").pack(side="left")
+        rounded_combo(
+            row, BACKGROUND_CHOICES, self.background_var, width=105,
+        ).pack(side="left", padx=(2, 10))
+        ttk.Label(row, text="Style:").pack(side="left")
+        rounded_combo(
+            row, STYLE_CHOICES, self.style_var, width=150,
+        ).pack(side="left", padx=(2, 0))
+
+        # post-save pipeline switches — ALL default ON (no native
+        # transparency, spec item 3): _compose_post_save runs whichever
+        # are ticked in the fixed BG -> Crop -> Aspect -> Upscale order,
+        # identical to every AgentPanel-driven site.
+        self.bg_removal_var = tk.BooleanVar(value=True)
+        self.crop_var = tk.BooleanVar(value=True)
+        self.force_aspect_var = tk.BooleanVar(value=True)
+        self.upscale_var = tk.BooleanVar(value=True)
+        row = ttk.Frame(self)
+        row.pack(fill="x", pady=2)
+        rounded_switch(row, "BG removal", self.bg_removal_var).pack(
+            side="left"
+        )
+        rounded_switch(row, "Crop", self.crop_var).pack(side="left", padx=8)
+        rounded_switch(
+            row, "Force Aspect Ratio", self.force_aspect_var,
+        ).pack(side="left", padx=(0, 8))
+        rounded_switch(row, "Upscale", self.upscale_var).pack(side="left")
+
+        self.report_var = tk.BooleanVar(value=True)
+        self.keep_all_steps_var = tk.BooleanVar(
+            value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
+        )
+        row = ttk.Frame(self)
+        row.pack(fill="x", pady=2)
+        rounded_switch(row, "Report txt", self.report_var).pack(side="left")
+        rounded_switch(
+            row, "Keep every pipeline step (uses more disk)",
+            self.keep_all_steps_var,
+        ).pack(side="left", padx=8)
+
+        # Force Aspect Ratio target — the SAME AspectRatioCanvas two-way
+        # sync AgentPanel's own Force-Aspect block / AspectSettingsPanel
+        # already use (Rule #5)
+        ttk.Label(
+            self, text="Force Aspect Ratio target:", style="Head.TLabel",
+        ).pack(anchor="w", pady=(4, 0))
+        self.force_aspect_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
+        self.force_aspect_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
+        fa_box = ttk.Frame(self)
+        fa_box.pack(fill="x", pady=2)
+        fa_fields = ttk.Frame(fa_box)
+        fa_fields.pack(side="left", anchor="n")
+        ttk.Label(fa_fields, text="W").pack(side="left", padx=(0, 4))
+        rounded_entry(
+            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self.force_aspect_w_var, justify="center",
+        ).pack(side="left")
+        ttk.Label(fa_fields, text=":", font=tk_font("head")).pack(
+            side="left", padx=8
+        )
+        ttk.Label(fa_fields, text="H").pack(side="left", padx=(0, 4))
+        rounded_entry(
+            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self.force_aspect_h_var, justify="center",
+        ).pack(side="left")
+        self._force_aspect_canvas = AspectRatioCanvas(
+            fa_box, w=int(self.force_aspect_w_var.get()),
+            h=int(self.force_aspect_h_var.get()),
+            on_change=self._on_force_aspect_canvas_drag,
+        )
+        self._force_aspect_canvas.pack(side="left", padx=(12, 0), anchor="n")
+        self.force_aspect_w_var.trace_add(
+            "write", self._on_force_aspect_wh_typed
+        )
+        self.force_aspect_h_var.trace_add(
+            "write", self._on_force_aspect_wh_typed
+        )
+
+        # the upscale gate — min-side spinner + embedded FilterEditor,
+        # the SAME shape AgentPanel/UpscaleSettingsPanel already use
+        ttk.Label(
+            self, text="Upscale gate:", style="Head.TLabel",
+        ).pack(anchor="w", pady=(4, 0))
+        self.up_minside_var = tk.StringVar(
+            value=str(UPSCALE_MIN_SIDE_DEFAULT)
+        )
+        row = ttk.Frame(self)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="min side", width=8).pack(side="left")
+        Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
+            side="left"
+        )
+        ttk.Label(
+            row, text="px (the smaller side reaches this)"
+        ).pack(side="left", padx=(4, 0))
+        self.upscale_filter = FilterEditor(
+            self,
+            conditions=[filters.FilterCondition(
+                kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
+                lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
+            )],
+            presets=self._filter_presets,
+            on_presets_changed=self._on_filter_presets_changed,
+        )
+        self.upscale_filter.pack(fill="x", pady=(2, 0))
+
+        # pace between prompts — run_sheet's own pacing wait, unrelated
+        # to ai.py's internal AI_CALL_PAUSE_S free-tier throttle; no
+        # action-delay field (that is SiteDriver._hesitate()'s DOM
+        # concept — there is no DOM here).
+        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
+        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
+        row = ttk.Frame(self)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="pause", width=12).pack(side="left")
+        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+
+        # --- GATING: the "Check API access" probe (spec item 5) -------
+        gate_row = ttk.Frame(self)
+        gate_row.pack(fill="x", pady=(8, 2))
+        self._gate_btn = rounded_button(
+            gate_row, "Check API access", command=self._probe_access,
+            kind="info",
+        )
+        self._gate_btn.pack(side="left")
+        self._gate_var = tk.StringVar(value="")
+        ttk.Label(
+            gate_row, textvariable=self._gate_var, style="Muted.TLabel",
+            wraplength=JOB_PANEL_BANNER_WRAP_PX,
+        ).pack(side="left", padx=(8, 0))
+        self._probe_q: queue.Queue = queue.Queue()
+        self._probe_poll_job: str | None = None
+
+        btn_row = ttk.Frame(self)
+        btn_row.pack(fill="x", pady=(10, 0))
+        self.btn_start = rounded_button(
+            btn_row, "Start", command=self._on_start,
+            kind="success", icon_name="start", width=90,
+        )
+        self.btn_start.pack(side="left")
+        self.btn_pause = rounded_button(
+            btn_row, "Pause", command=partial(self._on_pause, "api_image"),
+            kind="secondary", width=70,
+        )
+        self.btn_pause.pack(side="left", padx=6)
+        self.btn_stop = rounded_button(
+            btn_row, "Stop", command=partial(self._on_stop, "api_image"),
+            kind="danger-outline", width=70,
+        )
+        self.btn_stop.pack(side="left", padx=(0, 6))
+        self.set_run_state(running=False)
+
+        # a Day/Night flip must repaint the embedded AspectRatioCanvas
+        # (mirrors AgentPanel/AspectSettingsPanel's own registration —
+        # build-once, never destroyed before app exit)
+        THEME_TOPLEVELS.append(self)
+        self.bind("<Destroy>", self._on_destroy)
+
+    def _on_destroy(self, event) -> None:
+        if event.widget is self and self in THEME_TOPLEVELS:
+            THEME_TOPLEVELS.remove(self)
+
+    def apply_theme(self) -> None:
+        self._force_aspect_canvas.redraw_theme()
+
+    # --- Force Aspect Ratio two-way sync (mirrors AgentPanel's own) ----
+
+    def _on_force_aspect_canvas_drag(self, w: int, h: int) -> None:
+        self.force_aspect_w_var.set(str(w))
+        self.force_aspect_h_var.set(str(h))
+
+    def _on_force_aspect_wh_typed(self, *_args) -> None:
+        try:
+            w = int(self.force_aspect_w_var.get().strip())
+            h = int(self.force_aspect_h_var.get().strip())
+        except ValueError:
+            return
+        if w <= 0 or h <= 0:
+            return
+        self._force_aspect_canvas.set_ratio(w, h)
+
+    def force_aspect_ratio(self) -> tuple[int, int]:
+        """ValueError propagates to the caller's Start validation, same
+        contract as ``AgentPanel.force_aspect_ratio``."""
+        return (
+            int(self.force_aspect_w_var.get()),
+            int(self.force_aspect_h_var.get()),
+        )
+
+    # --- upscale gate (mirrors AgentPanel's own) ------------------------
+
+    def upscale_params(self) -> dict:
+        min_side = int(float(self.up_minside_var.get()))
+        return _upscale_params_from_side_and_filter(
+            min_side, self.upscale_filter.get_conditions()
+        )
+
+    def upscale_conditions(self) -> list[filters.FilterCondition]:
+        return self.upscale_filter.get_conditions()
+
+    def pace_floats(self) -> tuple[float, float]:
+        """ValueError propagates to the caller's Start validation, same
+        contract as ``AgentPanel.pace_floats`` (narrower here — no
+        action-delay pair)."""
+        return (float(self.pause_min_var.get()), float(self.pause_max_var.get()))
+
+    # --- gating: "Check API access" probe -------------------------------
+
+    def _probe_access(self) -> None:
+        """One cheap ``generate_image`` call on a background thread —
+        ``PaidFeatureRequired`` means the free tier is still exhausted
+        (gates Start with ``AI_IMAGE_GATE_MESSAGE``); success clears any
+        previous gate; any OTHER ``AiError`` (``NoKey``, network) is
+        shown but leaves the gate exactly as it was — inconclusive, not
+        proof either way. Mirrors ``AiKeyWizard._test``'s own worker
+        (no ``log=`` override — the default ``print`` is enough for an
+        occasional manual probe, same precedent)."""
+        self._gate_btn.configure(state="disabled")
+        self._gate_var.set("Checking API access …")
+
+        def work() -> None:
+            from painter import ai
+
+            try:
+                ai.generate_image(
+                    AI_IMAGE_PROBE_PROMPT, model=GEMINI_IMAGE_MODEL,
+                )
+            except ai.PaidFeatureRequired as exc:
+                self._probe_q.put(("gated", str(exc)))
+            except ai.AiError as exc:
+                self._probe_q.put(("error", str(exc)))
+            else:
+                self._probe_q.put(("ok", ""))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._arm_probe_poll()
+
+    def _arm_probe_poll(self) -> None:
+        self._probe_poll_job = self.after(AI_POLL_MS, self._poll_probe)
+
+    def _poll_probe(self) -> None:
+        self._probe_poll_job = None
+        if not self.winfo_exists():
+            return  # closed mid-check — the worker's message is moot
+        try:
+            msg = self._probe_q.get_nowait()
+        except queue.Empty:
+            self._arm_probe_poll()
+            return
+        self._apply_probe_result(msg)
+
+    def _apply_probe_result(self, msg: tuple) -> None:
+        kind, text = msg
+        self._gate_btn.configure(state="normal")
+        if kind == "ok":
+            self.access_gated = False
+            self._gate_var.set("API access OK — billing is enabled.")
+        elif kind == "gated":
+            self.access_gated = True
+            self._gate_var.set(AI_IMAGE_GATE_MESSAGE)
+        else:
+            self._gate_var.set(f"Check inconclusive: {text}")
+        self._refresh_start_state()
+
+    def _refresh_start_state(self) -> None:
+        style_action_button(
+            self.btn_start, "success",
+            not self._running and not self.access_gated,
+        )
+
+    # --- run state -----------------------------------------------------
+
+    def set_run_state(self, running: bool) -> None:
+        self._running = running
+        self._refresh_start_state()
+        style_action_button(self.btn_stop, "danger", running)
+
+    def set_paused(self, is_paused: bool) -> None:
+        self.btn_pause.configure(text="Resume" if is_paused else "Pause")
+
+    # --- settings round-trip --------------------------------------------
+    # SAME (stored, conditions=...) shape ToolSettingsPanel.apply_settings
+    # already has, so PainterGui._apply_settings's existing generic
+    # "tool_panels" loop round-trips this panel with NO changes there —
+    # "conditions" carries the upscale-gate filter (the ONE FilterEditor
+    # this panel owns), exactly the role UpscaleSettingsPanel's own top-
+    # level ``self.filter`` already plays under the same key.
+
+    def get_settings(self) -> dict:
+        return {
+            "background": self.background_var.get(),
+            "style": self.style_var.get(),
+            "bg_removal": self.bg_removal_var.get(),
+            "crop": self.crop_var.get(),
+            "force_aspect": self.force_aspect_var.get(),
+            "force_aspect_w": self.force_aspect_w_var.get(),
+            "force_aspect_h": self.force_aspect_h_var.get(),
+            "upscale": self.upscale_var.get(),
+            "up_minside": self.up_minside_var.get(),
+            "report": self.report_var.get(),
+            "keep_all_steps": self.keep_all_steps_var.get(),
+            "pause_min": self.pause_min_var.get(),
+            "pause_max": self.pause_max_var.get(),
+            "conditions": [
+                filters.condition_to_dict(c)
+                for c in self.upscale_filter.get_conditions()
+            ],
+        }
+
+    def apply_settings(
+        self, stored: dict,
+        conditions: list[filters.FilterCondition] | None = None,
+    ) -> None:
+        """Missing keys keep the current defaults — same contract as
+        every other panel's ``apply_settings`` in this file."""
+        string_fields = (
+            "background", "style", "up_minside", "force_aspect_w",
+            "force_aspect_h", "pause_min", "pause_max",
+        )
+        for key in string_fields:
+            if key in stored:
+                getattr(self, f"{key}_var").set(stored[key])
+        bool_fields = ("bg_removal", "crop", "force_aspect", "upscale",
+                       "report", "keep_all_steps")
+        for key in bool_fields:
+            if key in stored:
+                getattr(self, f"{key}_var").set(bool(stored[key]))
+        if conditions is not None:
+            self.upscale_filter.set_conditions(conditions)
+        try:
+            w = int(self.force_aspect_w_var.get())
+            h = int(self.force_aspect_h_var.get())
+            if w > 0 and h > 0:
+                self._force_aspect_canvas.set_ratio(w, h)
+        except ValueError:
+            pass
+
+
 # ---------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------
@@ -4906,6 +5339,73 @@ class DashGrid(ttk.Frame):
 
 
 # ---------------------------------------------------------------------
+# API Image Generation adapter (GUI rework Phase 19)
+# ---------------------------------------------------------------------
+
+
+class ApiImageAdapter:
+    """A ``SiteDriver``-shaped stand-in over the paid Gemini image API —
+    lets the "api_image" job reuse ``PainterGui._drive_site``/
+    ``painter.runner.run_sheet`` COMPLETELY UNCHANGED (the binding
+    design doc's own "biggest risk-reducer": ``run_sheet`` only ever
+    calls ``submit_prompt``/``await_done``/``extract_image`` on its
+    driver, plus ``attach``/``close`` in ``_drive_site`` and
+    ``driver.site.name`` for the report header — see runner.py/
+    driver.md). There is no browser tab to drive, so ``attach``/
+    ``close``/``await_done`` are no-ops; ``submit_prompt`` only
+    REMEMBERS the prompt text — the real call happens in
+    ``extract_image``, mirroring the DOM driver's own submit-then-
+    await-then-extract shape so ``run_sheet``'s own timing split
+    (SEND -> image is "gen_s") stays meaningful. ``new_chat`` is
+    deliberately NOT implemented: ``PainterGui._start_api_image``
+    always passes ``new_chat="off"``, so ``_drive_site``/``run_sheet``
+    never call it on this adapter — there is no chat to open.
+
+    A free-tier-exhausted 429 (``ai.PaidFeatureRequired`` — the
+    account has ZERO free quota for the paid image model, see ai.md)
+    is remapped to ``driver.TerminalState`` so the EXISTING quota-stop
+    plumbing (``_drive_site``'s own ``except TerminalState`` branch,
+    the dashboard's state line) handles it with NO new code. The
+    free-tier-zero condition is PERMANENT — no wait ever fixes it, only
+    billing — so ``retry_after_s`` is always None: unlike a website
+    quota with a known reset time, this job never schedules an
+    auto-restart timer, exactly like a quota message that named no
+    parseable reset time."""
+
+    def __init__(self, log: Callable[[str], None] = print):
+        self._log = log
+        self._prompt: str = ""
+        # run_sheet reads driver.site.name for the report header
+        # (RunReport's constructor, only when report=True) — a tiny
+        # stand-in, never a real SiteConfig (no DOM field on it is
+        # ever read).
+        self.site = SimpleNamespace(name=JOB_LABEL["api_image"])
+
+    def attach(self) -> str:
+        return "API Image GEN (Gemini paid image model, no browser tab)"
+
+    def close(self) -> None:
+        pass
+
+    def submit_prompt(self, prompt: str) -> None:
+        self._prompt = prompt
+
+    def await_done(self, log: Callable[[str], None] = print) -> None:
+        pass
+
+    def extract_image(self) -> bytes:
+        from painter import ai
+        from painter.driver import TerminalState
+
+        try:
+            return ai.generate_image(
+                self._prompt, model=GEMINI_IMAGE_MODEL, log=self._log,
+            )
+        except ai.PaidFeatureRequired as exc:
+            raise TerminalState(str(exc), retry_after_s=None) from exc
+
+
+# ---------------------------------------------------------------------
 # Main window
 # ---------------------------------------------------------------------
 
@@ -5453,22 +5953,27 @@ class PainterGui:
         # (bg/crop/upscale/aspect — a real should_stop for _run_tool_job,
         # closing Phase 13's own flagged gap; see _stop_tool). GUI rework
         # Phase 15 adds "aicheck" too (_run_ai_check_job's own should_stop,
-        # closing Phase 14's own flagged gap for THIS job) — so this now
-        # covers every _tool_workers key, still short of the full
-        # JOB_ORDER (_pause_events' own span, which also spans the two
-        # gen sites via a DIFFERENT mechanism — _drive_site's should_stop
-        # comes from this SAME dict under its site key).
+        # closing Phase 14's own flagged gap for THIS job); Phase 19 adds
+        # "api_image" explicitly (it is not in SITES — no SiteConfig, no
+        # browser tab — but it DOES drive through _drive_site, exactly
+        # like chatgpt/gemini, and needs the same stop_event) — so this
+        # now covers every _tool_workers key PLUS "api_image", still
+        # short of the full JOB_ORDER (_pause_events' own span, which
+        # also spans the two sites + api_image via a DIFFERENT mechanism
+        # — _drive_site's should_stop comes from this SAME dict under
+        # its job key).
         self._workers: dict[str, threading.Thread] = {}
         self._stop_events: dict[str, threading.Event] = {
             key: threading.Event()
-            for key in (*SITES, *JOB_TOOL_KINDS, "aicheck")
+            for key in (*SITES, "api_image", *JOB_TOOL_KINDS, "aicheck")
         }
         self._running: set[str] = set()
         # per-job PAUSE toggle (owner 2026-07-21): one threading.Event per
-        # JOB_ORDER kind (all seven — the two sites plus the four tools
-        # plus the AI checker), polled by the runner/worker loop between
-        # items/images — see _toggle_pause_job. _paused tracks which
-        # kinds are CURRENTLY paused so button labels stay in sync.
+        # JOB_ORDER kind (all eight, GUI rework Phase 19 — the two sites,
+        # API Image GEN, the four tools and the AI checker), polled by
+        # the runner/worker loop between items/images — see
+        # _toggle_pause_job. _paused tracks which kinds are CURRENTLY
+        # paused so button labels stay in sync.
         self._pause_events: dict[str, threading.Event] = {
             key: threading.Event() for key in JOB_ORDER
         }
@@ -5636,6 +6141,32 @@ class PainterGui:
                 on_start=self._start_ai_check,
                 on_pause=self._toggle_pause_job,
                 on_stop=self._stop_tool,
+                filter_presets=self._filter_presets,
+                on_filter_presets_changed=self._on_filter_presets_changed,
+            ),
+            # API Image GEN (GUI rework Phase 19) — keyed by its
+            # MENU_TILES id ("api_image_gen"), NOT its JOB_ORDER slot
+            # ("api_image"), the SAME asymmetry image_checker/"aicheck"
+            # already has above (tile_for_kind bridges the two). Start
+            # is its OWN _start_api_image (this job has no folder/
+            # build_func shape to share with _start_tool_from_panel —
+            # it drives the SAME queued .md sheets Website GEN does, via
+            # _drive_site, not _run_tool_job); Stop reuses _stop_site
+            # UNCHANGED — api_image's worker lives in self._workers/
+            # self._running (_drive_site's own tracking), the SAME
+            # dicts chatgpt/gemini use, NOT self._tool_workers, so
+            # _stop_tool's own "if slot not in self._tool_workers:
+            # return" guard would silently no-op here; _stop_site's
+            # generic "if key in self._running: ..." branch already
+            # covers ANY key (its OTHER branch, the quota-auto-restart
+            # cancel, is simply unreachable for api_image — its
+            # TerminalState always carries retry_after_s=None, so it
+            # never enters self._restart_jobs to begin with).
+            "api_image_gen": ApiImageGenPanel(
+                self._main_view,
+                on_start=self._start_api_image,
+                on_pause=self._toggle_pause_job,
+                on_stop=self._stop_site,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
             ),
@@ -5928,19 +6459,17 @@ class PainterGui:
 
     def _tile_handler(self, tile_id: str) -> Callable[[], None] | None:
         """The existing, unmodified action one ``MENU_TILES`` id runs.
-        ``None`` for "website_gen" (no single handler — see
-        ``_select_tile``'s docstring) and for the disabled
-        "api_image_gen" placeholder (never reaches a caller: MainMenu
-        binds no click on a disabled tile, and IconBar disables its own
-        button the same way — Phase 19 wires the real handler in).
+        ``None`` only for "website_gen" (no single handler — see
+        ``_select_tile``'s docstring).
 
-        GUI rework Phase 13/14/15: all five standalone-job tiles route
-        to ``_open_tool_panel`` — their persistent settings panel —
-        instead of an old modal/dialog launch (``_start_tool``, deleted
-        Phase 14; the AI checker's own ``askdirectory``+confirm inline
-        in ``_start_ai_check``, deleted Phase 15; see gui.md). In
+        GUI rework Phase 13/14/15/19: all SIX standalone-job tiles
+        (bg/crop/upscale/aspect/image_checker, and now api_image_gen)
+        route to ``_open_tool_panel`` — their persistent settings panel
+        — instead of an old modal/dialog launch (``_start_tool``,
+        deleted Phase 14; the AI checker's own ``askdirectory``+confirm
+        inline in ``_start_ai_check``, deleted Phase 15; see gui.md). In
         practice neither ``_select_tile`` nor ``_click_icon_bar_tile``
-        ever reaches this dict entry for any of the five (both special-
+        ever reaches this dict entry for any of the six (both special-
         case the panel toggle before falling through here —
         ``_select_tile`` to skip a wasted view hop, ``_click_icon_bar_
         tile`` implicitly via this same mapping), but this stays a
@@ -5949,7 +6478,7 @@ class PainterGui:
         return {
             "website_gen": None,
             "ai_sheet_gen": self._new_collection_ai,
-            "api_image_gen": None,
+            "api_image_gen": partial(self._open_tool_panel, "api_image_gen"),
             "image_checker": partial(self._open_tool_panel, "image_checker"),
             "bg": partial(self._open_tool_panel, "bg"),
             "crop": partial(self._open_tool_panel, "crop"),
@@ -6308,12 +6837,15 @@ class PainterGui:
         dash_tab = ttk.Frame(self.notebook)
         self.notebook.add(dash_tab, text="Dashboard")
         # BUILD-ONCE per-JOB panels in a responsive DashGrid: the two gen
-        # sites plus the four tools, NONE gridded until its job starts.
-        # A panel appears on Start / a tool click, gets CLOSE when done,
-        # and the grid re-flows by active count (gen sites first).
+        # sites, the API Image GEN job (GUI rework Phase 19 — same
+        # DashPanel the sites use, driven by the SAME run_sheet event
+        # shape via _drive_site) plus the four tools, NONE gridded until
+        # its job starts. A panel appears on Start / a tool click, gets
+        # CLOSE when done, and the grid re-flows by active count (gen
+        # sites first).
         self._dashgrid = DashGrid(dash_tab)
         self.panels: dict[str, JobPanel] = {}
-        for key in ("chatgpt", "gemini"):
+        for key in ("chatgpt", "gemini", "api_image"):
             self.panels[key] = DashPanel(
                 self._dashgrid, key,
                 on_show=partial(self._show_node, key),
@@ -7180,8 +7712,8 @@ class PainterGui:
         )
         return cleared
 
-    def _compose_post_save(self, key: str):
-        """The site's post-save hook per ITS panel switches — the same
+    def _compose_post_save(self, key: str, panel=None):
+        """The job's post-save hook per ITS panel switches — the same
         shape the CLI builds: ``post_save(path) -> "REMOVE BG: done,
         CROP: done, ASPECT: done, ..."`` (the runner logs the
         description and guards the call itself — a failing step never
@@ -7195,8 +7727,18 @@ class PainterGui:
         OFF (its default) this is BYTE-IDENTICAL to the pre-Phase-8
         pipeline — the new per-step JobTemp backups only ever COPY
         bytes elsewhere, they never touch ``path`` itself, so the final
-        saved image is unaffected either way."""
-        panel = self.agents[key]
+        saved image is unaffected either way.
+
+        ``panel`` (GUI rework Phase 19, optional): the caller's own
+        panel object when it is not one of ``self.agents`` — the API
+        Image GEN job's ``ApiImageGenPanel`` lives in ``_tool_panels``
+        instead (see ``_start_api_image``), but exposes the EXACT same
+        bg_removal_var/crop_var/force_aspect_var/upscale_var/
+        upscale_params()/upscale_conditions()/force_aspect_ratio()/
+        keep_all_steps_var surface, so this whole method is reused
+        UNCHANGED rather than duplicated (Rule #5). ``None`` (every
+        existing chatgpt/gemini caller) keeps the exact old lookup."""
+        panel = panel if panel is not None else self.agents[key]
         do_bg = panel.bg_removal_var.get()
         do_crop = panel.crop_var.get()
         do_aspect = panel.force_aspect_var.get()
@@ -7480,6 +8022,14 @@ class PainterGui:
             f" | safer_retry={panel.safer_var.get()}"
             f" continue_nudge={panel.continue_nudge_var.get()} ==="
         )
+        # GUI rework Phase 19: _drive_site now takes its driver as a
+        # parameter (widened to accept an ApiImageAdapter too, see
+        # _start_api_image) instead of building a SiteDriver internally
+        # off SITES[key] — this is the ONE place chatgpt/gemini still
+        # construct the real CDP driver, unchanged from before.
+        from painter.driver import SiteDriver
+
+        driver = SiteDriver(SITES[key], timing, CDP_URL)
         worker = threading.Thread(
             target=self._drive_site,
             args=(
@@ -7487,6 +8037,7 @@ class PainterGui:
                 list(sheets),
                 out_base,
                 timing,
+                driver,
                 post_save,
                 partial(prompt_suffix, key, background, style=style),
                 extra_suffix,
@@ -7510,24 +8061,211 @@ class PainterGui:
         self._inline_kind = None
         self._sync_running_state()
 
+    def _start_api_image(self) -> None:
+        """Start on the API Image GEN panel (GUI rework Phase 19) — the
+        SAME queued .md sheets Website GEN drives, generated through
+        the paid Gemini image API instead of a browser tab. Reuses the
+        proven SITE machinery almost verbatim: ``_drive_site`` (widened
+        to accept an ``ApiImageAdapter`` in place of a ``SiteDriver``),
+        ``_stop_events``/``_pause_events``/``_running``/``_workers``
+        (the SAME dicts chatgpt/gemini use, keyed "api_image" — see
+        ``__init__``'s own comment on ``_stop_events`` and
+        ``_dispatch``'s ``__worker_done__`` guard for why nothing there
+        needed forking), ``_compose_post_save`` (called with THIS
+        panel, since it is not one of ``self.agents``). Only its OWN
+        validation lives here — no per-site "New chat" or action-delay
+        concept (the API has no DOM to hesitate on, no chat to open),
+        and a gating check ``_start_site`` has no equivalent of."""
+        if "api_image" in self._running:
+            return
+        if not self._sheets:
+            messagebox.showerror("PromptPainter", "Add sheet .md files first.")
+            return
+        sheets = self._parse_all()
+        if not sheets:
+            messagebox.showerror(
+                "PromptPainter", "No usable sheets in the queue."
+            )
+            return
+        out_base = self._out_base()
+        for sheet in sheets:
+            if sheet.source.resolve().is_relative_to(out_base):
+                messagebox.showerror(
+                    "PromptPainter",
+                    f"{sheet.source.name} lives inside the output folder"
+                    " — sources are READ ONLY; pick another output.",
+                )
+                return
+        stems = [s.source.stem for s in sheets]
+        dupes = sorted({s for s in stems if stems.count(s) > 1})
+        if dupes:
+            messagebox.showerror(
+                "PromptPainter",
+                "Two queued collections share a filename: "
+                + ", ".join(dupes)
+                + ".\nTheir progress/report files would collide — rename"
+                " one before running.",
+            )
+            return
+
+        panel = self._tool_panels["api_image_gen"]
+        if panel.access_gated:
+            messagebox.showerror("PromptPainter", AI_IMAGE_GATE_MESSAGE)
+            return
+        if not self._ensure_ai_key():
+            return
+        try:
+            pause_min, pause_max = panel.pace_floats()
+        except ValueError:
+            messagebox.showerror(
+                "PromptPainter", "API Image GEN: pause must be numbers."
+            )
+            return
+        if pause_min > pause_max:
+            messagebox.showerror(
+                "PromptPainter", "API Image GEN: FROM must be <= TO (pause)."
+            )
+            return
+        if panel.upscale_var.get():
+            try:
+                up = panel.upscale_params()
+            except ValueError:
+                messagebox.showerror(
+                    "PromptPainter",
+                    "API Image GEN: Upscale-gate min side must be a"
+                    " number, and every filter row must be a valid"
+                    " number (FROM <= TO).",
+                )
+                return
+            if up["min_width"] <= 0:
+                messagebox.showerror(
+                    "PromptPainter",
+                    "API Image GEN: Upscale-gate min side must be"
+                    " positive.",
+                )
+                return
+        if panel.force_aspect_var.get():
+            try:
+                force_w, force_h = panel.force_aspect_ratio()
+            except ValueError:
+                messagebox.showerror(
+                    "PromptPainter",
+                    "API Image GEN: Force Aspect Ratio W/H must be whole"
+                    " numbers.",
+                )
+                return
+            if force_w <= 0 or force_h <= 0:
+                messagebox.showerror(
+                    "PromptPainter",
+                    "API Image GEN: Force Aspect Ratio W/H must both be"
+                    " positive.",
+                )
+                return
+
+        timing = replace(TIMING, pause_min_s=pause_min, pause_max_s=pause_max)
+
+        # this job's per-step backup store (mirrors _start_site's own
+        # "clear the old slot first" rule)
+        old_temp = self._job_temps.pop("api_image", None)
+        if old_temp is not None:
+            old_temp.clear()
+        self._job_temps["api_image"] = jobtemp.JobTemp("api_image", out_base)
+
+        post_save = self._compose_post_save("api_image", panel=panel)
+        if isinstance(post_save, str):  # a deps problem, not a hook
+            messagebox.showerror(
+                "PromptPainter",
+                f"{post_save}\n\n(or turn the API Image GEN BG removal /"
+                " Crop / Upscale switches off)",
+            )
+            return
+
+        # no Select-images ticking for this job (SelectWindow is still
+        # per-SITE only — see gui.md) — every sheet resumes by FILE
+        # EXISTENCE, sheet-advised items sit out, exactly like a site
+        # whose Select window the owner never opened.
+        selection: dict[str, set[str] | None] = {
+            str(sheet.source): None for sheet in sheets
+        }
+
+        self._stop_events["api_image"].clear()
+        if "api_image" in self._paused:
+            self._toggle_pause_job("api_image")  # never start pre-paused
+        self._running.add("api_image")
+        panel.set_run_state(running=True)
+        total, themes = self._plan("api_image", sheets, selection)
+        dash = self.panels["api_image"]
+        dash.jobtemp = self._job_temps["api_image"]
+        dash.out_base = out_base
+        dash.reset(active=True, task_total=total, task_themes=themes)
+        self._dashgrid.add("api_image")
+        self._update_status()
+        background = panel.background_var.get()
+        style = panel.style_var.get()
+        self._log(
+            f"=== START api_image | {len(sheets)} sheet(s) -> {out_base}"
+            f" | background: {background} | style: {style}"
+            f" | bg_removal={panel.bg_removal_var.get()}"
+            f" crop={panel.crop_var.get()}"
+            f" force_aspect={panel.force_aspect_var.get()}"
+            f" upscale={panel.upscale_var.get()} ==="
+        )
+        driver = ApiImageAdapter(
+            log=lambda msg: self._q.put(f"[api_image]     {msg}")
+        )
+        worker = threading.Thread(
+            target=self._drive_site,
+            args=(
+                "api_image",
+                list(sheets),
+                out_base,
+                timing,
+                driver,
+                post_save,
+                partial(prompt_suffix, "api_image", background, style=style),
+                None,  # extra_suffix — no AI-checker re-send wiring yet
+                panel.report_var.get(),
+                selection,
+                False,  # safer_retry — no ItemRefused path from this driver
+                False,  # continue_nudge — no NoImage path from this driver
+                "off",  # new_chat — no chat to open; NEW_CHAT_CHOICES value
+                self._stop_events["api_image"],
+                self._pause_events["api_image"],
+            ),
+            daemon=True,
+        )
+        self._workers["api_image"] = worker
+        worker.start()
+        self._inline_kind = None
+        self._sync_running_state()
+
     def _drive_site(
-        self, key, sheets, out_base, timing, post_save, suffix,
+        self, key, sheets, out_base, timing, driver, post_save, suffix,
         extra_suffix, report, selection, safer, continue_nudge, new_chat,
         stop_event, pause_event,
     ) -> None:
-        """One site's whole run — the theme queue in order, one thread."""
+        """One job's whole run — the theme queue in order, one thread.
+
+        GUI rework Phase 19: GENERALIZED, not forked — ``driver`` is
+        supplied ALREADY CONSTRUCTED by the caller (``_start_site``'s
+        own ``SiteDriver(SITES[key], timing, CDP_URL)`` for chatgpt/
+        gemini, ``_start_api_image``'s ``ApiImageAdapter`` for
+        "api_image") instead of this method building a ``SiteDriver``
+        internally off ``SITES[key]`` — "api_image" is not a browser
+        site and has no ``SiteConfig``. This method never branches on
+        WHICH kind of driver it got: it only ever calls ``attach()``/
+        ``close()`` and hands the object to ``run_sheet`` unchanged,
+        exactly as before — only the accepted type widened."""
         log = lambda msg: self._q.put(f"[{key}] {msg}")
         events = lambda ev: self._q.put(("__event__", key, ev))
-        driver = None
         done_sheets = 0
         # the WHOLE body is guarded so __worker_done__ is ALWAYS posted
-        # (even if the imports or driver construction fail) — otherwise
-        # the site's Start button would stay disabled forever
+        # (even if the imports fail) — otherwise the job's Start button
+        # would stay disabled forever
         try:
-            from painter.driver import DriverError, SiteDriver, TerminalState
+            from painter.driver import DriverError, TerminalState
             from painter.runner import run_sheet
 
-            driver = SiteDriver(SITES[key], timing, CDP_URL)
             t_site = time.monotonic()
             title = driver.attach()
             log(f"attached to {title!r} — SUPERVISED, watch the window")
@@ -7608,8 +8346,7 @@ class PainterGui:
             else:
                 log(f"UNEXPECTED ERROR: {kind}: {exc}")
         finally:
-            if driver is not None:
-                driver.close()
+            driver.close()
             self._q.put(("__worker_done__", key))
 
     def _stop_site(self, key: str) -> None:
@@ -7795,10 +8532,27 @@ class PainterGui:
                 self._workers.pop(key, None)
                 if key in self._paused:  # same stale-pause guard as above
                     self._toggle_pause_job(key)
-                self.agents[key].set_run_state(
-                    running=False,
-                    pending_restart=key in self._restart_jobs,
-                )
+                # GUI rework Phase 19: "api_image" also drives through
+                # _drive_site (hence __worker_done__) but is NOT one of
+                # self.agents (no SiteConfig, no AgentPanel — see
+                # _start_api_image) — chatgpt/gemini take the EXACT
+                # same branch as before; a key outside self.agents
+                # resolves its OWN settings panel via _tool_panel_key,
+                # the same bridge __tool_done__ below already uses, and
+                # has no pending-restart concept (this job's
+                # TerminalState always carries retry_after_s=None, so it
+                # never enters self._restart_jobs to begin with).
+                if key in self.agents:
+                    self.agents[key].set_run_state(
+                        running=False,
+                        pending_restart=key in self._restart_jobs,
+                    )
+                else:
+                    panel_key = self._tool_panel_key(key)
+                    if panel_key is not None:
+                        self._tool_panels[panel_key].set_run_state(
+                            running=False
+                        )
                 # a pending quota auto-restart keeps the panel
                 # alive (countdown, no CLOSE yet); otherwise the
                 # site is done — reveal its CLOSE button

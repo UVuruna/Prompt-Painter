@@ -52,8 +52,10 @@ match.
   retired — GUI rework Phase 14 — by `AspectSettingsPanel`), and
   (GUI rework Phase 10) `MenuTile`/`MENU_TILES`/`MENU_TILE_*` behind
   `MainMenu`, (GUI rework Phase 11) `TILE_JOB_KINDS` behind the
-  running view's `IconBar`, and (GUI rework Phase 15) `tile_for_kind`
-  behind `PainterGui._tool_panel_key`
+  running view's `IconBar`, (GUI rework Phase 15) `tile_for_kind`
+  behind `PainterGui._tool_panel_key`, and (GUI rework Phase 19)
+  `GEMINI_IMAGE_MODEL`, `AI_IMAGE_GATE_MESSAGE`, `AI_IMAGE_PROBE_PROMPT`
+  behind `ApiImageAdapter`/`ApiImageGenPanel`
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`, `ASPECT_LABEL_DECIMALS`
 - [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
@@ -243,23 +245,32 @@ match.
   `JOB_COLORS`, `JOB_METRIC`, `job_color_pair(kind)`,
   `GRID_COLS_BY_COUNT` — the dashboard per-JOB panels (owner
   2026-07-19). The dashboard shows one panel PER RUNNING JOB — the two
-  gen SITES plus the four in-place TOOLS plus the AI CHECKER (owner
-  2026-07-20), up to seven in parallel.
+  gen SITES, the API IMAGE GEN job (GUI rework Phase 19 — same
+  "generation" tier, driven through the paid REST API instead of a
+  browser tab; see [GUI](../gui.md)'s `ApiImageAdapter`/
+  `ApiImageGenPanel`) plus the four in-place TOOLS plus the AI CHECKER
+  (owner 2026-07-20), up to eight in parallel.
   `JOB_ORDER` is the fixed priority (gen first) that row-major places
-  panels so ChatGPT + Gemini always take the top cells;
-  `GRID_COLS_BY_COUNT` (1→1, 2→2, 3→3, 4→2, 5→2, 6→2, 7→3, rows =
-  ceil(N/cols)) is the responsive shape. Each job carries a `JOB_LABEL`
-  (the three tool buttons drop "only"), an ICON stem in `JOB_LOGO` —
-  the two sites their brand logo,
-  the four tools dedicated PNG icons (`bg`/`crop`/`upscale`/`aspect`,
-  replacing the old `JOB_EMOJI` marks; `gui.icon()` resolves each stem
-  to svg or png), the checker the `ai` png. Plus a `(day, night)`
-  `JOB_COLORS` pair
-  (`job_color_pair` returns it, auto-flipping on `set_appearance_mode`),
-  and a `JOB_METRIC` word (removed / reduction / increase / deformation;
-  the checker's odd one out is `defects` — a COUNT, not a %) the panel
-  shows. Pure strings/numbers, so the tests import it
-  without tkinter.
+  panels so ChatGPT + Gemini + API Image GEN always take the top row;
+  `GRID_COLS_BY_COUNT` (1→1, 2→2, 3→3, 4→2, 5→2, 6→2, 7→3, 8→3, rows =
+  ceil(N/cols)) is the responsive shape (8 added Phase 19, same 3-column
+  shape 7 already had — one more empty cell). Each job carries a
+  `JOB_LABEL` (the three tool buttons drop "only"), an ICON stem in
+  `JOB_LOGO` — the two sites their brand logo, `"api_image"` REUSING the
+  Gemini logo (it IS Gemini, just via the REST API — the same icon
+  `MENU_TILES`'s own `api_image_gen` tile already picked), the four
+  tools dedicated PNG icons (`bg`/`crop`/`upscale`/`aspect`, replacing
+  the old `JOB_EMOJI` marks; `gui.icon()` resolves each stem to svg or
+  png), the checker the `ai` png. Plus a `(day, night)` `JOB_COLORS`
+  pair (`job_color_pair` returns it, auto-flipping on
+  `set_appearance_mode`) — `"api_image"`'s own orange pair is the SAME
+  tuple `MENU_TILES`'s `api_image_gen` tile reads back (one hue, not two
+  literals that could drift, see `MENU_TILES` below) — and a `JOB_METRIC`
+  word (removed / reduction / increase / deformation; the checker's odd
+  one out is `defects` — a COUNT, not a %) the panel shows — `"api_image"`
+  has NO entry here, same as chatgpt/gemini (`DashPanel`, not `ToolPanel`,
+  shows no per-image metric column). Pure strings/numbers, so the tests
+  import it without tkinter.
 - `JOBTEMP_DIRNAME`, `JOBTEMP_REMOVED_ALPHA` — the tool temp/restore
   store (owner 2026-07-19). `JOBTEMP_DIRNAME` (`.painter_tmp`,
   gitignored) is the PROJECT_ROOT-relative backup root
@@ -429,32 +440,37 @@ match.
   frozen `MenuTile` dataclass (`id`, `label`, `description`, `icon`
   stem, `color` `(day, night)` accent pair, `enabled`) and the 8-entry
   `MENU_TILES` tuple behind it — `website_gen`, `ai_sheet_gen`,
-  `api_image_gen` (`enabled=False`; a shown-but-inert placeholder until
-  Phase 19 wires the adapter), `image_checker`, `bg`, `crop`, `upscale`,
-  `aspect` — PURE DATA, same shape/spirit as `SiteConfig`/`SITES`
-  below, so `test_menu_tiles_cover_all_eight_functionalities_with_
-  unique_ids` asserts coverage/uniqueness with no tkinter import; only
-  [GUI](../gui.md)'s `MainMenu` turns an entry into a widget. Five
-  tiles reuse `JOB_LABEL`/`JOB_LOGO`/`JOB_COLORS` directly (bg/crop/
+  `api_image_gen`, `image_checker`, `bg`, `crop`, `upscale`, `aspect` —
+  PURE DATA, same shape/spirit as `SiteConfig`/`SITES` below, so
+  `test_menu_tiles_cover_all_eight_functionalities_with_unique_ids`
+  asserts coverage/uniqueness with no tkinter import; only
+  [GUI](../gui.md)'s `MainMenu` turns an entry into a widget. `api_image_gen`
+  was a shown-but-inert placeholder (`enabled=False`) through Phase 18;
+  GUI rework Phase 19 flips it to `enabled=True` and wires the real
+  handler — EVERY tile is now live, `test_menu_tiles_none_are_disabled`.
+  Six tiles reuse `JOB_LABEL`/`JOB_LOGO`/`JOB_COLORS` directly (bg/crop/
   upscale/aspect map straight onto their existing job kind;
-  `image_checker` onto `"aicheck"`); the other three
-  (website_gen/ai_sheet_gen/api_image_gen) have no single matching
-  `JOB_COLORS` entry (Website GEN spans BOTH gen sites, the other two
-  are net-new AI features) and carry their own new accent tuples
-  (indigo/yellow/orange) picked to stay visually distinct from the
-  seven `JOB_COLORS` hues already in use. `MENU_TILE_RADIUS` (16) sits
-  in DESIGN.md's "cards, panels" bracket, one notch above `gui.py`'s
-  own smaller `BTN_RADIUS`/`INPUT_RADIUS` "buttons, inputs" bracket;
-  the rest are the tile grid's own Rule #4 geometry (a 4×2 layout for
-  today's 8 tiles, gap/icon-size/border-width — `_HOVER_PX` is the
-  ONE thing that changes on a tile's hover, a border-width widen with
-  no fill-colour cascade to keep in sync).
+  `image_checker` onto `"aicheck"`; `api_image_gen` onto `"api_image"`,
+  Phase 19); the other two (website_gen/ai_sheet_gen) have no single
+  matching `JOB_COLORS` entry (Website GEN spans BOTH gen sites,
+  ai_sheet_gen is a net-new AI feature with no dashboard job at all)
+  and carry their own accent tuples (indigo/yellow) picked to stay
+  visually distinct from the `JOB_COLORS` hues already in use.
+  `MENU_TILE_RADIUS` (16) sits in DESIGN.md's "cards, panels" bracket,
+  one notch above `gui.py`'s own smaller `BTN_RADIUS`/`INPUT_RADIUS`
+  "buttons, inputs" bracket; the rest are the tile grid's own Rule #4
+  geometry (a 4×2 layout for today's 8 tiles, gap/icon-size/border-width
+  — `_HOVER_PX` is the ONE thing that changes on a tile's hover, a
+  border-width widen with no fill-colour cascade to keep in sync).
 - `TILE_JOB_KINDS` — a `{MENU_TILES id: (JOB_ORDER kind, ...)}` dict
   (GUI rework Phase 11) behind [GUI](../gui.md)'s running-view
   `IconBar`: which kind(s) light a tile up while at least one is
-  active (`website_gen` → `("chatgpt", "gemini")`, the five tool/
-  checker tiles → their own single matching kind, the two AI dialogs
-  → `()` since neither has a dashboard job of its own). PURE DATA
+  active (`website_gen` → `("chatgpt", "gemini")`, the six tool/
+  checker/api-image tiles → their own single matching kind,
+  `ai_sheet_gen` → `()` since it has no dashboard job of its own —
+  `api_image_gen` used to be a SECOND empty-tuple entry through Phase
+  18; GUI rework Phase 19 gives it `("api_image",)`, the same
+  single-kind shape bg/crop/upscale/aspect already have). PURE DATA
   again — a new job kind only ever needs a data change here, never an
   `IconBar` code change; `test_tile_job_kinds_*` in `test_config.py`
   checks coverage BOTH ways (every `MENU_TILES` id has an entry, every
@@ -465,22 +481,35 @@ match.
   tile (bg/crop/upscale/aspect resolve to themselves — tile id ==
   slot; `"aicheck"` resolves to `"image_checker"`, since the AI
   checker's dashboard slot predates the tile system, GUI rework Phase
-  11, and never renamed to match it); `None` for a kind sharing a
-  tile with another (chatgpt/gemini under `"website_gen"`) or with no
-  tile at all. Behind [GUI](../gui.md)'s `PainterGui._tool_panel_key`,
-  the one bridge `_toggle_pause_job`/the `__tool_done__` dispatch
-  branch need to reach the AI checker's settings panel from its
-  `"aicheck"` JOB_ORDER kind — PURE DATA-DRIVEN, so a future
-  standalone job kind never needs a new branch there, only a
-  `TILE_JOB_KINDS` entry; `test_tile_for_kind_*` in `test_config.py`.
+  11, and never renamed to match it; `"api_image"` resolves to
+  `"api_image_gen"`, GUI rework Phase 19 — SAME asymmetry as the
+  checker's, `ApiImageGenPanel`'s own `_tool_panels` key differing
+  from its JOB_ORDER slot); `None` for a kind sharing a tile with
+  another (chatgpt/gemini under `"website_gen"`) or with no tile at
+  all. Behind [GUI](../gui.md)'s `PainterGui._tool_panel_key`, the one
+  bridge `_toggle_pause_job`/the `__worker_done__`/`__tool_done__`
+  dispatch branches need to reach a job's settings panel from its
+  JOB_ORDER kind — PURE DATA-DRIVEN, so a future standalone job kind
+  never needs a new branch there, only a `TILE_JOB_KINDS` entry;
+  `test_tile_for_kind_*` in `test_config.py`.
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text, style=None)` — the
   rule block appended to every prompt: the chosen background (each
   site's dropdown defaults to its `default_background` — ChatGPT
-  transparent, Gemini white) plus the site's forced laws (owner
-  2026-07-17). Gemini's aspect law is picked FROM THE PROMPT:
-  TALL/lancet prompts get tall portrait, everything else (badges,
-  rondels, medallions) a perfect 1:1 square; plus NO reflections.
+  transparent, Gemini white; `ApiImageGenPanel`'s own default is
+  "white" too, chosen directly by the panel rather than a
+  `default_background` field — the paid image model has no
+  `SiteConfig`, and cannot render real transparency at all, spec item
+  3) plus the site's forced laws (owner 2026-07-17). Gemini's aspect
+  law is picked FROM THE PROMPT: TALL/lancet prompts get tall
+  portrait, everything else (badges, rondels, medallions) a perfect
+  1:1 square; plus NO reflections. `SITE_PROMPT_RULES["api_image"]`
+  (GUI rework Phase 19) is an EMPTY tuple — no extra rule yet, since
+  there is no live drift evidence for the API model the way there is
+  for the Gemini WEBSITE's reflections; a required entry regardless
+  (`prompt_suffix` indexes `SITE_PROMPT_RULES[site_key]` directly, so
+  a missing key would raise) — add a real rule here if the owner
+  observes the same drift pattern from the API.
 - `STYLES`, `STYLE_CHOICES`, `STYLE_DEFAULT` — the per-agent STYLE
   clause (owner 2026-07-19). `STYLES` maps 7 named keys ("None" +
   Realistic / Oil painting / Watercolor / 3D render / Flat vector / Ink
@@ -537,6 +566,19 @@ match.
   which deliberately does NOT key on the same body's "retry in Xs"
   hint (present on both a permanent and an ordinary transient 429 —
   see ai.md's Design Decisions for the full trap writeup).
+- `AI_IMAGE_PROBE_PROMPT`, `AI_IMAGE_GATE_MESSAGE` — GUI rework Phase
+  19, [GUI](../gui.md)'s `ApiImageGenPanel`. `AI_IMAGE_PROBE_PROMPT` is
+  the tiny, cheap prompt the panel's **Check API access** button sends
+  through a REAL `ai.generate_image` call — the ONLY way to learn
+  whether the account still has zero free-tier quota is to actually
+  call the paid endpoint (same idea as the key wizard's own
+  `AI_TEST_PROMPT` probing the free text model). `AI_IMAGE_GATE_MESSAGE`
+  is the owner-facing copy shown — and the panel's Start button
+  disabled — the moment that probe (or a live run, via
+  `ApiImageAdapter.extract_image`'s own `PaidFeatureRequired` ->
+  `driver.TerminalState` mapping) hits the free-tier-EXHAUSTED signal:
+  "API image generation needs billing enabled — free tier limit is 0;
+  use Website GEN for free." Data only — the owner rewords either here.
 - `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`,
   `fmt_pct(value)` — the short human formatters shared by the runner
   report and the GUI dashboard. `fmt_op_duration` keeps sub-second

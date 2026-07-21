@@ -82,6 +82,21 @@ def test_dest_for_mirrors_the_assets_tree():
     assert dest_for("fake/img_0.png", "gemini") == "gemini/fake/img_0.png"
 
 
+def test_dest_for_api_image_injects_the_same_way_a_real_site_does():
+    """GUI rework Phase 19: "api_image" is just another site_key to
+    dest_for (it never validates against SITES) — images land at
+    <cat>/api_image/<rest>, exactly mirroring how chatgpt/gemini slot
+    in, so a finished API-generated collection copies into the SAME
+    assets/ tree as a website-generated one."""
+    assert (
+        dest_for("assets/emblem/mood/Glory.png", "api_image")
+        == "emblem/api_image/mood/Glory.png"
+    )
+    assert (
+        dest_for("fake/img_0.png", "api_image") == "api_image/fake/img_0.png"
+    )
+
+
 def test_prompt_suffix_rules():
     gemini_white = prompt_suffix("gemini", "white")
     # the owner's three laws for Gemini, forced into every prompt

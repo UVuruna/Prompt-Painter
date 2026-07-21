@@ -298,12 +298,11 @@ def test_menu_tiles_have_a_label_description_and_a_real_icon_file():
         assert night.startswith("#") and len(night) == 7
 
 
-def test_menu_tiles_only_api_image_gen_is_disabled():
-    """Phase 19 flips this on; every other functionality already had a
-    working handler behind it before Phase 10 (owner decision
-    2026-07-21)."""
+def test_menu_tiles_none_are_disabled():
+    """GUI rework Phase 19 flips the last placeholder (api_image_gen) on
+    — every functionality now has a real handler behind its tile."""
     disabled = {tile.id for tile in MENU_TILES if not tile.enabled}
-    assert disabled == {"api_image_gen"}
+    assert disabled == set()
 
 
 def test_menu_tile_radius_matches_the_design_system_card_bracket():
@@ -330,12 +329,18 @@ def test_tile_job_kinds_website_gen_spans_both_sites():
     assert TILE_JOB_KINDS["website_gen"] == ("chatgpt", "gemini")
 
 
-def test_tile_job_kinds_the_two_ai_dialogs_have_no_dashboard_job():
-    """Neither 'New collection (AI)' nor the (disabled) API Image GEN
-    tile has a JOB_ORDER kind of its own — they only ever launch, they
-    never light up in the IconBar."""
+def test_tile_job_kinds_ai_sheet_gen_has_no_dashboard_job():
+    """'New collection (AI)' only ever launches a dialog — it has no
+    JOB_ORDER kind of its own, so it never lights up in the IconBar."""
     assert TILE_JOB_KINDS["ai_sheet_gen"] == ()
-    assert TILE_JOB_KINDS["api_image_gen"] == ()
+
+
+def test_tile_job_kinds_api_image_gen_now_has_its_own_dashboard_job():
+    """GUI rework Phase 19: unlike ai_sheet_gen, API Image GEN DOES run
+    as a real dashboard job (the "api_image" JOB_ORDER kind) — a
+    single-kind tile, the same shape bg/crop/upscale/aspect already
+    have."""
+    assert TILE_JOB_KINDS["api_image_gen"] == ("api_image",)
 
 
 def test_tile_job_kinds_every_job_order_kind_is_reachable_from_some_tile():
@@ -365,6 +370,12 @@ def test_tile_for_kind_resolves_the_ai_checker_to_its_own_tile_id():
     from its JOB_ORDER slot ("aicheck") — the AI checker predates the
     tile system (owner 2026-07-20 vs. GUI rework Phase 10/11)."""
     assert tile_for_kind("aicheck") == "image_checker"
+
+
+def test_tile_for_kind_resolves_api_image_to_its_own_tile_id():
+    """GUI rework Phase 19: "api_image" -> "api_image_gen", the same
+    tile-id==slot shape as bg/crop/upscale/aspect."""
+    assert tile_for_kind("api_image") == "api_image_gen"
 
 
 def test_tile_for_kind_returns_none_for_a_multi_kind_tile():
