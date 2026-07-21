@@ -700,6 +700,50 @@ JOBTEMP_DIRNAME = ".painter_tmp"  # PROJECT_ROOT-relative temp/backup root
 # metric — the same opacity notion as CROP_INK_ALPHA / CLEAN_EDGE_ALPHA.
 JOBTEMP_REMOVED_ALPHA = 40
 
+# GUI rework Phase 7 (owner decision 2026-07-21): the site-generation
+# pipeline (BG -> Crop -> Aspect(force) -> Upscale, Phase 8) backs up an
+# image's state before EVERY enabled step it runs, not just once — so a
+# per-step restore viewer (Phase 9) can revert any single stage without
+# losing the others. JobTemp namespaces those per-step backups under
+# this reserved subdir name, which a real image's relative path is never
+# expected to collide with, so a named-step backup can never be confused
+# with the plain step=None backup the four standalone tools have always
+# used (CRITICAL regression guard — see jobtemp.py), or with another
+# step's own backup.
+JOBTEMP_STEPS_SUBDIR = "__steps__"
+
+# The ORDERING CONTRACT `JobTemp.steps_for(rel)` relies on. The pipeline
+# itself runs BG -> Crop -> Aspect -> Upscale (Phase 8's reordered
+# _compose_post_save), bookended by two backups that are not pipeline
+# STEPS themselves: "original" is the pristine baseline captured before
+# the pipeline touches the file at all — what "restore everything to
+# pristine" restores to, via the explicit call
+# `restore_to(rel, step="original")` — and "fixer" is the Fixer AI's
+# pre-fix snapshot (Phase 20), taken long after the pipeline and the
+# checker have already run. `steps_for()` filters THIS tuple down to
+# whichever steps actually backed up one rel, so its result is always in
+# this same original -> bg -> crop -> aspect -> upscale -> fixer order,
+# regardless of the order the individual backup() calls actually
+# happened in.
+JOBTEMP_STEP_NAMES = ("original", "bg", "crop", "aspect", "upscale", "fixer")
+
+# Intermediate-backup disk cap (owner decision 2026-07-21): 4 GiB per
+# job. Findings' memory math — 4 enabled steps x ~3MB/image = ~12MB/image
+# (~15MB with Fixer), so a realistic overnight batch (~300 images) peaks
+# ~3.6-4.5GB, transient and cleared on close — sits close to this cap in
+# the "keep every step" default case. `JobTemp.over_cap()` is a SIGNAL
+# only (JobTemp never auto-evicts anything itself); the Phase 8 caller
+# reads it to stop taking NEW per-step backups (falling back to
+# original-only) and raise a persistent dashboard banner.
+JOBTEMP_MAX_BYTES = 4 * 1024**3  # 4 GiB
+
+# Per-agent "Keep every pipeline step (uses more disk)" toggle default
+# (owner decision 2026-07-21) — ON: every enabled pipeline step gets its
+# own restorable backup rather than only the original baseline. Consumed
+# by the future Phase 8 AgentPanel setting; JobTemp itself has no notion
+# of "agents" — it only ever backs up whatever step name a caller passes.
+JOBTEMP_KEEP_ALL_STEPS_DEFAULT = True
+
 # Transparency backdrop for the before/after viewer. BG removal (and the
 # other tools) leave the AFTER image transparent where the background was
 # cleared; drawn straight onto the panel colour, "removed" looks

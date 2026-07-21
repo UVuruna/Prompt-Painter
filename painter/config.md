@@ -32,7 +32,8 @@ match.
   package-or-standalone
 - [Upscale](upscale.md) — the `UPSCALE_*` block
 - [Job Temp](jobtemp.md) — `PROJECT_ROOT`, `JOBTEMP_DIRNAME`,
-  `JOBTEMP_REMOVED_ALPHA`, `JOB_METRIC`
+  `JOBTEMP_REMOVED_ALPHA`, `JOB_METRIC`, and (GUI rework Phase 7)
+  `JOBTEMP_STEPS_SUBDIR`, `JOBTEMP_STEP_NAMES`, `JOBTEMP_MAX_BYTES`
 - [Settings](settings.md) — `SETTINGS_PATH`
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
   `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
@@ -254,6 +255,31 @@ match.
   [Job Temp](jobtemp.md) uses; `JOBTEMP_REMOVED_ALPHA` (40) is the
   alpha below which a pixel counts as "removed" for the BG metric (the
   same opacity notion as `CROP_INK_ALPHA` / `CLEAN_EDGE_ALPHA`).
+- `JOBTEMP_STEPS_SUBDIR`, `JOBTEMP_STEP_NAMES`, `JOBTEMP_MAX_BYTES`,
+  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT` — GUI rework Phase 7 (owner decision
+  2026-07-21): per-step backups for the site-generation pipeline (BG →
+  Crop → Aspect(force) → Upscale, Phase 8) on top of
+  [Job Temp](jobtemp.md)'s existing single-backup store.
+  `JOBTEMP_STEPS_SUBDIR` (`"__steps__"`) is the reserved subdir name a
+  NAMED step's backup is namespaced under, so it can never collide with
+  the plain `step=None` path the four standalone tools have always used
+  (see Job Temp's "On-disk layout" for the full byte-for-byte
+  guarantee). `JOBTEMP_STEP_NAMES` (`"original", "bg", "crop", "aspect",
+  "upscale", "fixer"`) is the ORDERING CONTRACT `JobTemp.steps_for(rel)`
+  relies on: the pipeline's own BG→Crop→Aspect→Upscale order, bookended
+  by `"original"` (the pristine baseline, before the pipeline touches
+  the file — what a "restore everything to pristine" restores to, via
+  the explicit `restore_to(rel, step="original")`) and `"fixer"` (the
+  Fixer AI's pre-fix snapshot, Phase 20, taken after the pipeline and
+  checker have already run). `JOBTEMP_MAX_BYTES` (`4 * 1024**3`, 4 GiB)
+  is the intermediate-backup disk cap `JobTemp.over_cap()` compares
+  cumulative backup bytes against — a SIGNAL only, `JobTemp` never
+  auto-evicts; the Findings memory math (4 steps × ~3MB/image ⇒
+  ~300 images overnight peaking ~3.6–4.5GB) is why 4 GiB was chosen.
+  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT` (`True`) is the default for the
+  future per-agent "Keep every pipeline step (uses more disk)" toggle
+  (Phase 8) — not read by `jobtemp.py` itself, which has no notion of
+  "agents".
 - `CHECKER_TILE_PX`, `CHECKER_LIGHT`, `CHECKER_DARK` — the neutral
   light/dark checkerboard the before/after viewer composites a
   transparent AFTER over, so a removed (transparent) background reads as

@@ -12,6 +12,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
+import painter.jobtemp as jobtemp_module
+from painter.config import JOBTEMP_STEPS_SUBDIR
 from painter.jobtemp import JobTemp, TEMP_ROOT, clear_all, measure
 
 
@@ -130,6 +132,157 @@ def test_new_jobtemp_wipes_a_stale_slot(tmp_path):
     # a fresh JobTemp for the SAME slot must start empty
     jt2 = JobTemp("bg", folder)
     assert not jt2.has_backup("f.png")
+
+
+# --- Phase 7: per-step backups ----------------------------------------
+
+
+def test_step_backup_is_namespaced_and_original_path_unchanged(tmp_path):
+    """THE critical regression guard (Phase 7): a step=None backup must
+    land at the EXACT byte-for-byte path the pre-Phase-7 store always
+    used (root/rel) — the four standalone tools' on-disk layout is
+    untouched. A named step lands somewhere else entirely, namespaced so
+    it can never collide with the unnamed backup or with another step."""
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    img = folder / "a.png"
+    _make_png(img, 40, 40)
+
+    jt = JobTemp("bg", folder)
+    unnamed = jt.backup(img, "a.png")
+    assert unnamed == jt.root / "a.png"  # identical to the old layout
+    assert unnamed.exists()
+
+    named = jt.backup(img, "a.png", step="crop")
+    assert named != unnamed
+    assert named.exists()
+    assert JOBTEMP_STEPS_SUBDIR in named.parts
+
+    # the no-step lookups still resolve to the unnamed backup only
+    assert jt.before_path("a.png") == unnamed
+    assert jt.has_backup("a.png") is True
+    # the named lookup resolves to the OTHER path
+    assert jt.before_path("a.png", step="crop") == named
+    assert jt.has_backup("a.png", step="crop") is True
+    # a step that was never backed up is absent, independently
+    assert jt.has_backup("a.png", step="upscale") is False
+    assert jt.before_path("a.png", step="upscale") is None
+
+
+def test_restore_to_named_step_reverts_only_that_stage(tmp_path):
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    img = folder / "a.png"
+    _make_png(img, 40, 40)
+
+    jt = JobTemp("chatgpt", folder)
+    # "original" — the pristine baseline, before the pipeline starts
+    jt.backup(img, "a.png", step="original")
+    pristine = img.read_bytes()
+
+    # BG step runs: back up the pre-bg state (== pristine), then mutate
+    jt.backup(img, "a.png", step="bg")
+    img.write_bytes(b"after-bg")
+    after_bg = img.read_bytes()
+
+    # CROP step runs: back up the pre-crop state (== after_bg), mutate
+    jt.backup(img, "a.png", step="crop")
+    img.write_bytes(b"after-crop")
+
+    # restore_to("crop") reverts to right BEFORE crop ran == after_bg,
+    # NOT all the way back to pristine
+    assert jt.restore_to("a.png", step="crop") is True
+    assert img.read_bytes() == after_bg
+
+    # the earlier stages' own backups are untouched by that restore
+    assert jt.before_path("a.png", step="bg").read_bytes() == pristine
+    assert jt.before_path("a.png", step="original").read_bytes() == pristine
+
+    # a step that never backed this rel up has nothing to restore
+    assert jt.restore_to("a.png", step="upscale") is False
+
+
+def test_steps_for_lists_available_stages_in_order(tmp_path):
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    img = folder / "a.png"
+    _make_png(img, 40, 40)
+
+    jt = JobTemp("chatgpt", folder)
+    # back them up OUT of pipeline order, to prove steps_for orders by
+    # JOBTEMP_STEP_NAMES, never by call/insertion order
+    jt.backup(img, "a.png", step="upscale")
+    jt.backup(img, "a.png", step="original")
+    jt.backup(img, "a.png", step="bg")
+
+    assert jt.steps_for("a.png") == ["original", "bg", "upscale"]
+    # a rel with no step backups at all
+    assert jt.steps_for("missing.png") == []
+    # the unnamed (step=None) backup is not itself a "step"
+    jt.backup(img, "a.png")
+    assert jt.steps_for("a.png") == ["original", "bg", "upscale"]
+
+
+def test_restore_all_only_touches_the_original_step_never_named_steps(tmp_path):
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    a = folder / "a.png"
+    b = folder / "b.png"
+    _make_png(a, 30, 30)
+    _make_png(b, 30, 30)
+    a_original = a.read_bytes()
+
+    jt = JobTemp("bg", folder)
+    # "a" has BOTH an unnamed backup and a named-step backup
+    jt.backup(a, "a.png")                  # unnamed
+    jt.backup(a, "a.png", step="crop")     # named
+    a.write_bytes(b"stomped-a")
+
+    # "b" has ONLY a named-step backup, no unnamed one
+    jt.backup(b, "b.png", step="crop")
+    b.write_bytes(b"stomped-b")
+
+    count = jt.restore_all()
+
+    # only the ONE unnamed backup (a.png) was restored
+    assert count == 1
+    assert a.read_bytes() == a_original
+    # "b" was never touched — it had no unnamed backup to restore from
+    assert b.read_bytes() == b"stomped-b"
+    # restore_all must never manufacture a bogus steps folder inside the
+    # LIVE output tree (the bug a naive rglob-everything walk would hit)
+    assert not (folder / JOBTEMP_STEPS_SUBDIR).exists()
+
+
+def test_backup_tracks_cumulative_bytes_and_over_cap_flags(tmp_path, monkeypatch):
+    folder = tmp_path / "imgs"
+    folder.mkdir()
+    a = folder / "a.png"
+    _make_png(a, 50, 50)
+    size = a.stat().st_size
+
+    jt = JobTemp("bg", folder)
+    assert jt.bytes_used == 0
+    assert jt.over_cap() is False
+
+    jt.backup(a, "a.png")
+    assert jt.bytes_used == size
+
+    jt.backup(a, "a.png", step="crop")
+    assert jt.bytes_used == size * 2
+
+    # lower the cap under monkeypatch so the flag flips without writing
+    # gigabytes of real test data
+    monkeypatch.setattr(jobtemp_module, "JOBTEMP_MAX_BYTES", size * 2)
+    assert jt.over_cap() is True  # AT the cap counts as over
+
+    monkeypatch.setattr(jobtemp_module, "JOBTEMP_MAX_BYTES", size * 2 + 1)
+    assert jt.over_cap() is False
+
+    # dropping a backup reduces the running total again (no drift)
+    jt.drop("a.png", step="crop")
+    assert jt.bytes_used == size
+    assert jt.over_cap() is False
 
 
 # --- measure ----------------------------------------------------------
