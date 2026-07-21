@@ -2286,11 +2286,10 @@ class AgentPanel(ttk.Labelframe):
         AgentPanel is BUILD-ONCE / never destroyed before app exit, same
         lifetime as every dashboard JobPanel. Needed because
         ``AspectRatioCanvas`` draws its accent/label straight from the
-        active theme (see its own docstring) and, unlike its ONLY other
-        host (the fully modal ``AspectRatioDialog``, which cannot be
-        open during a live flip), THIS host is a normal part of the main
-        window — a Day/Night flip while the fine-tune box is expanded
-        must repaint it too."""
+        active theme (see its own docstring) — this host is a normal,
+        non-modal part of the main window (like its sibling host,
+        ``AspectSettingsPanel``, GUI rework Phase 14), so a Day/Night
+        flip while the fine-tune box is expanded must repaint it too."""
         self._force_aspect_canvas.redraw_theme()
 
     def _on_destroy(self, event) -> None:
@@ -2532,58 +2531,90 @@ def _parse_int_range(text: str, field_name: str, lo: int, hi: int) -> int:
 
 class ToolSettingsPanel(ttk.Frame):
     """Base for a standalone in-place tool's PERSISTENT settings panel
-    — BG removal / Crop today (GUI rework Phase 13; Phase 14 gives
-    Upscale/Aspect the same treatment, per the design's own track
-    order). Shown INLINE above Dashboard/Log while its tile is toggled
-    open (``PainterGui._inline_kind`` — see ``PainterGui.
+    — all four tools now (BG removal / Crop, GUI rework Phase 13;
+    Upscale / Aspect ratio, Phase 14, same treatment). Shown INLINE
+    above Dashboard/Log while its tile is toggled open
+    (``PainterGui._inline_kind`` — see ``PainterGui.
     _open_tool_panel``), the exact surface website_gen's own
     ``_controls_box`` already occupies (``_apply_running_layout``),
     generalized to a second panel family instead of forked.
 
     Owns: an input picker (**Folder…** — recursive via the shared
     ``iter_images``, matching every folder-based tool — or **Files…**,
-    mirroring the Aspect tool's own Files/Folder choice), an embedded
-    ``FilterEditor`` (Phase 4) narrowing WHICH images the run touches,
-    an optional **Advanced** collapsible (the Settings-gear idiom
-    ``AgentPanel._toggle_settings`` already established) exposing
-    engine knobs the subclass contributes, and a Start/Pause row —
-    Pause mirrors ``AgentPanel.btn_pause``: a plain label-only toggle,
-    always clickable, never gated on run state (pausing before a job
-    exists is harmless — a fresh Start always clears any stale
-    pre-pause, see ``PainterGui._launch_tool_worker``).
+    mirroring the Aspect tool's own Files/Folder choice), an optional
+    **always-visible** subclass block (``_build_extra`` — e.g.
+    Upscale's min-side spinner, Aspect's target-ratio canvas; base
+    no-op), an embedded ``FilterEditor`` (Phase 4) narrowing WHICH
+    images the run touches (optionally pre-seeded — ``_default_
+    conditions``, base empty), an optional **Advanced** collapsible
+    (the Settings-gear idiom ``AgentPanel._toggle_settings`` already
+    established; ``HAS_ADVANCED = False`` skips building it entirely —
+    Upscale/Aspect have no hidden engine knobs, only always-visible
+    primary controls, so a gear that reveals nothing would be a dead
+    affordance) exposing engine knobs the subclass contributes, an
+    optional **footer** block (``_build_footer`` — e.g. Aspect's
+    non-proportional-stretch warning, carried over from the old
+    modal's confirm dialog; base no-op) shown just above the button
+    row, and a Start/Pause/Stop row — Pause mirrors ``AgentPanel.
+    btn_pause``: a plain label-only toggle, always clickable, never
+    gated on run state (pausing before a job exists is harmless — a
+    fresh Start always clears any stale pre-pause, see ``PainterGui.
+    _launch_tool_worker``).
 
-    No literal Stop button: unlike a site job, a standalone tool run
-    (``PainterGui._run_tool_job``) has no should_stop escape hatch —
-    adding one would mean changing that shared worker loop, which this
-    phase's own scope keeps UNCHANGED (bg/crop/upscale/aspect all rely
-    on its exact event contract). The panel's own icon-bar tile already
-    doubles as "dismiss without starting" (clicking it again hides the
-    panel, exactly like website_gen's toggle) — see gui.md for the
-    honest scope note on why a real mid-run Stop is flagged, not built,
-    this round.
+    **Stop** (GUI rework Phase 14, closing Phase 13's own flagged gap)
+    mirrors ``AgentPanel.btn_stop``'s availability styling (filled
+    while the job runs, disabled outline otherwise) and calls
+    ``PainterGui._stop_tool`` — a "smart" stop: the worker
+    (``_run_tool_job``, threaded a ``should_stop`` this phase, mirrors
+    ``run_sheet``'s own pattern) finishes the in-flight image then
+    halts; once it actually confirms the halt (``__tool_done__``, NOT
+    synchronously on click — the worker may still be mid-image),
+    ``PainterGui`` closes this tool's dashboard panel and clears its
+    JobTemp (the existing ``_close_panel``, same as a manual Close)
+    and returns to the Main Menu if that was the last active job
+    (``_request_menu`` — Phase 11's OWN gate, unmodified: it only ever
+    actually navigates once ``_active_kinds()`` is empty). This is a
+    deliberate DIVERGENCE from a site's own Stop (which leaves its
+    panel up for the owner to review before a manual Close, see
+    gui.md's **Running view**) — a quick, disk-based tool run has
+    nothing left worth reviewing once stopped, so "smart" here means
+    "decisively finish the job", not "linger".
 
-    Subclasses (``BgSettingsPanel``/``CropSettingsPanel``) set
-    ``SLOT`` and contribute ``_build_advanced``/``build_func``/
-    ``_advanced_settings``/``_apply_advanced_settings`` (Rule #5 — one
-    shared body, not two near-identical panels). Public surface
-    ``PainterGui._start_tool_from_panel`` reads: ``resolve_input() ->
-    (Path, list[Path])`` (raises ``ValueError`` with an owner-facing
+    Subclasses set ``SLOT`` and contribute ``_build_advanced``/
+    ``build_func``/``_advanced_settings``/``_apply_advanced_settings``
+    (Rule #5 — one shared body, not four near-identical panels);
+    ``BgSettingsPanel``/``CropSettingsPanel`` additionally use
+    ``_build_advanced`` for real (their engine knobs); ``Upscale
+    SettingsPanel``/``AspectSettingsPanel`` set ``HAS_ADVANCED = False``
+    and use ``_build_extra``/``_build_footer`` instead (see above) —
+    ``_advanced_settings``/``_apply_advanced_settings`` still carry
+    their own always-visible fields into the settings round-trip
+    regardless (the hook name is about "subclass extra data", not
+    literally the collapsible). Public surface ``PainterGui.
+    _start_tool_from_panel`` reads: ``resolve_input() -> (Path,
+    list[Path])`` (raises ``ValueError`` with an owner-facing
     message), ``get_conditions() -> list[FilterCondition]`` (proxies
     ``FilterEditor.get_conditions``, same raise contract),
     ``build_func() -> Callable[[Path, Log], str]`` (subclass hook —
-    the engine call closed over THIS run's Advanced overrides),
+    the engine call closed over THIS run's Advanced/extra overrides),
     ``set_run_state(running)``/``set_paused(is_paused)`` (mirror
     ``AgentPanel``'s own), and the settings round-trip
     ``get_settings()``/``apply_settings(stored, conditions=...)``.
     """
 
     SLOT: str = ""  # subclass sets this to a JOB_ORDER tool kind
+    # False for Upscale/Aspect (GUI rework Phase 14) — they have no
+    # hidden engine knobs, only ALWAYS-VISIBLE primary controls (see
+    # _build_extra); building an empty collapsible gear would be a
+    # dead affordance (Rule #16 — no pointless chrome).
+    HAS_ADVANCED: bool = True
 
     def __init__(
         self,
         master,
         on_start: Callable[[str], None],
         on_pause: Callable[[str], None],
+        on_stop: Callable[[str], None],
         filter_presets: dict[str, list[dict]] | None = None,
         on_filter_presets_changed: Callable[[], None] | None = None,
     ):
@@ -2591,6 +2622,7 @@ class ToolSettingsPanel(ttk.Frame):
         self.slot = self.SLOT
         self._on_start = on_start
         self._on_pause = on_pause
+        self._on_stop = on_stop
         self._input_mode = "folder"  # or "files"
         self._folder: Path | None = None
         self._files: list[Path] = []
@@ -2621,12 +2653,21 @@ class ToolSettingsPanel(ttk.Frame):
             pick_row, textvariable=self._picked_var, style="Muted.TLabel",
         ).pack(side="left", padx=(10, 0))
 
+        # subclass hook — always-visible PRIMARY controls (Upscale's
+        # min-side spinner, Aspect's target-ratio canvas); base no-op,
+        # so BG/Crop see no change at all (an empty frame packs at
+        # zero height)
+        self._extra_box = ttk.Frame(self)
+        self._extra_box.pack(fill="x")
+        self._build_extra(self._extra_box)
+
         ttk.Label(
             self,
             text="Filter — which images this run touches (empty = all):",
         ).pack(anchor="w", pady=(8, 2))
         self.filter = FilterEditor(
-            self, presets=filter_presets,
+            self, conditions=self._default_conditions(),
+            presets=filter_presets,
             on_presets_changed=on_filter_presets_changed,
         )
         self.filter.pack(fill="x")
@@ -2634,21 +2675,31 @@ class ToolSettingsPanel(ttk.Frame):
         # the Advanced collapsible — the SAME Settings-gear idiom
         # AgentPanel._toggle_settings/_apply_finetune_visibility already
         # established, applied to a subclass-built body instead of the
-        # per-agent fine-tune block
-        adv_head = ttk.Frame(self)
-        adv_head.pack(fill="x", pady=(10, 0))
-        ttk.Label(adv_head, text="Advanced", style="Head.TLabel").pack(
-            side="left"
-        )
-        self._advanced_btn = rounded_button(
-            adv_head, SETTINGS_GLYPH_COLLAPSED,
-            command=self._toggle_advanced, icon_name="settings",
-        )
-        self._advanced_btn.pack(side="left", padx=(6, 0))
-        self._advanced_collapsed_var = tk.BooleanVar(value=True)
-        self._advanced_box = ttk.Frame(self)
-        self._build_advanced(self._advanced_box)
-        self._apply_advanced_visibility()
+        # per-agent fine-tune block. Skipped entirely when the subclass
+        # has nothing to hide behind it (HAS_ADVANCED = False) — see
+        # this class's own docstring.
+        if self.HAS_ADVANCED:
+            adv_head = ttk.Frame(self)
+            adv_head.pack(fill="x", pady=(10, 0))
+            ttk.Label(adv_head, text="Advanced", style="Head.TLabel").pack(
+                side="left"
+            )
+            self._advanced_btn = rounded_button(
+                adv_head, SETTINGS_GLYPH_COLLAPSED,
+                command=self._toggle_advanced, icon_name="settings",
+            )
+            self._advanced_btn.pack(side="left", padx=(6, 0))
+            self._advanced_collapsed_var = tk.BooleanVar(value=True)
+            self._advanced_box = ttk.Frame(self)
+            self._build_advanced(self._advanced_box)
+            self._apply_advanced_visibility()
+
+        # subclass hook — a short always-visible note just above the
+        # button row (Aspect's non-proportional-stretch warning); base
+        # no-op
+        self._footer_box = ttk.Frame(self)
+        self._footer_box.pack(fill="x", pady=(6, 0))
+        self._build_footer(self._footer_box)
 
         btn_row = ttk.Frame(self)
         btn_row.pack(fill="x", pady=(10, 0))
@@ -2659,14 +2710,37 @@ class ToolSettingsPanel(ttk.Frame):
         self.btn_start.pack(side="left")
         # the pause toggle — a plain neutral button, ALWAYS clickable
         # (no filled/outline availability dance), exactly like
-        # AgentPanel.btn_pause; see this class's own docstring for why
-        # there is no third Stop button beside it.
+        # AgentPanel.btn_pause.
         self.btn_pause = rounded_button(
             btn_row, "Pause", command=lambda: self._on_pause(self.slot),
             kind="secondary", width=70,
         )
         self.btn_pause.pack(side="left", padx=6)
+        # Stop (GUI rework Phase 14) — filled/outline availability like
+        # AgentPanel.btn_stop, styled by set_run_state below.
+        self.btn_stop = rounded_button(
+            btn_row, "Stop", command=lambda: self._on_stop(self.slot),
+            kind="danger-outline", width=70,
+        )
+        self.btn_stop.pack(side="left", padx=(0, 6))
         self.set_run_state(running=False)
+
+        # a Day/Night flip must repaint any raw-Canvas content a
+        # subclass embeds (AspectSettingsPanel's AspectRatioCanvas —
+        # base apply_theme() is a no-op, mirrors AgentPanel's own
+        # THEME_TOPLEVELS registration); build-once, never destroyed
+        # before app exit, same lifetime as every dashboard JobPanel.
+        THEME_TOPLEVELS.append(self)
+        self.bind("<Destroy>", self._on_destroy)
+
+    def _on_destroy(self, event) -> None:
+        if event.widget is self and self in THEME_TOPLEVELS:
+            THEME_TOPLEVELS.remove(self)
+
+    def apply_theme(self) -> None:
+        """Subclass hook — repaint any raw-Canvas content on a Day/
+        Night flip (e.g. AspectSettingsPanel's AspectRatioCanvas.
+        redraw_theme()). Base no-op."""
 
     # --- input picker ----------------------------------------------
 
@@ -2721,12 +2795,32 @@ class ToolSettingsPanel(ttk.Frame):
     def get_conditions(self) -> list[filters.FilterCondition]:
         return self.filter.get_conditions()
 
+    def _default_conditions(self) -> list[filters.FilterCondition]:
+        """Subclass hook — the embedded FilterEditor's SEED conditions
+        (e.g. UpscaleSettingsPanel's aspect-range default). Base empty
+        (BG/Crop start with no filter, unchanged)."""
+        return []
+
+    # --- always-visible subclass content (GUI rework Phase 14) --------
+
+    def _build_extra(self, box: ttk.Frame) -> None:
+        """Subclass hook — populate ``box`` with this tool's own
+        ALWAYS-VISIBLE primary control(s), shown between the input
+        picker and the Filter section (Upscale's min-side spinner,
+        Aspect's target-ratio canvas). Base no-op."""
+
+    def _build_footer(self, box: ttk.Frame) -> None:
+        """Subclass hook — populate ``box`` with a short note shown
+        just above the Start/Pause/Stop row (Aspect's non-proportional-
+        stretch warning). Base no-op."""
+
     # --- Advanced (subclass hooks) ------------------------------------
 
     def _build_advanced(self, box: ttk.Frame) -> None:
         """Subclass hook — populate ``box`` with this tool's own engine
         knobs. Base no-op (never reached directly — ``SLOT``/this
-        method are always overridden together)."""
+        method are always overridden together). Only ever called when
+        ``HAS_ADVANCED`` is True."""
 
     def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
         """Subclass hook — a ``(path, log) -> str`` callable wrapping
@@ -2766,10 +2860,11 @@ class ToolSettingsPanel(ttk.Frame):
 
     def set_run_state(self, running: bool) -> None:
         """Start is available unless this slot's job is already
-        running (mirrors ``AgentPanel.set_run_state``'s Start half —
-        there is no Stop button here to also style, see this class's
-        docstring)."""
+        running; Stop is available exactly while it runs — mirrors
+        ``AgentPanel.set_run_state`` (no ``pending_restart`` here, a
+        site-only/quota concept a standalone tool never has)."""
         style_action_button(self.btn_start, "success", not running)
+        style_action_button(self.btn_stop, "danger", running)
 
     def set_paused(self, is_paused: bool) -> None:
         self.btn_pause.configure(text="Resume" if is_paused else "Pause")
@@ -2782,8 +2877,9 @@ class ToolSettingsPanel(ttk.Frame):
                 filters.condition_to_dict(c)
                 for c in self.filter.get_conditions()
             ],
-            "advanced_collapsed": self._advanced_collapsed_var.get(),
         }
+        if self.HAS_ADVANCED:
+            data["advanced_collapsed"] = self._advanced_collapsed_var.get()
         data.update(self._advanced_settings())
         return data
 
@@ -2795,16 +2891,21 @@ class ToolSettingsPanel(ttk.Frame):
         every other panel's ``apply_settings`` in this file.
         ``conditions`` (GUI rework Phase 4 convention) is the ALREADY-
         PARSED replacement for the FilterEditor's stack; ``None`` (a
-        fresh settings.json) leaves it at its construction-time empty
-        default. The CALLER (``PainterGui._apply_settings``) owns
-        parsing the raw JSON, same as ``AgentPanel.apply_settings``."""
+        fresh settings.json) leaves it at its construction-time
+        default (empty, or a subclass's own ``_default_conditions``).
+        The CALLER (``PainterGui._apply_settings``) owns parsing the
+        raw JSON, same as ``AgentPanel.apply_settings``. ``_apply_
+        advanced_settings`` always runs, regardless of ``HAS_
+        ADVANCED`` — it also carries a subclass's ALWAYS-VISIBLE extra
+        fields (e.g. Upscale's min-side, Aspect's target ratio)."""
         if conditions is not None:
             self.filter.set_conditions(conditions)
-        if "advanced_collapsed" in stored:
-            self._advanced_collapsed_var.set(
-                bool(stored["advanced_collapsed"])
-            )
-        self._apply_advanced_visibility()
+        if self.HAS_ADVANCED:
+            if "advanced_collapsed" in stored:
+                self._advanced_collapsed_var.set(
+                    bool(stored["advanced_collapsed"])
+                )
+            self._apply_advanced_visibility()
         self._apply_advanced_settings(stored)
 
 
@@ -2959,6 +3060,200 @@ class CropSettingsPanel(ToolSettingsPanel):
             self.ink_alpha_var.set(stored["ink_alpha"])
         if "min_ink_px" in stored:
             self.min_ink_var.set(stored["min_ink_px"])
+
+
+class UpscaleSettingsPanel(ToolSettingsPanel):
+    """Upscale's persistent settings panel (GUI rework Phase 14).
+
+    No Advanced section (``HAS_ADVANCED = False``) — Phase 6 already
+    reduced the whole gate to ONE min-side spinner plus the base's own
+    embedded ``FilterEditor`` (pre-seeded here with the aspect-range
+    default via ``_default_conditions``, exactly like ``AgentPanel``'s
+    own ``upscale_filter``/``UpscaleParamsDialog``'s old seed), so
+    there is nothing left to tuck behind a gear — the spinner is the
+    panel's one PRIMARY control, always visible (``_build_extra``),
+    right where the old modal put it."""
+
+    SLOT = "upscale"
+    HAS_ADVANCED = False
+
+    def _default_conditions(self) -> list[filters.FilterCondition]:
+        return [filters.FilterCondition(
+            kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
+            lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
+        )]
+
+    def _build_extra(self, box: ttk.Frame) -> None:
+        self.up_minside_var = tk.StringVar(
+            value=str(UPSCALE_MIN_SIDE_DEFAULT)
+        )
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="min side", width=8).pack(side="left")
+        Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
+            side="left"
+        )
+        ttk.Label(
+            row, text="px — the smaller side reaches this; the Filter"
+            " below decides WHICH images qualify",
+        ).pack(side="left", padx=(4, 0))
+
+    def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
+        """The min-side spinner + the base's OWN FilterEditor resolve
+        into ``upscale_if_small``'s kwargs exactly like ``AgentPanel``'s
+        own upscale gate (``_upscale_params_from_side_and_filter``).
+        ``get_conditions()`` is read AGAIN here (the caller,
+        ``PainterGui._start_tool_from_panel``, already reads it once to
+        pre-filter the candidate file list) — a harmless duplicate read
+        (FilterEditor rows, no side effects): this closure needs the
+        SAME conditions to resolve the aspect band, and every
+        ``ToolSettingsPanel.build_func()`` has the same fixed no-
+        argument signature, so there is no other way to hand them in."""
+        from painter.upscale import upscale_if_small
+
+        try:
+            min_side = int(float(self.up_minside_var.get().strip()))
+        except ValueError:
+            raise ValueError("Min side must be a number.")
+        if min_side <= 0:
+            raise ValueError("Min side must be positive.")
+        up_params = _upscale_params_from_side_and_filter(
+            min_side, self.get_conditions()
+        )
+        return lambda path, log: upscale_if_small(path, log, **up_params)
+
+    def _advanced_settings(self) -> dict:
+        return {"up_minside": self.up_minside_var.get()}
+
+    def _apply_advanced_settings(self, stored: dict) -> None:
+        if "up_minside" in stored:
+            self.up_minside_var.set(stored["up_minside"])
+
+
+class AspectSettingsPanel(ToolSettingsPanel):
+    """Aspect ratio's persistent settings panel (GUI rework Phase 14).
+
+    No Advanced section (``HAS_ADVANCED = False``) — the target-ratio
+    editor (``_build_extra``: GUI rework Phase 5's ``AspectRatioCanvas``
+    two-way synced with plain W/H entries, exactly like ``AgentPanel``'s
+    own Force Aspect Ratio block) IS the panel's one PRIMARY control,
+    always visible; the base's own embedded ``FilterEditor`` decides
+    WHICH images qualify. ``_build_footer`` carries the non-
+    proportional-stretch warning the old modal's confirm ``askyesno``
+    used to show, so Start — no confirm dialog here; the panel itself,
+    deliberately configured then Started, already IS the confirmation,
+    same contract as every other panel — never surprises the owner."""
+
+    SLOT = "aspect"
+    HAS_ADVANCED = False
+
+    def _build_extra(self, box: ttk.Frame) -> None:
+        self._ratio_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
+        self._ratio_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
+        ttk.Label(
+            box, text="Target aspect ratio — stretches every matching"
+            " image to it:",
+        ).pack(anchor="w", pady=(0, 6))
+
+        row = ttk.Frame(box)
+        row.pack(anchor="w")
+        fields = ttk.Frame(row)
+        fields.pack(side="left", anchor="n")
+        ttk.Label(fields, text="W").pack(side="left", padx=(0, 4))
+        self._w_entry = rounded_entry(
+            fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self._ratio_w_var, justify="center",
+        )
+        self._w_entry.pack(side="left")
+        ttk.Label(fields, text=":", font=tk_font("head")).pack(
+            side="left", padx=8
+        )
+        ttk.Label(fields, text="H").pack(side="left", padx=(0, 4))
+        self._h_entry = rounded_entry(
+            fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self._ratio_h_var, justify="center",
+        )
+        self._h_entry.pack(side="left")
+
+        # the visual editor (GUI rework Phase 5), two-way synced with
+        # the fields above — the SAME pattern AspectRatioDialog/
+        # AgentPanel's own Force Aspect Ratio block already use
+        self._ratio_canvas = AspectRatioCanvas(
+            row, w=ASPECT_DEFAULT_W, h=ASPECT_DEFAULT_H,
+            on_change=self._on_canvas_drag,
+        )
+        self._ratio_canvas.pack(side="left", padx=(12, 0), anchor="n")
+        self._ratio_w_var.trace_add("write", self._on_wh_typed)
+        self._ratio_h_var.trace_add("write", self._on_wh_typed)
+
+    def _build_footer(self, box: ttk.Frame) -> None:
+        ttk.Label(
+            box,
+            text="⚠ Deforms every matching image with a non-proportional"
+            " STRETCH, written IN PLACE. Originals are backed up so you"
+            " can Restore; images already at this ratio are skipped"
+            " untouched.",
+            style="Muted.TLabel", wraplength=JOB_PANEL_BANNER_WRAP_PX,
+        ).pack(anchor="w")
+
+    def _on_canvas_drag(self, w: int, h: int) -> None:
+        """``AspectRatioCanvas.on_change`` — mirrors ``AgentPanel.
+        _on_force_aspect_canvas_drag``/``AspectRatioDialog.
+        _on_canvas_drag`` (Rule #5 — the third instance of the same
+        two-way sync)."""
+        self._ratio_w_var.set(str(w))
+        self._ratio_h_var.set(str(h))
+
+    def _on_wh_typed(self, *_args) -> None:
+        """Live-reshape the canvas as the owner types; a bad/mid-edit
+        value is silently skipped (final validation happens in
+        ``target_ratio()`` on Start) — mirrors ``AgentPanel._on_force_
+        aspect_wh_typed``/``AspectRatioDialog._on_wh_typed``."""
+        try:
+            w = int(self._ratio_w_var.get().strip())
+            h = int(self._ratio_h_var.get().strip())
+        except ValueError:
+            return
+        if w <= 0 or h <= 0:
+            return
+        self._ratio_canvas.set_ratio(w, h)
+
+    def target_ratio(self) -> tuple[int, int]:
+        """The target W:H — ``ValueError`` propagates to Start's own
+        messagebox, same contract as ``AgentPanel.force_aspect_ratio``."""
+        try:
+            w = int(self._ratio_w_var.get().strip())
+            h = int(self._ratio_h_var.get().strip())
+        except ValueError:
+            raise ValueError("Width and height must be whole numbers.")
+        if w <= 0 or h <= 0:
+            raise ValueError("Width and height must both be positive.")
+        return (w, h)
+
+    def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
+        from painter.aspect import change_aspect
+
+        ratio_w, ratio_h = self.target_ratio()
+        return lambda path, log: change_aspect(path, ratio_w, ratio_h, log)
+
+    def _advanced_settings(self) -> dict:
+        return {"ratio": [self._ratio_w_var.get(), self._ratio_h_var.get()]}
+
+    def _apply_advanced_settings(self, stored: dict) -> None:
+        ratio = stored.get("ratio")
+        if not (isinstance(ratio, (list, tuple)) and len(ratio) == 2):
+            return
+        try:
+            w, h = int(ratio[0]), int(ratio[1])
+        except (TypeError, ValueError):
+            return
+        if w > 0 and h > 0:
+            self._ratio_w_var.set(str(w))
+            self._ratio_h_var.set(str(h))
+            self._ratio_canvas.set_ratio(w, h)
+
+    def apply_theme(self) -> None:
+        self._ratio_canvas.redraw_theme()
 
 
 # ---------------------------------------------------------------------
@@ -3148,7 +3443,7 @@ class JobPanel(ttk.Frame):
         # 8) — shared here (Rule #5) so DashPanel/ToolPanel both gain
         # it identically instead of each redeclaring the same line;
         # AiCheckPanel simply never populates it. Set by the caller at
-        # job start (_start_tool / _start_site), None otherwise.
+        # job start (_launch_tool_worker / _start_site), None otherwise.
         self.jobtemp: "jobtemp.JobTemp | None" = None
         self._build_header(kind)
 
@@ -4515,10 +4810,11 @@ def _upscale_params_from_side_and_filter(
     ``filters.matches()`` against the FULL, unmodified ``conditions``
     list before ever invoking ``upscale_if_small`` with this function's
     output. See ``_gate_and_upscale`` (the per-image site-pipeline
-    gate) and ``PainterGui._start_tool``'s upscale branch (the
-    standalone tool's pre-filtered file list, via ``_filter_files``) —
-    both call sites apply that gate; this function alone would silently
-    ignore every non-aspect condition, so it is never used alone.
+    gate) and ``UpscaleSettingsPanel.build_func``'s caller (the
+    standalone tool's pre-filtered file list, via ``_filter_files`` in
+    ``PainterGui._start_tool_from_panel``) — both call sites apply
+    that gate; this function alone would silently ignore every
+    non-aspect condition, so it is never used alone.
     """
     aspect_min, aspect_max = 0.0, float("inf")
     for c in conditions:
@@ -4935,10 +5231,15 @@ class PainterGui:
 
         self._q: queue.Queue = queue.Queue()
         self._sheets: list[Path] = []
-        # per-site run state: workers, stop events, pending restarts
+        # per-site run state: workers, stop events, pending restarts.
+        # GUI rework Phase 14: also spans the four standalone tools
+        # (bg/crop/upscale/aspect — a real should_stop for _run_tool_job,
+        # closing Phase 13's own flagged gap; see _stop_tool) — NOT
+        # "aicheck" (Phase 15's own scope), so this stays SITES + the
+        # tool kinds, not the full JOB_ORDER (_pause_events' own span).
         self._workers: dict[str, threading.Thread] = {}
         self._stop_events: dict[str, threading.Event] = {
-            key: threading.Event() for key in SITES
+            key: threading.Event() for key in (*SITES, *JOB_TOOL_KINDS)
         }
         self._running: set[str] = set()
         # per-job PAUSE toggle (owner 2026-07-21): one threading.Event per
@@ -4983,40 +5284,21 @@ class PainterGui:
         self._resize_settle_job = None  # its settle after() id
         self._pending_events: list[tuple] = []  # buffered __event__ msgs
 
-        # remembered dialog values (owner 2026-07-19): the standalone
-        # Upscale dialog's last-used gate and the last aspect W:H —
-        # restored in _apply_settings and re-saved on change. Each agent's
-        # own Settings-gear collapse state is persisted by the AgentPanel.
-        # GUI rework Phase 6: the old four scalar params collapsed into a
-        # min-SIDE number + a FilterEditor condition stack (mirrors each
-        # AgentPanel's own upscale gate) — see
-        # _upscale_params_from_side_and_filter for how these resolve into
-        # upscale_if_small's kwargs.
-        self._upscale_tool_minside: int = UPSCALE_MIN_SIDE_DEFAULT
-        self._upscale_tool_conditions: list[filters.FilterCondition] = [
-            filters.FilterCondition(
-                kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
-                lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
-            )
-        ]
-        self._aspect_ratio: tuple[int, int] = (
-            ASPECT_DEFAULT_W, ASPECT_DEFAULT_H
-        )
-        # the aspect tool's remembered optional INPUT FILTER — GUI
-        # rework Phase 4: a stacked list of FilterCondition (was a
-        # single from/to/mode scalar dict through 0.0.094; a one-time
-        # migration in _apply_settings converts an owner's already-
-        # saved scalar the first time it loads, see
-        # _migrate_legacy_aspect_filter). Empty = no filter, process
-        # every image — the dialog's own "+ Add condition" is how the
-        # owner starts narrowing.
-        self._aspect_filter_conditions: list[filters.FilterCondition] = []
         # the shared filter-preset LIBRARY every FilterEditor instance
         # reads/writes (config.FILTER_PRESETS_SETTING) — a plain
         # {name: [condition-dict, ...]} dict, mutated IN PLACE by the
         # widget itself; this reference is what makes a preset saved
-        # while e.g. the Aspect dialog is open available to a BG/Crop/
+        # while e.g. the Aspect panel is open available to a BG/Crop/
         # Upscale FilterEditor later (Phase 6/13/14) without a reload.
+        # (The standalone tools' own remembered LAST-USED values — the
+        # Upscale min-side/gate, the Aspect target ratio — used to live
+        # here as separate PainterGui attributes feeding the old modal
+        # dialogs' pre-fill; GUI rework Phase 14 retired both dialogs
+        # and moved that state INTO UpscaleSettingsPanel/
+        # AspectSettingsPanel themselves — see each panel's own
+        # ``get_settings``/``apply_settings`` and _apply_settings's
+        # "tool_panels" loop below, which also carries the one-time
+        # migration from the old settings.json keys.)
         self._filter_presets: dict[str, list[dict]] = {}
 
         # the top strip (theme switch + collapse toggle) is PINNED outside
@@ -5043,10 +5325,11 @@ class PainterGui:
         self._view = "menu"
         # GUI rework Phase 11: which tile's inline settings surface (if
         # any) shows above the Dashboard/Log while _view == "running" —
-        # only "website_gen" has a real one today (_controls_box itself;
-        # every other functionality still launches through its existing
-        # modal/dialog handler — see _click_icon_bar_tile). Inert, never
-        # read, outside "running".
+        # "website_gen" (_controls_box) or one of the four standalone
+        # tools (_tool_panels — all four now, GUI rework Phase 14; only
+        # bg/crop had one through Phase 13). image_checker/ai_sheet_gen
+        # still launch through their existing modal/dialog handler —
+        # see _click_icon_bar_tile. Inert, never read, outside "running".
         self._inline_kind: str | None = None
         self._main_view = ttk.Frame(outer)
         self._menu_view = MainMenu(outer, on_select=self._select_tile)
@@ -5071,18 +5354,22 @@ class PainterGui:
             self._main_view,
             on_select=self._click_icon_bar_tile, on_menu=self._request_menu,
         )
-        # GUI rework Phase 13: PERSISTENT settings panels for the
-        # standalone tools — BG removal / Crop today (Phase 14 gives
-        # Upscale/Aspect the same treatment). Children of _main_view
-        # like _controls_box/_icon_bar, shown/hidden by
-        # _apply_running_layout via _inline_kind (generalizing
-        # website_gen's own single-panel toggle to this dict); left
-        # unpacked here.
+        # PERSISTENT settings panels for all FOUR standalone tools (BG
+        # removal / Crop, GUI rework Phase 13; Upscale / Aspect ratio,
+        # Phase 14 — replacing the old UpscaleParamsDialog/
+        # AspectRatioDialog modals). Children of _main_view like
+        # _controls_box/_icon_bar, shown/hidden by _apply_running_layout
+        # via _inline_kind (generalizing website_gen's own single-panel
+        # toggle to this dict); left unpacked here. Each gets
+        # on_stop=self._stop_tool (Phase 14) alongside on_start/on_pause
+        # — the SAME "smart stop" handler for all four (one shared
+        # implementation, see ToolSettingsPanel's own docstring).
         self._tool_panels: dict[str, ToolSettingsPanel] = {
             "bg": BgSettingsPanel(
                 self._main_view,
                 on_start=self._start_tool_from_panel,
                 on_pause=self._toggle_pause_job,
+                on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
             ),
@@ -5090,6 +5377,23 @@ class PainterGui:
                 self._main_view,
                 on_start=self._start_tool_from_panel,
                 on_pause=self._toggle_pause_job,
+                on_stop=self._stop_tool,
+                filter_presets=self._filter_presets,
+                on_filter_presets_changed=self._on_filter_presets_changed,
+            ),
+            "upscale": UpscaleSettingsPanel(
+                self._main_view,
+                on_start=self._start_tool_from_panel,
+                on_pause=self._toggle_pause_job,
+                on_stop=self._stop_tool,
+                filter_presets=self._filter_presets,
+                on_filter_presets_changed=self._on_filter_presets_changed,
+            ),
+            "aspect": AspectSettingsPanel(
+                self._main_view,
+                on_start=self._start_tool_from_panel,
+                on_pause=self._toggle_pause_job,
+                on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
             ),
@@ -5388,16 +5692,16 @@ class PainterGui:
         binds no click on a disabled tile, and IconBar disables its own
         button the same way — Phase 19 wires the real handler in).
 
-        GUI rework Phase 13: bg/crop route to ``_open_tool_panel`` —
-        their new persistent settings panel — instead of the old
-        ``_start_tool`` modal (which no longer handles either slot;
-        see ``_start_tool``'s own docstring). In practice neither
-        ``_select_tile`` nor ``_click_icon_bar_tile`` ever reaches
-        this dict entry for them (both special-case the panel toggle
-        before falling through here — ``_select_tile`` to skip a
-        wasted view hop, ``_click_icon_bar_tile`` implicitly via this
-        same mapping), but this stays a COMPLETE, truthful "tile id ->
-        its action" table regardless of which caller consults it."""
+        GUI rework Phase 13/14: all four standalone tools route to
+        ``_open_tool_panel`` — their persistent settings panel —
+        instead of the old ``_start_tool`` modal (deleted this phase;
+        see gui.md). In practice neither ``_select_tile`` nor
+        ``_click_icon_bar_tile`` ever reaches this dict entry for any
+        of the four (both special-case the panel toggle before falling
+        through here — ``_select_tile`` to skip a wasted view hop,
+        ``_click_icon_bar_tile`` implicitly via this same mapping), but
+        this stays a COMPLETE, truthful "tile id -> its action" table
+        regardless of which caller consults it."""
         return {
             "website_gen": None,
             "ai_sheet_gen": self._new_collection_ai,
@@ -5405,8 +5709,8 @@ class PainterGui:
             "image_checker": self._start_ai_check,
             "bg": partial(self._open_tool_panel, "bg"),
             "crop": partial(self._open_tool_panel, "crop"),
-            "upscale": partial(self._start_tool, "upscale"),
-            "aspect": partial(self._start_tool, "aspect"),
+            "upscale": partial(self._open_tool_panel, "upscale"),
+            "aspect": partial(self._open_tool_panel, "aspect"),
         }[tile_id]
 
     # --- Running view (GUI rework Phase 11) -----------------------------
@@ -5715,18 +6019,17 @@ class PainterGui:
         rounded_button(
             row, "Instructions", command=self._open_instructions,
         ).pack(side="right")
-        # the four in-place tools — each its OWN concurrent job + panel,
-        # carrying the panel's colour + its PNG icon (owner 2026-07-19,
-        # replacing the old emoji). Packed reversed so they read BG
-        # removal / Crop / Upscale / Aspect ratio left→right.
-        for slot in reversed(JOB_TOOL_KINDS):
-            color = job_color_pair(slot)
-            rounded_button(
-                row, JOB_LABEL[slot], icon_name=slot,
-                command=partial(self._start_tool, slot),
-                fg_color=color, hover_color=_darken_pair(color),
-                text_color=status_pair("btn_text"),
-            ).pack(side="right", padx=4)
+        # the four in-place tools (BG removal / Crop / Upscale / Aspect
+        # ratio) had their own quick-access buttons here through GUI
+        # rework Phase 13, each opening the OLD _start_tool modal.
+        # Deleted (Phase 14, _start_tool itself is gone): the IconBar
+        # (GUI rework Phase 11) sits ABOVE this whole controls box
+        # whenever it is visible and already carries all four tiles,
+        # routed to their persistent ToolSettingsPanel via
+        # _open_tool_panel — one click away regardless of which inline
+        # panel (this one or a tool's own) currently shows below it, so
+        # a second copy of the same four buttons here would be pure
+        # duplication (Rule #5), not a shortcut.
 
         # the AI features row (owner 2026-07-20): the sheet GENERATOR,
         # the batch image CHECKER (its own job/panel like the tools, in
@@ -6163,25 +6466,6 @@ class PainterGui:
 
     # --- the in-place tools (each its own concurrent job + panel) ------
 
-    @staticmethod
-    def _iter_images(folder: Path) -> list[Path]:
-        return iter_images(folder)
-
-    def _remember_aspect_ratio(self, ratio_w: int, ratio_h: int) -> None:
-        """Persist the last-entered aspect W:H so the dialog pre-fills it
-        next time (owner 2026-07-19)."""
-        self._aspect_ratio = (ratio_w, ratio_h)
-        self._schedule_save()
-
-    def _remember_aspect_filter_conditions(
-        self, conditions: list[filters.FilterCondition]
-    ) -> None:
-        """Persist the aspect tool's last-used stacked FILTER so the
-        dialog pre-fills it next time (owner 2026-07-19; conditions
-        since GUI rework Phase 4)."""
-        self._aspect_filter_conditions = list(conditions)
-        self._schedule_save()
-
     def _on_filter_presets_changed(self) -> None:
         """A FilterEditor mutates ``self._filter_presets`` (the shared
         dict reference passed at construction) IN PLACE on Save/Delete
@@ -6193,180 +6477,18 @@ class PainterGui:
         never a merge — see ``_save_now``)."""
         self._schedule_save()
 
-    def _remember_upscale_tool_params(self, choice: dict) -> None:
-        """Persist the standalone Upscale dialog's last-used min-side +
-        filter so it pre-fills them next run (owner 2026-07-19; GUI
-        rework Phase 6: ``choice`` is ``UpscaleParamsDialog.result`` —
-        ``{"min_side": int, "conditions": list[FilterCondition]}``,
-        replacing the old four-scalar-dict shape)."""
-        self._upscale_tool_minside = choice["min_side"]
-        self._upscale_tool_conditions = list(choice["conditions"])
-        self._schedule_save()
-
-    def _start_tool(self, slot: str) -> None:
-        """Start Upscale or Aspect ratio as its OWN job: pop the
-        tool's modal (a ratio + gate, or a min-side + gate), confirm,
-        then back up + process every image under the pick on a
-        dedicated worker thread, reporting into the slot's own
-        dashboard panel. One job per kind — a second click while it
-        runs is refused; up to all four tools + both sites run in
-        parallel (6 panels).
-
-        GUI rework Phase 13: BG removal / Crop no longer reach this
-        method — they route through their own persistent
-        ``ToolSettingsPanel`` (``_open_tool_panel`` /
-        ``_start_tool_from_panel``) instead of this modal
-        askdirectory+confirm flow; Phase 14 converts Upscale/Aspect
-        the same way, at which point this method retires."""
-        if slot in self._tool_workers:
-            messagebox.showerror(
-                "PromptPainter",
-                f"{JOB_LABEL[slot]} is already running — wait for it to"
-                " finish, or Close its panel.",
-            )
-            return
-
-        label = JOB_LABEL[slot]
-        if slot == "aspect":
-            # Aspect accepts individual image FILES or a whole FOLDER (the
-            # optional input filter makes folders useful — skip the
-            # already-good ones). One folder can hold images of DIFFERENT
-            # ratios, so a single target is never blanket-applied blindly;
-            # the filter gates which images are touched. The other three
-            # tools stay folder-based. The dialog PRE-FILLS the last-used
-            # ratio + filter (both remembered). (owner 2026-07-19)
-            choice = AspectRatioDialog(
-                self.root, *self._aspect_ratio,
-                conditions=self._aspect_filter_conditions,
-                presets=self._filter_presets,
-                on_presets_changed=self._on_filter_presets_changed,
-            ).result
-            if choice is None:
-                return
-            ratio_w, ratio_h = choice["ratio"]
-            conditions = choice["conditions"]
-            self._remember_aspect_ratio(ratio_w, ratio_h)
-            self._remember_aspect_filter_conditions(conditions)
-            from painter.aspect import change_aspect
-
-            # the GUI pre-filters WHICH FILES are touched (below) via
-            # filters.matches() itself now — change_aspect's OWN scalar
-            # filter_from/filter_to/filter_mode stay at their off
-            # defaults, unused (its signature is otherwise untouched —
-            # GUI rework Phase 4)
-            func = (
-                lambda path, log: change_aspect(path, ratio_w, ratio_h, log)
-            )
-            label = f"Aspect {ratio_w}:{ratio_h}"
-            if choice["input"] == "folder":
-                folder = filedialog.askdirectory(
-                    title=f"Folder with images — {label} runs IN PLACE"
-                )
-                if not folder:
-                    return
-                folder_path = Path(folder)
-                files = self._iter_images(folder_path)
-            else:
-                picks = filedialog.askopenfilenames(
-                    title=f"Image files to deform — {label} runs IN PLACE",
-                    filetypes=[
-                        ("Images", "*.png *.jpg *.jpeg *.webp"),
-                        ("All files", "*.*"),
-                    ],
-                )
-                if not picks:
-                    return
-                folder_path, _rels = selection_base_and_rels(picks)
-                files = [Path(p) for p in picks]
-            total_before = len(files)
-            files = _filter_files(files, conditions, self._log)
-            filt_note = (
-                f"\nFilter: {len(conditions)} condition(s) —"
-                f" {len(files)} of {total_before} image(s) match"
-                if conditions else ""
-            )
-            message = (
-                f"DEFORM {len(files)} image(s)\n\n"
-                f"to a {ratio_w}:{ratio_h} aspect ratio?{filt_note}\n\n"
-                "A non-proportional STRETCH written IN PLACE — the"
-                " originals are backed up so you can Restore. Images"
-                f" already at {ratio_w}:{ratio_h} are skipped untouched."
-            )
-        else:
-            # slot == "upscale" — the only kind left reaching this
-            # branch since GUI rework Phase 13 moved bg/crop to their
-            # own panel (see this method's docstring).
-            #
-            # Upscale asks its min-side + FilterEditor gate first
-            # (owner 2026-07-19; GUI rework Phase 6 replaced the old
-            # four scalar fields with ONE min-side spinner + a
-            # stacked FilterEditor), PRE-FILLED with the last-used
-            # values; then runs folder-based with that gate bound.
-            choice = UpscaleParamsDialog(
-                self.root,
-                {
-                    "min_side": self._upscale_tool_minside,
-                    "conditions": self._upscale_tool_conditions,
-                },
-                presets=self._filter_presets,
-                on_presets_changed=self._on_filter_presets_changed,
-            ).result
-            if choice is None:
-                return
-            self._remember_upscale_tool_params(choice)
-            upscale_conditions = choice["conditions"]
-            up_params = _upscale_params_from_side_and_filter(
-                choice["min_side"], upscale_conditions
-            )
-            from painter.upscale import upscale_if_small
-
-            func = (
-                lambda path, log: upscale_if_small(
-                    path, log, **up_params
-                )
-            )
-            label = f"Upscale ≥{up_params['min_width']}px min side"
-            folder = filedialog.askdirectory(
-                title=f"Folder with images — {label} runs IN PLACE"
-            )
-            if not folder:
-                return
-            folder_path = Path(folder)
-            files = self._iter_images(folder_path)
-            # the standalone Upscale tool pre-filters its candidate file
-            # list the SAME way Aspect does above (root Rule #1: this is
-            # how a stacked Width/Height/Any-side condition — or a SECOND
-            # aspect condition — gets honored, since the simple upscale
-            # kwargs above can only express ONE aspect band; see
-            # _upscale_params_from_side_and_filter's docstring).
-            total_before = len(files)
-            files = _filter_files(files, upscale_conditions, self._log)
-            filt_note = (
-                f"\nFilter: {len(upscale_conditions)} condition(s) —"
-                f" {len(files)} of {total_before} image(s) match"
-                if upscale_conditions else ""
-            )
-            message = (
-                f"{label} IN PLACE for every image under:\n{folder}?"
-                f"{filt_note}\n\n"
-                "(the originals are backed up so you can Restore; files"
-                " with nothing to do are skipped untouched)"
-            )
-        if not messagebox.askyesno("PromptPainter", message):
-            return
-        self._launch_tool_worker(slot, label, func, folder_path, files)
-
     def _start_tool_from_panel(self, slot: str) -> None:
-        """Start button on a persistent ``ToolSettingsPanel`` (BG/Crop,
-        GUI rework Phase 13) — reads the panel's OWN input pick +
-        filter + Advanced overrides instead of popping ``_start_tool``'s
-        modal askdirectory+confirm (dropped here: the panel itself,
-        deliberately configured then Started, already IS the
-        confirmation), pre-filters via the SAME ``_filter_files`` every
-        other tool/Aspect/Upscale already uses, then hands off to the
-        UNCHANGED ``_launch_tool_worker`` tail shared with
-        ``_start_tool`` (one-job-per-kind guard, JobTemp, worker spawn,
-        dashboard reveal)."""
+        """Start button on a persistent ``ToolSettingsPanel`` — ALL
+        FOUR standalone tools since GUI rework Phase 14 (BG/Crop,
+        Phase 13; Upscale/Aspect, Phase 14, replacing their old
+        UpscaleParamsDialog/AspectRatioDialog modal askdirectory+
+        confirm flow, now deleted): reads the panel's OWN input pick +
+        filter + Advanced/extra overrides (dropped here: the panel
+        itself, deliberately configured then Started, already IS the
+        confirmation — no separate askyesno), pre-filters via the
+        shared ``_filter_files``, then hands off to ``_launch_tool_
+        worker`` (one-job-per-kind guard, JobTemp, worker spawn,
+        dashboard reveal) — the ONE tail every tool's Start shares."""
         if slot in self._tool_workers:
             messagebox.showerror(
                 "PromptPainter",
@@ -6399,13 +6521,14 @@ class PainterGui:
         self, slot: str, label: str, func, folder_path: Path,
         files: list[Path],
     ) -> None:
-        """Shared tail for EVERY standalone-tool Start — the modal-
-        driven ones (upscale/aspect today; Phase 14 converts them) and
-        the panel-driven ones (bg/crop, GUI rework Phase 13): create
-        this run's JobTemp, reveal the dashboard ``ToolPanel``, spawn
-        ``_run_tool_job`` on its own daemon thread. Extracted out of
-        ``_start_tool`` so it and ``_start_tool_from_panel`` share ONE
-        body (Rule #5) instead of the same dozen lines twice."""
+        """Shared tail for EVERY standalone-tool Start (all four are
+        panel-driven since GUI rework Phase 14 — ``_start_tool_from_
+        panel``): create this run's JobTemp, reveal the dashboard
+        ``ToolPanel``, spawn ``_run_tool_job`` on its own daemon
+        thread. A stale Stop flag from a PREVIOUS run of this slot is
+        swept here too (mirrors ``_start_site``'s own ``self.
+        _stop_events[key].clear()`` — a fresh job must never start
+        pre-stopped)."""
         # a finished panel for this slot may still be on screen — clear
         # its old temp before the new job takes the slot
         old = self._job_temps.pop(slot, None)
@@ -6424,11 +6547,12 @@ class PainterGui:
 
         if slot in self._paused:
             self._toggle_pause_job(slot)  # a fresh job never starts pre-paused
+        self._stop_events[slot].clear()  # ditto for a stale Stop
         worker = threading.Thread(
             target=self._run_tool_job,
             args=(
                 slot, label, func, folder_path, files, temp,
-                self._pause_events[slot],
+                self._pause_events[slot], self._stop_events[slot],
             ),
             daemon=True,
         )
@@ -6438,6 +6562,7 @@ class PainterGui:
 
     def _run_tool_job(
         self, slot, label, func, folder, files, temp, pause_event,
+        stop_event,
     ) -> None:
         """One tool job on its own thread: back up each original, run
         the engine func in place, measure BEFORE→AFTER, and stream item
@@ -6445,9 +6570,13 @@ class PainterGui:
         counted FAILED (its no-op backup dropped), never kills the job.
         The measure is computed OUTSIDE the engine, from the backup vs
         the in-place result (Rule #10 progress every 25). ``pause_event``
-        (owner 2026-07-21) blocks BETWEEN images while set — tools have
-        no Stop, so unlike run_sheet this wait has no should_stop escape
-        hatch; it simply waits for Resume."""
+        (owner 2026-07-21) blocks BETWEEN images while set. ``stop_event``
+        (GUI rework Phase 14, ``PainterGui._stop_tool``) is checked at
+        the SAME between-images boundary — mirrors ``run_sheet``'s own
+        ``should_stop`` exactly: the in-flight image always finishes
+        first, and it is also threaded into ``wait_while_paused`` so a
+        Stop wins over a pending Pause instead of hanging until
+        Resume."""
         from painter.runner import wait_while_paused
 
         emit = lambda ev: self._q.put(("__event__", slot, ev))
@@ -6458,7 +6587,20 @@ class PainterGui:
             counts: dict[str, int] = {}
             t0 = time.time()
             for i, src in enumerate(files, start=1):
-                wait_while_paused(pause_event.is_set, None, log, emit)
+                if stop_event.is_set():
+                    log(
+                        f"STOPPED on request —"
+                        f" {sum(counts.values())}/{len(files)} this run"
+                    )
+                    break
+                if wait_while_paused(
+                    pause_event.is_set, stop_event.is_set, log, emit
+                ):
+                    log(
+                        f"STOPPED on request —"
+                        f" {sum(counts.values())}/{len(files)} this run"
+                    )
+                    break
                 rel = src.relative_to(folder).as_posix()
                 emit({
                     "type": "item_start", "idx": i, "of": len(files),
@@ -6959,7 +7101,7 @@ class PainterGui:
 
         # this site's per-step backup store (GUI rework Phase 8) — a
         # restart while a previous run's panel is still on screen must
-        # not inherit its old backups; mirrors _start_tool's own
+        # not inherit its old backups; mirrors _launch_tool_worker's own
         # "clear the old slot first" rule for the four standalone tools.
         # Created here (BEFORE _compose_post_save reads it) so the
         # composed post_save closure captures the temp for this run.
@@ -7014,8 +7156,8 @@ class PainterGui:
         total, themes = self._plan(key, sheets, selection)
         # the per-step restore viewer (GUI rework Phase 9) needs BOTH
         # this run's JobTemp and its output root to resolve a row's
-        # drop path into a rel/live-file — mirrors _start_tool's own
-        # "panel.folder = ...; panel.jobtemp = ...; panel.reset(...)"
+        # drop path into a rel/live-file — mirrors _launch_tool_worker's
+        # own "panel.folder = ...; panel.jobtemp = ...; panel.reset(...)"
         # grouping for the four standalone tools.
         dash = self.panels[key]
         dash.jobtemp = self._job_temps[key]
@@ -7189,6 +7331,28 @@ class PainterGui:
                 f"{key}: stopping after the current item …"
             )
 
+    def _stop_tool(self, slot: str) -> None:
+        """Stop ONE standalone tool job (GUI rework Phase 14, closing
+        Phase 13's own flagged gap) — mirrors ``_stop_site``'s request
+        half exactly (no quota auto-restart to cancel, tools have
+        none): sets the should_stop event ``_run_tool_job`` polls
+        BETWEEN images, wins over a pending Pause the same way. This
+        method only REQUESTS the stop — it does NOT touch the
+        dashboard panel or JobTemp itself; the worker may still be
+        mid-image. The "smart" half (close the panel, clear its
+        JobTemp, maybe leave "running") runs once the worker actually
+        confirms the halt, in ``_dispatch``'s ``__tool_done__`` branch,
+        which checks this SAME event to tell a Stop-triggered finish
+        apart from a natural one."""
+        if slot not in self._tool_workers:
+            return
+        self._stop_events[slot].set()
+        if slot in self._paused:
+            self._toggle_pause_job(slot)
+        self.status_var.set(
+            f"{JOB_LABEL[slot]}: stopping after the current item …"
+        )
+
     def _update_status(self) -> None:
         if self._running:
             self.status_var.set("running: " + ", ".join(sorted(self._running)))
@@ -7272,7 +7436,14 @@ class PainterGui:
                 self._handle_terminal(msg[1], msg[2])
             elif msg[0] == "__tool_done__":
                 slot = msg[1]
-                self.panels[slot].finish()  # reveal CLOSE
+                # GUI rework Phase 14: was THIS finish caused by
+                # _stop_tool (still set — cleared only at the next
+                # Start, see _launch_tool_worker) or a natural
+                # completion? Read BEFORE popping _tool_workers below
+                # (harmless either order — _stop_events is independent
+                # — but keeps the "what happened" read next to the
+                # message that reports it).
+                stopped = self._stop_events[slot].is_set()
                 self._tool_workers.pop(slot, None)
                 # a job that finished its last image right as it was
                 # paused would otherwise leave a stale "paused" toggle
@@ -7284,6 +7455,22 @@ class PainterGui:
                     # Start button — "aicheck" has no entry here (its
                     # own panel is AiCheckPanel, not a ToolSettingsPanel)
                     self._tool_panels[slot].set_run_state(running=False)
+                if stopped:
+                    # the "smart" half of _stop_tool: the worker has
+                    # NOW actually halted (not merely requested to,
+                    # back on the Stop click — it may have still been
+                    # mid-image) — close the panel + clear its JobTemp
+                    # (existing _close_panel, same as a manual Close)
+                    # and leave "running" for the Main Menu if that was
+                    # the LAST active job (_request_menu — Phase 11's
+                    # own gate, unmodified: a no-op status hint, never
+                    # an auto-jump, while another job is still active).
+                    # A natural (unstopped) finish is UNCHANGED — reveal
+                    # CLOSE and let the owner review before dismissing.
+                    self._close_panel(slot)
+                    self._request_menu()
+                else:
+                    self.panels[slot].finish()  # reveal CLOSE
                 if not self._tool_workers and not self._running:
                     self._update_status()
                 self._sync_running_state()  # GUI rework Phase 11
@@ -7323,21 +7510,6 @@ class PainterGui:
             # the GUI so the whole-dict save round-trips it; painter.ai
             # reads it back from settings.json per call
             GEMINI_KEY_SETTING: self._gemini_key,
-            # GUI rework Phase 6: min-side + a FilterEditor condition
-            # stack, replacing the old four-scalar shape (see
-            # _migrate_legacy_upscale_gate for the one-time inverse)
-            "upscale_tool": {
-                "min_side": self._upscale_tool_minside,
-                "conditions": [
-                    filters.condition_to_dict(c)
-                    for c in self._upscale_tool_conditions
-                ],
-            },
-            "aspect_ratio": list(self._aspect_ratio),
-            "aspect_filter_conditions": [
-                filters.condition_to_dict(c)
-                for c in self._aspect_filter_conditions
-            ],
             FILTER_PRESETS_SETTING: {
                 name: list(rows) for name, rows in self._filter_presets.items()
             },
@@ -7345,18 +7517,140 @@ class PainterGui:
                 key: panel.get_settings()
                 for key, panel in self.agents.items()
             },
-            # GUI rework Phase 13: each standalone tool's PERSISTENT
-            # settings panel (BG/Crop today) — its filter stack +
-            # Advanced overrides, same round-trip shape as "agents"
-            # above. The picked folder/files are NEVER persisted (every
-            # tool has always asked fresh — matches the standalone
-            # Upscale/Aspect dialogs' own "remembered VALUES, not the
-            # picked path" convention).
+            # GUI rework Phase 13/14: each standalone tool's PERSISTENT
+            # settings panel (all four now) — its filter stack + Advanced
+            # (or always-visible, for upscale/aspect) overrides, same
+            # round-trip shape as "agents" above. The picked folder/files
+            # are NEVER persisted (every tool has always asked fresh).
+            # SUPERSEDES the old top-level 'upscale_tool'/'aspect_ratio'/
+            # 'aspect_filter_conditions' keys the standalone Upscale/
+            # Aspect MODAL dialogs used to own (both retired this phase)
+            # — those old keys are simply no longer emitted here (see
+            # _apply_settings's one-time migration INTO this dict below,
+            # same "additive, read-old-once, log loudly" contract as
+            # every other settings migration in this file).
             "tool_panels": {
                 slot: panel.get_settings()
                 for slot, panel in self._tool_panels.items()
             },
         }
+
+    def _migrate_upscale_panel_settings(
+        self, panel_stored: dict, stored: dict
+    ) -> dict:
+        """One-time migration (GUI rework Phase 14, same additive/
+        read-old-once/log-loudly contract as every other settings
+        migration in this file) of the retired standalone Upscale
+        dialog's remembered gate — settings.json's old top-level
+        ``upscale_tool`` key, EITHER the Phase 6+ ``{"min_side",
+        "conditions"}`` shape or the pre-Phase-6 ``{"min_width",
+        "min_height", "aspect_min", "aspect_max"}`` one — into
+        ``UpscaleSettingsPanel``'s OWN settings shape (``up_minside``/
+        ``conditions``, exactly what its ``get_settings``/
+        ``apply_settings`` already read/write). A no-op once the panel
+        has saved itself at least once under the NEW ``tool_panels``
+        key (its own ``up_minside`` already present) — the old
+        top-level key is never written back (``_collect_settings`` no
+        longer emits it), so it naturally drops off disk over time,
+        same as any other stale key."""
+        if "up_minside" in panel_stored:
+            return panel_stored
+        saved_up = stored.get("upscale_tool")
+        if isinstance(saved_up, dict) and "min_side" in saved_up:
+            panel_stored = dict(panel_stored)
+            panel_stored.setdefault("up_minside", str(saved_up["min_side"]))
+            raw_conditions = saved_up.get("conditions")
+            if isinstance(raw_conditions, list):
+                panel_stored.setdefault("conditions", raw_conditions)
+            self._log(
+                "MIGRATION: standalone Upscale tool's remembered gate"
+                " (top-level 'upscale_tool') -> the Upscale panel's own"
+                " settings (one-time; the old key stays on disk unread"
+                " from now on)"
+            )
+        elif isinstance(saved_up, dict) and "min_width" in saved_up:
+            try:
+                migrated = _migrate_legacy_upscale_gate(
+                    saved_up.get("min_width", UPSCALE_MIN_SIDE_DEFAULT),
+                    saved_up.get("aspect_min", UPSCALE_ASPECT_MIN),
+                    saved_up.get("aspect_max", UPSCALE_ASPECT_MAX),
+                )
+            except (TypeError, ValueError) as exc:
+                self._log(
+                    f"MIGRATION: legacy 'upscale_tool' dict is unreadable"
+                    f" ({exc}) — the Upscale panel keeps its shipped"
+                    " default gate"
+                )
+            else:
+                self._log(
+                    "MIGRATION: legacy standalone 'upscale_tool'"
+                    " (min_width/min_height/aspect_min/aspect_max) -> the"
+                    f" Upscale panel's own min_side={migrated['min_side']}"
+                    " + 1 filter condition (one-time; the old key stays"
+                    " on disk unread from now on)"
+                )
+                panel_stored = dict(panel_stored)
+                panel_stored.setdefault(
+                    "up_minside", str(migrated["min_side"])
+                )
+                panel_stored.setdefault("conditions", migrated["conditions"])
+        return panel_stored
+
+    def _migrate_aspect_panel_settings(
+        self, panel_stored: dict, stored: dict
+    ) -> dict:
+        """One-time migration (GUI rework Phase 14) of the retired
+        standalone Aspect dialog's remembered ratio/filter —
+        settings.json's old top-level ``aspect_ratio`` ([w, h]) and
+        ``aspect_filter_conditions`` (or the even older scalar
+        ``aspect_filter``, GUI rework Phase 4's own migration source)
+        keys — into ``AspectSettingsPanel``'s OWN settings shape
+        (``ratio``/``conditions``). A no-op once the panel has saved
+        itself at least once under the NEW ``tool_panels`` key (same
+        contract as ``_migrate_upscale_panel_settings`` above)."""
+        if "ratio" in panel_stored:
+            return panel_stored
+        panel_stored = dict(panel_stored)
+        saved_ratio = stored.get("aspect_ratio")
+        if isinstance(saved_ratio, (list, tuple)) and len(saved_ratio) == 2:
+            panel_stored["ratio"] = [str(saved_ratio[0]), str(saved_ratio[1])]
+            self._log(
+                "MIGRATION: standalone Aspect tool's remembered ratio"
+                " (top-level 'aspect_ratio') -> the Aspect panel's own"
+                " settings (one-time; the old key stays on disk unread"
+                " from now on)"
+            )
+
+        if "conditions" not in panel_stored:
+            saved_conditions = stored.get("aspect_filter_conditions")
+            if isinstance(saved_conditions, list):
+                panel_stored["conditions"] = saved_conditions
+                self._log(
+                    "MIGRATION: standalone Aspect tool's remembered"
+                    " filter (top-level 'aspect_filter_conditions') ->"
+                    " the Aspect panel's own settings (one-time; the old"
+                    " key stays on disk unread from now on)"
+                )
+            else:
+                legacy = stored.get("aspect_filter")
+                if isinstance(legacy, dict):
+                    try:
+                        migrated = _migrate_legacy_aspect_filter(legacy)
+                    except (TypeError, ValueError) as exc:
+                        self._log(
+                            f"MIGRATION: legacy aspect_filter {legacy!r} is"
+                            f" unreadable ({exc}) — the Aspect panel"
+                            " starts with no filter"
+                        )
+                    else:
+                        self._log(
+                            "MIGRATION: legacy 'aspect_filter' setting"
+                            f" {legacy!r} -> {len(migrated)} condition(s)"
+                            " on the Aspect panel (one-time; the old key"
+                            " stays on disk unread from now on)"
+                        )
+                        panel_stored["conditions"] = migrated
+        return panel_stored
 
     def _apply_settings(self, stored: dict) -> None:
         """Missing keys keep the current defaults. The queue is
@@ -7428,105 +7722,29 @@ class PainterGui:
                 agent_stored, upscale_conditions=upscale_conditions
             )
 
-        # GUI rework Phase 13: each standalone tool's PERSISTENT
-        # settings panel — same "missing key = keep default" contract
-        # as every other field, mirroring the "agents" loop above.
+        # GUI rework Phase 13/14: each standalone tool's PERSISTENT
+        # settings panel (all four now) — same "missing key = keep
+        # default" contract as every other field, mirroring the
+        # "agents" loop above. upscale/aspect additionally get a
+        # ONE-TIME LOUD migration from the retired standalone dialogs'
+        # OLD top-level keys (_migrate_upscale_panel_settings/
+        # _migrate_aspect_panel_settings) — a no-op once each panel has
+        # saved itself at least once under this NEW "tool_panels" key.
         for slot, panel in self._tool_panels.items():
             panel_stored = dict(stored.get("tool_panels", {}).get(slot, {}))
+            if slot == "upscale":
+                panel_stored = self._migrate_upscale_panel_settings(
+                    panel_stored, stored
+                )
+            elif slot == "aspect":
+                panel_stored = self._migrate_aspect_panel_settings(
+                    panel_stored, stored
+                )
             conditions = None
             raw_conditions = panel_stored.get("conditions")
             if isinstance(raw_conditions, list):
                 conditions = _parse_condition_dicts(raw_conditions, self._log)
             panel.apply_settings(panel_stored, conditions=conditions)
-
-        # remembered dialog values (owner 2026-07-19): the standalone
-        # Upscale gate and the last aspect W:H (each agent's own
-        # Settings-gear collapse state is restored in panel.apply_settings
-        # above). Each falls back to the current default on a missing key.
-        #
-        # GUI rework Phase 6: the NEW {"min_side", "conditions"} shape
-        # wins when present; otherwise a ONE-TIME LOUD migration reads
-        # the OLD {"min_width", "min_height", "aspect_min", "aspect_max"}
-        # shape exactly once (same up_minh-dropped rationale as the
-        # per-agent migration above) — never written back, see
-        # _collect_settings, which no longer emits the old field names.
-        saved_up = stored.get("upscale_tool")
-        if isinstance(saved_up, dict) and "min_side" in saved_up:
-            try:
-                self._upscale_tool_minside = int(saved_up["min_side"])
-            except (TypeError, ValueError):
-                self._log(
-                    f"SETTINGS: upscale_tool.min_side {saved_up['min_side']!r}"
-                    " is not a number — keeping the shipped default"
-                )
-            raw_conditions = saved_up.get("conditions")
-            if isinstance(raw_conditions, list):
-                self._upscale_tool_conditions = _parse_condition_dicts(
-                    raw_conditions, self._log
-                )
-        elif isinstance(saved_up, dict) and "min_width" in saved_up:
-            try:
-                migrated = _migrate_legacy_upscale_gate(
-                    saved_up.get("min_width", UPSCALE_MIN_SIDE_DEFAULT),
-                    saved_up.get("aspect_min", UPSCALE_ASPECT_MIN),
-                    saved_up.get("aspect_max", UPSCALE_ASPECT_MAX),
-                )
-            except (TypeError, ValueError) as exc:
-                self._log(
-                    f"MIGRATION: legacy 'upscale_tool' dict is unreadable"
-                    f" ({exc}) — using the shipped default upscale gate"
-                )
-            else:
-                self._log(
-                    "MIGRATION: legacy standalone 'upscale_tool'"
-                    " (min_width/min_height/aspect_min/aspect_max) ->"
-                    f" min_side={migrated['min_side']} + 1 filter"
-                    " condition (one-time; the old keys stay on disk"
-                    " unread from now on)"
-                )
-                self._upscale_tool_minside = migrated["min_side"]
-                self._upscale_tool_conditions = _parse_condition_dicts(
-                    migrated["conditions"], self._log
-                )
-        saved_ratio = stored.get("aspect_ratio")
-        if (
-            isinstance(saved_ratio, (list, tuple)) and len(saved_ratio) == 2
-        ):
-            self._aspect_ratio = (int(saved_ratio[0]), int(saved_ratio[1]))
-
-        # the aspect tool's stacked filter (GUI rework Phase 4): the
-        # NEW key wins when present; otherwise a ONE-TIME LOUD
-        # migration reads the OLD scalar key exactly once — it is
-        # never written back (see _collect_settings, which no longer
-        # emits "aspect_filter" at all — the key naturally drops off
-        # disk on the next save, the same way a stale "sash" key does)
-        saved_conditions = stored.get("aspect_filter_conditions")
-        if isinstance(saved_conditions, list):
-            self._aspect_filter_conditions = _parse_condition_dicts(
-                saved_conditions, self._log
-            )
-        else:
-            legacy = stored.get("aspect_filter")
-            if isinstance(legacy, dict):
-                try:
-                    migrated = _migrate_legacy_aspect_filter(legacy)
-                except (TypeError, ValueError) as exc:
-                    self._log(
-                        f"MIGRATION: legacy aspect_filter {legacy!r} is"
-                        f" unreadable ({exc}) — starting with no aspect"
-                        " filter"
-                    )
-                    migrated = []
-                else:
-                    self._log(
-                        "MIGRATION: legacy 'aspect_filter' setting"
-                        f" {legacy!r} -> {len(migrated)} condition(s), now"
-                        " under 'aspect_filter_conditions' (one-time; the"
-                        " old key stays on disk unread from now on)"
-                    )
-                self._aspect_filter_conditions = _parse_condition_dicts(
-                    migrated, self._log
-                )
 
         saved_presets = stored.get(FILTER_PRESETS_SETTING)
         if isinstance(saved_presets, dict):
@@ -8186,10 +8404,14 @@ class SelectWindow(tk.Toplevel):
 
 
 class _ModalToolDialog(tk.Toplevel):
-    """Shared plumbing for the small themed modal tool dialogs
-    (``AspectRatioDialog``, ``UpscaleParamsDialog``): the centre-on-parent
-    placement they both use (Rule #5 — one home for the identical
-    geometry math)."""
+    """Shared plumbing for a small themed modal dialog: the centre-on-
+    parent placement (``_center_on``). Historically shared by the
+    standalone Upscale/Aspect tool dialogs too (both retired, GUI
+    rework Phase 14 — replaced by ``UpscaleSettingsPanel``/
+    ``AspectSettingsPanel``); today's only family is ``_AiDialog``
+    (the key wizard, the sheet generator) — kept as its own base
+    rather than folded into ``_AiDialog`` directly (Rule #5: a future
+    non-AI modal dialog can still reuse just the placement math)."""
 
     def _center_on(self, master) -> None:
         """Place the dialog over the middle-upper third of the parent."""
@@ -8226,14 +8448,15 @@ class AspectRatioCanvas(tk.Canvas):
     font zoom — once is enough). Its background is a ``skin_canvas``
     surface (re-tints automatically on a flip); its DRAWN content (box,
     handles, label) is NOT part of that background-only registry, so it
-    exposes ``redraw_theme()`` for a host to call explicitly. THIS
-    widget's host (``AspectRatioDialog``) is fully MODAL (``grab_set``),
-    so — exactly like ``AiKeyWizard`` (see its docstring) — a flip
-    cannot happen while it is open, and the dialog deliberately does
-    NOT register in ``THEME_TOPLEVELS``: there is nothing to wire. A
-    FUTURE non-modal host (Phase 14's persistent Aspect-ratio settings
-    panel) calls ``redraw_theme()`` from ITS OWN ``apply_theme()`` —
-    the pattern every other themed Toplevel already follows."""
+    exposes ``redraw_theme()`` for a host to call explicitly. Both of
+    today's hosts are non-modal, LIVE parts of the main window — each
+    calls ``redraw_theme()`` from ITS OWN ``apply_theme()``, registered
+    in ``THEME_TOPLEVELS`` (the pattern every other themed Toplevel
+    already follows): ``AgentPanel``'s Force Aspect Ratio block (GUI
+    rework Phase 8) and ``AspectSettingsPanel`` (GUI rework Phase 14,
+    replacing the old fully-modal ``AspectRatioDialog``, which never
+    needed this — a flip cannot happen while a ``grab_set`` dialog is
+    open)."""
 
     def __init__(
         self,
@@ -8417,284 +8640,6 @@ class AspectRatioCanvas(tk.Canvas):
             text=f"{decimal}   ({rw}:{rh})",
             fill=palette["fg"], font=tk_font("bold"), anchor="n",
         )
-
-
-class AspectRatioDialog(_ModalToolDialog):
-    """The MODAL prompt for the standalone 'Aspect ratio…' deform tool.
-
-    Asks THREE things (owner 2026-07-19; the filter became a stacked
-    FilterEditor in GUI rework Phase 4):
-      * the target OUTPUT ratio — two positive-integer fields W and H,
-        PRE-FILLED with the last-used ratio (first run 16:9);
-      * an optional stacked INPUT FILTER on each image's CURRENT
-        size/ratio — zero or more ANDed conditions, remembered;
-      * whether the input is individual FILES or a whole FOLDER — the two
-        action buttons ('Files…' / 'Folder…') encode the choice.
-
-    ``result`` is ``None`` on Cancel / Escape, else a dict
-    ``{"ratio": (w, h), "conditions": list[FilterCondition],
-    "input": "files"|"folder"}``. Themed like the app."""
-
-    def __init__(
-        self, master,
-        default_w: int = ASPECT_DEFAULT_W, default_h: int = ASPECT_DEFAULT_H,
-        conditions: list[filters.FilterCondition] | None = None,
-        presets: dict[str, list[dict]] | None = None,
-        on_presets_changed: Callable[[], None] | None = None,
-    ):
-        super().__init__(master)
-        self.title("Change aspect ratio")
-        self.resizable(False, False)
-        skin_toplevel(self)  # bg registered so a flip re-tints the window
-        self.result: dict | None = None
-        self._w_var = tk.StringVar(value=str(default_w))
-        self._h_var = tk.StringVar(value=str(default_h))
-
-        body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
-        body.pack(fill="both", expand=True)
-
-        top = ttk.Frame(body)
-        top.pack(anchor="w", fill="x")
-
-        left_col = ttk.Frame(top)
-        left_col.pack(side="left", anchor="n")
-        ttk.Label(
-            left_col,
-            text="Target aspect ratio — stretches every image to it:",
-        ).pack(anchor="w", pady=(0, 10))
-
-        fields = ttk.Frame(left_col)
-        fields.pack(anchor="w")
-        ttk.Label(fields, text="W").pack(side="left", padx=(0, 4))
-        self._w_entry = rounded_entry(
-            fields, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._w_var,
-            justify="center",
-        )
-        self._w_entry.pack(side="left")
-        ttk.Label(fields, text=":", font=tk_font("head")).pack(
-            side="left", padx=8
-        )
-        ttk.Label(fields, text="H").pack(side="left", padx=(0, 4))
-        self._h_entry = rounded_entry(
-            fields, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._h_var,
-            justify="center",
-        )
-        self._h_entry.pack(side="left")
-
-        # the visual editor (GUI rework Phase 5), beside the fields and
-        # TWO-WAY synced with them: dragging an edge writes the W/H vars
-        # (_on_canvas_drag), whose trace reshapes the box right back —
-        # AspectRatioCanvas.set_ratio's echo-guard makes that a no-op;
-        # typing in the fields reshapes the box (_on_wh_typed).
-        self._canvas = AspectRatioCanvas(
-            top, w=default_w, h=default_h, on_change=self._on_canvas_drag,
-        )
-        self._canvas.pack(side="left", padx=(ASPECT_DIALOG_PAD_PX, 0), anchor="n")
-        self._w_var.trace_add("write", self._on_wh_typed)
-        self._h_var.trace_add("write", self._on_wh_typed)
-
-        # --- optional stacked INPUT FILTER on the current size/ratio ---
-        ttk.Label(
-            body,
-            text=(
-                "Optional filter on each image's CURRENT size/ratio\n"
-                "— no conditions = process every image:"
-            ),
-        ).pack(anchor="w", pady=(14, 6))
-        self._filter_editor = FilterEditor(
-            body, conditions=conditions, presets=presets,
-            on_presets_changed=on_presets_changed,
-        )
-        self._filter_editor.pack(fill="x")
-
-        btns = ttk.Frame(body)
-        btns.pack(fill="x", pady=(16, 0))
-        rounded_button(
-            btns, "Files…", command=partial(self._run, "files"),
-            kind="success",
-        ).pack(side="right")
-        rounded_button(
-            btns, "Folder…", command=partial(self._run, "folder"),
-            kind="info",
-        ).pack(side="right", padx=6)
-        rounded_button(btns, "Cancel", command=self.destroy).pack(
-            side="right", padx=(0, 6)
-        )
-
-        # Enter defaults to the multi-FILE pick (the tool's original input)
-        self.bind("<Return>", lambda _e: self._run("files"))
-        self.bind("<Escape>", lambda _e: self.destroy())
-        self.update_idletasks()
-        self._center_on(master)
-        self.transient(master)
-        self.grab_set()
-        self._w_entry.focus_set()
-        self.wait_window(self)
-
-    def _on_canvas_drag(self, w: int, h: int) -> None:
-        """``AspectRatioCanvas.on_change`` — a drag mirrored into the W/H
-        entries, which is what ``_run()`` actually reads (and whose own
-        trace calls back into ``set_ratio`` — a no-op echo, see that
-        method's docstring)."""
-        self._w_var.set(str(w))
-        self._h_var.set(str(h))
-
-    def _on_wh_typed(self, *_args) -> None:
-        """Live-reshape the canvas as the owner types a new W/H. A bad
-        or incomplete value (mid-edit — e.g. a momentarily empty field)
-        is a normal typing state, not an error: silently skipped, the
-        canvas just keeps showing the last valid shape. Final validation
-        still happens in ``_run()`` on Files…/Folder…."""
-        try:
-            w = int(self._w_var.get().strip())
-            h = int(self._h_var.get().strip())
-        except ValueError:
-            return
-        if w <= 0 or h <= 0:
-            return
-        self._canvas.set_ratio(w, h)
-
-    def _run(self, input_mode: str) -> None:
-        """Validate the ratio (positive whole numbers) and the filter
-        editor's rows, then close with ``result`` set for the chosen
-        ``input_mode``. A bad value stays open with a loud message."""
-        try:
-            ratio_w = int(self._w_var.get().strip())
-            ratio_h = int(self._h_var.get().strip())
-        except ValueError:
-            messagebox.showerror(
-                "PromptPainter",
-                "Width and height must be whole numbers.", parent=self,
-            )
-            return
-        if ratio_w <= 0 or ratio_h <= 0:
-            messagebox.showerror(
-                "PromptPainter",
-                "Width and height must both be positive.", parent=self,
-            )
-            return
-
-        try:
-            conditions = self._filter_editor.get_conditions()
-        except ValueError as exc:
-            messagebox.showerror("PromptPainter", str(exc), parent=self)
-            return
-
-        self.result = {
-            "ratio": (ratio_w, ratio_h),
-            "conditions": conditions,
-            "input": input_mode,
-        }
-        self.destroy()
-
-
-class UpscaleParamsDialog(_ModalToolDialog):
-    """The MODAL prompt for the standalone Upscale tool's gate (GUI
-    rework Phase 6, replacing the old four-field min-W/min-H/aspect-
-    FROM/aspect-TO layout): ONE min-SIDE spinner — the smaller side's
-    target minimum, in px — plus an embedded stacked ``FilterEditor``
-    deciding WHICH images qualify, PRE-FILLED with the last-used values
-    the caller remembers (first run = today's aspect gate, a single
-    Aspect (range) 0.9-1.1 condition, config default 800px min side).
-
-    ``result`` is ``{"min_side": int, "conditions":
-    list[FilterCondition]}`` on Run, or ``None`` on Cancel / Escape —
-    the caller (``PainterGui._start_tool``) resolves this into
-    ``upscale_if_small``'s kwargs via
-    ``_upscale_params_from_side_and_filter`` AND separately pre-filters
-    the candidate file list via the SAME conditions (root Rule #1: a
-    stacked Width/Height/Any-side condition — or a second/IF-NOT aspect
-    condition the simple kwargs cannot express — must still gate the
-    run, never silently dropped). Themed like the app (skinned Toplevel
-    + rounded fields / buttons)."""
-
-    def __init__(
-        self, master, defaults: dict,
-        presets: dict[str, list[dict]] | None = None,
-        on_presets_changed: Callable[[], None] | None = None,
-    ):
-        super().__init__(master)
-        self.title("Upscale settings")
-        self.resizable(False, False)
-        skin_toplevel(self)  # bg registered so a flip re-tints the window
-        self.result: dict | None = None
-        self._minside_var = tk.StringVar(value=str(defaults["min_side"]))
-
-        body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
-        body.pack(fill="both", expand=True)
-        ttk.Label(
-            body,
-            text=(
-                "Upscale gate — an image is enlarged so its smaller\n"
-                "side reaches this minimum, but only when it also\n"
-                "matches the filter below:"
-            ),
-        ).pack(anchor="w", pady=(0, 10))
-
-        dims = ttk.Frame(body)
-        dims.pack(anchor="w")
-        ttk.Label(dims, text="min side", width=8).pack(side="left")
-        Spinner(dims, self._minside_var, step=UPSCALE_MINDIM_STEP).pack(
-            side="left"
-        )
-        ttk.Label(dims, text="px").pack(side="left", padx=(4, 0))
-
-        ttk.Label(
-            body,
-            text=(
-                "Optional filter on each image's CURRENT size/ratio\n"
-                "— no conditions = process every image:"
-            ),
-        ).pack(anchor="w", pady=(14, 6))
-        self._filter_editor = FilterEditor(
-            body, conditions=defaults["conditions"], presets=presets,
-            on_presets_changed=on_presets_changed,
-        )
-        self._filter_editor.pack(fill="x")
-
-        btns = ttk.Frame(body)
-        btns.pack(fill="x", pady=(14, 0))
-        rounded_button(btns, "Run", command=self._run, kind="success").pack(
-            side="right"
-        )
-        rounded_button(btns, "Cancel", command=self.destroy).pack(
-            side="right", padx=6
-        )
-
-        self.bind("<Return>", lambda _e: self._run())
-        self.bind("<Escape>", lambda _e: self.destroy())
-        self.update_idletasks()
-        self._center_on(master)
-        self.transient(master)
-        self.grab_set()
-        self.focus_set()
-        self.wait_window(self)
-
-    def _run(self) -> None:
-        """Validate the min-side spinner (a positive number) and the
-        filter editor's rows, then close with ``result`` set; a bad
-        value stays open with a loud message."""
-        try:
-            min_side = int(float(self._minside_var.get().strip()))
-        except ValueError:
-            messagebox.showerror(
-                "PromptPainter",
-                "Min side must be a number.", parent=self,
-            )
-            return
-        if min_side <= 0:
-            messagebox.showerror(
-                "PromptPainter",
-                "Min side must be positive.", parent=self,
-            )
-            return
-        try:
-            conditions = self._filter_editor.get_conditions()
-        except ValueError as exc:
-            messagebox.showerror("PromptPainter", str(exc), parent=self)
-            return
-        self.result = {"min_side": min_side, "conditions": conditions}
-        self.destroy()
 
 
 class _AiDialog(_ModalToolDialog):

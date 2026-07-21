@@ -47,7 +47,9 @@ match.
   `BADGES` block + `badge_keys_for` (the dashboard status badges),
   (GUI rework Phase 4) the `FILTER_KIND_*`/`FILTER_KINDS`/
   `FILTER_POLARITY_*`/`FILTER_PRESETS_SETTING`/`FILTER_ASPECT_EXACT_TOL`
-  block behind `FilterEditor` and the migrated `AspectRatioDialog`, and
+  block behind `FilterEditor` and the standalone Aspect tool's own
+  panel it migrated (GUI rework Phase 4's `AspectRatioDialog`, later
+  retired — GUI rework Phase 14 — by `AspectSettingsPanel`), and
   (GUI rework Phase 10) `MenuTile`/`MENU_TILES`/`MENU_TILE_*` behind
   `MainMenu`, and (GUI rework Phase 11) `TILE_JOB_KINDS` behind the
   running view's `IconBar`
@@ -203,7 +205,9 @@ match.
   key the shared preset LIBRARY lives under — one flat
   `{name: [condition-dict, ...]}` dict every `FilterEditor` instance
   reads/writes (GUI rework Phase 4 wired this in: `gui.FilterEditor` +
-  `AspectRatioDialog`, its first caller — see [GUI](../gui.md)).
+  `AspectRatioDialog`, its first caller, since retired — GUI rework
+  Phase 14 — by `AspectSettingsPanel`, one of several current callers
+  — see [GUI](../gui.md)).
 - `FILTER_ASPECT_EXACT_TOL` (`0.02`) — GUI rework Phase 4, fixes Phase
   3's flagged caveat: a pinned "Aspect (exact)" condition is a
   razor-thin `lo == hi` float-equality test (correct for the engine —

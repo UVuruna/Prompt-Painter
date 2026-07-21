@@ -27,7 +27,11 @@ GUI rework Phase 13 adds ``_tool_panels`` (BG/Crop's own persistent
 pack_forget is exercised for real, same as ``_controls_box``/
 ``_compact_box`` already are) and ``_open_tool_panel`` (the shared
 toggle both ``_select_tile`` and ``_click_icon_bar_tile`` now route
-bg/crop through instead of the old ``_start_tool`` modal).
+bg/crop through instead of the old ``_start_tool`` modal). GUI rework
+Phase 14 widens ``_tool_panels`` to all FOUR standalone tools
+(upscale/aspect join bg/crop, both old modal dialogs deleted) — same
+mechanism, no new branch in either caller, so the upscale-specific
+tests below just prove the dict now covers it too.
 """
 
 from __future__ import annotations
@@ -136,13 +140,16 @@ class FakeGui:
 
         self._controls_box = ttk.Frame(root)
         self._compact_box = ttk.Frame(root)
-        # GUI rework Phase 13: BG/Crop's own persistent settings panel
-        # stand-ins — real ttk.Frames so _apply_running_layout's pack/
+        # all FOUR standalone tools' own persistent settings panel
+        # stand-ins (bg/crop, GUI rework Phase 13; upscale/aspect,
+        # Phase 14) — real ttk.Frames so _apply_running_layout's pack/
         # pack_forget is exercised for real (see this module's own
-        # docstring); upscale/aspect/aicheck deliberately have NO entry
-        # here, matching PainterGui._tool_panels' real Phase-13 scope.
+        # docstring); "aicheck" deliberately has NO entry here, matching
+        # PainterGui._tool_panels' real scope (Phase 15's own scope).
         self._tool_panels: dict[str, _RecordingToolPanel] = {
             "bg": _RecordingToolPanel(root), "crop": _RecordingToolPanel(root),
+            "upscale": _RecordingToolPanel(root),
+            "aspect": _RecordingToolPanel(root),
         }
         self.notebook = ttk.Notebook(root)
         self.notebook.add(ttk.Frame(self.notebook), text="Dashboard")
@@ -155,7 +162,6 @@ class FakeGui:
 
         self.new_collection_calls = 0
         self.start_ai_check_calls = 0
-        self.start_tool_calls: list[str] = []
 
         # _toggle_pause_job's own attribute surface (Start/Pause/Stop
         # view semantics, spec item 4) — plain recorders, never a real
@@ -180,9 +186,6 @@ class FakeGui:
 
     def _start_ai_check(self) -> None:
         self.start_ai_check_calls += 1
-
-    def _start_tool(self, slot: str) -> None:
-        self.start_tool_calls.append(slot)
 
     def _log(self, msg: str) -> None:
         self.log_lines.append(msg)
@@ -371,17 +374,19 @@ def test_click_icon_bar_tile_website_gen_toggles_the_inline_panel(root):
 def test_click_icon_bar_tile_a_not_running_tool_invokes_its_existing_handler(
     root,
 ):
-    """upscale/aspect have no persistent panel yet (Phase 14) —
+    """image_checker (Phase 15's own scope) has no persistent panel —
     clicking still launches through the SAME handler the Main Menu
     itself uses (_tile_handler), undisturbed by some OTHER job that
-    keeps running. (bg/crop DO have one now — GUI rework Phase 13 —
-    see test_click_icon_bar_tile_bg_not_running_opens_its_inline_panel
+    keeps running. (All FOUR standalone tools DO have one now — GUI
+    rework Phase 13/14 — see
+    test_click_icon_bar_tile_bg_not_running_opens_its_inline_panel /
+    test_click_icon_bar_tile_upscale_not_running_opens_its_inline_panel
     below.)"""
     fake = FakeGui(root)
     fake._view = "running"
     fake._running = {"chatgpt"}
-    gui.PainterGui._click_icon_bar_tile(fake, "upscale")
-    assert fake.start_tool_calls == ["upscale"]
+    gui.PainterGui._click_icon_bar_tile(fake, "image_checker")
+    assert fake.start_ai_check_calls == 1
     assert fake._inline_kind is None  # website_gen panel never touched
 
 
@@ -394,13 +399,32 @@ def test_click_icon_bar_tile_bg_not_running_opens_its_inline_panel(root):
     fake._view = "running"
     fake._running = {"chatgpt"}
     gui.PainterGui._click_icon_bar_tile(fake, "bg")
-    assert fake.start_tool_calls == []  # never the old modal path
     assert fake._inline_kind == "bg"
     assert fake._tool_panels["bg"].winfo_manager() == "pack"
 
     gui.PainterGui._click_icon_bar_tile(fake, "bg")  # click again -> hides
     assert fake._inline_kind is None
     assert fake._tool_panels["bg"].winfo_manager() == ""
+
+
+def test_click_icon_bar_tile_upscale_not_running_opens_its_inline_panel(
+    root,
+):
+    """GUI rework Phase 14: upscale/aspect now behave exactly like
+    bg/crop above — the old UpscaleParamsDialog/AspectRatioDialog
+    modal is gone, _tile_handler routes both through _open_tool_panel
+    the same generic way (no per-slot branch in either caller)."""
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._running = {"chatgpt"}
+    gui.PainterGui._click_icon_bar_tile(fake, "upscale")
+    assert fake._inline_kind == "upscale"
+    assert fake._tool_panels["upscale"].winfo_manager() == "pack"
+
+    gui.PainterGui._click_icon_bar_tile(fake, "aspect")  # a DIFFERENT slot
+    assert fake._inline_kind == "aspect"
+    assert fake._tool_panels["upscale"].winfo_manager() == ""
+    assert fake._tool_panels["aspect"].winfo_manager() == "pack"
 
 
 def test_click_icon_bar_tile_ai_sheet_gen_always_opens_its_dialog(root):
@@ -448,7 +472,6 @@ def test_select_tile_bg_from_menu_skips_main_and_opens_the_panel_in_running(
     assert fake._view == "running"
     assert fake._inline_kind == "bg"
     assert fake._tool_panels["bg"].winfo_manager() == "pack"
-    assert fake.start_tool_calls == []  # never the old modal path
 
 
 def test_select_tile_website_gen_still_goes_through_main_unmodified(root):
@@ -459,14 +482,19 @@ def test_select_tile_website_gen_still_goes_through_main_unmodified(root):
     assert fake._inline_kind is None  # controls_box shows via "main" itself
 
 
-def test_select_tile_upscale_still_goes_through_main_and_its_own_handler(
+def test_select_tile_upscale_skips_main_and_opens_the_panel_in_running(
     root,
 ):
+    """GUI rework Phase 14: upscale (like aspect) now takes the SAME
+    bg/crop shortcut straight to "running" with its own panel shown —
+    the old modal dialog's "main" hop is gone."""
     fake = FakeGui(root)
     fake._view = "menu"
     gui.PainterGui._select_tile(fake, "upscale")
-    assert fake.view_log == ["main"]
-    assert fake.start_tool_calls == ["upscale"]
+    assert fake.view_log == ["running"]  # never visited "main"
+    assert fake._view == "running"
+    assert fake._inline_kind == "upscale"
+    assert fake._tool_panels["upscale"].winfo_manager() == "pack"
 
 
 # ---------------------------------------------------------------------
@@ -489,17 +517,19 @@ def test_toggle_pause_job_on_a_site_reveals_the_website_gen_panel_while_running(
 
 
 def test_toggle_pause_job_on_a_tool_never_touches_the_inline_panel(root):
-    """upscale/aspect/aicheck have no persistent settings panel yet
-    (Phase 14/15) — pausing one is a no-op beyond its own existing
-    Pause/Resume toggle (already reflected via panels[kind].set_paused).
-    (bg/crop DO have one now — GUI rework Phase 13 — see
-    test_toggle_pause_job_on_bg_reveals_its_own_inline_panel below.)"""
+    """"aicheck" has no persistent settings panel yet (Phase 15's own
+    scope) — pausing it is a no-op beyond its own existing Pause/Resume
+    toggle (already reflected via panels[kind].set_paused). (ALL FOUR
+    standalone tools DO have one now — GUI rework Phase 13/14 — see
+    test_toggle_pause_job_on_bg_reveals_its_own_inline_panel /
+    test_toggle_pause_job_on_upscale_reveals_its_own_inline_panel
+    below.)"""
     fake = FakeGui(root)
     fake._view = "running"
-    gui.PainterGui._toggle_pause_job(fake, "upscale")
-    assert "upscale" in fake._paused
-    assert fake.panels["upscale"].paused_calls == [True]
-    assert "upscale" not in fake.agents  # tools have no AgentPanel entry
+    gui.PainterGui._toggle_pause_job(fake, "aicheck")
+    assert "aicheck" in fake._paused
+    assert fake.panels["aicheck"].paused_calls == [True]
+    assert "aicheck" not in fake.agents  # tools have no AgentPanel entry
     assert fake._inline_kind is None
 
 
@@ -520,6 +550,20 @@ def test_toggle_pause_job_on_bg_reveals_its_own_inline_panel(root):
     assert fake._tool_panels["bg"].paused_calls == [True, False]
     assert fake._inline_kind == "bg"  # still there — only Start hides it
     assert fake._tool_panels["bg"].winfo_manager() == "pack"
+
+
+def test_toggle_pause_job_on_upscale_reveals_its_own_inline_panel(root):
+    """GUI rework Phase 14: upscale/aspect now behave exactly like
+    bg/crop above — the SAME generic ``kind in self._tool_panels``
+    check in ``_toggle_pause_job``, no per-slot branch."""
+    fake = FakeGui(root)
+    fake._view = "running"
+    gui.PainterGui._toggle_pause_job(fake, "upscale")
+    assert "upscale" in fake._paused
+    assert fake.panels["upscale"].paused_calls == [True]
+    assert fake._tool_panels["upscale"].paused_calls == [True]
+    assert fake._inline_kind == "upscale"
+    assert fake._tool_panels["upscale"].winfo_manager() == "pack"
 
 
 def test_toggle_pause_job_outside_running_view_never_touches_the_layout(root):

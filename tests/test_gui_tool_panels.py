@@ -1,7 +1,8 @@
-"""BG removal / Crop persistent settings panels (GUI rework Phase 13).
+"""Standalone-tool persistent settings panels — BG removal / Crop (GUI
+rework Phase 13), Upscale / Aspect ratio (Phase 14, same family).
 
-Four halves, matching gui.py's own "pure helpers get pytest, real
-Tk/UI wiring gets a screenshot" split (___tests.md):
+Halves, matching gui.py's own "pure helpers get pytest, real Tk/UI
+wiring gets a screenshot" split (___tests.md):
 
 * ``gui._filter_files`` — the pre-filter every tool now shares
   (Aspect/Upscale already used it; BG/Crop gain it this phase) — real
@@ -18,20 +19,40 @@ Tk/UI wiring gets a screenshot" split (___tests.md):
   the embedded ``FilterEditor`` proxy, the Advanced fields reaching
   ``build_func()``'s engine call (proving a NON-DEFAULT override
   actually arrives, not just accepted and silently ignored — Rule #1),
-  run-state/pause button reflection, and the settings round-trip.
+  run-state/pause/STOP button reflection, and the settings round-trip.
+* ``UpscaleSettingsPanel``/``AspectSettingsPanel`` (GUI rework Phase
+  14, replacing the retired ``UpscaleParamsDialog``/
+  ``AspectRatioDialog`` modals) — the SAME base contract as BG/Crop,
+  proven the SAME way: Upscale's min-side spinner + seeded aspect
+  condition reaching ``build_func()``'s ``upscale_if_small`` call
+  (cross-checked against ``_upscale_params_from_side_and_filter``'s
+  own resolution, test_gui_upscale.py's proven table); Aspect's
+  target-ratio W/H entries + canvas two-way sync + ``build_func()``'s
+  ``change_aspect`` call; both panels' settings round-trip
+  (``up_minside``/``ratio`` — the ALWAYS-VISIBLE fields ``HAS_ADVANCED
+  = False`` moves out of the collapsible, still carried by
+  ``_advanced_settings``/``_apply_advanced_settings`` regardless, see
+  ``ToolSettingsPanel``'s own docstring).
 * ``PainterGui._start_tool_from_panel`` — the core Phase-13 promise
   ("given a folder + conditions, the right file subset is queued") —
   exercised through a small duck-typed ``FakeGuiForPanel`` (the SAME
   convention test_gui_pipeline.py's/test_gui_running_view.py's own
   FakeGui use: never a full ``PainterGui``). Its ``_run_tool_job`` is
   a RECORDING stand-in, never the real background worker — the worker
-  loop itself is explicitly UNCHANGED this phase (see
-  ``_launch_tool_worker``'s own docstring) and already has its own
-  coverage; this file only proves WHAT gets hidden off to it.
+  loop itself has its own coverage (should_stop threading — GUI rework
+  Phase 14 — in the "Stop" section below); this file only proves WHAT
+  gets handed off to it.
+* **Stop** (GUI rework Phase 14) — ``_run_tool_job``'s new
+  ``stop_event`` halting the loop BETWEEN images (mirrors
+  test_runner.py's own ``test_stop_flag_stops_between_items``, over a
+  duck-typed fake ``self`` with a real ``queue.Queue`` so ``_q.put``
+  has somewhere to land) and ``PainterGui._stop_tool``'s request half
+  through ``FakeGuiForPanel``.
 """
 
 from __future__ import annotations
 
+import queue
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -43,16 +64,22 @@ import gui
 import painter.postprocess as postprocess_module
 from painter import filters
 from painter.config import (
+    ASPECT_DEFAULT_H,
+    ASPECT_DEFAULT_W,
     CLEAN_EDGE_ENABLE,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
     CROP_MIN_INK_PX,
+    FILTER_KIND_ASPECT_RANGE,
     FILTER_KIND_WIDTH,
     FILTER_POLARITY_IF,
     SAFETY_MAX_REMOVE_FRAC,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
+    UPSCALE_ASPECT_MAX,
+    UPSCALE_ASPECT_MIN,
+    UPSCALE_MIN_SIDE_DEFAULT,
 )
-from painter.jobtemp import clear_all
+from painter.jobtemp import JobTemp, clear_all
 
 
 @pytest.fixture(autouse=True)
@@ -76,7 +103,10 @@ def cond(kind: str, polarity: str, lo: float, hi: float) -> filters.FilterCondit
 
 
 def make_panel(cls, root):
-    return cls(root, on_start=lambda *_a: None, on_pause=lambda *_a: None)
+    return cls(
+        root, on_start=lambda *_a: None, on_pause=lambda *_a: None,
+        on_stop=lambda *_a: None,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -304,6 +334,17 @@ def test_set_run_state_disables_start_while_running(root):
     assert panel.btn_start.cget("state") == "normal"
 
 
+def test_set_run_state_enables_stop_only_while_running(root):
+    """GUI rework Phase 14 — Stop is the MIRROR of Start: disabled
+    (outline) while idle, available (filled) exactly while running."""
+    panel = make_panel(gui.CropSettingsPanel, root)
+    assert panel.btn_stop.cget("state") == "disabled"
+    panel.set_run_state(running=True)
+    assert panel.btn_stop.cget("state") == "normal"
+    panel.set_run_state(running=False)
+    assert panel.btn_stop.cget("state") == "disabled"
+
+
 def test_set_paused_flips_the_button_label(root):
     panel = make_panel(gui.CropSettingsPanel, root)
     assert panel.btn_pause.cget("text") == "Pause"
@@ -424,6 +465,11 @@ class FakeGuiForPanel:
         self._pause_events = {
             slot: threading.Event() for slot in tool_panels
         }
+        # GUI rework Phase 14: _launch_tool_worker also clears+reads a
+        # per-slot Stop event (mirrors _pause_events above)
+        self._stop_events = {
+            slot: threading.Event() for slot in tool_panels
+        }
         self.panels = {slot: _FakeDashSlot() for slot in tool_panels}
         self._dashgrid = SimpleNamespace(add=lambda _slot: None)
         self.notebook = SimpleNamespace(select=lambda _i: None)
@@ -442,7 +488,10 @@ class FakeGuiForPanel:
     def _sync_running_state(self) -> None:
         self.sync_running_state_calls += 1
 
-    def _run_tool_job(self, slot, label, func, folder, files, temp, pause_event):
+    def _run_tool_job(
+        self, slot, label, func, folder, files, temp, pause_event,
+        stop_event,
+    ):
         self.run_tool_job_calls.append({
             "slot": slot, "label": label, "func": func,
             "folder": folder, "files": list(files),
@@ -539,3 +588,374 @@ def test_start_tool_from_panel_refuses_a_second_job_of_the_same_kind(
 
     assert errors
     assert fake.run_tool_job_calls == []
+
+
+# ---------------------------------------------------------------------
+# UpscaleSettingsPanel (GUI rework Phase 14)
+# ---------------------------------------------------------------------
+
+
+def test_upscale_panel_seeds_the_default_min_side_and_aspect_condition(root):
+    panel = make_panel(gui.UpscaleSettingsPanel, root)
+    assert panel.up_minside_var.get() == str(UPSCALE_MIN_SIDE_DEFAULT)
+    [c] = panel.filter.get_conditions()
+    assert c.kind == FILTER_KIND_ASPECT_RANGE
+    assert c.polarity == FILTER_POLARITY_IF
+    assert c.lo == UPSCALE_ASPECT_MIN and c.hi == UPSCALE_ASPECT_MAX
+
+
+def test_upscale_panel_has_no_advanced_section(root):
+    """HAS_ADVANCED = False — the min-side spinner is the panel's own
+    PRIMARY control (_build_extra), not tucked behind a gear."""
+    panel = make_panel(gui.UpscaleSettingsPanel, root)
+    assert not hasattr(panel, "_advanced_box")
+    assert not hasattr(panel, "_advanced_btn")
+
+
+def test_upscale_panel_build_func_reaches_the_real_engine(
+    root, monkeypatch, tmp_path,
+):
+    """The exact 'non-default override reaches the engine call' proof
+    (same convention as test_bg_build_func_passes_the_overridden_
+    safety_fractions): a non-default min-side flows through build_func
+    into upscale_if_small's kwargs, resolved the SAME way
+    _upscale_params_from_side_and_filter already proves
+    (test_gui_upscale.py)."""
+    import painter.upscale as upscale_module
+
+    calls: list[dict] = []
+
+    def fake_upscale_if_small(path, log, **params):
+        calls.append(params)
+        return "done"
+
+    monkeypatch.setattr(
+        upscale_module, "upscale_if_small", fake_upscale_if_small
+    )
+    panel = make_panel(gui.UpscaleSettingsPanel, root)
+    panel.up_minside_var.set("950")
+    func = panel.build_func()
+    func(tmp_path / "x.png", print)
+
+    assert calls == [{
+        "min_width": 950, "min_height": 950,
+        "aspect_min": UPSCALE_ASPECT_MIN, "aspect_max": UPSCALE_ASPECT_MAX,
+    }]
+
+
+def test_upscale_panel_build_func_raises_on_a_non_numeric_min_side(root):
+    panel = make_panel(gui.UpscaleSettingsPanel, root)
+    panel.up_minside_var.set("not-a-number")
+    with pytest.raises(ValueError, match="Min side must be a number"):
+        panel.build_func()
+
+
+def test_upscale_panel_build_func_raises_on_a_non_positive_min_side(root):
+    panel = make_panel(gui.UpscaleSettingsPanel, root)
+    panel.up_minside_var.set("0")
+    with pytest.raises(ValueError, match="Min side must be positive"):
+        panel.build_func()
+
+
+def test_upscale_panel_settings_round_trip(root):
+    """The core Phase-14 promise for Upscale: the min-side spinner
+    round-trips through get_settings()/apply_settings() alongside the
+    filter stack, and 'advanced_collapsed' is never emitted (HAS_
+    ADVANCED = False, same contract ToolSettingsPanel.get_settings
+    documents)."""
+    panel = make_panel(gui.UpscaleSettingsPanel, root)
+    panel.up_minside_var.set("950")
+    panel.filter.set_conditions(
+        [cond(FILTER_KIND_WIDTH, FILTER_POLARITY_IF, 100.0, 2000.0)]
+    )
+
+    stored = panel.get_settings()
+    assert stored["up_minside"] == "950"
+    assert "advanced_collapsed" not in stored
+    assert stored["conditions"] == [
+        filters.condition_to_dict(
+            cond(FILTER_KIND_WIDTH, FILTER_POLARITY_IF, 100.0, 2000.0)
+        )
+    ]
+
+    fresh = make_panel(gui.UpscaleSettingsPanel, root)
+    conditions = gui._parse_condition_dicts(stored["conditions"], lambda _m: None)
+    fresh.apply_settings(stored, conditions=conditions)
+    assert fresh.up_minside_var.get() == "950"
+    assert fresh.filter.get_conditions() == conditions
+
+
+def test_upscale_panel_apply_settings_missing_keys_keep_the_seeded_default(
+    root,
+):
+    panel = make_panel(gui.UpscaleSettingsPanel, root)
+    panel.apply_settings({}, conditions=None)
+    assert panel.up_minside_var.get() == str(UPSCALE_MIN_SIDE_DEFAULT)
+    [c] = panel.filter.get_conditions()
+    assert c.lo == UPSCALE_ASPECT_MIN and c.hi == UPSCALE_ASPECT_MAX
+
+
+# ---------------------------------------------------------------------
+# AspectSettingsPanel (GUI rework Phase 14)
+# ---------------------------------------------------------------------
+
+
+def test_aspect_panel_seeds_the_default_ratio_and_an_empty_filter(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    assert panel.target_ratio() == (ASPECT_DEFAULT_W, ASPECT_DEFAULT_H)
+    assert panel.filter.get_conditions() == []
+
+
+def test_aspect_panel_has_no_advanced_section(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    assert not hasattr(panel, "_advanced_box")
+    assert not hasattr(panel, "_advanced_btn")
+
+
+def test_aspect_panel_canvas_drag_updates_the_wh_fields(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel._on_canvas_drag(4, 3)
+    assert panel._ratio_w_var.get() == "4"
+    assert panel._ratio_h_var.get() == "3"
+    assert panel.target_ratio() == (4, 3)
+
+
+def test_aspect_panel_typing_reshapes_the_canvas(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel._ratio_w_var.set("21")
+    panel._ratio_h_var.set("9")
+    assert (
+        panel._ratio_canvas._ratio_w, panel._ratio_canvas._ratio_h,
+    ) == (21, 9)
+
+
+def test_aspect_panel_typing_a_bad_value_is_silently_skipped(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel._ratio_w_var.set("not-a-number")  # mid-edit, never an error
+    assert (
+        panel._ratio_canvas._ratio_w, panel._ratio_canvas._ratio_h,
+    ) == (ASPECT_DEFAULT_W, ASPECT_DEFAULT_H)
+
+
+def test_aspect_panel_target_ratio_raises_on_non_numeric(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel._ratio_w_var.set("abc")
+    with pytest.raises(ValueError, match="whole numbers"):
+        panel.target_ratio()
+
+
+def test_aspect_panel_target_ratio_raises_on_non_positive(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel._ratio_w_var.set("0")
+    with pytest.raises(ValueError, match="positive"):
+        panel.target_ratio()
+
+
+def test_aspect_panel_build_func_calls_change_aspect_with_the_target_ratio(
+    root, monkeypatch, tmp_path,
+):
+    import painter.aspect as aspect_module
+
+    calls: list[tuple] = []
+
+    def fake_change_aspect(path, w, h, log):
+        calls.append((path, w, h))
+        return "done"
+
+    monkeypatch.setattr(aspect_module, "change_aspect", fake_change_aspect)
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel._ratio_w_var.set("4")
+    panel._ratio_h_var.set("3")
+    func = panel.build_func()
+    img = tmp_path / "x.png"
+    func(img, print)
+
+    assert calls == [(img, 4, 3)]
+
+
+def test_aspect_panel_target_ratio_and_filter_round_trip(root):
+    """The core Phase-14 promise for Aspect: BOTH the target ratio
+    (canvas + entries) and the stacked filter survive get_settings()/
+    apply_settings() — the same 'missing key = keep default' contract
+    every other panel already has, and 'advanced_collapsed' is never
+    emitted (HAS_ADVANCED = False)."""
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel._ratio_w_var.set("21")
+    panel._ratio_h_var.set("9")
+    panel.filter.set_conditions(
+        [cond(FILTER_KIND_WIDTH, FILTER_POLARITY_IF, 500.0, 5000.0)]
+    )
+
+    stored = panel.get_settings()
+    assert stored["ratio"] == ["21", "9"]
+    assert "advanced_collapsed" not in stored
+    assert stored["conditions"] == [
+        filters.condition_to_dict(
+            cond(FILTER_KIND_WIDTH, FILTER_POLARITY_IF, 500.0, 5000.0)
+        )
+    ]
+
+    fresh = make_panel(gui.AspectSettingsPanel, root)
+    conditions = gui._parse_condition_dicts(stored["conditions"], lambda _m: None)
+    fresh.apply_settings(stored, conditions=conditions)
+    assert fresh.target_ratio() == (21, 9)
+    assert fresh.filter.get_conditions() == conditions
+    # the canvas itself reflects the restored ratio, not just the vars
+    assert (
+        fresh._ratio_canvas._ratio_w, fresh._ratio_canvas._ratio_h,
+    ) == (21, 9)
+
+
+def test_aspect_panel_apply_settings_missing_keys_keep_the_default(root):
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel.apply_settings({}, conditions=None)
+    assert panel.target_ratio() == (ASPECT_DEFAULT_W, ASPECT_DEFAULT_H)
+    assert panel.filter.get_conditions() == []
+
+
+def test_aspect_panel_apply_settings_ignores_a_malformed_ratio(root):
+    """A hand-corrupted or partial 'ratio' value never crashes the
+    settings load — the widget's own current value survives untouched
+    (same 'corrupt value, honest fallback' precedent as every other
+    migration/restore path in this file)."""
+    panel = make_panel(gui.AspectSettingsPanel, root)
+    panel.apply_settings({"ratio": ["not-a-number", "9"]}, conditions=None)
+    assert panel.target_ratio() == (ASPECT_DEFAULT_W, ASPECT_DEFAULT_H)
+
+    panel.apply_settings({"ratio": [0, 9]}, conditions=None)
+    assert panel.target_ratio() == (ASPECT_DEFAULT_W, ASPECT_DEFAULT_H)
+
+
+# ---------------------------------------------------------------------
+# Stop (GUI rework Phase 14) — PainterGui._stop_tool, the request half
+# ---------------------------------------------------------------------
+
+
+def test_stop_tool_sets_the_stop_event_for_a_running_job(root):
+    panel = make_panel(gui.BgSettingsPanel, root)
+    fake = FakeGuiForPanel({"bg": panel})
+    fake._tool_workers["bg"] = object()  # pretend a worker is running
+    gui.PainterGui._stop_tool(fake, "bg")
+    assert fake._stop_events["bg"].is_set()
+
+
+def test_stop_tool_is_a_no_op_when_nothing_is_running(root):
+    panel = make_panel(gui.CropSettingsPanel, root)
+    fake = FakeGuiForPanel({"crop": panel})
+    gui.PainterGui._stop_tool(fake, "crop")
+    assert not fake._stop_events["crop"].is_set()
+
+
+def test_stop_tool_also_clears_a_pending_pause(root):
+    """MUST NOT REGRESS (mirrors _stop_site's own contract): Stop wins
+    over a pending Pause instead of leaving a stale pre-paused toggle
+    for the next Start."""
+    panel = make_panel(gui.CropSettingsPanel, root)
+    fake = FakeGuiForPanel({"crop": panel})
+    fake._tool_workers["crop"] = object()
+    fake._paused.add("crop")
+    toggled: list[str] = []
+    fake._toggle_pause_job = toggled.append
+    gui.PainterGui._stop_tool(fake, "crop")
+    assert fake._stop_events["crop"].is_set()
+    assert toggled == ["crop"]
+
+
+# ---------------------------------------------------------------------
+# Stop (GUI rework Phase 14) — _run_tool_job's should_stop, the worker
+# half. Mirrors test_runner.py's own test_stop_flag_stops_between_items:
+# should_stop is checked BETWEEN images only, never mid-image, so the
+# in-flight item always finishes.
+# ---------------------------------------------------------------------
+
+
+class _FakeGuiForJob:
+    """Just enough surface for the UNBOUND ``_run_tool_job`` to run for
+    real: a genuine ``queue.Queue`` so its ``log``/``emit`` closures
+    (both ``self._q.put``) have somewhere to land — the SAME minimal-
+    surface convention ``FakeGuiForPanel``/test_gui_pipeline.py's own
+    ``FakeGui`` already use."""
+
+    def __init__(self):
+        self._q: "queue.Queue" = queue.Queue()
+
+
+def _drain(q: "queue.Queue") -> list:
+    items = []
+    while True:
+        try:
+            items.append(q.get_nowait())
+        except queue.Empty:
+            break
+    return items
+
+
+def test_run_tool_job_stop_flag_halts_between_images(tmp_path):
+    folder = tmp_path / "images"
+    folder.mkdir()
+    files = []
+    for i in range(3):
+        p = folder / f"img_{i}.png"
+        Image.new("RGBA", (10, 10)).save(p)
+        files.append(p)
+
+    calls = {"n": 0}
+
+    def stop_after_first():
+        calls["n"] += 1
+        return calls["n"] > 1  # first between-item check passes, second stops
+
+    fake = _FakeGuiForJob()
+    temp = JobTemp("upscale", folder)
+    try:
+        gui.PainterGui._run_tool_job(
+            fake, "upscale", "Upscale", lambda path, log: "nothing",
+            folder, files, temp,
+            pause_event=threading.Event(),
+            stop_event=SimpleNamespace(is_set=stop_after_first),
+        )
+    finally:
+        temp.clear()
+
+    msgs = _drain(fake._q)
+    text_lines = [m for m in msgs if isinstance(m, str)]
+    events = [m for m in msgs if isinstance(m, tuple) and m[0] == "__event__"]
+    item_events = [e[2]["type"] for e in events]
+
+    # exactly ONE image reached the engine (item_start once, no second)
+    assert item_events.count("item_start") == 1
+    assert any("STOPPED on request" in line for line in text_lines)
+    assert any("1/3" in line for line in text_lines if "STOPPED" in line)
+    # the worker still reports done, even on a Stop (finally: always posted)
+    assert msgs[-1] == ("__tool_done__", "upscale")
+
+
+def test_run_tool_job_without_a_stop_processes_every_image(tmp_path):
+    """Regression guard: a should_stop that never fires behaves exactly
+    like before this phase — every image runs, same as the previous
+    (Stop-less) contract."""
+    folder = tmp_path / "images"
+    folder.mkdir()
+    files = []
+    for i in range(2):
+        p = folder / f"img_{i}.png"
+        Image.new("RGBA", (10, 10)).save(p)
+        files.append(p)
+
+    fake = _FakeGuiForJob()
+    temp = JobTemp("upscale", folder)
+    try:
+        gui.PainterGui._run_tool_job(
+            fake, "upscale", "Upscale", lambda path, log: "nothing",
+            folder, files, temp,
+            pause_event=threading.Event(),
+            stop_event=threading.Event(),  # never set
+        )
+    finally:
+        temp.clear()
+
+    events = [
+        m for m in _drain(fake._q)
+        if isinstance(m, tuple) and m[0] == "__event__"
+    ]
+    assert [e[2]["type"] for e in events].count("item_start") == 2

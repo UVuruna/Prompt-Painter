@@ -146,7 +146,10 @@ reachability fixes:
 - **Collapsible controls** — a `▾ Controls` toggle (top strip, left
   of the Day/Night switch) collapses the WHOLE upper control area
   (the Collections queue, Output row, both `AgentPanel` bodies and
-  the in-place-tools button row — all held in `self._controls_box`)
+  the AI features row — all held in `self._controls_box`; the four
+  standalone tools' OWN quick-access buttons used to live in this same
+  toolbar too, DELETED GUI rework Phase 14 — the Main Menu/IconBar
+  tiles fully supersede them, see **Standalone-tool settings panels**)
   down to a thin per-agent strip (`self._compact_box`): one
   `[logo] Name [Start][Stop]` cluster per site, so the Dashboard/Log
   notebook takes the full height while the owner watches a run.
@@ -300,26 +303,26 @@ always-visible toolbar already called before Phase 10:
 | `ai_sheet_gen` | `_new_collection_ai()` |
 | `api_image_gen` | none (disabled tile — `_select_tile` is never reached; Phase 19 wires the adapter) |
 | `image_checker` | `_start_ai_check()` |
-| `bg` / `crop` | `_open_tool_panel(slot)` — GUI rework Phase 13, see below |
-| `upscale` / `aspect` | `_start_tool(slot)` |
+| `bg` / `crop` / `upscale` / `aspect` | `_open_tool_panel(slot)` — GUI rework Phase 13 (bg/crop), Phase 14 (upscale/aspect), see below |
 
-`upscale`/`aspect` are UNCHANGED — `_start_tool` still opens its own
-file/folder picker + its own modal dialog and still ends by selecting
-the Dashboard tab (`self.notebook.select(0)`), which now simply
-happens to already be visible because the view switch ran first.
-`bg`/`crop` (GUI rework Phase 13) instead go straight to `_open_tool_panel`
-and SKIP the `_go_view("main")` hop entirely — going through "main"
-first, like every other tile, would reveal-then-immediately-hide the
-old controls box behind a wasted extra fade, since `_open_tool_panel`
-itself transitions straight to "running" (see **Standalone-tool
-settings panels** under **The window**, and **Running view** below
-for how it shares `_inline_kind`/`_apply_running_layout` with
-website_gen's own toggle). A minimal **"Menu"** button (plain text —
-no icon asset fits "menu/home" yet, and DESIGN.md's emoji policy rules
-out a hamburger glyph standing in for a real one) sits in the pinned
-top strip beside the Day/Night switch and the Controls toggle —
-reachable from "menu"/"main"; **Running view** below is what happens
-while a job is actually going.
+ALL FOUR standalone tools (GUI rework Phase 14 completes what Phase 13
+started) go straight to `_open_tool_panel` and SKIP the `_go_view
+("main")` hop entirely — going through "main" first, like every other
+tile, would reveal-then-immediately-hide the old controls box behind a
+wasted extra fade, since `_open_tool_panel` itself transitions straight
+to "running" (see **Standalone-tool settings panels** under **The
+window**, and **Running view** below for how it shares `_inline_kind`/
+`_apply_running_layout` with website_gen's own toggle). The old
+`UpscaleParamsDialog`/`AspectRatioDialog` modals upscale/aspect used to
+open here are DELETED (Phase 14, along with `_start_tool` itself, their
+only caller — Rule #6, no dead wrappers left behind); `_ModalToolDialog`
+(the shared centre-on-parent placement math) survives only because
+`_AiDialog` (the key wizard, the sheet generator) still uses it. A
+minimal **"Menu"** button (plain text — no icon asset fits "menu/home"
+yet, and DESIGN.md's emoji policy rules out a hamburger glyph standing
+in for a real one) sits in the pinned top strip beside the Day/Night
+switch and the Controls toggle — reachable from "menu"/"main";
+**Running view** below is what happens while a job is actually going.
 
 ## Running view (GUI rework Phase 11)
 
@@ -400,8 +403,8 @@ back through the NEW `config.TILE_JOB_KINDS` dict (which
 the one entry spanning two kinds, the two AI dialogs map to `()` since
 neither has a dashboard job). **`_sync_running_state()`** is the ONE
 call site that reconciles both after every change: called at the end
-of `_start_site`/`_start_tool`/`_start_ai_check` (right after their
-worker thread starts) and from the `__worker_done__`/`__tool_done__`
+of `_start_site`/`_launch_tool_worker`/`_start_ai_check` (right after
+their worker thread starts) and from the `__worker_done__`/`__tool_done__`
 dispatch branches (right after a kind is dropped from `_running`/
 `_tool_workers`) — it recomputes `_next_view` and, whenever the result
 IS `"running"`, refreshes `IconBar.set_active`. It is deliberately the
@@ -430,25 +433,25 @@ to a NAMED semantic kind like `"success"`/`"danger"`) to an arbitrary
   hiding the EXISTING `_controls_box` (the queue + BOTH `AgentPanel`s)
   right above the Dashboard/Log — nothing new was built, Phase 10's
   own controls area is simply repacked into a different slot;
-- `"bg"`/`"crop"` (GUI rework Phase 13) are ALSO a persistent inline
-  surface now — routed through the SAME generic fallthrough below
-  (`_tile_handler("bg")` now resolves to `partial(self._open_tool_panel,
-  "bg")` instead of the old `_start_tool` modal), toggling their OWN
-  `ToolSettingsPanel` (see **Standalone-tool settings panels** under
-  **The window**) the exact same way;
-- every OTHER not-running tile (`upscale`/`aspect`/`image_checker`/
-  `ai_sheet_gen`) still launches through the EXISTING modal/dialog
-  handler — `_tile_handler(tile_id)`, the SAME mapping `_select_tile`
-  uses (extracted once, Rule #5, so the Main Menu and the running view
+- ALL FOUR standalone tools (`"bg"`/`"crop"`, GUI rework Phase 13;
+  `"upscale"`/`"aspect"`, Phase 14) are ALSO a persistent inline
+  surface — routed through the SAME generic fallthrough below
+  (`_tile_handler("bg")` resolves to `partial(self._open_tool_panel,
+  "bg")`, etc. — no per-slot branch in either caller, the OLD
+  `_start_tool` modal these used to open is deleted), toggling their
+  OWN `ToolSettingsPanel` (see **Standalone-tool settings panels**
+  under **The window**) the exact same way;
+- every OTHER not-running tile (`image_checker`/`ai_sheet_gen`) still
+  launches through the EXISTING modal/dialog handler —
+  `_tile_handler(tile_id)`, the SAME mapping `_select_tile` uses
+  (extracted once, Rule #5, so the Main Menu and the running view
   never carry two copies of "what does this tile do"). **Honest scope
-  note:** those four have no PERSISTENT settings panel of their own
-  yet — Phase 14/15 build `ToolSettingsPanel` subclasses for
-  upscale/aspect and a panel for the AI checker on top of this phase;
-  until then, "toggle the inline surface" for them means "open the
-  SAME folder-picker + confirm dialog the toolbar button already
-  opened before Phase 10", which disturbs nothing else (always its
-  own Toplevel) but is not literally a persistent panel the owner can
-  leave open to inspect later.
+  note:** those two have no PERSISTENT settings panel of their own yet
+  — Phase 15 builds one for the AI checker; until then, "toggle the
+  inline surface" for them means "open the SAME confirm dialog the
+  toolbar button already opened before Phase 10", which disturbs
+  nothing else (always its own Toplevel) but is not literally a
+  persistent panel the owner can leave open to inspect later.
 
 **Start/Pause/Stop view semantics** (spec item 4), wired into the
 EXISTING handlers — none forked:
@@ -456,27 +459,32 @@ EXISTING handlers — none forked:
 | Action | What changes |
 |---|---|
 | **Start** (`_start_site`) | Unconditionally clears `_inline_kind` (Start hides the launching tool's OWN settings panel — website_gen's is shared by both sites, so EITHER starting hides it) then calls `_sync_running_state()` — auto-enters `"running"` on the first job. |
-| **Start** (`_start_tool` / `_start_ai_check`) | Calls `_sync_running_state()` after the worker starts — same auto-enter; upscale/aspect/the AI checker have no inline panel to hide (see above). |
-| **Start** (`_start_tool_from_panel`, GUI rework Phase 13 — bg/crop) | Clears `_inline_kind` AND explicitly re-calls `_apply_running_layout()` (unlike the two rows above: the panel can ONLY be visible while ALREADY `"running"`, so `_sync_running_state()`'s own view-transition check is always a no-op here — see `_launch_tool_worker`'s shared tail, which `_sync_running_state()` too). |
-| **Pause** (`_toggle_pause_job`) | Unchanged pause/resume bookkeeping, PLUS: pausing `chatgpt`/`gemini` while `_view == "running"` sets `_inline_kind = "website_gen"`; pausing `bg`/`crop` sets `_inline_kind` to that SAME slot (GUI rework Phase 13) — either way `_apply_running_layout()` re-applies the layout ("Pause returns the settings panel for future tasks", spec item 4), and the revealed `ToolSettingsPanel`'s OWN Pause/Resume label is kept in sync too (`_tool_panels[kind].set_paused`). Resuming never hides it again — only a fresh Start or the owner's own icon click does. A no-op for upscale/aspect/the AI checker (no persistent panel yet) and outside `"running"` (already fully visible there). |
-| **Stop** (`_stop_site`) | UNCHANGED — signals the stop event; the worker exits on its own next poll and posts `__worker_done__`, which calls `_sync_running_state()` (recolours the icon; the design's "STOP … returns to the main menu" reads as "the Menu click that follows now succeeds", not an auto-jump — see below). Standalone tools (bg/crop/upscale/aspect) have NO Stop — `_run_tool_job`'s loop has no should_stop escape hatch, deliberately unchanged by Phase 13 (see **Standalone-tool settings panels** under **The window**). |
-| **Close** (`_close_panel`) | UNCHANGED — the existing `_dashgrid.remove`/`reset_finished`/`JobTemp.clear`. By the time a panel's Close button is even reachable, `finish()` has already run and that kind is already out of `_active_kinds()`, so no additional Phase 11 bookkeeping is needed here. `__tool_done__`'s dispatch ALSO now re-enables the finished slot's `ToolSettingsPanel` Start button (`set_run_state(running=False)`) when one exists. |
-| **Menu** (`_request_menu`, shared by the pinned button and IconBar's own) | Routes through `_next_view(…, menu_requested=True)` — navigates to `"menu"` once `active_count == 0`, otherwise refused with a status-bar hint ("Stop every running job before returning to the menu."). |
+| **Start** (`_start_ai_check`) | Calls `_sync_running_state()` after the worker starts — same auto-enter; the AI checker has no inline panel to hide (see above; Phase 15 gives it one). |
+| **Start** (`_start_tool_from_panel`, GUI rework Phase 13/14 — ALL FOUR standalone tools) | Clears `_inline_kind` AND explicitly re-calls `_apply_running_layout()` (unlike the two rows above: the panel can ONLY be visible while ALREADY `"running"`, so `_sync_running_state()`'s own view-transition check is always a no-op here — see `_launch_tool_worker`'s shared tail, which calls `_sync_running_state()` too). |
+| **Pause** (`_toggle_pause_job`) | Unchanged pause/resume bookkeeping, PLUS: pausing `chatgpt`/`gemini` while `_view == "running"` sets `_inline_kind = "website_gen"`; pausing ANY of the four tools sets `_inline_kind` to that SAME slot (GUI rework Phase 13/14, one generic `kind in self._tool_panels` check, no per-slot code) — either way `_apply_running_layout()` re-applies the layout ("Pause returns the settings panel for future tasks", spec item 4), and the revealed `ToolSettingsPanel`'s OWN Pause/Resume label is kept in sync too (`_tool_panels[kind].set_paused`). Resuming never hides it again — only a fresh Start, a Stop (see below), or the owner's own icon click does. A no-op for the AI checker (no persistent panel yet) and outside `"running"` (already fully visible there). |
+| **Stop** (`_stop_site`) | UNCHANGED — signals the stop event; the worker exits on its own next poll and posts `__worker_done__`, which calls `_sync_running_state()` (recolours the icon; the design's "STOP … returns to the main menu" reads as "the Menu click that follows now succeeds", not an auto-jump — see below). Site Stop's own review-before-Close lifecycle is untouched by Phase 14. |
+| **Stop** (`_stop_tool`, GUI rework Phase 14 — ALL FOUR standalone tools, closing Phase 13's own flagged gap) | Requests the halt (sets the tool's stop event, wins over a pending Pause) — see **Standalone-tool settings panels**' own "Stop" write-up for the FULL "smart stop" sequence (worker finishes the in-flight image, then `__tool_done__`'s dispatch closes the panel + clears its JobTemp + calls `_request_menu()`). A DELIBERATE divergence from site Stop's review-then-Close lifecycle — a quick, disk-based tool run has nothing left worth reviewing once stopped. |
+| **Close** (`_close_panel`) | UNCHANGED — the existing `_dashgrid.remove`/`reset_finished`/`JobTemp.clear`. For a NATURAL tool finish (not a Stop) and every site finish, `finish()` reveals CLOSE first and the owner clicks it manually, same as always; a Stop-triggered tool finish calls `_close_panel` itself (see the Stop row above) — `__tool_done__`'s dispatch ALSO re-enables the finished slot's `ToolSettingsPanel` Start button (`set_run_state(running=False)`) either way. |
+| **Menu** (`_request_menu`, shared by the pinned button and IconBar's own) | Routes through `_next_view(…, menu_requested=True)` — navigates to `"menu"` once `active_count == 0`, otherwise refused with a status-bar hint ("Stop every running job before returning to the menu."). GUI rework Phase 14's `_stop_tool`→`__tool_done__` sequence calls this SAME gate itself once its slot is popped from `_tool_workers`, so a tool Stop that happens to be the LAST active job lands on "menu" automatically; refused (silently, from this internal caller) if another job is still active. |
 
 **Reading "Stop … returns to the main menu" (spec item 4) precisely:**
 the binding design doc is explicit that "menu" is reachable "only when
-NO jobs are active AND the owner clicks Menu" — Stop (even of the
-LAST job) does not, by itself, jump anywhere; it makes the Menu click
-that follows finally succeed. This keeps the existing, tested Stop→
-finish→Close lifecycle (the owner can still review a finished panel
-before dismissing it) completely intact rather than force-closing it
-the moment Stop is clicked.
+NO jobs are active AND the owner clicks Menu" — `_next_view`'s own
+rules are UNCHANGED by Phase 14 (Stop of the last job still never
+auto-navigates BY ITSELF). What Phase 14 adds is a single new internal
+caller of the EXISTING `_request_menu()` gate: once a STOPPED tool's
+worker actually confirms the halt, `_dispatch` calls `_request_menu()`
+on the tool's behalf — equivalent to "the owner clicking Menu right
+after Stop", succeeding only when nothing else is active. Site Stop is
+untouched: it still keeps the existing, tested Stop→finish→Close
+lifecycle (the owner reviews a finished panel before a manual Close).
 
 **Non-regression:** the Main Menu (Phase 10) is unchanged and still
 the app's front door; every job kind still starts/pauses/stops exactly
-as before (none of `_start_site`/`_start_tool`/`_start_ai_check`/
-`_stop_site`/`_close_panel`'s own bodies were rewritten, only extended
-at their tail); the Dashboard/Log, per-job panels, before/after +
+as before (none of `_start_site`/`_start_ai_check`/`_stop_site`/
+`_close_panel`'s own bodies were rewritten, only extended at their
+tail; `_start_tool` itself is gone, GUI rework Phase 14, along with
+its two callers); the Dashboard/Log, per-job panels, before/after +
 `StepRestoreWindow`, Select window, Day/Night theming, font zoom,
 scroll and settings persistence are all untouched — Phase 11 only
 changes what is PACKED where, via the same `pack_forget`/`pack`
@@ -630,9 +638,9 @@ pre-running spots.
   **Force Aspect Ratio (this site)** (GUI rework Phase 8, default OFF)
   — a `Force to ratio` switch plus a target **W : H** pair, edited
   two-way with an embedded **`AspectRatioCanvas`** (the SAME Phase 5
-  widget `AspectRatioDialog` uses, reused here as its first NON-modal
-  host — see **Theming**'s `THEME_TOPLEVELS`/`job_color` note for why
-  that mattered). `panel.force_aspect_ratio()` returns the validated
+  widget the standalone Aspect tool's own panel uses — see
+  **Theming**'s `THEME_TOPLEVELS`/`job_color` note for why a non-modal
+  host matters). `panel.force_aspect_ratio()` returns the validated
   `(w, h)` int pair (`ValueError` propagates to Start's validation,
   same contract as `upscale_params()`); when the switch is on, the
   post-save pipeline runs `painter.aspect.change_aspect(path, w, h,
@@ -716,177 +724,222 @@ pre-running spots.
   tools (owner 2026-07-19; the three renamed buttons DROPPED "only"),
   each its OWN CONCURRENT JOB with its own worker thread and its own
   dashboard panel — up to all four plus both sites (6 panels) run at
-  once. Each button carries the panel's COLOUR + its PNG icon (owner
+  once. Each carries the panel's COLOUR + its PNG icon (owner
   2026-07-19, replacing the old emoji: BG removal cyan/teal, Crop amber,
   Upscale violet, Aspect ratio magenta — colours in `config.JOB_COLORS`,
   icons `bg`/`crop`/`upscale`/`aspect` via `config.JOB_LOGO` + `icon()`).
   Everything from here through the end of this bullet — the JobTemp
   backup, the timing, the "changed" contract, the dashboard panel
   itself — is SHARED by all four tools UNCHANGED (`_run_tool_job`'s
-  worker loop + event contract, `ToolPanel`'s rendering); GUI rework
-  Phase 13 only changed HOW the run is configured for BG/Crop — see
-  **Standalone-tool settings panels** right below for that half.
-  **Upscale**/**Aspect ratio** still launch the OLD way: a click
-  (`_start_tool`) refuses a second job of the SAME kind (a messagebox
-  — one job per kind), opens the input pick + a confirm, then spawns
-  `_run_tool_job` on a daemon thread; the engine function
-  (`upscale_if_small` / `change_aspect`) runs over the picked images,
-  in order. **Upscale** (owner 2026-07-19; simplified GUI
-  rework Phase 6) is folder-based, and first pops
-  `UpscaleParamsDialog` — a modal asking ONE min-side Spinner (px) plus
-  an embedded stacked `FilterEditor` (deciding WHICH images qualify —
-  same widget/engine as Aspect's own filter below), PRE-FILLED with the
-  last-used values (`self._upscale_tool_minside` /
-  `self._upscale_tool_conditions`, remembered/persisted, min-side-
-  positive + per-row validation from `FilterEditor` itself). `.result`
-  is `{min_side, conditions}`; `_upscale_params_from_side_and_filter`
-  resolves it into `upscale_if_small`'s kwargs (identical resolution
-  and "unmapped conditions matter too" guarantee as the per-agent gate
-  above), and — mirroring Aspect's OWN pre-filter immediately below —
-  the picked file list is pre-filtered via `_filter_files` against the
-  FULL condition stack (not just the one aspect condition the kwargs
-  capture) before the confirm dialog, so a stacked Width/Height/Any-
-  side row is honored even though `upscale_if_small` itself never sees
-  it. **Aspect ratio** pops the `AspectRatioDialog`
-  first — a modal with two positive-integer fields **W** and **H**
-  (PRE-FILLED with the last-used ratio `self._aspect_ratio`; first run
-  16 : 9) beside a visual **`AspectRatioCanvas`** (GUI rework Phase 5 —
-  see below) two-way synced with them, an optional STACKED input filter
-  (GUI rework Phase 4, replacing the old single from/to/mode block —
-  see **FilterEditor** below), and TWO action buttons **Folder…** /
-  **Files…** that encode
-  the input choice: a folder can hold images of DIFFERENT ratios, so
-  the tool accepts a whole FOLDER (`askdirectory` → `_iter_images`) OR
-  individual FILES (`askopenfilenames`, multi-select) — the filter is
-  what makes a folder useful (skip the already-good ones). `.result` is
-  `{ratio, conditions, input}`; the run pre-filters the picked file
-  list itself via module-level `_filter_files` (opens each candidate,
-  keeps only those `painter.filters.matches()` passes — an EMPTY
-  condition list is a no-op, opens nothing) BEFORE the confirm dialog,
-  so its "DEFORM N image(s)" count is always the POST-filter count, and
-  `change_aspect` runs with its own scalar filter args at their
-  (unused) off defaults — its signature is untouched by this migration.
-  Both modals share `_ModalToolDialog` (the centre-on-parent placement).
-  A file selection is keyed by `config.selection_base_and_rels` (the
-  common-ancestor folder + each file's relative path), so picks
-  spanning sub-folders still group under their folder node and restore
-  correctly. Each image's ORIGINAL is
-  BACKED UP first (`painter/jobtemp.py`, see **Temp / before-after /
-  restore**), so `done` = the file was changed (its backup kept,
-  before→after measured and shown), REFUSED = the engine said
-  "nothing"/"unclear" — nothing to do, its no-op backup dropped (for
-  Upscale: failed the FULL filter stack, or the resolved aspect band,
-  or both sides already ≥ the chosen min side; for Aspect: already at
-  the target ratio OR filtered out by the input filter, left
-  byte-unchanged).
-  The op is also TIMED (per-image seconds; skipped items add no time).
-  "Changed" keys ONLY on the engine ACTUALLY REWRITING the file (a
-  "done"), never on the metric size (owner 2026-07-19) — a 3px crop or a
-  small BG clear is a genuine, restorable change even though its % is
-  tiny, so its backup + before/after must survive. The % itself is now
-  rendered by `config.fmt_pct` (2 decimals below 10, 1 decimal from 10),
-  so that 3px crop reads `0.24%`, never a rounded-away `0%`. Keying
-  "changed" on a resolution/metric change (instead of on the file being
-  rewritten) was the old before/after bug for BG removal, which changes
-  ALPHA, not dimensions. The engine returns "nothing" for a true
-  byte-unchanged no-op (crop: a 0px-change box), so a "done" is always a
-  real change. The panel shows the tool's own PARAMETER + timing (below).
+  worker loop + event contract — plus its own should_stop, GUI rework
+  Phase 14, see below — and `ToolPanel`'s rendering, engine-untouched
+  throughout); **all four are now configured and started the SAME
+  way, through their own persistent panel** — see **Standalone-tool
+  settings panels** right below, which is where the OLD per-tool
+  askdirectory+confirm-modal writeup used to live (GUI rework Phase 13
+  for BG/Crop, Phase 14 for Upscale/Aspect — the `UpscaleParamsDialog`/
+  `AspectRatioDialog` modals both retired, deleted along with their
+  only caller `_start_tool`). Once Started, `upscale_if_small` /
+  `change_aspect` run over the picked (and filter-narrowed) images, in
+  order, EXACTLY as before this migration — the engine functions
+  themselves are BYTE-UNCHANGED, only how their kwargs get assembled
+  moved from a modal's `.result` dict to a panel's own fields. Each
+  image's ORIGINAL is BACKED UP first (`painter/jobtemp.py`, see
+  **Temp / before-after / restore**), so `done` = the file was changed
+  (its backup kept, before→after measured and shown), REFUSED = the
+  engine said "nothing"/"unclear" — nothing to do, its no-op backup
+  dropped (for Upscale: failed the FULL filter stack, or the resolved
+  aspect band, or both sides already ≥ the chosen min side; for
+  Aspect: already at the target ratio OR filtered out by the input
+  filter, left byte-unchanged). The op is also TIMED (per-image
+  seconds; skipped items add no time). "Changed" keys ONLY on the
+  engine ACTUALLY REWRITING the file (a "done"), never on the metric
+  size (owner 2026-07-19) — a 3px crop or a small BG clear is a
+  genuine, restorable change even though its % is tiny, so its backup
+  + before/after must survive. The % itself is rendered by
+  `config.fmt_pct` (2 decimals below 10, 1 decimal from 10), so that
+  3px crop reads `0.24%`, never a rounded-away `0%`. Keying "changed"
+  on a resolution/metric change (instead of on the file being
+  rewritten) was the old before/after bug for BG removal, which
+  changes ALPHA, not dimensions. The engine returns "nothing" for a
+  true byte-unchanged no-op (crop: a 0px-change box), so a "done" is
+  always a real change. The panel shows the tool's own PARAMETER +
+  timing (below).
 - **Standalone-tool settings panels** — `ToolSettingsPanel(ttk.Frame)`
-  + `BgSettingsPanel`/`CropSettingsPanel` (GUI rework Phase 13; Phase
-  14 gives Upscale/Aspect the same treatment) REPLACE the old
-  askdirectory+confirm modal for BG removal and Crop with a
-  PERSISTENT panel shown inline above Dashboard/Log — the exact
-  surface website_gen's own `_controls_box` occupies (see **Running
-  view**'s `_apply_running_layout`/`_inline_kind`), reached via
-  `PainterGui._open_tool_panel(tile_id)` from either the Main Menu
+  + `BgSettingsPanel`/`CropSettingsPanel` (GUI rework Phase 13) +
+  `UpscaleSettingsPanel`/`AspectSettingsPanel` (Phase 14, same base,
+  replacing the retired `UpscaleParamsDialog`/`AspectRatioDialog`
+  modals) REPLACE the old per-tool askdirectory+confirm modal flow
+  with ONE PERSISTENT panel family shown inline above Dashboard/Log —
+  the exact surface website_gen's own `_controls_box` occupies (see
+  **Running view**'s `_apply_running_layout`/`_inline_kind`), reached
+  via `PainterGui._open_tool_panel(tile_id)` from either the Main Menu
   (`_select_tile`) or the running view's IconBar
   (`_click_icon_bar_tile`'s generic `_tile_handler` fallthrough) — ONE
-  shared toggle, not two copies (Rule #5). Each panel owns:
+  shared toggle, not four copies (Rule #5). Each panel owns:
   * an **input picker** — **Folder…** (`askdirectory` → the shared
     `iter_images`, re-scanned LIVE at Start so a folder edited after
     the pick is honored) or **Files…** (`askopenfilenames`, based via
-    `config.selection_base_and_rels` like the Aspect tool) — BG/Crop
-    gain the Files choice Aspect always had;
+    `config.selection_base_and_rels`, exactly like the old Aspect
+    dialog always offered) — every panel gets BOTH, unconditionally
+    (the base builds this once; Upscale's old modal only ever offered
+    Folder…, so this is a genuine small upgrade, not a behaviour the
+    owner has to opt into);
+  * an OPTIONAL always-visible **`_build_extra` block** (GUI rework
+    Phase 14 hook, base no-op — BG/Crop don't use it) for a tool's own
+    PRIMARY control, shown between the input picker and the Filter
+    section: `UpscaleSettingsPanel` — the min-side Spinner (px, the
+    smaller side's target minimum); `AspectSettingsPanel` — the
+    target-ratio **W**/**H** entries beside a visual
+    **`AspectRatioCanvas`** (GUI rework Phase 5 — see below), two-way
+    synced exactly like the old `AspectRatioDialog`/`AgentPanel`'s own
+    Force Aspect Ratio block;
   * an embedded **`FilterEditor`** (see below) narrowing WHICH images
-    the run touches — a capability BG/Crop never had before this
-    phase;
+    the run touches — pre-seeded via an overridable `_default_
+    conditions()` hook (base empty, matching BG/Crop's own "no filter
+    by default"): `UpscaleSettingsPanel` seeds ONE Aspect (range)
+    [`UPSCALE_ASPECT_MIN`, `UPSCALE_ASPECT_MAX`] condition, the SAME
+    default `AgentPanel`'s own upscale gate and the old
+    `UpscaleParamsDialog` used; `AspectSettingsPanel` starts empty,
+    matching the old `AspectRatioDialog`'s own "no conditions = every
+    image" default;
   * an **Advanced** collapsible (the SAME Settings-gear idiom
-    `AgentPanel._toggle_settings` established) exposing engine knobs
-    as PER-RUN overrides: `BgSettingsPanel` — the two SAFETY GUARD
-    fractions `remove_background` aborts past (`safety_max_remove_frac`
-    black / `safety_max_remove_frac_white` white); `CropSettingsPanel`
-    — every knob `crop_transparent` reads (the border-halo cleanup
-    toggle, the safety margin, the ink-detection alpha + minimum ink
-    pixels). **Deviation from the design's own phase notes:** those
-    notes assign the halo-cleanup toggle to BG's Advanced section, but
-    the real code only ever wires `CLEAN_EDGE_ENABLE` into
-    `crop_transparent` (its own docstring: "only serves to ENABLE a
-    tighter crop") — `remove_background` never calls `clean_edge_halo`
-    at all, so putting the toggle on BG's panel would silently do
-    nothing (root Rule #1). It lives on Crop's panel instead, where it
-    is real. [Postprocess](painter/postprocess.md)'s `remove_background`/
+    `AgentPanel._toggle_settings` established) — ONLY when the
+    subclass sets `HAS_ADVANCED = True` (the base default; `Upscale
+    SettingsPanel`/`AspectSettingsPanel` set it False and skip
+    building the collapsible ENTIRELY, Rule #16: a gear that reveals
+    nothing would be a dead affordance — their one primary control
+    already lives in the ALWAYS-VISIBLE `_build_extra` block above,
+    not tucked behind a gear). Exposes engine knobs as PER-RUN
+    overrides for the two panels that DO have one: `BgSettingsPanel`
+    — the two SAFETY GUARD fractions `remove_background` aborts past
+    (`safety_max_remove_frac` black / `safety_max_remove_frac_white`
+    white); `CropSettingsPanel` — every knob `crop_transparent` reads
+    (the border-halo cleanup toggle, the safety margin, the
+    ink-detection alpha + minimum ink pixels). **Deviation from the
+    design's own Phase 13 notes:** those notes assign the halo-cleanup
+    toggle to BG's Advanced section, but the real code only ever wires
+    `CLEAN_EDGE_ENABLE` into `crop_transparent` (its own docstring:
+    "only serves to ENABLE a tighter crop") — `remove_background`
+    never calls `clean_edge_halo` at all, so putting the toggle on
+    BG's panel would silently do nothing (root Rule #1). It lives on
+    Crop's panel instead, where it is real.
+    [Postprocess](painter/postprocess.md)'s `remove_background`/
     `crop_transparent` gained matching OPTIONAL keyword-only
     parameters, one per constant, defaulting to the config value — an
     ADDITIVE signature change (every existing caller passes neither
-    and keeps today's exact behaviour), not a wrapper (root Rule #6);
-  * **Start**/**Pause** buttons. Start (`PainterGui.
+    and keeps today's exact behaviour), not a wrapper (root Rule #6).
+    `_advanced_settings()`/`_apply_advanced_settings()` (the settings-
+    round-trip hooks) run REGARDLESS of `HAS_ADVANCED` — for Upscale/
+    Aspect they carry the ALWAYS-VISIBLE `_build_extra` fields instead
+    (min-side, target ratio) into the SAME JSON shape, so "subclass's
+    own extra data" is one hook pair either way, just displayed
+    differently;
+  * an OPTIONAL always-visible **`_build_footer` block** (GUI rework
+    Phase 14 hook, base no-op) shown just above the button row:
+    `AspectSettingsPanel` carries the non-proportional-STRETCH warning
+    the old `AspectRatioDialog`'s confirm `askyesno` used to show
+    ("DEFORM N image(s) … a non-proportional STRETCH written IN
+    PLACE … originals are backed up so you can Restore … already at
+    the ratio are skipped untouched") — since a panel's Start has no
+    confirm step of its own (the panel, deliberately configured then
+    Started, already IS the confirmation, same contract as every other
+    panel), the warning is a permanent label instead of a one-off
+    dialog, so the owner is never surprised even on a THIRD/FOURTH run;
+  * **Start**/**Pause**/**Stop** buttons. Start (`PainterGui.
     _start_tool_from_panel`) reads the panel's OWN
     `resolve_input()`/`get_conditions()`/`build_func()` (each raising
     `ValueError` — shown as a messagebox — instead of the old modal's
     inline validation), pre-filters via the SAME module-level
-    `_filter_files` every other tool already uses, then hands off to
-    `_launch_tool_worker` — a NEW helper extracted from `_start_tool`'s
-    own tail so the modal-driven path (upscale/aspect) and the
-    panel-driven path (bg/crop) share ONE body (Rule #5) instead of
-    the same dozen lines twice. **`_run_tool_job`'s worker spawn +
-    event contract are UNCHANGED** — `ToolPanel.handle` needed no
-    edits at all. Pause reuses `_toggle_pause_job` — see **Running
-    view**'s Start/Pause/Stop table above for how it reveals the panel
-    again mid-run, keeping ITS OWN Pause/Resume label in sync with the
-    dashboard `ToolPanel`'s. **No literal Stop button:** a standalone
-    tool run has no should_stop escape hatch (`_run_tool_job`'s own
-    docstring), and threading one through would mean changing that
-    shared worker loop — explicitly out of scope this phase. Dismissing
-    the panel without starting is already possible via the SAME
-    icon-bar toggle that opened it (click "BG removal" again); flagged
-    as a candidate for a real mid-run Stop in a future phase, not
-    half-wired here.
+    `_filter_files` every panel now shares, then hands off to
+    `_launch_tool_worker` — the ONE shared tail EVERY tool's Start
+    uses (Rule #5; the OLD modal-driven path this used to also serve
+    is gone). **`_run_tool_job`'s worker spawn + event contract are
+    UNCHANGED** — `ToolPanel.handle` needed no edits at all. Pause
+    reuses `_toggle_pause_job` — see **Running view**'s Start/Pause/
+    Stop table above for how it reveals the panel again mid-run,
+    keeping ITS OWN Pause/Resume label in sync with the dashboard
+    `ToolPanel`'s. **Stop** (GUI rework Phase 14, closing Phase 13's
+    own flagged gap — "no literal Stop button… flagged as a candidate
+    for a future phase" is now built): `PainterGui._stop_tool` sets
+    the tool's should_stop event (mirrors `_stop_site`'s own request
+    half, wins over a pending Pause the same way); `_run_tool_job`
+    checks it BETWEEN images (mirrors `run_sheet`'s own `should_stop`
+    check exactly, including threading it into `wait_while_paused` so
+    a Stop wins over a paused wait too) — the IN-FLIGHT image always
+    finishes first. Once the worker actually confirms the halt
+    (`__tool_done__`, never synchronously on the click — see **Running
+    view**'s Stop row above), `_dispatch` closes the panel + clears
+    its JobTemp (the existing `_close_panel`, same as a manual Close)
+    and calls `_request_menu()` — landing on "menu" if that was the
+    LAST active job, a no-op status hint otherwise. This is a
+    DELIBERATE divergence from site Stop's review-then-Close lifecycle
+    (**MUST NOT REGRESS, verified**: site Stop is completely
+    untouched) — a quick, disk-based tool run has nothing left worth
+    reviewing once stopped, so "smart" here means "decisively finish
+    the job", not "linger". Reachability mirrors Pause's own existing
+    quirk (not a NEW one): the settings panel (Start/Pause/Stop) hides
+    the moment Start runs, same as before Phase 14; the dashboard
+    `ToolPanel`'s OWN always-visible Pause button is what reveals it
+    again mid-run (`_toggle_pause_job`'s tail) — the owner clicks
+    Pause first, then Stop becomes reachable on the now-revealed
+    panel. A more direct dashboard-level Stop is a candidate for a
+    future polish pass, not built this round;
   * a settings round-trip — `get_settings()`/`apply_settings(stored,
     conditions=…)` mirror `AgentPanel`'s own contract (missing key =
-    keep default); `PainterGui._collect_settings`/`_apply_settings`
-    persist each panel under a new `"tool_panels"` key
+    keep default; `"advanced_collapsed"` is only ever emitted when
+    `HAS_ADVANCED`); `PainterGui._collect_settings`/`_apply_settings`
+    persist each panel under the `"tool_panels"` key
     (`{slot: panel.get_settings()}`) — the picked folder/files are
     NEVER persisted (every tool has always asked fresh; only the
-    filter stack + Advanced overrides survive a restart, same
-    "remembered VALUE, not the picked path" convention the standalone
-    Upscale/Aspect dialogs already established).
+    filter stack + Advanced/extra overrides survive a restart). GUI
+    rework Phase 14 also retires the OLD top-level `"upscale_tool"`/
+    `"aspect_ratio"`/`"aspect_filter_conditions"` settings.json keys
+    the standalone dialogs used to own — `_collect_settings` no longer
+    emits them; `_apply_settings`'s `_migrate_upscale_panel_settings`/
+    `_migrate_aspect_panel_settings` do a ONE-TIME LOUD migration
+    (same additive/read-old-once/log-loudly contract as every other
+    migration in this file, including chaining into the EXISTING
+    `_migrate_legacy_upscale_gate`/`_migrate_legacy_aspect_filter`
+    pure functions for an even-older pre-Phase-6/pre-Phase-4 shape)
+    into `UpscaleSettingsPanel`/`AspectSettingsPanel`'s own
+    `up_minside`/`ratio` fields — a no-op once each panel has saved
+    itself at least once under the NEW key.
 
   **Verified (0.0.1xx):** `tests/test_gui_tool_panels.py` (pure
   `_filter_files` + the Advanced-field parsers; `resolve_input`/
-  `get_conditions`/`build_func` against a real withdrawn-root panel;
-  a monkeypatched `postprocess.remove_background`/`crop_transparent`
-  proving a NON-default override reaches the engine call; the settings
-  round-trip; `PainterGui._start_tool_from_panel`'s pre-filter path
-  end to end through a duck-typed `FakeGuiForPanel`, its
-  `_run_tool_job` a RECORDING stand-in) plus 3 new engine-level tests
-  in `tests/test_postprocess.py` (the safety/margin/clean-edge
-  overrides each produce an observably different result than the
-  default) plus updated `tests/test_gui_running_view.py` coverage
-  (`_open_tool_panel`, `_select_tile`'s bg/crop shortcut, the
-  generalized `_apply_running_layout`/`_toggle_pause_job`) — full
-  suite green throughout. Real-window screenshots (Day theme,
-  settings.json redirected to a scratch file, 65 synthetic images —
-  never DOMY Watch, never the project's own `out/`) confirmed the full
-  BG removal flow: Menu → BG tile → panel with a folder + 2 stacked
-  conditions (`Aspect (range)`/`Any side`) → Start → panel hides,
-  IconBar tile fills, dashboard shows "(N/63) …" running → Pause
-  clicked genuinely MID-RUN → panel reappears (folder/conditions still
-  intact), its Start button correctly DISABLED, its Resume label in
-  sync with the dashboard's own → Resume → run completes ("done — 63
-  changed, 0 skipped", matching the filter's own exclusion of the 2
-  off-ratio images) → switching to the Crop panel (Advanced expanded,
-  all 4 fields at their config defaults) leaves the finished BG
-  dashboard panel completely undisturbed.
+  `get_conditions`/`build_func` against a real withdrawn-root panel
+  for all FOUR panels; monkeypatched engine calls
+  (`postprocess.remove_background`/`crop_transparent`,
+  `upscale.upscale_if_small`, `aspect.change_aspect`) each proving a
+  NON-default override reaches the real call; run-state/pause/**Stop**
+  button availability; the settings round-trip incl. Upscale's
+  min-side and Aspect's target-ratio + filter; `PainterGui.
+  _start_tool_from_panel`'s pre-filter path end to end through a
+  duck-typed `FakeGuiForPanel`, its `_run_tool_job` a RECORDING
+  stand-in; `PainterGui._stop_tool`'s request half (sets the event,
+  wins over a pending pause, no-ops when nothing is running); `_run_
+  tool_job`'s should_stop halting BETWEEN images — mirrors test_
+  runner.py's own `test_stop_flag_stops_between_items` — over a
+  duck-typed fake with a real `queue.Queue`) plus 3 engine-level tests
+  in `tests/test_postprocess.py` (Phase 13, the safety/margin/
+  clean-edge overrides each produce an observably different result
+  than the default) plus updated `tests/test_gui_running_view.py`
+  coverage (`_open_tool_panel`/`_select_tile`'s shortcut and `_toggle_
+  pause_job`'s reveal for ALL FOUR tools, not just bg/crop) — full
+  suite green throughout (453 → 479 tests, GUI rework Phase 14).
+  Real-window screenshots (Day theme, settings.json redirected to a
+  scratch file, synthetic images — never DOMY Watch, never the
+  project's own `out/`) confirmed: the Upscale panel (min-side spinner
+  + filter, no Advanced gear); the Aspect panel (visual ratio box +
+  W/H entries + filter + the permanent deform warning, no Advanced
+  gear); and a tool job STOPPED genuinely mid-run — Stop clicked on
+  the revealed panel, the dashboard shows the halt, the panel closes
+  and the view settles back toward the menu once nothing else is
+  running. Phase 13's own BG-removal-flow screenshot walkthrough
+  (Menu → BG tile → panel → Start → Pause reveals it → Resume →
+  completes → switching to Crop leaves BG undisturbed) is UNCHANGED
+  and still accurate — re-verified, not re-screenshotted, this phase.
 - **FilterEditor** (GUI rework Phase 4, `ttk.Frame`) — the reusable
   stacked-condition widget wrapping [Shared Filter
   Framework](painter/filters.md): zero or more removable ROWS (each a
@@ -899,24 +952,24 @@ pre-running spots.
   `set_conditions(conditions)` — `get_conditions` raises `ValueError`
   (naming the offending kind) on an unparsable or inverted row rather
   than returning a partial list; the embedding dialog/panel catches it
-  and shows a messagebox (`AspectRatioDialog._run` does exactly this).
-  Callers as of GUI rework Phase 13: `AspectRatioDialog` (a MODAL
-  dialog's optional input filter — reads `get_conditions()` once, on
-  Files…/Folder…), each `AgentPanel`'s upscale-gate block AND
-  `UpscaleParamsDialog` (BOTH embed a FilterEditor the same way,
-  pre-seeded with one Aspect (range) condition — see **The two AGENT
-  PANELS** and the Upscale tool description above), and — unseeded,
-  empty by default — `BgSettingsPanel`/`CropSettingsPanel` (see
-  **Standalone-tool settings panels** above). The EMBEDDED,
-  always-visible callers (every one but the modal dialogs) have no
-  "Run"/"OK" moment to read `get_conditions()` at, so their conditions
-  are captured FRESH every settings save (`AgentPanel.get_settings`/
-  `ToolSettingsPanel.get_settings`) rather than through a per-keystroke
-  `tk.Variable` trace like every other persisted field — never
-  silently lost (the debounced autosave any OTHER field edit
+  and shows a messagebox (every embedding caller does exactly this,
+  see below). Callers as of GUI rework Phase 14 — ALL embedded,
+  always-visible (the old MODAL callers, `AspectRatioDialog`/
+  `UpscaleParamsDialog`, are both retired): each `AgentPanel`'s
+  upscale-gate block, pre-seeded with one Aspect (range) condition
+  (see **The two AGENT PANELS**); `BgSettingsPanel`/`CropSettingsPanel`
+  — unseeded, empty by default; `UpscaleSettingsPanel` — pre-seeded
+  the SAME way `AgentPanel`'s own gate is; `AspectSettingsPanel` —
+  unseeded, matching the old `AspectRatioDialog`'s own default (see
+  **Standalone-tool settings panels** above for all four). None of
+  these have a "Run"/"OK" moment to read `get_conditions()` at, so
+  their conditions are captured FRESH every settings save (`AgentPanel
+  .get_settings`/`ToolSettingsPanel.get_settings`) rather than through
+  a per-keystroke `tk.Variable` trace like every other persisted field
+  — never silently lost (the debounced autosave any OTHER field edit
   schedules, or the app's close-time save, both pick up the current
-  widget state), just not INSTANTLY scheduled by
-  a filter-only edit the way e.g. the min-side spinner is.
+  widget state), just not INSTANTLY scheduled by a filter-only edit
+  the way e.g. the min-side spinner is.
   **Exact-aspect tolerance** (fixes Phase 3's flagged caveat): a pinned
   "Aspect (exact)" `lo == hi` is a razor-thin float equality a REAL
   decoded image's W/H division almost never lands on, so ITS row shows
@@ -945,8 +998,11 @@ pre-running spots.
   (`painter.filters.condition_to_dict`/`condition_from_dict`) is what
   makes both settings.json persistence and presets JSON-safe.
 - **`AspectRatioCanvas`** (GUI rework Phase 5, `tk.Canvas`) — a live,
-  draggable preview of the TARGET output ratio, embedded beside
-  `AspectRatioDialog`'s W/H fields. NOT to be confused with
+  draggable preview of the TARGET output ratio, embedded beside a
+  target-ratio W/H field pair — today `AgentPanel`'s Force Aspect
+  Ratio block and `AspectSettingsPanel`'s own `_build_extra` (GUI
+  rework Phase 14, replacing the retired `AspectRatioDialog`, which
+  used to be its third host). NOT to be confused with
   **FilterEditor** above: FilterEditor picks WHICH images a tool
   touches, this widget shapes WHAT ratio the tool deforms them TO. A
   rectangle, centred in a fixed square arena, represents `w:h`;
@@ -958,18 +1014,24 @@ pre-running spots.
   (`painter.aspect.reduced_ratio`, gcd-based, e.g. "16:9"). A live
   drag EMPHASIZES the box (thicker outline, bigger handles) as
   feedback that it is actively grabbed.
-  **Two-way sync** with the dialog's W/H entries: dragging an edge
-  calls `on_change(w, h)`, which the dialog mirrors into the `_w_var`/
-  `_h_var` StringVars (`_on_canvas_drag`); typing in either entry
-  (`_on_wh_typed`, a `trace_add("write", ...)`) parses both as
-  positive ints and calls the canvas's `set_ratio(w, h)` — a bad or
-  incomplete value (mid-edit, e.g. a momentarily empty field) is
-  silently skipped, never an error dialog on every keystroke (final
-  validation still happens in `_run()`). `set_ratio` NO-OPS when
-  passed the SAME `(w, h)` it already holds, which is exactly what a
-  drag's own `on_change` round-trips back as through the entry-var
-  trace — without that guard, every drag tick would re-"fit" the box
-  to the arena and visibly SNAP, fighting the live gesture.
+  **Two-way sync** with the host's own W/H entries — the SAME pattern
+  reproduced identically by each of the three hosts (`AgentPanel.
+  _on_force_aspect_canvas_drag`/`_on_force_aspect_wh_typed`,
+  `AspectSettingsPanel._on_canvas_drag`/`_on_wh_typed`, and the
+  retired `AspectRatioDialog`'s own — Rule #5, one PATTERN, each host
+  its own tiny glue since the target StringVars differ): dragging an
+  edge calls `on_change(w, h)`, which the host mirrors into its own
+  W/H StringVars; typing in either entry (a `trace_add("write", ...)`)
+  parses both as positive ints and calls the canvas's `set_ratio(w,
+  h)` — a bad or incomplete value (mid-edit, e.g. a momentarily empty
+  field) is silently skipped, never an error dialog on every keystroke
+  (final validation happens on Start/Run: `AgentPanel.
+  force_aspect_ratio()` / `AspectSettingsPanel.target_ratio()`).
+  `set_ratio` NO-OPS when passed the SAME `(w, h)` it already holds,
+  which is exactly what a drag's own `on_change` round-trips back as
+  through the entry-var trace — without that guard, every drag tick
+  would re-"fit" the box to the arena and visibly SNAP, fighting the
+  live gesture.
   **Drag math**: each of the 4 edges (not just 2 axes) is tracked
   individually — grabbing the RIGHT edge clamps its effective x to
   never cross the centre, so an overshot/fast drag HOLDS at the
@@ -984,14 +1046,15 @@ pre-running spots.
   (re-tints automatically on a flip); its drawn content (box, handles,
   label) reads `job_color("aspect")`/`THEMES[ACTIVE_THEME]` LIVE at
   draw time and exposes `redraw_theme()` for a host to call
-  explicitly on a flip. `AspectRatioDialog` itself is fully MODAL
-  (`grab_set`), so — exactly like `AiKeyWizard` (see **Theming**
-  below) — a flip cannot happen while it is open, and the dialog
-  deliberately does NOT register in `THEME_TOPLEVELS`: there would be
-  nothing reachable to wire. A FUTURE non-modal host (Phase 14's
-  persistent Aspect-ratio settings panel) calls `redraw_theme()` from
-  ITS OWN `apply_theme()`, the pattern every other themed Toplevel
-  already follows.
+  explicitly on a flip. Both of today's hosts are non-modal, LIVE
+  parts of the main window, so both register in `THEME_TOPLEVELS` and
+  call `redraw_theme()` from their OWN `apply_theme()` (the pattern
+  every other themed Toplevel already follows): `AgentPanel`'s Force
+  Aspect Ratio block (GUI rework Phase 8) and `AspectSettingsPanel`
+  (Phase 14). The retired `AspectRatioDialog` never needed this — it
+  was fully MODAL (`grab_set`), so — exactly like `AiKeyWizard` (see
+  **Theming** below) — a flip could never happen while it was open,
+  and it deliberately did NOT register in `THEME_TOPLEVELS`.
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause (the toggle button, owner 2026-07-21)** — indefinite, not
@@ -1096,20 +1159,23 @@ pre-running spots.
   features' credential, owner 2026-07-20 — held on the GUI so the
   whole-dict save round-trips it; the wizard's Save persists
   IMMEDIATELY via `set_gemini_key` → `_save_now`, since `painter.ai`
-  reads the key back from disk per call), `upscale_tool`
-  (the standalone Upscale dialog's last-used gate — GUI rework Phase 6:
-  `{"min_side": int, "conditions": [condition-dict, ...]}`, REPLACING
-  the old `min_width`/`min_height`/`aspect_min`/`aspect_max` scalar
-  shape), `aspect_ratio` (the last `[W, H]` from
-  the Aspect dialog), `aspect_filter_conditions` (GUI rework Phase 4 —
-  `self._aspect_filter_conditions`, a list of
-  `painter.filters.condition_to_dict` dicts; REPLACES the old scalar
-  `aspect_filter` from/to/mode dict), `filter_presets`
+  reads the key back from disk per call), `filter_presets`
   (`config.FILTER_PRESETS_SETTING` — the shared `FilterEditor` preset
   library, `{name: [condition-dict, ...]}` — shared by EVERY
   `FilterEditor` instance in the app, including each agent's own
-  upscale-gate filter and the standalone Upscale dialog's), and
-  `agents.<site>` with
+  upscale-gate filter and all four standalone tool panels'), `agents.
+  <site>` (below) and `tool_panels.<slot>` — ALL FOUR standalone tools'
+  own settings (`{slot: panel.get_settings()}` — see **Standalone-tool
+  settings panels** for each panel's own field shape: BG/Crop's safety/
+  margin/ink-alpha overrides + `advanced_collapsed`; Upscale's
+  `up_minside`; Aspect's `ratio`; every panel's `conditions`). GUI
+  rework Phase 14 RETIRED the OLD top-level `upscale_tool`/
+  `aspect_ratio`/`aspect_filter_conditions` keys the standalone Upscale/
+  Aspect MODAL dialogs used to own (`_collect_settings` no longer emits
+  any of the three) — see **the tool-panel migration** below for how an
+  owner's already-saved values move into `tool_panels` instead.
+
+  `agents.<site>` carries
   `background`, `style`
   (the rendering-style dropdown), `bg_removal`, `crop`, `upscale`,
   `report`, `safer_retry`, `continue_nudge`, `new_chat`,
@@ -1128,33 +1194,31 @@ pre-running spots.
   `settings_collapsed`.
 
   **The `aspect_filter` -> `aspect_filter_conditions` migration** (GUI
-  rework Phase 4, owner decision 2026-07-21): `_apply_settings` prefers
-  the NEW key when present; otherwise, if the OLD scalar `aspect_filter`
-  key is on disk (an owner who used the tool before this phase), a
+  rework Phase 4, owner decision 2026-07-21; Phase 14 moves the TARGET
+  from a PainterGui attribute to `AspectSettingsPanel`'s own field, see
+  below — the SOURCE keys and the pure conversion are unchanged): if
+  the OLD scalar `aspect_filter` key is on disk (an owner who used the
+  tool before Phase 4) and NEITHER `aspect_filter_conditions` (Phase
+  4–13) NOR the panel's own `conditions` (Phase 14+) is present, a
   ONE-TIME LOUD migration (`gui._migrate_legacy_aspect_filter`, logged
   via `self._log`) converts it to an equivalent single-condition list —
   `off` -> an empty list (already "matches everything"), `IF`/`IF NOT`
   -> one `FILTER_KIND_ASPECT_RANGE` condition with the SAME from/to/
-  polarity numbers, so behaviour is preserved exactly. The old key is
-  read ONCE and never rewritten: `_collect_settings` simply no longer
-  emits `aspect_filter` at all, so — like the old top-level `sash` /
-  `settings_collapsed` keys before it — it naturally drops off disk on
-  the very next save (this module always writes the WHOLE dict it is
-  given, never a merge). A malformed `aspect_filter_conditions` entry,
-  or an `aspect_filter` whose `mode` isn't one of the three legacy
-  strings, is DROPPED with a loud log line rather than crashing startup
-  (`gui._parse_condition_dicts` / a caught `ValueError` around the
-  migration call) — the same "a corrupt file loses the remembered
-  choice, never the app" precedent `painter.settings.load_settings`
-  already sets.
+  polarity numbers, so behaviour is preserved exactly. A malformed
+  condition entry, or an `aspect_filter` whose `mode` isn't one of the
+  three legacy strings, is DROPPED with a loud log line rather than
+  crashing startup (`gui._parse_condition_dicts` / a caught `ValueError`
+  around the migration call) — the same "a corrupt file loses the
+  remembered choice, never the app" precedent `painter.settings.
+  load_settings` already sets.
 
   **The upscale-gate migration** (GUI rework Phase 6, same additive
-  pattern): both upscale gates — each agent's `up_minw`/`up_minh`/
-  `up_aspmin`/`up_aspmax` AND the standalone dialog's `upscale_tool`
+  pattern; Phase 14 moves the STANDALONE half's target the same way):
+  both upscale gates — each agent's `up_minw`/`up_minh`/`up_aspmin`/
+  `up_aspmax` AND the standalone dialog's OLD top-level `upscale_tool`
   `min_width`/`min_height`/`aspect_min`/`aspect_max` — migrate to the
-  NEW `up_minside`+`up_filter_conditions` / `upscale_tool.{min_side,
-  conditions}` shapes via the shared pure `gui._migrate_legacy_
-  upscale_gate(min_width, aspect_min, aspect_max) -> {"min_side",
+  NEW `up_minside`+condition shapes via the shared pure `gui._migrate_
+  legacy_upscale_gate(min_width, aspect_min, aspect_max) -> {"min_side",
   "conditions"}` (Tk-free, unit-tested against the owner's real saved
   numbers in `test_gui_upscale.py`). `min_height` is intentionally
   DROPPED — the two axes collapse into ONE min-side spinner, and
@@ -1162,14 +1226,32 @@ pre-running spots.
   real settings.json seen so far already had width == height, so
   nothing observable is lost in practice); the aspect `[from, to]`
   becomes ONE `FILTER_KIND_ASPECT_RANGE` IF condition, the SAME numbers.
-  Each of the two call sites (`_apply_settings`'s per-agent loop and its
-  standalone-tool block) triggers migration only when the OLD keys are
-  present AND the NEW `up_minside` / `min_side` key is ABSENT, logs
-  loudly via `self._log` on success (and separately on a genuinely
-  unparsable legacy value, falling back to the shipped default gate
-  rather than crashing startup), and never rewrites the old keys —
-  they naturally drop off disk on the next save, same as every other
-  migration in this file.
+  The per-agent call site (`_apply_settings`'s `agents` loop) triggers
+  migration only when the OLD keys are present AND the NEW `up_minside`
+  key is ABSENT, logs loudly via `self._log` on success (and separately
+  on a genuinely unparsable legacy value, falling back to the shipped
+  default gate rather than crashing startup), and never rewrites the
+  old keys — they naturally drop off disk on the next save, same as
+  every other migration in this file.
+
+  **The tool-panel migration** (GUI rework Phase 14): `_apply_settings`'s
+  `tool_panels` loop runs `_migrate_upscale_panel_settings`/`_migrate_
+  aspect_panel_settings` on each panel's stored dict BEFORE calling
+  `panel.apply_settings(...)` — a no-op once a panel has saved itself
+  at least once under the NEW `tool_panels` key (its own `up_minside`/
+  `ratio` already present). Otherwise each reads the retired top-level
+  `upscale_tool` / `aspect_ratio` + `aspect_filter_conditions` (or the
+  even older scalar `aspect_filter`) keys, chaining into the SAME
+  `_migrate_legacy_upscale_gate`/`_migrate_legacy_aspect_filter` pure
+  functions the per-agent/Phase-4 migrations above already use (Rule
+  #5 — one conversion each, several target shapes), and injects
+  `up_minside`/`ratio`/`conditions` into the panel's stored dict before
+  handing it to `apply_settings`. Logs loudly on every migration and on
+  every unreadable legacy value (falls back to the panel's shipped
+  default, never crashes startup); the old top-level keys are never
+  rewritten — `_collect_settings` no longer emits them at all, so they
+  naturally drop off disk on the next save, exactly like every other
+  retired key in this file.
 
 ## The Dashboard — per-JOB panels (owner 2026-07-19)
 The dashboard shows one panel PER RUNNING JOB, up to SEVEN in parallel:
@@ -1400,13 +1482,15 @@ JOBTEMP_CAP_BANNER_TEXT` is the message (formatted from
 cap).
 
 The Force Aspect target ratio is edited via an embedded
-`AspectRatioCanvas` (Phase 5) — its FIRST non-modal host (unlike the
-fully-modal `AspectRatioDialog`, a live Day/Night flip CAN happen
-while this panel's fine-tune box is expanded), so `AgentPanel` gained
-its own `apply_theme()` (calls the canvas's `redraw_theme()`) and
-registers itself in `THEME_TOPLEVELS` despite not being a Toplevel —
-see **Theming**'s note on that list really meaning "anything exposing
-apply_theme()", not literally "every Toplevel".
+`AspectRatioCanvas` (Phase 5) — a non-modal host, so a live Day/Night
+flip CAN happen while this panel's fine-tune box is expanded, unlike
+the retired fully-modal `AspectRatioDialog` (GUI rework Phase 14).
+`AgentPanel` gained its own `apply_theme()` (calls the canvas's
+`redraw_theme()`) and registers itself in `THEME_TOPLEVELS` despite
+not being a Toplevel — see **Theming**'s note on that list really
+meaning "anything exposing apply_theme()", not literally "every
+Toplevel" (`AspectSettingsPanel`, Phase 14, does the exact same thing
+for its own embedded canvas).
 
 #### Per-step restore viewer (GUI rework Phase 9)
 `DashPanel` gains the same two attributes `ToolPanel` has always had
@@ -1416,8 +1500,8 @@ identically instead of redeclaring the same line) and a NEW
 `self.out_base` (mirrors `ToolPanel.folder`'s role — the site's output
 root, needed to resolve a row's SITE-AGNOSTIC drop path into the
 JobTemp `rel`/live file via `dest_for`). `_start_site` sets both,
-right beside `reset()`, the same grouping `_start_tool` already uses
-for `panel.folder`/`panel.jobtemp`.
+right beside `reset()`, the same grouping `_launch_tool_worker`
+already uses for `panel.folder`/`panel.jobtemp`.
 
 A new **Steps…** button sits beside **Show** in the Collections
 sub-header — a SEPARATE button, never overloaded onto the tree's own
@@ -1579,23 +1663,27 @@ label, DocWindow's Text tags) do NOT follow ttk styles and must be
 recomputed from `status()`/`colors` live (Select retains each leaf's
 `advice` + `n_done` to recompute its colour). **FULLY MODAL dialogs
 (`grab_set` + `wait_window`) deliberately do NOT register** —
-`AiKeyWizard`, `AspectRatioDialog`, `UpscaleParamsDialog`: the grab
-blocks all input to the rest of the app for as long as they are open,
-so the Day/Night switch is unreachable and a flip genuinely cannot
-happen while one is on screen; registering would be dead code. Only
-the NON-modal AI dialog (`AiSheetDialog`, a long generation that must
+`AiKeyWizard` today (the standalone `UpscaleParamsDialog`/
+`AspectRatioDialog` used to, both retired GUI rework Phase 14): the
+grab blocks all input to the rest of the app for as long as they are
+open, so the Day/Night switch is unreachable and a flip genuinely
+cannot happen while one is on screen; registering would be dead code.
+The NON-modal AI dialog (`AiSheetDialog`, a long generation that must
 not grab the app) registers — and, since GUI rework Phase 8,
-`AgentPanel` (its fine-tune box embeds an `AspectRatioCanvas` too, but
-unlike the modal dialog above IS reachable during a live flip, being
-part of the always-on-screen main window). `THEME_TOPLEVELS` is
-therefore not literally "every Toplevel" any more — the loop only
-ever calls `.apply_theme()` on whatever is registered, so a
-build-once, never-destroyed `ttk.Labelframe` works identically;
-`AgentPanel.apply_theme()` just calls its canvas's `redraw_theme()`.
+`AgentPanel` (its fine-tune box embeds an `AspectRatioCanvas` too),
+and — since Phase 14 — `AspectSettingsPanel` (same reason: its own
+embedded canvas). All three are non-modal, LIVE parts of the
+always-on-screen main window, so a flip CAN happen while any of them
+is on screen — unlike the retired modal dialogs above. `THEME_
+TOPLEVELS` is therefore not literally "every Toplevel" any more — the
+loop only ever calls `.apply_theme()` on whatever is registered, so a
+build-once, never-destroyed `ttk.Labelframe`/`ttk.Frame` works
+identically; `AgentPanel.apply_theme()`/`AspectSettingsPanel.
+apply_theme()` each just call their OWN canvas's `redraw_theme()`.
 `job_color(kind)` mirrors `status(role)`
 for the FEW places plain-tk drawing needs a single resolved hex from a
 `(day, night)` `JOB_COLORS` pair instead of a CTk auto-resolving
-tuple — `AspectRatioCanvas`'s accent, now drawn from BOTH its hosts.
+tuple — `AspectRatioCanvas`'s accent, drawn from BOTH its live hosts.
 
 **The snapshot cover — `smooth_transition(root, mutate, ...)`** (owner
 2026-07-20, generalizing the 2026-07-18 theme cross-fade into ONE
@@ -1690,15 +1778,20 @@ background re-tints with the window — the pill's transparent corners
 blend into the top strip in both themes.
 
 ## Threading
-One worker thread per site, started and stopped INDEPENDENTLY by
-its panel's buttons (per-site stop events, and — owner 2026-07-21 —
-per-KIND pause events, one per `JOB_ORDER` entry, seven total); each
-creates its own
+One worker thread per site, started and stopped INDEPENDENTLY by its
+panel's buttons (per-KIND stop events — `self._stop_events`, sites
+plus the four standalone tools since GUI rework Phase 14, `_stop_tool`
+— and, owner 2026-07-21, per-KIND pause events, one per `JOB_ORDER`
+entry, seven total); each site creates its own
 Playwright instance and `SiteDriver` (sync Playwright is
 per-thread) and walks the theme queue sequentially. The four TOOLS
-add up to four MORE daemon workers (`_run_tool_job`), one per kind
+add up to four MORE daemon workers (`_run_tool_job`, GUI rework Phase
+14 threads a real should_stop into its loop, mirroring `run_sheet`'s
+own — see **Pause** below and **Standalone-tool settings panels**
+under **The window**), one per kind
 (one job per kind — a second click is refused), and the AI CHECKER a
-seventh (`_run_ai_check_job`, same `_tool_workers` bookkeeping), so up
+seventh (`_run_ai_check_job`, same `_tool_workers` bookkeeping, no
+should_stop yet — Phase 15's own scope), so up
 to seven jobs run
 CONCURRENTLY; each tool worker only backs up + processes files under
 its own picked folder and its own `JobTemp` subdir (disjoint writes;
@@ -1720,11 +1813,16 @@ updates stop re-rendering per drag frame; plain log lines and the
 rare control messages still apply immediately). Queue messages:
 `('__event__', slot, ev)` routes to `self.panels.get(slot).handle(ev)`
 (`.get` is the defensive guard for a late event after a panel closed),
-`('__tool_done__', slot)` and `('__worker_done__', key)` reveal the
-panel's CLOSE and clear the worker bookkeeping, a quota
-`TerminalState` posts its `retry_after_s` the same way and the main
-thread schedules the auto-restart via `root.after` (the panel keeps its
-countdown, no CLOSE, until the restart or a Stop).
+`('__worker_done__', key)` reveals the site panel's CLOSE and clears
+the worker bookkeeping, and `('__tool_done__', slot)` does the SAME on
+a natural finish — but (GUI rework Phase 14) instead CLOSES the panel
+outright (`_close_panel` — same as a manual Close) and calls
+`_request_menu()` when this slot's should_stop event is set (a
+Stop-triggered finish, see **Standalone-tool settings panels**' own
+"Stop" write-up); a quota `TerminalState` posts its `retry_after_s`
+the same way and the main thread schedules the auto-restart via
+`root.after` (the panel keeps its countdown, no CLOSE, until the
+restart or a Stop).
 
 ## Pause (owner 2026-07-21)
 
@@ -1753,25 +1851,42 @@ exact same poll-wait (`config.PAUSE_POLL_INTERVAL_S`, no busy spin):
   checked between sheet items; a Stop always wins over a pending pause
   (`should_stop` is re-checked on every poll tick inside the wait).
 - `_run_tool_job` and `_run_ai_check_job` call `wait_while_paused`
-  directly, once per loop iteration, BETWEEN images — with
-  `should_stop=None` (neither job has a Stop of its own, so the wait
-  simply blocks for Resume; there is nothing for it to lose to).
+  directly, once per loop iteration, BETWEEN images. `_run_ai_check_job`
+  still passes `should_stop=None` (no Stop of its own yet — Phase 15's
+  own scope — so the wait simply blocks for Resume, nothing to lose
+  to). `_run_tool_job` (GUI rework Phase 14) now passes its OWN real
+  `should_stop=stop_event.is_set` — a Stop wins over a pending Pause
+  here too, the exact same contract as `_drive_site`'s row above (see
+  **Standalone-tool settings panels** under **The window** for the
+  full Stop write-up).
 
 **Stale-pause hygiene** (owner 2026-07-21): a job that finishes its
 LAST item right as Pause was clicked — the for-loop just ends, so the
 toggle is never revisited — would otherwise leave a phantom "paused"
 button/state on an now-idle panel, and a bad carry-over would silently
 pre-pause the NEXT run of that kind. Two guards close this: every
-`_start_*` method (`_start_site`, `_start_tool`, `_start_ai_check`,
-and — via `_launch_tool_worker`'s shared tail, GUI rework Phase 13 —
-`_start_tool_from_panel`) clears a stale pause for its kind BEFORE
-spawning the worker (a fresh Start never begins pre-paused), and the
-`__worker_done__` / `__tool_done__` dispatch handlers ALSO clear it
-the moment a job finishes (so an idle/finished panel never shows a
-stale "Resume").
+`_start_*` method (`_start_site`, `_start_ai_check`, and — via
+`_launch_tool_worker`'s shared tail, GUI rework Phase 13/14, EVERY
+standalone tool's Start now goes through it — `_start_tool_from_panel`)
+clears a stale pause for its kind BEFORE spawning the worker (a fresh
+Start never begins pre-paused), and the `__worker_done__` /
+`__tool_done__` dispatch handlers ALSO clear it the moment a job
+finishes (so an idle/finished panel never shows a stale "Resume").
 `_stop_site` clears it too when actually stopping a running site —
 belt-and-suspenders with the `should_stop` re-check inside the wait,
-which already lets a PAUSED run stop promptly either way.
+which already lets a PAUSED run stop promptly either way; `_stop_tool`
+(GUI rework Phase 14) does the exact same thing for a standalone tool.
+
+**Stale-STOP hygiene** (GUI rework Phase 14, the SAME shape as the
+pause guard above, one event earlier in the chain): `_launch_tool_
+worker` ALSO clears the tool's stop event before spawning the worker
+— mirrors `_start_site`'s own `self._stop_events[key].clear()` —
+so a job Stopped once and then Started again never begins already
+should_stop()-True (which would halt it before a single image runs).
+The event is intentionally NOT cleared right after `_stop_tool`
+requests the halt or right when `__tool_done__` consumes it (reading
+`is_set()` to decide the "smart"/natural-finish branch) — only the
+NEXT Start's own sweep clears it, same timing as the pause guard.
 
 Caveat: `_drive_site`'s OUTER per-collection loop has no pause check
 of its own — only `run_sheet`'s per-ITEM loop does. Pausing while the
@@ -1785,14 +1900,16 @@ items" is satisfied, and the gap is cosmetic, never functional.
 **GUI rework Phase 11** extends `_toggle_pause_job` at its tail (the
 bookkeeping above is otherwise untouched): pausing a SITE while the
 running view is up also reveals its settings panel — see **Running
-view**'s Start/Pause/Stop table below. **GUI rework Phase 13** widens
-the SAME tail to bg/crop: pausing either while the running view is up
-reveals ITS OWN `ToolSettingsPanel` the identical way (`_inline_kind`
-set to that slot), and additionally keeps the revealed panel's own
-Pause/Resume button label in sync (`_tool_panels[kind].set_paused`) —
-upscale/aspect/the AI checker still have no persistent panel to
-reveal, so pausing them stays exactly the no-op it always was beyond
-their own dashboard button.
+view**'s Start/Pause/Stop table below. **GUI rework Phase 13/14**
+widens the SAME tail to ALL FOUR standalone tools (bg/crop, Phase 13;
+upscale/aspect, Phase 14 — one generic `kind in self._tool_panels`
+check, no per-slot code): pausing any of them while the running view
+is up reveals ITS OWN `ToolSettingsPanel` the identical way
+(`_inline_kind` set to that slot), and additionally keeps the revealed
+panel's own Pause/Resume button label in sync (`_tool_panels[kind].
+set_paused`) — the AI checker still has no persistent panel to reveal
+(Phase 15's own scope), so pausing it stays exactly the no-op it
+always was beyond its own dashboard button.
 
 ## Connections
 
