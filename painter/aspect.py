@@ -28,6 +28,7 @@ non-positive target ratio is rejected loudly.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Callable
 
@@ -35,6 +36,7 @@ from painter.config import (
     ASPECT_FILTER_IF,
     ASPECT_FILTER_IF_NOT,
     ASPECT_FILTER_OFF,
+    ASPECT_LABEL_DECIMALS,
     ASPECT_TOL,
 )
 
@@ -44,6 +46,34 @@ Log = Callable[[str], None]
 class AspectError(RuntimeError):
     """The aspect deform failed on one image, or the target ratio is
     invalid (loud, never masked)."""
+
+
+# --- GUI rework Phase 5: the visual aspect-ratio editor ---------------
+#
+# Pure, offline-testable helpers behind the editor's live dual label —
+# no Tk, no file I/O. Both reject a non-positive side loudly (ValueError)
+# rather than let math.gcd's 0-or-negative handling silently produce a
+# degenerate ratio or a ZeroDivisionError buried inside an f-string.
+
+
+def reduced_ratio(w: int, h: int) -> tuple[int, int]:
+    """The smallest-integer form of ``w:h`` — divide both sides by their
+    GCD (e.g. 1920x1080 -> (16, 9); an already-coprime pair like 16:9
+    passes through unchanged)."""
+    if w <= 0 or h <= 0:
+        raise ValueError(f"ratio sides must be positive, got {w}:{h}")
+    g = math.gcd(w, h)
+    return w // g, h // g
+
+
+def decimal_ratio_label(
+    w: int, h: int, decimals: int = ASPECT_LABEL_DECIMALS
+) -> str:
+    """The DECIMAL form of ``w:h`` as ``"X.XXX:1"``, standard-ROUNDED to
+    ``decimals`` places (owner decision 2026-07-21: 16:9 -> "1.778:1")."""
+    if w <= 0 or h <= 0:
+        raise ValueError(f"ratio sides must be positive, got {w}:{h}")
+    return f"{w / h:.{decimals}f}:1"
 
 
 def change_aspect(

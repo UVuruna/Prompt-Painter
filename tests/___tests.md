@@ -102,7 +102,12 @@ mutually consistent.
 
 ### `test_aspect.py` — Change-Aspect Deform
 The grow-only stretch rule, already-at-ratio byte-unchanged no-ops,
-the optional input filter (off / IF / IF NOT) and loud failures.
+the optional input filter (off / IF / IF NOT) and loud failures. Plus
+(GUI rework Phase 5) the visual editor's pure helpers: `reduced_ratio`
+(gcd reduction, e.g. 1920×1080 → (16, 9), an already-coprime pair
+unchanged) and `decimal_ratio_label` (standard-rounded decimal, e.g.
+1920×1080 → "1.778:1", the configured-decimals default and an
+explicit override), both rejecting a non-positive side loudly.
 
 ### `test_viewer.py` — Viewer Helpers
 The before/after transparency checkerboard (`_checkerboard` /

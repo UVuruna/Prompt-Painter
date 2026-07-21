@@ -378,9 +378,11 @@ reachability fixes:
   with those params bound. **Aspect ratio** pops the `AspectRatioDialog`
   first — a modal with two positive-integer fields **W** and **H**
   (PRE-FILLED with the last-used ratio `self._aspect_ratio`; first run
-  16 : 9), an optional STACKED input filter (GUI rework Phase 4,
-  replacing the old single from/to/mode block — see **FilterEditor**
-  below), and TWO action buttons **Folder…** / **Files…** that encode
+  16 : 9) beside a visual **`AspectRatioCanvas`** (GUI rework Phase 5 —
+  see below) two-way synced with them, an optional STACKED input filter
+  (GUI rework Phase 4, replacing the old single from/to/mode block —
+  see **FilterEditor** below), and TWO action buttons **Folder…** /
+  **Files…** that encode
   the input choice: a folder can hold images of DIFFERENT ratios, so
   the tool accepts a whole FOLDER (`askdirectory` → `_iter_images`) OR
   individual FILES (`askopenfilenames`, multi-select) — the filter is
@@ -456,6 +458,54 @@ reachability fixes:
   `FilterCondition<->dict` (de)serialization
   (`painter.filters.condition_to_dict`/`condition_from_dict`) is what
   makes both settings.json persistence and presets JSON-safe.
+- **`AspectRatioCanvas`** (GUI rework Phase 5, `tk.Canvas`) — a live,
+  draggable preview of the TARGET output ratio, embedded beside
+  `AspectRatioDialog`'s W/H fields. NOT to be confused with
+  **FilterEditor** above: FilterEditor picks WHICH images a tool
+  touches, this widget shapes WHAT ratio the tool deforms them TO. A
+  rectangle, centred in a fixed square arena, represents `w:h`;
+  grabbing any of its 4 edges reshapes it (LEFT/RIGHT change WIDTH,
+  TOP/BOTTOM change HEIGHT, the box always stays centred), with a
+  live label showing BOTH forms — the exact decimal
+  (`painter.aspect.decimal_ratio_label`, owner-decision standard
+  rounding, e.g. "1.778:1") and the smallest-integer form
+  (`painter.aspect.reduced_ratio`, gcd-based, e.g. "16:9"). A live
+  drag EMPHASIZES the box (thicker outline, bigger handles) as
+  feedback that it is actively grabbed.
+  **Two-way sync** with the dialog's W/H entries: dragging an edge
+  calls `on_change(w, h)`, which the dialog mirrors into the `_w_var`/
+  `_h_var` StringVars (`_on_canvas_drag`); typing in either entry
+  (`_on_wh_typed`, a `trace_add("write", ...)`) parses both as
+  positive ints and calls the canvas's `set_ratio(w, h)` — a bad or
+  incomplete value (mid-edit, e.g. a momentarily empty field) is
+  silently skipped, never an error dialog on every keystroke (final
+  validation still happens in `_run()`). `set_ratio` NO-OPS when
+  passed the SAME `(w, h)` it already holds, which is exactly what a
+  drag's own `on_change` round-trips back as through the entry-var
+  trace — without that guard, every drag tick would re-"fit" the box
+  to the arena and visibly SNAP, fighting the live gesture.
+  **Drag math**: each of the 4 edges (not just 2 axes) is tracked
+  individually — grabbing the RIGHT edge clamps its effective x to
+  never cross the centre, so an overshot/fast drag HOLDS at the
+  minimum size instead of "growing" again once the cursor passes the
+  opposite side (a real bug caught while writing this widget's
+  headless drag-math smoke checks, fixed before it ever shipped).
+  **Theming**: a FIXED pixel size (`ASPECT_CANVAS_*` geometry
+  constants in gui.py, same Rule #4 split as `FILTER_ROW_*` above —
+  pure engine constants live in `painter/config.py`, pure Tk pixel
+  geometry lives here) — it does not track the font zoom, like
+  `DayNightSwitch`. Its background is a `skin_canvas` surface
+  (re-tints automatically on a flip); its drawn content (box, handles,
+  label) reads `job_color("aspect")`/`THEMES[ACTIVE_THEME]` LIVE at
+  draw time and exposes `redraw_theme()` for a host to call
+  explicitly on a flip. `AspectRatioDialog` itself is fully MODAL
+  (`grab_set`), so — exactly like `AiKeyWizard` (see **Theming**
+  below) — a flip cannot happen while it is open, and the dialog
+  deliberately does NOT register in `THEME_TOPLEVELS`: there would be
+  nothing reachable to wire. A FUTURE non-modal host (Phase 14's
+  persistent Aspect-ratio settings panel) calls `redraw_theme()` from
+  ITS OWN `apply_theme()`, the pattern every other themed Toplevel
+  already follows.
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
 - **Pause (the toggle button, owner 2026-07-21)** — indefinite, not
@@ -856,7 +906,17 @@ register in `THEME_TOPLEVELS` on `__init__`, unregister on
 per-widget foregrounds (Select tree leaf colours + the header progress
 label, DocWindow's Text tags) do NOT follow ttk styles and must be
 recomputed from `status()`/`colors` live (Select retains each leaf's
-`advice` + `n_done` to recompute its colour).
+`advice` + `n_done` to recompute its colour). **FULLY MODAL dialogs
+(`grab_set` + `wait_window`) deliberately do NOT register** —
+`AiKeyWizard`, `AspectRatioDialog`, `UpscaleParamsDialog`: the grab
+blocks all input to the rest of the app for as long as they are open,
+so the Day/Night switch is unreachable and a flip genuinely cannot
+happen while one is on screen; registering would be dead code. Only
+the NON-modal AI dialog (`AiSheetDialog`, a long generation that must
+not grab the app) registers. `job_color(kind)` mirrors `status(role)`
+for the FEW places plain-tk drawing needs a single resolved hex from a
+`(day, night)` `JOB_COLORS` pair instead of a CTk auto-resolving
+tuple — currently just `AspectRatioCanvas`'s accent.
 
 **The snapshot cover — `smooth_transition(root, mutate, ...)`** (owner
 2026-07-20, generalizing the 2026-07-18 theme cross-fade into ONE

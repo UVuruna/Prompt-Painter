@@ -45,7 +45,7 @@ match.
   `FILTER_POLARITY_*`/`FILTER_PRESETS_SETTING`/`FILTER_ASPECT_EXACT_TOL`
   block behind `FilterEditor` and the migrated `AspectRatioDialog`
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
-  `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`
+  `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`, `ASPECT_LABEL_DECIMALS`
 - [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
   `FILTER_KIND_ASPECT_RANGE`, `FILTER_KIND_ANY_SIDE`,
   `FILTER_KIND_WIDTH`, `FILTER_KIND_HEIGHT`, `FILTER_POLARITY_IF`,
@@ -138,6 +138,13 @@ match.
   common-ancestor DIRECTORY of the picks, one folder ⇒ base = that
   folder, rel = filename), so a selection spanning sub-folders still
   groups + restores correctly.
+- `ASPECT_LABEL_DECIMALS` (3) — GUI rework Phase 5 (owner decision
+  2026-07-21): the visual aspect-ratio editor's live dual label shows
+  the target ratio as an exact DECIMAL, standard-ROUNDED to this many
+  places (16:9 -> "1.778:1") — the default `decimals` argument of
+  [Change Aspect Ratio](aspect.md)'s pure `decimal_ratio_label`, kept
+  here (not in gui.py) so it stays importable with no tkinter
+  dependency, same as every other engine-side constant on this page.
 - `ASPECT_FILTER_OFF` / `ASPECT_FILTER_IF` / `ASPECT_FILTER_IF_NOT`,
   `ASPECT_FILTER_MODES`, `ASPECT_FILTER_DEFAULT_FROM` /
   `ASPECT_FILTER_DEFAULT_TO` — the Aspect tool's optional INPUT FILTER

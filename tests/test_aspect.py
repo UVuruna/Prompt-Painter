@@ -15,11 +15,17 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from painter.aspect import AspectError, change_aspect
+from painter.aspect import (
+    AspectError,
+    change_aspect,
+    decimal_ratio_label,
+    reduced_ratio,
+)
 from painter.config import (
     ASPECT_FILTER_IF,
     ASPECT_FILTER_IF_NOT,
     ASPECT_FILTER_OFF,
+    ASPECT_LABEL_DECIMALS,
 )
 
 
@@ -183,3 +189,54 @@ def test_filter_off_processes_all(tmp_path):
     other = tmp_path / "other.png"
     make_png(other, 1000, 1000)
     assert change_aspect(other, 16, 9, print) == "done"
+
+
+# --- reduced_ratio / decimal_ratio_label (GUI rework Phase 5) -----------
+# Pure helpers behind the visual aspect-ratio editor's live dual label —
+# no files, no Tk.
+
+
+def test_reduced_ratio_16_9():
+    assert reduced_ratio(1920, 1080) == (16, 9)
+
+
+def test_reduced_ratio_already_coprime():
+    """A pair with GCD 1 passes through unchanged."""
+    assert reduced_ratio(16, 9) == (16, 9)
+
+
+def test_reduced_ratio_square_is_1_1():
+    assert reduced_ratio(1000, 1000) == (1, 1)
+
+
+@pytest.mark.parametrize("w, h", [(0, 9), (16, 0), (-16, 9), (16, -9)])
+def test_reduced_ratio_rejects_non_positive_sides(w, h):
+    with pytest.raises(ValueError):
+        reduced_ratio(w, h)
+
+
+def test_decimal_ratio_label_formats_to_configured_decimals():
+    assert decimal_ratio_label(1920, 1080) == "1.778:1"
+
+
+def test_decimal_ratio_label_square_is_one_to_one():
+    assert decimal_ratio_label(1000, 1000) == "1.000:1"
+
+
+def test_decimal_ratio_label_honours_an_explicit_decimals_override():
+    assert decimal_ratio_label(1920, 1080, decimals=1) == "1.8:1"
+    assert decimal_ratio_label(1920, 1080, decimals=0) == "2:1"
+
+
+def test_decimal_ratio_label_default_matches_the_configured_constant():
+    """The function's own default IS the config constant, not a copy of
+    its value — changing ASPECT_LABEL_DECIMALS moves this too."""
+    assert decimal_ratio_label(1920, 1080) == decimal_ratio_label(
+        1920, 1080, decimals=ASPECT_LABEL_DECIMALS
+    )
+
+
+@pytest.mark.parametrize("w, h", [(0, 9), (16, 0), (-16, 9), (16, -9)])
+def test_decimal_ratio_label_rejects_non_positive_sides(w, h):
+    with pytest.raises(ValueError):
+        decimal_ratio_label(w, h)

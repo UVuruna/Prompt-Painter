@@ -254,6 +254,14 @@ ASPECT_FILTER_MODES = (ASPECT_FILTER_OFF, ASPECT_FILTER_IF, ASPECT_FILTER_IF_NOT
 ASPECT_FILTER_DEFAULT_FROM = 0.9
 ASPECT_FILTER_DEFAULT_TO = 1.1
 
+# GUI rework Phase 5 — the visual aspect-ratio editor's live label shows
+# the TARGET ratio in two forms at once: the exact decimal (owner
+# decision 2026-07-21, standard ROUNDING — 16:9 -> "1.778:1") beside the
+# smallest-integer form (`reduced_ratio`, gcd-based — 1920x1080 -> 16:9).
+# Both pure functions live in aspect.py; this constant is their shared
+# default precision, kept in config.py (Rule #4) so it is tunable in one
+# place and importable with no tkinter dependency.
+ASPECT_LABEL_DECIMALS = 3
 
 # --- Shared filter framework (owner decision 2026-07-21) --------------
 #
