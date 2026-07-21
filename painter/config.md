@@ -33,7 +33,10 @@ match.
 - [Upscale](upscale.md) — the `UPSCALE_*` block
 - [Job Temp](jobtemp.md) — `PROJECT_ROOT`, `JOBTEMP_DIRNAME`,
   `JOBTEMP_REMOVED_ALPHA`, `JOB_METRIC`, and (GUI rework Phase 7)
-  `JOBTEMP_STEPS_SUBDIR`, `JOBTEMP_STEP_NAMES`, `JOBTEMP_MAX_BYTES`
+  `JOBTEMP_STEPS_SUBDIR`, `JOBTEMP_STEP_NAMES`, `JOBTEMP_MAX_BYTES`,
+  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT`; [GUI](../gui.md) also reads
+  `JOBTEMP_CAP_BANNER_TEXT` (GUI rework Phase 8's over-cap dashboard
+  banner copy)
 - [Settings](settings.md) — `SETTINGS_PATH`
 - [Main (Entry Point)](../main.md) / [GUI](../gui.md) — `CDP_URL`,
   `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
@@ -257,8 +260,9 @@ match.
   same opacity notion as `CROP_INK_ALPHA` / `CLEAN_EDGE_ALPHA`).
 - `JOBTEMP_STEPS_SUBDIR`, `JOBTEMP_STEP_NAMES`, `JOBTEMP_MAX_BYTES`,
   `JOBTEMP_KEEP_ALL_STEPS_DEFAULT` — GUI rework Phase 7 (owner decision
-  2026-07-21): per-step backups for the site-generation pipeline (BG →
-  Crop → Aspect(force) → Upscale, Phase 8) on top of
+  2026-07-21): the on-disk shape for per-step backups; Phase 8 wired
+  them up for real over the site-generation pipeline (BG → Crop →
+  Aspect(force) → Upscale) on top of
   [Job Temp](jobtemp.md)'s existing single-backup store.
   `JOBTEMP_STEPS_SUBDIR` (`"__steps__"`) is the reserved subdir name a
   NAMED step's backup is namespaced under, so it can never collide with
@@ -271,15 +275,30 @@ match.
   the file — what a "restore everything to pristine" restores to, via
   the explicit `restore_to(rel, step="original")`) and `"fixer"` (the
   Fixer AI's pre-fix snapshot, Phase 20, taken after the pipeline and
-  checker have already run). `JOBTEMP_MAX_BYTES` (`4 * 1024**3`, 4 GiB)
+  checker have already run). Phase 8's `gui._run_pipeline_steps` DEDUPS
+  the first ENABLED step's own name against `"original"` (byte-identical
+  backups of the same instant otherwise), so `steps_for()` in practice
+  never lists BOTH — a filmstrip for an image whose first enabled step
+  was BG lists `["original", "crop", ...]`, never `["original", "bg",
+  "crop", ...]`. `JOBTEMP_MAX_BYTES` (`4 * 1024**3`, 4 GiB)
   is the intermediate-backup disk cap `JobTemp.over_cap()` compares
   cumulative backup bytes against — a SIGNAL only, `JobTemp` never
   auto-evicts; the Findings memory math (4 steps × ~3MB/image ⇒
   ~300 images overnight peaking ~3.6–4.5GB) is why 4 GiB was chosen.
-  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT` (`True`) is the default for the
-  future per-agent "Keep every pipeline step (uses more disk)" toggle
-  (Phase 8) — not read by `jobtemp.py` itself, which has no notion of
-  "agents".
+  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT` (`True`) is the default for
+  `AgentPanel.keep_all_steps_var`, the per-agent "Keep every pipeline
+  step (uses more disk)" toggle (Phase 8) — not read by `jobtemp.py`
+  itself, which has no notion of "agents"; when off, `gui.
+  _run_pipeline_steps` falls back to original-only SILENTLY (never
+  `on_cap`, which is reserved for a REAL cap hit).
+- `JOBTEMP_CAP_BANNER_TEXT` — GUI rework Phase 8: the LOUD, PERSISTENT
+  dashboard banner text a site job's panel shows the ONE time its
+  `JobTemp` crosses `JOBTEMP_MAX_BYTES` (owner decision: "loud
+  persistent dashboard banner, not just a log line"). Formatted from
+  `JOBTEMP_MAX_BYTES` itself at module load, so the GiB figure in the
+  message can never drift from the real cap. A plain static string —
+  lives here like every other user-facing copy constant
+  (`SAFER_PREAMBLE`, `CONTINUE_NUDGE`, `AI_CHECK_INSTRUCTIONS`).
 - `CHECKER_TILE_PX`, `CHECKER_LIGHT`, `CHECKER_DARK` — the neutral
   light/dark checkerboard the before/after viewer composites a
   transparent AFTER over, so a removed (transparent) background reads as
@@ -366,15 +385,21 @@ match.
   (owner 2026-07-20): small coloured dots beside an image row's name
   in the gen panels' Collections tree, marking what actually HAPPENED
   to that image. `BADGES` is pure data — key → (dot colour, legend
-  label), render order; deliberately THEME-AGNOSTIC mid-tones so one
-  dot reads on both tree backgrounds, and the owner retints/renames
-  here. `BADGE_ACTION_STEPS` maps the runner's post_save step names
-  (`REMOVE BG` / `CROP` / `UPSCALE`) to badge keys;
+  label), render order (`bg`, `crop`, `aspect`, `upscale`, `retry` —
+  the pipeline order, retry last); deliberately THEME-AGNOSTIC
+  mid-tones so one dot reads on both tree backgrounds, and the owner
+  retints/renames here. GUI rework Phase 8 added `"aspect"` (`#d946ef`,
+  "aspect forced") for the new Force-Aspect pipeline step — a
+  magenta/fuchsia picked from the same Tailwind-500 family the other
+  three already use (green-500/amber-500/blue-500), reusing the SAME
+  hue `JOB_COLORS["aspect"]` already ties to "aspect" everywhere else
+  in the app. `BADGE_ACTION_STEPS` maps the runner's post_save step
+  names (`REMOVE BG` / `CROP` / `ASPECT` / `UPSCALE`) to badge keys;
   `badge_keys_for` parses the action string ("REMOVE BG: done, CROP:
-  done, UPSCALE: nothing") and awards a badge ONLY on status
-  `BADGE_DONE_STATUS` ("done" — never nothing/unclear/FAILED; unknown
-  segments are ignored, badges only assert a positive), plus the
-  `retry` badge when the safer retry produced the image. The `DOT_*`
+  done, ASPECT: done, UPSCALE: nothing") and awards a badge ONLY on
+  status `BADGE_DONE_STATUS` ("done" — never nothing/unclear/FAILED;
+  unknown segments are ignored, badges only assert a positive), plus
+  the `retry` badge when the safer retry produced the image. The `DOT_*`
   numbers drive [GUI](../gui.md)'s PIL dot rasterizer (supersampled +
   LANCZOS) — dots are PIL-drawn, NOT emoji: Tk 8.6 on Windows renders
   colour emoji as identical monochrome circles (verified live

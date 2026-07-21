@@ -82,6 +82,8 @@ from painter.config import (
     JOB_METRIC,
     JOB_ORDER,
     JOB_TOOL_KINDS,
+    JOBTEMP_CAP_BANNER_TEXT,
+    JOBTEMP_KEEP_ALL_STEPS_DEFAULT,
     NEW_CHAT_CHOICES,
     RESIZE_SETTLE_MS,
     SHEETS_DIR,
@@ -352,6 +354,12 @@ DOC_CHROME_PAD_PX = 48      # non-text vertical chrome: Text pady + frame margin
 # --- Before/after viewer (the tool panels' Restore viewer) ------------
 BEFORE_AFTER_W = 760          # viewer width; before/after images scale into it
 BEFORE_AFTER_IMG_PAD_PX = 60  # slack subtracted from the width for the images
+
+# --- JobPanel's loud persistent cap-warning strip (GUI rework Phase 8) -
+# see JobPanel._show_cap_banner/_hide_cap_banner; wraplength keeps the
+# (fairly long) JOBTEMP_CAP_BANNER_TEXT readable inside one dashboard
+# panel column instead of stretching it.
+JOB_PANEL_BANNER_WRAP_PX = 480
 
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
 ASPECT_DIALOG_ENTRY_W = 64  # px width of each W / H field in the ratio dialog
@@ -1791,6 +1799,11 @@ class AgentPanel(ttk.Labelframe):
         "up_minside",
         # this agent's own Settings-gear collapse state (owner 2026-07-19)
         "settings_collapsed",
+        # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — OFF
+        # by default; W/H are the target ratio the AspectRatioCanvas
+        # edits. "keep_all_steps" is the per-agent "keep every pipeline
+        # step" disk-usage toggle (JOBTEMP_KEEP_ALL_STEPS_DEFAULT).
+        "force_aspect", "force_aspect_w", "force_aspect_h", "keep_all_steps",
     )
 
     def __init__(
@@ -1865,6 +1878,25 @@ class AgentPanel(ttk.Labelframe):
         # True = fine-tune hidden (default). A BooleanVar so it persists and
         # auto-saves through the same per-agent trace as every other field.
         self.settings_collapsed_var = tk.BooleanVar(value=True)
+
+        # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — OFF
+        # by default (a deliberate DEFORM, not everyone's images need
+        # one); W/H are the target ratio, mirrored two-way with the
+        # embedded AspectRatioCanvas (built in _build_finetune, reusing
+        # Phase 5's editor) exactly like AspectRatioDialog's own W/H
+        # entries + canvas.
+        self.force_aspect_var = tk.BooleanVar(value=False)
+        self.force_aspect_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
+        self.force_aspect_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
+        # per-agent "keep every pipeline step" disk-usage toggle (owner
+        # decision 2026-07-21, GUI rework Phase 8) — ON keeps a
+        # restorable backup for EVERY enabled post-save step (BG/Crop/
+        # Aspect/Upscale), not just the pristine "original" baseline;
+        # OFF (or the job's JobTemp going over JOBTEMP_MAX_BYTES) falls
+        # back to original-only. See gui._run_pipeline_steps.
+        self.keep_all_steps_var = tk.BooleanVar(
+            value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
+        )
 
         row = ttk.Frame(self)
         row.pack(fill="x", pady=2)
@@ -1945,6 +1977,14 @@ class AgentPanel(ttk.Labelframe):
         self._build_finetune()
         self._apply_finetune_visibility()
 
+        # this panel's embedded AspectRatioCanvas needs redraw_theme() on
+        # every live Day/Night flip (GUI rework Phase 8 — see apply_theme's
+        # own docstring for why AgentPanel registers here despite not
+        # being a Toplevel); never unregistered — build-once, same
+        # lifetime as the app itself, like every dashboard JobPanel.
+        THEME_TOPLEVELS.append(self)
+        self.bind("<Destroy>", self._on_destroy)
+
     def _build_finetune(self) -> None:
         """This agent's collapsible FINE-TUNE area (owner 2026-07-19),
         hidden behind its Settings gear: the PAUSE range, the ACTION-DELAY
@@ -1976,6 +2016,68 @@ class AgentPanel(ttk.Labelframe):
         ttk.Label(row, text="–").pack(side="left", padx=2)
         Spinner(row, self.act_max_var, step=0.1).pack(side="left")
         ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+
+        # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — a
+        # deliberate DEFORM to an exact target ratio, run AFTER Crop and
+        # BEFORE Upscale (PainterGui._compose_post_save's new order:
+        # BG -> Crop -> Aspect -> Upscale). Default OFF. The target W/H
+        # is edited two-way with the SAME AspectRatioCanvas the
+        # standalone 'Aspect ratio…' tool's dialog uses (Phase 5) — the
+        # entries drive the canvas, dragging an edge drives them back.
+        ttk.Label(
+            box, text="Force Aspect Ratio (this site):", style="Head.TLabel"
+        ).pack(anchor="w", pady=(4, 0))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        rounded_switch(row, "Force to ratio", self.force_aspect_var).pack(
+            side="left"
+        )
+
+        fa_fields = ttk.Frame(box)
+        fa_fields.pack(fill="x", pady=2)
+        ttk.Label(fa_fields, text="W").pack(side="left", padx=(0, 4))
+        self._force_aspect_w_entry = rounded_entry(
+            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self.force_aspect_w_var, justify="center",
+        )
+        self._force_aspect_w_entry.pack(side="left")
+        ttk.Label(fa_fields, text=":", font=tk_font("head")).pack(
+            side="left", padx=8
+        )
+        ttk.Label(fa_fields, text="H").pack(side="left", padx=(0, 4))
+        self._force_aspect_h_entry = rounded_entry(
+            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self.force_aspect_h_var, justify="center",
+        )
+        self._force_aspect_h_entry.pack(side="left")
+
+        # its own row below the W/H fields (not beside them, like the
+        # standalone dialog can afford) — this panel's column is
+        # narrower than a free-standing modal
+        canvas_row = ttk.Frame(box)
+        canvas_row.pack(fill="x", pady=(2, 0))
+        self._force_aspect_canvas = AspectRatioCanvas(
+            canvas_row,
+            w=int(self.force_aspect_w_var.get()),
+            h=int(self.force_aspect_h_var.get()),
+            on_change=self._on_force_aspect_canvas_drag,
+        )
+        self._force_aspect_canvas.pack(anchor="w")
+        self.force_aspect_w_var.trace_add(
+            "write", self._on_force_aspect_wh_typed
+        )
+        self.force_aspect_h_var.trace_add(
+            "write", self._on_force_aspect_wh_typed
+        )
+
+        # per-agent disk-usage choice for the pipeline's per-step backups
+        # (GUI rework Phase 8) — see gui._run_pipeline_steps.
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=(6, 2))
+        rounded_switch(
+            row, "Keep every pipeline step (uses more disk)",
+            self.keep_all_steps_var,
+        ).pack(side="left")
 
         ttk.Label(
             box, text="Upscale gate (this site):", style="Head.TLabel"
@@ -2025,6 +2127,56 @@ class AgentPanel(ttk.Labelframe):
         smooth_transition(
             self.winfo_toplevel(), self._apply_finetune_visibility
         )
+
+    def _on_force_aspect_canvas_drag(self, w: int, h: int) -> None:
+        """``AspectRatioCanvas.on_change`` — a drag mirrored into the W/H
+        entries (whose own trace calls back into ``set_ratio``, a no-op
+        echo — see that method's docstring). Same pattern as
+        ``AspectRatioDialog._on_canvas_drag``."""
+        self.force_aspect_w_var.set(str(w))
+        self.force_aspect_h_var.set(str(h))
+
+    def _on_force_aspect_wh_typed(self, *_args) -> None:
+        """Live-reshape the canvas as the owner types a new W/H. A bad
+        or incomplete value (mid-edit) is a normal typing state, not an
+        error — silently skipped, same as
+        ``AspectRatioDialog._on_wh_typed``; final validation happens in
+        ``force_aspect_ratio()`` on Start."""
+        try:
+            w = int(self.force_aspect_w_var.get().strip())
+            h = int(self.force_aspect_h_var.get().strip())
+        except ValueError:
+            return
+        if w <= 0 or h <= 0:
+            return
+        self._force_aspect_canvas.set_ratio(w, h)
+
+    def force_aspect_ratio(self) -> tuple[int, int]:
+        """The Force-Aspect target ratio — ValueError propagates to the
+        caller's Start validation, same contract as ``upscale_params()``
+        / ``pace_floats()``."""
+        return (
+            int(self.force_aspect_w_var.get()),
+            int(self.force_aspect_h_var.get()),
+        )
+
+    def apply_theme(self) -> None:
+        """Registered in ``THEME_TOPLEVELS`` (GUI rework Phase 8) even
+        though this panel is not a Toplevel — that list is really just
+        "objects with their own apply_theme() a flip must reach", and
+        AgentPanel is BUILD-ONCE / never destroyed before app exit, same
+        lifetime as every dashboard JobPanel. Needed because
+        ``AspectRatioCanvas`` draws its accent/label straight from the
+        active theme (see its own docstring) and, unlike its ONLY other
+        host (the fully modal ``AspectRatioDialog``, which cannot be
+        open during a live flip), THIS host is a normal part of the main
+        window — a Day/Night flip while the fine-tune box is expanded
+        must repaint it too."""
+        self._force_aspect_canvas.redraw_theme()
+
+    def _on_destroy(self, event) -> None:
+        if event.widget is self and self in THEME_TOPLEVELS:
+            THEME_TOPLEVELS.remove(self)
 
     def upscale_params(self) -> dict:
         """The upscale gate's engine kwargs (GUI rework Phase 6):
@@ -2127,6 +2279,10 @@ class AgentPanel(ttk.Labelframe):
             "act_max": self.act_max_var,
             "up_minside": self.up_minside_var,
             "settings_collapsed": self.settings_collapsed_var,
+            "force_aspect": self.force_aspect_var,
+            "force_aspect_w": self.force_aspect_w_var,
+            "force_aspect_h": self.force_aspect_h_var,
+            "keep_all_steps": self.keep_all_steps_var,
         }
 
     def persist_vars(self) -> list[tk.Variable]:
@@ -2398,9 +2554,40 @@ class JobPanel(ttk.Frame):
         # the state line — quota auto-restart countdown / current item
         # / paused
         self.state_var = tk.StringVar(value="")
-        ttk.Label(
+        self._state_label = ttk.Label(
             self, textvariable=self.state_var, style="Muted.TLabel"
-        ).pack(anchor="w")
+        )
+        self._state_label.pack(anchor="w")
+
+        # a LOUD, PERSISTENT warning strip (GUI rework Phase 8) — unlike
+        # state_var above (MUTED, overwritten by the very next progress
+        # event — see set_paused's own docstring), this stays up until
+        # something explicitly hides it again (reset() on a fresh run).
+        # Built here so its pack POSITION (right after the state line,
+        # via after=self._state_label) is fixed no matter what a
+        # subclass packs later, but left UNPACKED at construction — a
+        # solid "inverse-warning" fill with empty text would still paint
+        # a bare colour bar on every panel. Today only DashPanel ever
+        # shows it (a site job's JobTemp crossing its backup cap — see
+        # DashPanel.handle's "over_cap" branch); the four standalone
+        # tools have no per-step backups to cap (Phase 8 scope).
+        self._cap_banner_var = tk.StringVar(value="")
+        self._cap_banner = ttk.Label(
+            self, textvariable=self._cap_banner_var,
+            bootstyle="inverse-warning", anchor="w", padding=4,
+            wraplength=JOB_PANEL_BANNER_WRAP_PX,
+        )
+
+    def _show_cap_banner(self, text: str) -> None:
+        """Show (or update the text of) the persistent warning strip.
+        Idempotent — Tk's pack() just re-configures an already-mapped
+        widget in place, so a repeat call never re-stacks it."""
+        self._cap_banner_var.set(text)
+        self._cap_banner.pack(fill="x", pady=(2, 0), after=self._state_label)
+
+    def _hide_cap_banner(self) -> None:
+        self._cap_banner.pack_forget()
+        self._cap_banner_var.set("")
 
     def finish(self) -> None:
         """The job ended — reveal the CLOSE button."""
@@ -2656,6 +2843,7 @@ class DashPanel(JobPanel):
         self, active: bool = True, task_total: int = 0, task_themes: int = 0
     ) -> None:
         self.reset_finished()  # a fresh run hides the CLOSE button again
+        self._hide_cap_banner()  # a fresh run starts with a clean slate
         now = time.monotonic()
         self._task_total = task_total
         self._task_themes = task_themes
@@ -2785,6 +2973,13 @@ class DashPanel(JobPanel):
         elif kind == "sheet_done":
             self._finalize_theme()
             self.image_var.set("—")
+        elif kind == "over_cap":
+            # this site's JobTemp crossed JOBTEMP_MAX_BYTES (GUI rework
+            # Phase 8) — per-step backups have stopped, original-only
+            # from here on; LOUD and PERSISTENT (unlike every branch
+            # above, which only ever touches the muted state_var/tree),
+            # so it survives every later progress event until reset().
+            self._show_cap_banner(JOBTEMP_CAP_BANNER_TEXT)
         self._refresh()
 
     def _ensure_parent(self) -> str:
@@ -3670,6 +3865,86 @@ def _gate_and_upscale(
     return upscale_if_small(path, log, **params)
 
 
+def _run_pipeline_steps(
+    path: Path,
+    steps: list[tuple[str, str, Callable[[Path], str]]],
+    temp: "jobtemp.JobTemp | None",
+    keep_all_steps: bool,
+    on_cap: Callable[[], None],
+) -> str:
+    """Run each ENABLED post-save STEP over one already-saved image, in
+    order, composing the runner's action-string description ("REMOVE
+    BG: done, CROP: done, ...") — the per-image engine of
+    ``PainterGui._compose_post_save`` (GUI rework Phase 8's reordered
+    BG -> Crop -> Aspect -> Upscale pipeline). ``steps`` is the
+    caller-built ``(label, step_name, fn)`` triples for whichever
+    switches are on, in PIPELINE order; ``fn`` is already a plain
+    ``path -> status`` callable (its own log sink bound at the call
+    site), so this function stays engine-agnostic — it never imports
+    postprocess/aspect/upscale itself.
+
+    When ``temp`` (a JobTemp) is attached, each step's PRE-state is
+    backed up first:
+
+    * the FIRST enabled step's pre-state is tagged ``step="original"``
+      — the pristine, restore-everything baseline (the runner's raw
+      just-saved image, before the pipeline touches it at all) — and is
+      ALWAYS taken, cap or toggle or not, so every image keeps at LEAST
+      this one restore point. This DELIBERATELY DEDUPS against that
+      first step's own name (owner ask, GUI rework Phase 8: "avoid a
+      pointless duplicate when original == the first step's pre-
+      state") — the two would be byte-identical backups of the exact
+      same instant, so only ONE is ever written. A caller reading
+      ``steps_for()`` should expect the first ENABLED step's own name
+      to be ABSENT from the list — "original" already covers that
+      instant; see the ``JOBTEMP_STEP_NAMES`` ordering-contract
+      comment in painter/config.py, which already frames "original" as
+      captured "before the pipeline touches the file at all" (i.e. not
+      tied to any one step's name).
+    * every LATER enabled step's pre-state gets its OWN named backup
+      ("bg"/"crop"/"aspect"/"upscale") — but only when ``keep_all_
+      steps`` is True AND the job is not yet ``over_cap()``. Once over
+      cap, NEW per-step backups stop (the "original-only" fallback)
+      and ``on_cap()`` fires; when ``keep_all_steps`` is False (the
+      owner's own choice, not an emergency), the same skip happens
+      SILENTLY — ``on_cap()`` is reserved for the cap, never the
+      toggle. The caller turns a real cap hit into the loud persistent
+      dashboard banner (see DashPanel's "over_cap" event).
+    * a step backed up under its OWN name whose result was "nothing" (a
+      genuine no-op — before == after) has that backup DROPPED right
+      back, mirroring the four standalone tools' own restore-point
+      hygiene (``PainterGui._run_tool_job``): a no-op leaves nothing
+      worth restoring. "original" is NEVER dropped, whatever any step's
+      own outcome — it is the restore-all target regardless.
+
+    With ``temp is None`` (no JobTemp attached — never happens once
+    ``_start_site`` has run, but keeps this function usable headless in
+    tests) every step still runs normally; only the backup bookkeeping
+    is skipped.
+    """
+    rel = path.relative_to(temp.folder).as_posix() if temp is not None else ""
+    parts = []
+    took_original = False
+    for label, step_name, fn in steps:
+        backed_up_as = None
+        if temp is not None:
+            if not took_original:
+                temp.backup(path, rel, step="original")
+                took_original = True
+            elif not keep_all_steps:
+                pass  # the owner's own choice — silent skip, no banner
+            elif not temp.over_cap():
+                temp.backup(path, rel, step=step_name)
+                backed_up_as = step_name
+            else:
+                on_cap()
+        status = fn(path)
+        if backed_up_as is not None and status != "done":
+            temp.drop(rel, step=backed_up_as)  # a no-op — nothing to restore
+        parts.append(f"{label}: {status}")
+    return ", ".join(parts)
+
+
 def _migrate_legacy_upscale_gate(min_width, aspect_min, aspect_max) -> dict:
     """One-time migration (GUI rework Phase 6, owner decision
     2026-07-21): the OLD three upscale-gate numbers — a min WIDTH (min
@@ -3755,10 +4030,15 @@ class PainterGui:
         self._restart_deadline: dict[str, float] = {}  # site -> monotonic
         # the four in-place tools each run as their OWN job (one worker
         # thread + one dashboard panel per kind; one job per kind at a
-        # time). Each holds a JobTemp of the originals it backed up.
+        # time). GUI rework Phase 8: the two gen-SITE jobs now ALSO get
+        # a JobTemp each (per-step pipeline backups — created in
+        # _start_site), so this dict — renamed _tool_temps -> _job_temps
+        # — holds up to six slots (bg/crop/upscale/aspect + chatgpt/
+        # gemini), keyed the same way _close_panel already pops any
+        # kind generically.
         self._tool_workers: dict[str, threading.Thread] = {}
-        self._tool_temps: dict[str, jobtemp.JobTemp] = {}
-        # sweep any crash-orphaned tool backups from a previous session
+        self._job_temps: dict[str, jobtemp.JobTemp] = {}
+        # sweep any crash-orphaned backups from a previous session
         jobtemp.clear_all()
         # (site, source-path, drop-path) -> BooleanVar; missing = ticked
         self._select_vars: dict[tuple[str, str, str], tk.BooleanVar] = {}
@@ -4212,12 +4492,13 @@ class PainterGui:
 
     def _close_panel(self, kind: str) -> None:
         """A finished panel's CLOSE button: remove it from the grid and
-        clear that job's temp backups (tools only). The panel widget
-        survives (build-once) — reset_finished hides its CLOSE for the
-        next run, and the next Start re-adds it."""
+        clear that job's temp backups (any kind — a tool or, since GUI
+        rework Phase 8, a gen site's own per-step pipeline backups). The
+        panel widget survives (build-once) — reset_finished hides its
+        CLOSE for the next run, and the next Start re-adds it."""
         self._dashgrid.remove(kind)
         self.panels[kind].reset_finished()
-        temp = self._tool_temps.pop(kind, None)
+        temp = self._job_temps.pop(kind, None)
         if temp is not None:
             temp.clear()
 
@@ -4755,11 +5036,11 @@ class PainterGui:
 
         # a finished panel for this slot may still be on screen — clear
         # its old temp before the new job takes the slot
-        old = self._tool_temps.pop(slot, None)
+        old = self._job_temps.pop(slot, None)
         if old is not None:
             old.clear()
         temp = jobtemp.JobTemp(slot, folder_path)
-        self._tool_temps[slot] = temp
+        self._job_temps[slot] = temp
 
         panel = self.panels[slot]
         panel.folder = folder_path
@@ -5082,15 +5363,25 @@ class PainterGui:
     def _compose_post_save(self, key: str):
         """The site's post-save hook per ITS panel switches — the same
         shape the CLI builds: ``post_save(path) -> "REMOVE BG: done,
-        CROP: done, ..."`` (the runner logs the description and guards
-        the call itself — a failing step never kills the run). Returns
-        None when every switch is off, or the deps-problem string when
-        the steps cannot run at all."""
+        CROP: done, ASPECT: done, ..."`` (the runner logs the
+        description and guards the call itself — a failing step never
+        kills the run). Returns None when every switch is off, or the
+        deps-problem string when the steps cannot run at all.
+
+        GUI rework Phase 8: the pipeline order is BG -> Crop ->
+        Aspect(force) -> Upscale (``_run_pipeline_steps`` runs whichever
+        of those four are enabled, in that fixed order — never
+        reordered by which switches happen to be on); with Force Aspect
+        OFF (its default) this is BYTE-IDENTICAL to the pre-Phase-8
+        pipeline — the new per-step JobTemp backups only ever COPY
+        bytes elsewhere, they never touch ``path`` itself, so the final
+        saved image is unaffected either way."""
         panel = self.agents[key]
         do_bg = panel.bg_removal_var.get()
         do_crop = panel.crop_var.get()
+        do_aspect = panel.force_aspect_var.get()
         do_upscale = panel.upscale_var.get()
-        if not (do_bg or do_crop or do_upscale):
+        if not (do_bg or do_crop or do_aspect or do_upscale):
             return None
 
         from painter.postprocess import deps_error
@@ -5108,7 +5399,24 @@ class PainterGui:
         # dropped (root Rule #1 — see _upscale_params_from_side_and_filter).
         up_params = panel.upscale_params() if do_upscale else {}
         up_conditions = panel.upscale_conditions() if do_upscale else []
+        # the Force-Aspect target ratio, read ONCE the same way — already
+        # validated by the caller's Start checks (see _start_site)
+        force_w, force_h = panel.force_aspect_ratio() if do_aspect else (0, 0)
+        keep_all_steps = panel.keep_all_steps_var.get()
         log = lambda msg: self._q.put(f"[{key}]     {msg}")
+        # this site's JobTemp, created by _start_site right before this
+        # method runs (None only in a headless/test caller that never
+        # went through _start_site — _run_pipeline_steps treats that as
+        # "no backups", the pipeline steps themselves still run normally)
+        temp = self._job_temps.get(key)
+        emit = lambda ev: self._q.put(("__event__", key, ev))
+        cap_warned = False  # the ONE loud banner per Start, never per image
+
+        def on_cap() -> None:
+            nonlocal cap_warned
+            if not cap_warned:
+                cap_warned = True
+                emit({"type": "over_cap"})
 
         def post_save(path: Path) -> str:
             from painter.postprocess import (
@@ -5116,17 +5424,30 @@ class PainterGui:
                 remove_background,
             )
 
-            parts = []
+            steps: list[tuple[str, str, Callable[[Path], str]]] = []
             if do_bg:
-                parts.append(f"REMOVE BG: {remove_background(path, log)}")
-            if do_crop:
-                parts.append(f"CROP: {crop_transparent(path, log)}")
-            if do_upscale:
-                parts.append(
-                    "UPSCALE:"
-                    f" {_gate_and_upscale(path, log, up_conditions, up_params)}"
+                steps.append(
+                    ("REMOVE BG", "bg", lambda p: remove_background(p, log))
                 )
-            return ", ".join(parts)
+            if do_crop:
+                steps.append(
+                    ("CROP", "crop", lambda p: crop_transparent(p, log))
+                )
+            if do_aspect:
+                steps.append((
+                    "ASPECT", "aspect",
+                    lambda p: aspect.change_aspect(p, force_w, force_h, log),
+                ))
+            if do_upscale:
+                steps.append((
+                    "UPSCALE", "upscale",
+                    lambda p: _gate_and_upscale(
+                        p, log, up_conditions, up_params
+                    ),
+                ))
+            return _run_pipeline_steps(
+                path, steps, temp, keep_all_steps, on_cap,
+            )
 
         return post_save
 
@@ -5227,6 +5548,23 @@ class PainterGui:
             # FROM > TO can ever reach get_conditions()) — the old
             # ordering check is unreachable dead code once that upstream
             # guarantee holds, so it is intentionally not reproduced here.
+        if panel.force_aspect_var.get():
+            try:
+                force_w, force_h = panel.force_aspect_ratio()
+            except ValueError:
+                messagebox.showerror(
+                    "PromptPainter",
+                    f"{SITES[key].name}: Force Aspect Ratio W/H must be"
+                    " whole numbers.",
+                )
+                return
+            if force_w <= 0 or force_h <= 0:
+                messagebox.showerror(
+                    "PromptPainter",
+                    f"{SITES[key].name}: Force Aspect Ratio W/H must"
+                    " both be positive.",
+                )
+                return
         timing = replace(
             TIMING,
             pause_min_s=pause_min,
@@ -5244,6 +5582,17 @@ class PainterGui:
                 " 'Open Chrome (login)' first.",
             )
             return
+
+        # this site's per-step backup store (GUI rework Phase 8) — a
+        # restart while a previous run's panel is still on screen must
+        # not inherit its old backups; mirrors _start_tool's own
+        # "clear the old slot first" rule for the four standalone tools.
+        # Created here (BEFORE _compose_post_save reads it) so the
+        # composed post_save closure captures the temp for this run.
+        old_temp = self._job_temps.pop(key, None)
+        if old_temp is not None:
+            old_temp.clear()
+        self._job_temps[key] = jobtemp.JobTemp(key, out_base)
 
         post_save = self._compose_post_save(key)
         if isinstance(post_save, str):  # a deps problem, not a hook
@@ -5803,11 +6152,12 @@ class PainterGui:
 
     def _on_close(self) -> None:
         self._save_now()
-        # drop every live tool job's backups, then sweep the whole temp
-        # root (belt-and-braces for any orphan)
-        for temp in list(self._tool_temps.values()):
+        # drop every live job's backups (tools AND, since GUI rework
+        # Phase 8, the two gen sites' own per-step pipeline backups),
+        # then sweep the whole temp root (belt-and-braces for any orphan)
+        for temp in list(self._job_temps.values()):
             temp.clear()
-        self._tool_temps.clear()
+        self._job_temps.clear()
         jobtemp.clear_all()
         self.root.destroy()
 

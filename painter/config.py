@@ -653,14 +653,25 @@ GRID_COLS_BY_COUNT = {1: 1, 2: 2, 3: 3, 4: 2, 5: 2, 6: 2, 7: 3}
 BADGES = {
     "bg": ("#22c55e", "BG removed"),      # green
     "crop": ("#f59e0b", "cropped"),       # orange
+    # GUI rework Phase 8: the new Force-Aspect pipeline step. Reuses the
+    # SAME magenta hue JOB_COLORS already ties to "aspect" everywhere
+    # else in the app (the tool button, the AspectRatioCanvas accent),
+    # picked from the same Tailwind-500 family the other three badges
+    # already come from (fuchsia-500 — bg/crop/upscale/retry are green
+    # -500/amber-500/blue-500/purple-500) so it reads as ONE consistent
+    # palette, not an unrelated new hue.
+    "aspect": ("#d946ef", "aspect forced"),  # magenta/fuchsia
     "upscale": ("#3b82f6", "upscaled"),   # blue
     "retry": ("#a855f7", "safer retry"),  # purple
 }
 # how the runner's post_save action string spells each step
-# ("REMOVE BG: done, CROP: done, UPSCALE: nothing") -> badge key.
+# ("REMOVE BG: done, CROP: done, ASPECT: done, UPSCALE: nothing") ->
+# badge key. "ASPECT" is the Force-Aspect step (GUI rework Phase 8,
+# painter.aspect.change_aspect run over the just-saved image).
 BADGE_ACTION_STEPS = {
     "REMOVE BG": "bg",
     "CROP": "crop",
+    "ASPECT": "aspect",
     "UPSCALE": "upscale",
 }
 BADGE_DONE_STATUS = "done"  # the only status that earns a badge
@@ -740,9 +751,24 @@ JOBTEMP_MAX_BYTES = 4 * 1024**3  # 4 GiB
 # Per-agent "Keep every pipeline step (uses more disk)" toggle default
 # (owner decision 2026-07-21) — ON: every enabled pipeline step gets its
 # own restorable backup rather than only the original baseline. Consumed
-# by the future Phase 8 AgentPanel setting; JobTemp itself has no notion
-# of "agents" — it only ever backs up whatever step name a caller passes.
+# by the AgentPanel's ``keep_all_steps_var`` (GUI rework Phase 8);
+# JobTemp itself has no notion of "agents" — it only ever backs up
+# whatever step name a caller passes.
 JOBTEMP_KEEP_ALL_STEPS_DEFAULT = True
+
+# GUI rework Phase 8: the LOUD, PERSISTENT dashboard banner text a site
+# job's panel shows the ONE time its JobTemp crosses JOBTEMP_MAX_BYTES
+# (owner decision: "loud persistent dashboard banner, not just a log
+# line") — formatted from that same constant so the number in the
+# message can never drift from the real cap. Plain, static copy (no
+# per-call parameters), so it lives here like every other user-facing
+# string constant (SAFER_PREAMBLE, CONTINUE_NUDGE, AI_CHECK_INSTRUCTIONS).
+JOBTEMP_CAP_BANNER_TEXT = (
+    f"Backup cap reached ({JOBTEMP_MAX_BYTES / 1024 ** 3:.0f} GiB) — new"
+    " per-step backups have stopped for this run; every image still"
+    " keeps its ORIGINAL (pristine) backup, just not the BG/Crop/"
+    "Aspect/Upscale in-between stages."
+)
 
 # Transparency backdrop for the before/after viewer. BG removal (and the
 # other tools) leave the AFTER image transparent where the background was

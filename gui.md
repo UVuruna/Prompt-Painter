@@ -261,11 +261,16 @@ reachability fixes:
   area near Background / New chat, NOT under the gear; its clause is
   appended at the very END of that site's `prompt_suffix`, after the
   background rule + Gemini laws, and it is passed into the worker via
-  `partial(prompt_suffix, key, background, style=...)`), the three composable
-  **post-save switches** — `BG removal`, `Crop`, `Upscale` (all ON
-  by default; each site's post-save pipeline runs exactly ITS
-  ticked steps, in that order, loud on failure but never killing
-  the run), **Report txt**, **Safer retry**, **Continue nudge**
+  `partial(prompt_suffix, key, background, style=...)`), the three
+  always-visible composable **post-save switches** — `BG removal`,
+  `Crop`, `Upscale` (all ON by default) — plus a FOURTH, **Force
+  Aspect Ratio** (GUI rework Phase 8, default OFF, under the Settings
+  gear — see below): each site's post-save pipeline runs exactly ITS
+  ticked steps, ALWAYS in the fixed order **BG → Crop → Aspect(force)
+  → Upscale** regardless of which are ticked (never reordered by
+  switch state), loud on failure but never killing the run — see
+  **Pipeline reorder + per-step backups** below. **Report txt**,
+  **Safer retry**, **Continue nudge**
   (owner 2026-07-20 — ON by default; on a stuck `NoImage` response
   the runner sends `CONTINUE_NUDGE` once into the same chat to un-stick
   ChatGPT before giving up, passed to `run_sheet(continue_nudge=…)`),
@@ -276,7 +281,10 @@ reachability fixes:
   see **Pause** below), and its own **⚙ Settings gear**
   (owner 2026-07-19). The gear reveals THIS agent's collapsible
   **fine-tune** area (`_finetune_box`, hidden by default): the **pause**
-  Spinner range, the **action delay** Spinner range, and the **Upscale
+  Spinner range, the **action delay** Spinner range, the **Force
+  Aspect Ratio (this site)** block (GUI rework Phase 8 — see below),
+  the **Keep every pipeline step (uses more disk)** switch (see
+  **Pipeline reorder + per-step backups**) and the **Upscale
   gate (this site)** block. GUI rework Phase 6 simplified the gate from
   four scalar fields to ONE **min-side** Spinner (the smaller side's
   target minimum, px) plus an embedded stacked **`FilterEditor`**
@@ -303,8 +311,20 @@ reachability fixes:
   filter row's own FROM ≤ TO is already enforced by `FilterEditor`
   itself, so no separate aspect-ordering check is needed here) before
   spawning. The shipped default (min side 800, Aspect (range) 0.90–1.10
-  IF) reproduces the OLD locked/four-field gate byte-identically. A
-  site "participates" in a run by
+  IF) reproduces the OLD locked/four-field gate byte-identically.
+  **Force Aspect Ratio (this site)** (GUI rework Phase 8, default OFF)
+  — a `Force to ratio` switch plus a target **W : H** pair, edited
+  two-way with an embedded **`AspectRatioCanvas`** (the SAME Phase 5
+  widget `AspectRatioDialog` uses, reused here as its first NON-modal
+  host — see **Theming**'s `THEME_TOPLEVELS`/`job_color` note for why
+  that mattered). `panel.force_aspect_ratio()` returns the validated
+  `(w, h)` int pair (`ValueError` propagates to Start's validation,
+  same contract as `upscale_params()`); when the switch is on, the
+  post-save pipeline runs `painter.aspect.change_aspect(path, w, h,
+  log)` on the just-saved image — a deliberate DEFORM, never a
+  proportional fit (see [Change Aspect Ratio](painter/aspect.md)) — as
+  the pipeline's THIRD step, between Crop and Upscale. A site
+  "participates" in a run by
   being STARTED — there are no site on/off switches any more, and
   one site running never blocks starting the other. Start/Stop
   availability is STYLED (`style_action_button`): an available
@@ -681,7 +701,12 @@ reachability fixes:
   `up_filter_conditions` (that agent's embedded `FilterEditor` stack —
   NOT a plain `tk.Variable`, so `AgentPanel.get_settings`/
   `apply_settings` handle it explicitly, outside the `_PERSIST`-tuple
-  loop every other field goes through), and that agent's
+  loop every other field goes through), `force_aspect`/
+  `force_aspect_w`/`force_aspect_h` (GUI rework Phase 8's Force Aspect
+  Ratio switch + target ratio — plain `tk.Variable`s, so they DO go
+  through the ordinary `_PERSIST` loop) and `keep_all_steps` (that
+  agent's "keep every pipeline step" disk-usage toggle, default
+  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT`), and that agent's
   `settings_collapsed`.
 
   **The `aspect_filter` -> `aspect_filter_conditions` migration** (GUI
@@ -798,14 +823,18 @@ key is gone (a stale one in an old settings.json is ignored).
   (or double-click a row) opens the same formatted viewer — a
   collection's whole file, a folder's sheet excerpt, or an image's
   prompt + the saved image.
-- **Status badges** (owner 2026-07-20) — each image row carries small
-  coloured DOTS beside its name for what actually HAPPENED to that
-  image: green `bg` = BG removed, orange `crop` = cropped, blue
-  `upscale` = upscaled, purple `retry` = the one-shot safer retry
-  produced it. A post-save step earns its dot ONLY when it really
+- **Status badges** (owner 2026-07-20; the `aspect` dot added GUI
+  rework Phase 8) — each image row carries small coloured DOTS beside
+  its name for what actually HAPPENED to that image: green `bg` = BG
+  removed, orange `crop` = cropped, magenta/fuchsia `aspect` = aspect
+  forced, blue `upscale` = upscaled, purple `retry` = the one-shot
+  safer retry produced it — render order matches the PIPELINE order
+  (bg, crop, aspect, upscale), retry last. A post-save step earns its
+  dot ONLY when it really
   CHANGED the file (`config.badge_keys_for` maps the runner's
   `actions` string — a step counts on status `done`, never `nothing`
-  / `unclear` / `FAILED`); `retried` comes from the same
+  / `unclear` / `FAILED`; `"ASPECT"` is `BADGE_ACTION_STEPS`' new
+  fourth key); `retried` comes from the same
   `item_progress`/`item_done` payload. The dots are PIL-DRAWN
   (module `badge_dots`, supersampled + LANCZOS, one cached
   PhotoImage per key-combination) and attached as the row's Treeview
@@ -816,8 +845,9 @@ key is gone (a stale one in an old settings.json is ignored).
   are pure config data (`config.BADGES` — the owner retints there;
   deliberately theme-agnostic mid-tones that read on both the dark
   and the cream tree). A tiny mono-font LEGEND line under the
-  Collections header (`● BG removed ● cropped ● upscaled ● safer
-  retry`, each label tinted its badge colour) spells them out.
+  Collections header (`● BG removed ● cropped ● aspect forced ●
+  upscaled ● safer retry`, each label tinted its badge colour) spells
+  them out.
 
 **`ToolPanel`** (one in-place tool), header + state line then:
 - a progress bar, an aggregate metric label — `avg N% <metric> ·
@@ -881,7 +911,81 @@ composites any image WITH ALPHA over a neutral checkerboard
 `_has_alpha`, greys in `config.CHECKER_*`) — the removed area reads as
 removed. Restore / RESTORE ALL delegate to the `JobTemp`. Temp is
 CLEARED on the panel's CLOSE, on app exit (`_on_close`) and swept at
-startup — gen jobs make NEW files, so they need no restore.
+startup. `self._job_temps` (RENAMED from `_tool_temps`, GUI rework
+Phase 8 — grep-verified every call site) is the dict of live slot →
+`JobTemp`; it now holds up to SEVEN entries (the four tools' unnamed
+backups AND, since Phase 8, the two gen sites' own per-step pipeline
+backups below — `_close_panel`/`_on_close` already popped/cleared it
+generically by kind, so the rename needed no branching logic change).
+
+#### Pipeline reorder + per-step backups (GUI rework Phase 8)
+Gen jobs used to make NEW files only and need no restore; Phase 8
+adds a SECOND kind of backup — not "undo the tool", but "step back
+through the pipeline" — so each SITE job now also gets its own
+`JobTemp` (created in `_start_site`, right before `_compose_post_save`
+reads it, so the composed closure captures it; cleared exactly where
+a tool's is, `folder=out_base` so a rel is `dest.relative_to(out_base)`
+same as `dest_for`'s own output layout).
+
+`PainterGui._compose_post_save(key)` composes the site's post-save
+hook — do_bg/do_crop/do_aspect/do_upscale, read once at Start like the
+pace values — into `post_save(path) -> "REMOVE BG: done, CROP: done,
+ASPECT: done, UPSCALE: done"`; the per-image engine is the pure,
+Tk-free module function **`_run_pipeline_steps(path, steps, temp,
+keep_all_steps, on_cap)`**, given the caller-built `(label, step_name,
+fn)` triples for whichever switches are ON, ALWAYS in pipeline order
+— **BG → Crop → Aspect(force) → Upscale** — never reordered by which
+happen to be ticked. With Force Aspect OFF (its default) this is
+BYTE-IDENTICAL to the pre-Phase-8 pipeline: the backups below only
+ever COPY bytes elsewhere, never touch `path` itself.
+
+Per-step backups, when a `JobTemp` is attached:
+- the FIRST enabled step's PRE-state is tagged `step="original"` — the
+  pristine, restore-everything baseline (the runner's raw just-saved
+  image) — and is ALWAYS taken, cap or toggle or not, so every image
+  keeps at least this one restore point. This DEDUPS against that
+  first step's own name (owner ask): both would be byte-identical
+  backups of the same instant, so only ONE is ever written — a
+  `steps_for()` filmstrip for an image whose first enabled step was BG
+  therefore lists `["original", "crop", ...]`, never `["original",
+  "bg", "crop", ...]`. See the `JOBTEMP_STEP_NAMES` ordering-contract
+  comment in [Config](painter/config.md).
+- every LATER enabled step's pre-state gets its OWN named backup
+  (`"bg"`/`"crop"`/`"aspect"`/`"upscale"`) — but only when the
+  per-agent **Keep every pipeline step** switch (`keep_all_steps_var`,
+  default `JOBTEMP_KEEP_ALL_STEPS_DEFAULT`) is on AND the job is not
+  yet `JobTemp.over_cap()` (`JOBTEMP_MAX_BYTES`, 4 GiB default). Once
+  over cap, NEW per-step backups stop — "original-only" — and `on_cap`
+  fires; a toggle-OFF produces the identical original-only outcome
+  SILENTLY (a deliberate owner choice, not a disk emergency — `on_cap`
+  is reserved for the real cap).
+- a step's OWN named backup whose result was `"nothing"` (a genuine
+  no-op) is DROPPED right back, mirroring the four tools' own
+  restore-point hygiene — a no-op has nothing worth restoring;
+  `"original"` is never dropped regardless of any step's own outcome.
+
+`_compose_post_save`'s `on_cap` wrapper (NOT `_run_pipeline_steps`
+itself, which can fire it many times) DEDUPS to exactly ONE
+`{"type": "over_cap"}` event per Start, posted through the ordinary
+`self._q`/`__event__` channel to `DashPanel.handle`. Unlike the muted,
+constantly-overwritten `state_var` line, the banner is a dedicated,
+LOUD, PERSISTENT strip (`JobPanel._show_cap_banner`/
+`_hide_cap_banner`, `bootstyle="inverse-warning"`, packed right after
+the state line via `after=self._state_label` so its position is fixed
+regardless of build order) that survives every later progress event —
+only `reset()` (a fresh Start) hides it again. `config.
+JOBTEMP_CAP_BANNER_TEXT` is the message (formatted from
+`JOBTEMP_MAX_BYTES` so the GiB number can never drift from the real
+cap).
+
+The Force Aspect target ratio is edited via an embedded
+`AspectRatioCanvas` (Phase 5) — its FIRST non-modal host (unlike the
+fully-modal `AspectRatioDialog`, a live Day/Night flip CAN happen
+while this panel's fine-tune box is expanded), so `AgentPanel` gained
+its own `apply_theme()` (calls the canvas's `redraw_theme()`) and
+registers itself in `THEME_TOPLEVELS` despite not being a Toplevel —
+see **Theming**'s note on that list really meaning "anything exposing
+apply_theme()", not literally "every Toplevel".
 
 ### `AiCheckPanel` — the AI image checker (owner 2026-07-20)
 The seventh job slot (`aicheck`, rose `JOB_COLORS`, the `ai` png).
@@ -994,10 +1098,18 @@ blocks all input to the rest of the app for as long as they are open,
 so the Day/Night switch is unreachable and a flip genuinely cannot
 happen while one is on screen; registering would be dead code. Only
 the NON-modal AI dialog (`AiSheetDialog`, a long generation that must
-not grab the app) registers. `job_color(kind)` mirrors `status(role)`
+not grab the app) registers — and, since GUI rework Phase 8,
+`AgentPanel` (its fine-tune box embeds an `AspectRatioCanvas` too, but
+unlike the modal dialog above IS reachable during a live flip, being
+part of the always-on-screen main window). `THEME_TOPLEVELS` is
+therefore not literally "every Toplevel" any more — the loop only
+ever calls `.apply_theme()` on whatever is registered, so a
+build-once, never-destroyed `ttk.Labelframe` works identically;
+`AgentPanel.apply_theme()` just calls its canvas's `redraw_theme()`.
+`job_color(kind)` mirrors `status(role)`
 for the FEW places plain-tk drawing needs a single resolved hex from a
 `(day, night)` `JOB_COLORS` pair instead of a CTk auto-resolving
-tuple — currently just `AspectRatioCanvas`'s accent.
+tuple — `AspectRatioCanvas`'s accent, now drawn from BOTH its hosts.
 
 **The snapshot cover — `smooth_transition(root, mutate, ...)`** (owner
 2026-07-20, generalizing the 2026-07-18 theme cross-fade into ONE
@@ -1104,7 +1216,11 @@ seventh (`_run_ai_check_job`, same `_tool_workers` bookkeeping), so up
 to seven jobs run
 CONCURRENTLY; each tool worker only backs up + processes files under
 its own picked folder and its own `JobTemp` subdir (disjoint writes;
-the checker writes only the flag file under `<out>/_state/`). The AI
+the checker writes only the flag file under `<out>/_state/`) — and,
+since GUI rework Phase 8, each SITE worker's post-save pipeline backs
+up under ITS OWN `JobTemp` subdir the same way (`self._job_temps`,
+keyed by site instead of tool kind — see **Pipeline reorder +
+per-step backups**). The AI
 DIALOGS (`AiKeyWizard`'s Test, `AiSheetDialog`'s two calls) run their
 API work on short-lived daemon threads too, feeding a per-dialog queue
 polled with `after` (`_AiDialog` — the workers never touch a widget).

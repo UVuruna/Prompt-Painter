@@ -224,6 +224,23 @@ def test_badge_keys_render_in_badges_order_not_action_order():
     assert keys == ("bg", "crop", "upscale")  # BADGES (render) order
 
 
+def test_badge_keys_aspect_step_maps_to_aspect_badge():
+    """GUI rework Phase 8: the new Force-Aspect pipeline step spells
+    'ASPECT' in the action string, same shape as the other three."""
+    assert badge_keys_for("ASPECT: done") == ("aspect",)
+    assert badge_keys_for("ASPECT: nothing") == ()  # 'nothing' never earns one
+
+
+def test_badge_keys_all_four_pipeline_steps_render_in_pipeline_order():
+    """All four post-save steps, given out of order, still render in
+    BADGES' own order — bg, crop, aspect, upscale (the Phase 8 pipeline
+    order), never the order they appear in the action string."""
+    keys = badge_keys_for(
+        "UPSCALE: done, ASPECT: done, CROP: done, REMOVE BG: done"
+    )
+    assert keys == ("bg", "crop", "aspect", "upscale")
+
+
 def test_badge_keys_ignore_failures_unclear_and_free_text():
     assert badge_keys_for("") == ()
     assert badge_keys_for("POSTPROCESS: FAILED") == ()
