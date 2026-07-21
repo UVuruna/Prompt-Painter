@@ -32,6 +32,7 @@ from painter.config import (
     iter_images,
     iter_md_files,
     selection_base_and_rels,
+    tile_for_kind,
 )
 
 
@@ -342,3 +343,37 @@ def test_tile_job_kinds_every_job_order_kind_is_reachable_from_some_tile():
     IconBar could never reflect."""
     referenced = {k for kinds in TILE_JOB_KINDS.values() for k in kinds}
     assert referenced == set(JOB_ORDER)
+
+
+# --- tile_for_kind (GUI rework Phase 15) --------------------------------
+# The reverse of TILE_JOB_KINDS behind PainterGui._tool_panel_key: which
+# MENU_TILES id is a JOB_ORDER kind's OWN persistent-panel home (a
+# single-kind tile only — a multi-kind tile like "website_gen" has no
+# ONE kind that resolves back to it, since neither chatgpt nor gemini
+# owns it alone).
+
+
+def test_tile_for_kind_resolves_the_four_standalone_tools_to_themselves():
+    """bg/crop/upscale/aspect: tile id == slot, so this is an identity
+    lookup in practice."""
+    for kind in ("bg", "crop", "upscale", "aspect"):
+        assert tile_for_kind(kind) == kind
+
+
+def test_tile_for_kind_resolves_the_ai_checker_to_its_own_tile_id():
+    """The one job kind whose MENU_TILES id ("image_checker") differs
+    from its JOB_ORDER slot ("aicheck") — the AI checker predates the
+    tile system (owner 2026-07-20 vs. GUI rework Phase 10/11)."""
+    assert tile_for_kind("aicheck") == "image_checker"
+
+
+def test_tile_for_kind_returns_none_for_a_multi_kind_tile():
+    """chatgpt/gemini share "website_gen" — neither ALONE maps back to
+    it, since that tile is a DIFFERENT surface (_controls_box), not a
+    ToolSettingsPanel."""
+    assert tile_for_kind("chatgpt") is None
+    assert tile_for_kind("gemini") is None
+
+
+def test_tile_for_kind_returns_none_for_an_unknown_kind():
+    assert tile_for_kind("not-a-real-kind") is None

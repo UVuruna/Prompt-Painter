@@ -302,22 +302,28 @@ always-visible toolbar already called before Phase 10:
 | `website_gen` | none — the owner drives the now-visible queue + per-site Start buttons, same as always |
 | `ai_sheet_gen` | `_new_collection_ai()` |
 | `api_image_gen` | none (disabled tile — `_select_tile` is never reached; Phase 19 wires the adapter) |
-| `image_checker` | `_start_ai_check()` |
-| `bg` / `crop` / `upscale` / `aspect` | `_open_tool_panel(slot)` — GUI rework Phase 13 (bg/crop), Phase 14 (upscale/aspect), see below |
+| `image_checker` / `bg` / `crop` / `upscale` / `aspect` | `_open_tool_panel(tile_id)` — GUI rework Phase 13 (bg/crop), Phase 14 (upscale/aspect), Phase 15 (image_checker), see below |
 
-ALL FOUR standalone tools (GUI rework Phase 14 completes what Phase 13
-started) go straight to `_open_tool_panel` and SKIP the `_go_view
-("main")` hop entirely — going through "main" first, like every other
-tile, would reveal-then-immediately-hide the old controls box behind a
-wasted extra fade, since `_open_tool_panel` itself transitions straight
-to "running" (see **Standalone-tool settings panels** under **The
-window**, and **Running view** below for how it shares `_inline_kind`/
-`_apply_running_layout` with website_gen's own toggle). The old
-`UpscaleParamsDialog`/`AspectRatioDialog` modals upscale/aspect used to
-open here are DELETED (Phase 14, along with `_start_tool` itself, their
-only caller — Rule #6, no dead wrappers left behind); `_ModalToolDialog`
-(the shared centre-on-parent placement math) survives only because
-`_AiDialog` (the key wizard, the sheet generator) still uses it. A
+ALL FIVE standalone-job tiles (GUI rework Phase 15 completes what
+Phase 13/14 started) go straight to `_open_tool_panel` and SKIP the
+`_go_view("main")` hop entirely — going through "main" first, like
+every other tile, would reveal-then-immediately-hide the old controls
+box behind a wasted extra fade, since `_open_tool_panel` itself
+transitions straight to "running" (see **Standalone-tool settings
+panels** under **The window**, and **Running view** below for how it
+shares `_inline_kind`/`_apply_running_layout` with website_gen's own
+toggle). `_open_tool_panel` is always called with the TILE id
+(`"image_checker"`, not `"aicheck"`) — `_tool_panels` itself is keyed
+the same way; see **Standalone-tool settings panels**' own note on
+`PainterGui._tool_panel_key` for the one place that bridges back from
+a JOB_ORDER kind. The old `UpscaleParamsDialog`/`AspectRatioDialog`
+modals upscale/aspect used to open here are DELETED (Phase 14, along
+with `_start_tool` itself, their only caller); the AI checker's own
+`askdirectory`+confirm `askyesno`, inline in `_start_ai_check`, is
+DELETED the same way (Phase 15 — Rule #6, no dead wrappers left
+behind in either case); `_ModalToolDialog` (the shared centre-on-
+parent placement math) survives only because `_AiDialog` (the key
+wizard, the sheet generator) still uses it. A
 minimal **"Menu"** button (plain text — no icon asset fits "menu/home"
 yet, and DESIGN.md's emoji policy rules out a hamburger glyph standing
 in for a real one) sits in the pinned top strip beside the Day/Night
@@ -361,8 +367,11 @@ def _apply_running_layout(self) -> None:
 (GUI rework Phase 13 generalized the single `"website_gen"` special
 case above to a small `_inline_kind -> panel` lookup over
 `self._tool_panels` — BG/Crop's own `ToolSettingsPanel` today, Phase
-14 growing the dict to Upscale/Aspect. AT MOST ONE inline surface
-shows at a time either way.)
+14 growing the dict to Upscale/Aspect, Phase 15 growing it again to
+the AI checker (keyed `"image_checker"`, its MENU_TILES id — see
+**Standalone-tool settings panels**' note on `_tool_panel_key` for why
+that differs from its `"aicheck"` JOB_ORDER slot). AT MOST ONE inline
+surface shows at a time either way.)
 
 Entering `"running"` also disables the Controls-collapse toggle
 (collapsed/expanded is meaningless once neither `_controls_box` nor
@@ -433,25 +442,27 @@ to a NAMED semantic kind like `"success"`/`"danger"`) to an arbitrary
   hiding the EXISTING `_controls_box` (the queue + BOTH `AgentPanel`s)
   right above the Dashboard/Log — nothing new was built, Phase 10's
   own controls area is simply repacked into a different slot;
-- ALL FOUR standalone tools (`"bg"`/`"crop"`, GUI rework Phase 13;
-  `"upscale"`/`"aspect"`, Phase 14) are ALSO a persistent inline
-  surface — routed through the SAME generic fallthrough below
-  (`_tile_handler("bg")` resolves to `partial(self._open_tool_panel,
-  "bg")`, etc. — no per-slot branch in either caller, the OLD
-  `_start_tool` modal these used to open is deleted), toggling their
-  OWN `ToolSettingsPanel` (see **Standalone-tool settings panels**
-  under **The window**) the exact same way;
-- every OTHER not-running tile (`image_checker`/`ai_sheet_gen`) still
-  launches through the EXISTING modal/dialog handler —
-  `_tile_handler(tile_id)`, the SAME mapping `_select_tile` uses
-  (extracted once, Rule #5, so the Main Menu and the running view
-  never carry two copies of "what does this tile do"). **Honest scope
-  note:** those two have no PERSISTENT settings panel of their own yet
-  — Phase 15 builds one for the AI checker; until then, "toggle the
-  inline surface" for them means "open the SAME confirm dialog the
-  toolbar button already opened before Phase 10", which disturbs
-  nothing else (always its own Toplevel) but is not literally a
-  persistent panel the owner can leave open to inspect later.
+- ALL FIVE standalone-job tiles (`"bg"`/`"crop"`, GUI rework Phase 13;
+  `"upscale"`/`"aspect"`, Phase 14; `"image_checker"`, Phase 15) are
+  ALSO a persistent inline surface — routed through the SAME generic
+  fallthrough below (`_tile_handler("bg")` resolves to
+  `partial(self._open_tool_panel, "bg")`, etc. — no per-slot branch in
+  either caller, the OLD `_start_tool` modal/the AI checker's own
+  inline `askdirectory`+confirm these used to open are both deleted),
+  toggling their OWN `ToolSettingsPanel` (see **Standalone-tool
+  settings panels** under **The window**) the exact same way;
+- the ONE remaining not-running tile, `"ai_sheet_gen"`, still launches
+  through the EXISTING dialog handler — `_tile_handler(tile_id)`, the
+  SAME mapping `_select_tile` uses (extracted once, Rule #5, so the
+  Main Menu and the running view never carry two copies of "what does
+  this tile do"). It has no PERSISTENT settings panel of its own (a
+  request → clarifying-questions → sheet flow has no "settings" to
+  leave open — see `AiSheetDialog`), so "toggle the inline surface"
+  for it means "open the SAME dialog the toolbar button already
+  opens", which disturbs nothing else (always its own Toplevel) but is
+  not literally a persistent panel the owner can leave open to inspect
+  later. `"api_image_gen"` is disabled — its IconBar button never
+  fires a click at all.
 
 **Start/Pause/Stop view semantics** (spec item 4), wired into the
 EXISTING handlers — none forked:
@@ -459,13 +470,12 @@ EXISTING handlers — none forked:
 | Action | What changes |
 |---|---|
 | **Start** (`_start_site`) | Unconditionally clears `_inline_kind` (Start hides the launching tool's OWN settings panel — website_gen's is shared by both sites, so EITHER starting hides it) then calls `_sync_running_state()` — auto-enters `"running"` on the first job. |
-| **Start** (`_start_ai_check`) | Calls `_sync_running_state()` after the worker starts — same auto-enter; the AI checker has no inline panel to hide (see above; Phase 15 gives it one). |
-| **Start** (`_start_tool_from_panel`, GUI rework Phase 13/14 — ALL FOUR standalone tools) | Clears `_inline_kind` AND explicitly re-calls `_apply_running_layout()` (unlike the two rows above: the panel can ONLY be visible while ALREADY `"running"`, so `_sync_running_state()`'s own view-transition check is always a no-op here — see `_launch_tool_worker`'s shared tail, which calls `_sync_running_state()` too). |
-| **Pause** (`_toggle_pause_job`) | Unchanged pause/resume bookkeeping, PLUS: pausing `chatgpt`/`gemini` while `_view == "running"` sets `_inline_kind = "website_gen"`; pausing ANY of the four tools sets `_inline_kind` to that SAME slot (GUI rework Phase 13/14, one generic `kind in self._tool_panels` check, no per-slot code) — either way `_apply_running_layout()` re-applies the layout ("Pause returns the settings panel for future tasks", spec item 4), and the revealed `ToolSettingsPanel`'s OWN Pause/Resume label is kept in sync too (`_tool_panels[kind].set_paused`). Resuming never hides it again — only a fresh Start, a Stop (see below), or the owner's own icon click does. A no-op for the AI checker (no persistent panel yet) and outside `"running"` (already fully visible there). |
-| **Stop** (`_stop_site`) | UNCHANGED — signals the stop event; the worker exits on its own next poll and posts `__worker_done__`, which calls `_sync_running_state()` (recolours the icon; the design's "STOP … returns to the main menu" reads as "the Menu click that follows now succeeds", not an auto-jump — see below). Site Stop's own review-before-Close lifecycle is untouched by Phase 14. |
-| **Stop** (`_stop_tool`, GUI rework Phase 14 — ALL FOUR standalone tools, closing Phase 13's own flagged gap) | Requests the halt (sets the tool's stop event, wins over a pending Pause) — see **Standalone-tool settings panels**' own "Stop" write-up for the FULL "smart stop" sequence (worker finishes the in-flight image, then `__tool_done__`'s dispatch closes the panel + clears its JobTemp + calls `_request_menu()`). A DELIBERATE divergence from site Stop's review-then-Close lifecycle — a quick, disk-based tool run has nothing left worth reviewing once stopped. |
-| **Close** (`_close_panel`) | UNCHANGED — the existing `_dashgrid.remove`/`reset_finished`/`JobTemp.clear`. For a NATURAL tool finish (not a Stop) and every site finish, `finish()` reveals CLOSE first and the owner clicks it manually, same as always; a Stop-triggered tool finish calls `_close_panel` itself (see the Stop row above) — `__tool_done__`'s dispatch ALSO re-enables the finished slot's `ToolSettingsPanel` Start button (`set_run_state(running=False)`) either way. |
-| **Menu** (`_request_menu`, shared by the pinned button and IconBar's own) | Routes through `_next_view(…, menu_requested=True)` — navigates to `"menu"` once `active_count == 0`, otherwise refused with a status-bar hint ("Stop every running job before returning to the menu."). GUI rework Phase 14's `_stop_tool`→`__tool_done__` sequence calls this SAME gate itself once its slot is popped from `_tool_workers`, so a tool Stop that happens to be the LAST active job lands on "menu" automatically; refused (silently, from this internal caller) if another job is still active. |
+| **Start** (`_start_tool_from_panel`, GUI rework Phase 13/14, ALL FOUR tools; `_start_ai_check`, Phase 15, the AI checker — a DIFFERENT method, same view-tail) | Clears `_inline_kind` AND explicitly re-calls `_apply_running_layout()` (unlike the row above: the panel can ONLY be visible while ALREADY `"running"`, so `_sync_running_state()`'s own view-transition check is always a no-op here). `_start_ai_check` used to have no panel to hide at all (Phase 11–14); Phase 15 gives it `ImageCheckerSettingsPanel`, so its tail now matches `_start_tool_from_panel`'s exactly, just written by hand (see **Standalone-tool settings panels** for why it cannot share `_launch_tool_worker`). |
+| **Pause** (`_toggle_pause_job`) | Unchanged pause/resume bookkeeping, PLUS: pausing `chatgpt`/`gemini` while `_view == "running"` sets `_inline_kind = "website_gen"`; pausing ANY of the FIVE standalone jobs (bg/crop/upscale/aspect, the AI checker since Phase 15) sets `_inline_kind` to `PainterGui._tool_panel_key(kind)` — identical to `kind` for the four tools, `"image_checker"` for `"aicheck"` — either way `_apply_running_layout()` re-applies the layout ("Pause returns the settings panel for future tasks", spec item 4), and the revealed `ToolSettingsPanel`'s OWN Pause/Resume label is kept in sync too (`_tool_panels[panel_key].set_paused`). Resuming never hides it again — only a fresh Start, a Stop (see below), or the owner's own icon click does. A no-op only outside `"running"` (already fully visible there) — no kind is left without a panel to reveal any more. |
+| **Stop** (`_stop_site`) | UNCHANGED — signals the stop event; the worker exits on its own next poll and posts `__worker_done__`, which calls `_sync_running_state()` (recolours the icon; the design's "STOP … returns to the main menu" reads as "the Menu click that follows now succeeds", not an auto-jump — see below). Site Stop's own review-before-Close lifecycle is untouched by Phase 14/15. |
+| **Stop** (`_stop_tool`, GUI rework Phase 14 — ALL FIVE standalone jobs since Phase 15, closing Phase 13's own flagged gap) | Requests the halt (sets the job's stop event, wins over a pending Pause) — see **Standalone-tool settings panels**' own "Stop" write-up for the FULL "smart stop" sequence (worker finishes the in-flight image/vision call, then `__tool_done__`'s dispatch closes the panel + clears its JobTemp (a no-op for the AI checker — it has none) + calls `_request_menu()`). GUI rework Phase 15 wires the AI checker's OWN settings panel to this SAME method, UNCHANGED (`on_stop=PainterGui._stop_tool`, keyed `"aicheck"`) rather than a new near-duplicate — it never touched `_tool_panels` to begin with, so nothing about it was tool-specific. A DELIBERATE divergence from site Stop's review-then-Close lifecycle — a quick, disk-based (or read-only) job has nothing left worth reviewing once stopped. |
+| **Close** (`_close_panel`) | UNCHANGED — the existing `_dashgrid.remove`/`reset_finished`/`JobTemp.clear`. For a NATURAL tool/checker finish (not a Stop) and every site finish, `finish()` reveals CLOSE first and the owner clicks it manually, same as always; a Stop-triggered finish calls `_close_panel` itself (see the Stop row above) — `__tool_done__`'s dispatch ALSO re-enables the finished slot's `ToolSettingsPanel` Start button (`set_run_state(running=False)`, resolved via `_tool_panel_key` since Phase 15) either way. |
+| **Menu** (`_request_menu`, shared by the pinned button and IconBar's own) | Routes through `_next_view(…, menu_requested=True)` — navigates to `"menu"` once `active_count == 0`, otherwise refused with a status-bar hint ("Stop every running job before returning to the menu."). GUI rework Phase 14's `_stop_tool`→`__tool_done__` sequence calls this SAME gate itself once its slot is popped from `_tool_workers`, so a Stop that happens to be the LAST active job (a tool OR, since Phase 15, the AI checker) lands on "menu" automatically; refused (silently, from this internal caller) if another job is still active. |
 
 **Reading "Stop … returns to the main menu" (spec item 4) precisely:**
 the binding design doc is explicit that "menu" is reachable "only when
@@ -481,14 +491,20 @@ lifecycle (the owner reviews a finished panel before a manual Close).
 
 **Non-regression:** the Main Menu (Phase 10) is unchanged and still
 the app's front door; every job kind still starts/pauses/stops exactly
-as before (none of `_start_site`/`_start_ai_check`/`_stop_site`/
-`_close_panel`'s own bodies were rewritten, only extended at their
-tail; `_start_tool` itself is gone, GUI rework Phase 14, along with
-its two callers); the Dashboard/Log, per-job panels, before/after +
-`StepRestoreWindow`, Select window, Day/Night theming, font zoom,
-scroll and settings persistence are all untouched — Phase 11 only
-changes what is PACKED where, via the same `pack_forget`/`pack`
-technique already proven safe in Phase 10.
+as before AS FAR AS THE OWNER CAN SEE (`_start_site`/`_stop_site`/
+`_close_panel`'s own bodies were never rewritten, only extended at
+their tail; `_start_tool` itself is gone, GUI rework Phase 14, along
+with its two callers). `_start_ai_check` is the ONE exception to
+"never rewritten" — GUI rework Phase 15 replaces its BODY (the
+`askdirectory`+confirm it used to own) while preserving its own
+EXTERNALLY-VISIBLE contract (one job at a time, key-gated, same
+worker/event stream) — see **Standalone-tool settings panels**' own
+Phase 15 write-up, not a claim made lightly given root Rule #1. The
+Dashboard/Log, per-job panels, before/after + `StepRestoreWindow`,
+Select window, Day/Night theming, font zoom, scroll and settings
+persistence are all untouched — Phase 11 only changes what is PACKED
+where, via the same `pack_forget`/`pack` technique already proven safe
+in Phase 10.
 
 **Verified (0.0.09x):** full suite green (386 tests, up from 345) plus
 `tests/test_gui_running_view.py` — `_next_view`'s rules table above,
@@ -767,16 +783,30 @@ pre-running spots.
   timing (below).
 - **Standalone-tool settings panels** — `ToolSettingsPanel(ttk.Frame)`
   + `BgSettingsPanel`/`CropSettingsPanel` (GUI rework Phase 13) +
-  `UpscaleSettingsPanel`/`AspectSettingsPanel` (Phase 14, same base,
-  replacing the retired `UpscaleParamsDialog`/`AspectRatioDialog`
-  modals) REPLACE the old per-tool askdirectory+confirm modal flow
-  with ONE PERSISTENT panel family shown inline above Dashboard/Log —
-  the exact surface website_gen's own `_controls_box` occupies (see
-  **Running view**'s `_apply_running_layout`/`_inline_kind`), reached
-  via `PainterGui._open_tool_panel(tile_id)` from either the Main Menu
-  (`_select_tile`) or the running view's IconBar
-  (`_click_icon_bar_tile`'s generic `_tile_handler` fallthrough) — ONE
-  shared toggle, not four copies (Rule #5). Each panel owns:
+  `UpscaleSettingsPanel`/`AspectSettingsPanel` (Phase 14) +
+  `ImageCheckerSettingsPanel` (Phase 15 — the AI checker; see its own
+  paragraph below for how it differs), all the SAME base, the last
+  three replacing a retired modal/inline-dialog flow
+  (`UpscaleParamsDialog`/`AspectRatioDialog`; the AI checker's own
+  `askdirectory`+confirm `askyesno`, formerly inline in
+  `_start_ai_check`) with ONE PERSISTENT panel family shown inline
+  above Dashboard/Log — the exact surface website_gen's own
+  `_controls_box` occupies (see **Running view**'s
+  `_apply_running_layout`/`_inline_kind`), reached via `PainterGui.
+  _open_tool_panel(tile_id)` from either the Main Menu (`_select_tile`)
+  or the running view's IconBar (`_click_icon_bar_tile`'s generic
+  `_tile_handler` fallthrough) — ONE shared toggle, not five copies
+  (Rule #5). `_tool_panels` is keyed by MENU_TILES id throughout (tile
+  id == slot for the four tools, so this is invisible for them);
+  `ImageCheckerSettingsPanel`'s own `SLOT`/JOB_ORDER kind is
+  `"aicheck"`, predating the tile system (owner 2026-07-20 vs. GUI
+  rework Phase 10/11) and never renamed to match its `"image_checker"`
+  tile — `PainterGui._tool_panel_key(kind)` (backed by
+  `config.tile_for_kind`) is the ONE place that bridges a JOB_ORDER
+  kind back to its `_tool_panels` key, used by `_toggle_pause_job` and
+  the `__tool_done__` dispatch branch (both below); `_open_tool_panel`/
+  `_select_tile`/`_click_icon_bar_tile` never needed it — they already
+  operate purely in tile-id space. Each panel owns:
   * an **input picker** — **Folder…** (`askdirectory` → the shared
     `iter_images`, re-scanned LIVE at Start so a folder edited after
     the pick is honored) or **Files…** (`askopenfilenames`, based via
@@ -885,15 +915,53 @@ pre-running spots.
     Pause first, then Stop becomes reachable on the now-revealed
     panel. A more direct dashboard-level Stop is a candidate for a
     future polish pass, not built this round;
+  * **`ImageCheckerSettingsPanel`'s own differences** (GUI rework Phase
+    15) — `HAS_ADVANCED = False` (no engine knobs; a `_build_footer`
+    note instead, carrying what the retired confirm dialog used to say:
+    model + pacing + where flags persist — the SAME "footer replaces a
+    one-off confirm" pattern `AspectSettingsPanel` already established);
+    `_picker_title_suffix()` overridden to `"(read-only)"` (a NEW
+    `ToolSettingsPanel` hook, base `"runs IN PLACE"` — a read-only
+    vision pass must never claim to write anything, root Rule #1) so
+    its **Folder…**/**Files…** dialog titles read "AI check
+    (read-only)", not the other four tools' shared wording; no
+    `_build_extra`/`build_func` override (its Start does not read
+    `build_func()` at all — see below). **Start** is `PainterGui.
+    _start_ai_check`, NOT `_start_tool_from_panel` — the checker's
+    worker (`_run_ai_check_job`) has no JobTemp/per-file-engine-
+    callable shape to share with `_run_tool_job` (the run is READ-ONLY:
+    nothing is backed up, nothing is written but the flag file), so its
+    body reads the panel's `resolve_input()`/`get_conditions()` (NOT
+    `build_func()`), pre-filters via the SAME `_filter_files`, and
+    spawns `_run_ai_check_job` by hand, mirroring `_launch_tool_
+    worker`'s tail (stale-Stop/stale-pause sweep, dashboard reveal,
+    `_sync_running_state()`) — see **`AiCheckPanel`** under **The
+    Dashboard** for the worker itself, UNCHANGED except for the new
+    `stop_event` below. **Stop** reuses `PainterGui._stop_tool`
+    VERBATIM — no `_stop_ai_check` method exists: `_stop_tool` never
+    referenced `_tool_panels` to begin with (it only touches
+    `_tool_workers`/`_stop_events`/`_paused`/`self.status_var`, all
+    already keyed `"aicheck"`), so it was ALREADY fully generic over
+    any slot with those three entries — a second, near-identical method
+    would only duplicate it byte-for-byte (root Rule #5); the
+    constructor wires `on_stop=self._stop_tool` exactly like the four
+    tools. `_run_ai_check_job` gained the matching `stop_event`
+    parameter, checked BETWEEN images (mirrors `_run_tool_job`'s own
+    pattern exactly — see **Pause** below for `wait_while_paused`'s own
+    updated row) — the in-flight vision call always finishes first.
   * a settings round-trip — `get_settings()`/`apply_settings(stored,
     conditions=…)` mirror `AgentPanel`'s own contract (missing key =
     keep default; `"advanced_collapsed"` is only ever emitted when
     `HAS_ADVANCED`); `PainterGui._collect_settings`/`_apply_settings`
-    persist each panel under the `"tool_panels"` key
-    (`{slot: panel.get_settings()}`) — the picked folder/files are
-    NEVER persisted (every tool has always asked fresh; only the
-    filter stack + Advanced/extra overrides survive a restart). GUI
-    rework Phase 14 also retires the OLD top-level `"upscale_tool"`/
+    persist each panel under the `"tool_panels"` key, keyed by
+    `_tool_panels`' own dict key — the MENU_TILES id
+    (`{tile_id: panel.get_settings()}`; `"image_checker"` for the AI
+    checker, GUI rework Phase 15, its ONLY field `conditions` — no
+    Advanced/extra overrides of its own, no migration needed either,
+    unlike Upscale/Aspect below) — the picked folder/files are NEVER
+    persisted (every tool has always asked fresh; only the filter
+    stack + Advanced/extra overrides survive a restart). GUI rework
+    Phase 14 also retires the OLD top-level `"upscale_tool"`/
     `"aspect_ratio"`/`"aspect_filter_conditions"` settings.json keys
     the standalone dialogs used to own — `_collect_settings` no longer
     emits them; `_apply_settings`'s `_migrate_upscale_panel_settings`/
@@ -940,6 +1008,47 @@ pre-running spots.
   (Menu → BG tile → panel → Start → Pause reveals it → Resume →
   completes → switching to Crop leaves BG undisturbed) is UNCHANGED
   and still accurate — re-verified, not re-screenshotted, this phase.
+
+  **Verified, GUI rework Phase 15 (0.0.1xx):** `ImageCheckerSettingsPanel`
+  gets the SAME `tests/test_gui_tool_panels.py` treatment as its four
+  siblings — no Advanced section, `_picker_title_suffix()` overridden
+  to `"(read-only)"` (checked against `BgSettingsPanel`'s own unchanged
+  `"runs IN PLACE"` default, side by side), the input picker + the
+  `conditions`-only settings round-trip. `PainterGui._start_ai_check`'s
+  pre-filter path end to end through a NEW small duck-typed
+  `FakeGuiForAiCheck` (`_run_ai_check_job` a RECORDING stand-in — the
+  SAME `FakeGuiForPanel`/`_run_tool_job` convention, one level over:
+  the one-job guard, the `_ensure_ai_key()` gate, the "nothing picked"
+  messagebox, and the Start tail — panel hidden, `_apply_running_
+  layout()`/`_sync_running_state()` called, the dashboard `AiCheckPanel`
+  stand-in `.reset()`). **Stop** needed NO new request-half test of its
+  own — `PainterGui._stop_tool` is reused UNCHANGED, so the EXISTING
+  `FakeGuiForPanel`-based Stop tests just gained an `"aicheck"`-keyed
+  pair proving the same generic method also covers this slot.
+  `_run_ai_check_job`'s new `stop_event` gets the EXACT mirror of
+  `_run_tool_job`'s own should_stop test — `painter.ai.check_one_image`
+  MONKEYPATCHED (no network, no API quota spent), should_stop firing on
+  the SECOND between-image check halts after exactly one (mocked)
+  vision call, `sheet_done`/`__tool_done__` still posted (the `finally`
+  block is unconditional). `config.tile_for_kind` gets its own
+  `test_config.py` coverage (the four tools resolve to themselves,
+  `"aicheck"` → `"image_checker"`, a shared/multi-kind or unknown kind →
+  `None`). `tests/test_gui_running_view.py` gained a fifth
+  `_tool_panels` entry (`FakeGui`, keyed `"image_checker"`) and its own
+  `_tool_panel_key` alias, then the SAME bg/upscale-shaped assertions
+  for the checker: `_select_tile`/`_click_icon_bar_tile` open/toggle its
+  panel (never the old `_start_ai_check`-calls-directly stub, now
+  deleted along with the stub itself), and pausing `"aicheck"` reveals
+  `_tool_panels["image_checker"]` — proving the tile-id/slot bridge for
+  real. Full suite green throughout (479 → 496 tests). Real-window
+  screenshots (Day theme, settings.json redirected to a scratch file,
+  synthetic images, `painter.ai.check_one_image` MOCKED so a live run
+  spends no API quota) confirmed: the Image Checker panel from its Menu
+  tile (folder picked, Start/Pause/Stop, the read-only footer note) and
+  a mocked check run Stopped mid-way — the dashboard halts on the
+  in-flight image, the panel closes and the view settles back toward
+  the Menu once nothing else is running, the SAME shape the Phase 14
+  screenshot already proved for a tool.
 - **FilterEditor** (GUI rework Phase 4, `ttk.Frame`) — the reusable
   stacked-condition widget wrapping [Shared Filter
   Framework](painter/filters.md): zero or more removable ROWS (each a
@@ -1089,9 +1198,14 @@ pre-running spots.
   `screen*DOC_MAX_FRAC`, so a short excerpt shrinks to content while
   a tall medallion / long doc scrolls.
 - **The AI row** (owner 2026-07-20, a SECOND toolbar row so the tool
-  row never clips at the window minimum) — three buttons over
-  [AI Client & Flows](painter/ai.md), all gated by the free Gemini
-  key in `settings.json`:
+  row never clips at the window minimum) — TWO buttons over
+  [AI Client & Flows](painter/ai.md) (a THIRD, **AI check…**, used to
+  sit here directly popping its folder dialog + confirm — DELETED GUI
+  rework Phase 15 alongside that inline flow itself, same reasoning as
+  the four tools' own quick buttons before it: the Main Menu/IconBar's
+  `image_checker` tile now opens `ImageCheckerSettingsPanel`, see
+  **Standalone-tool settings panels** and `AiCheckPanel` under the
+  Dashboard section):
     - **New collection (AI)…** opens `AiSheetDialog` — the owner
       types the request (any language), the model returns a short
       clarifying POLL (first call: the sheet contract + a
@@ -1102,8 +1216,6 @@ pre-running spots.
       demand) and ADDED to the Collections queue; still broken → the
       raw md opens in a `DocWindow` for manual fixing and is NOT
       loaded. Non-modal, worker-threaded, progress in the Log.
-    - **AI check…** — the batch image checker, its OWN job/panel
-      (see `AiCheckPanel` under the Dashboard section).
     - **AI key…** opens `AiKeyWizard` — the guided key onboarding:
       four numbered steps (1. a button opening
       `aistudio.google.com` via `webbrowser`, 2. sign in with any
@@ -1163,13 +1275,16 @@ pre-running spots.
   (`config.FILTER_PRESETS_SETTING` — the shared `FilterEditor` preset
   library, `{name: [condition-dict, ...]}` — shared by EVERY
   `FilterEditor` instance in the app, including each agent's own
-  upscale-gate filter and all four standalone tool panels'), `agents.
-  <site>` (below) and `tool_panels.<slot>` — ALL FOUR standalone tools'
-  own settings (`{slot: panel.get_settings()}` — see **Standalone-tool
+  upscale-gate filter and all five standalone job panels'), `agents.
+  <site>` (below) and `tool_panels.<tile-id>` — ALL FIVE standalone
+  jobs' own settings (`{tile_id: panel.get_settings()}`, keyed by
+  MENU_TILES id — `"image_checker"` for the AI checker, GUI rework
+  Phase 15, its own JOB_ORDER slot `"aicheck"` — see **Standalone-tool
   settings panels** for each panel's own field shape: BG/Crop's safety/
   margin/ink-alpha overrides + `advanced_collapsed`; Upscale's
-  `up_minside`; Aspect's `ratio`; every panel's `conditions`). GUI
-  rework Phase 14 RETIRED the OLD top-level `upscale_tool`/
+  `up_minside`; Aspect's `ratio`; the AI checker has none of its own;
+  every panel's `conditions`). GUI rework Phase 14 RETIRED the OLD
+  top-level `upscale_tool`/
   `aspect_ratio`/`aspect_filter_conditions` keys the standalone Upscale/
   Aspect MODAL dialogs used to own (`_collect_settings` no longer emits
   any of the three) — see **the tool-panel migration** below for how an
@@ -1558,18 +1673,33 @@ StepRestoreWindow` mocked so no actual window is constructed) are
 pytest-covered; see [Tests](tests/___tests.md).
 
 ### `AiCheckPanel` — the AI image checker (owner 2026-07-20)
-The seventh job slot (`aicheck`, rose `JOB_COLORS`, the `ai` png).
-**AI check…** gates on the key (`_ensure_ai_key` — the wizard
-auto-opens on `NoKey`), picks a FOLDER, confirms (the run is
-READ-ONLY but costs paced free-tier calls, ~`AI_CALL_PAUSE_S` s per
-image) and starts `_run_ai_check_job` on its own worker (registered
-in `_tool_workers["aicheck"]`, so the one-job-per-kind guard and the
-`__tool_done__` plumbing are reused as-is). The worker first
-`prune_stale_flags` (a REGENERATED file's changed mtime drops its old
-flag), then per image calls `ai.check_one_image` (the pure driver —
-it times the call, retries transient 503/429 failures, parses the
-strict OK/DEFECTS answer, merges/clears the flag and does the
-FLAGGED/FAIL logging) and maps its `kind` to a row:
+The seventh job slot (`aicheck`, rose `JOB_COLORS`, the `ai` png). This
+is the DASHBOARD half only — the LAUNCH surface (folder/files pick +
+Start/Pause/Stop) moved to its own `ImageCheckerSettingsPanel` in GUI
+rework Phase 15 (see **Standalone-tool settings panels** under **The
+window**); nothing below changed. `PainterGui._start_ai_check` gates
+on the key (`_ensure_ai_key` — the wizard auto-opens on `NoKey`), reads
+the SETTINGS PANEL's own folder/files pick + stacked filter (no more
+inline `askdirectory`/confirm `askyesno` — the panel's Start already
+IS the confirmation, same contract as every sibling panel; the read-
+only footer note still tells the owner about the paced ~`AI_CALL_
+PAUSE_S` s/call cost) and starts `_run_ai_check_job` on its own worker
+(registered in `_tool_workers["aicheck"]`, so the one-job-per-kind
+guard and the `__tool_done__` plumbing are reused as-is). **Stop**
+(GUI rework Phase 15, closing Phase 14's own flagged gap for this job)
+reuses `PainterGui._stop_tool` verbatim from the checker's settings
+panel — sets a new `_stop_events["aicheck"]`, which `_run_ai_check_job`
+now checks BETWEEN images (mirroring `_run_tool_job`'s own should_stop
+exactly, including inside `wait_while_paused` so a Stop wins over a
+pending Pause); once the worker confirms the halt, `_dispatch` closes
+THIS panel (`_close_panel` — harmless no-op on its JobTemp lookup, the
+checker never had one) and calls `_request_menu()`, the SAME "smart
+stop" sequence the four tools already had. The worker's OWN body is
+UNCHANGED: it first `prune_stale_flags` (a REGENERATED file's changed
+mtime drops its old flag), then per image calls `ai.check_one_image`
+(the pure driver — it times the call, retries transient 503/429
+failures, parses the strict OK/DEFECTS answer, merges/clears the flag
+and does the FLAGGED/FAIL logging) and maps its `kind` to a row:
 
 - **flagged** → `ai.record_flag` (merged into
   `<out>/_state/ai_flags.json`: defects, the verbatim raw response,
@@ -1780,9 +1910,10 @@ blend into the top strip in both themes.
 ## Threading
 One worker thread per site, started and stopped INDEPENDENTLY by its
 panel's buttons (per-KIND stop events — `self._stop_events`, sites
-plus the four standalone tools since GUI rework Phase 14, `_stop_tool`
-— and, owner 2026-07-21, per-KIND pause events, one per `JOB_ORDER`
-entry, seven total); each site creates its own
+plus the four standalone tools since GUI rework Phase 14, plus the AI
+checker since Phase 15, `_stop_tool` — and, owner 2026-07-21, per-KIND
+pause events, one per `JOB_ORDER` entry, seven total); each site
+creates its own
 Playwright instance and `SiteDriver` (sync Playwright is
 per-thread) and walks the theme queue sequentially. The four TOOLS
 add up to four MORE daemon workers (`_run_tool_job`, GUI rework Phase
@@ -1790,8 +1921,9 @@ add up to four MORE daemon workers (`_run_tool_job`, GUI rework Phase
 own — see **Pause** below and **Standalone-tool settings panels**
 under **The window**), one per kind
 (one job per kind — a second click is refused), and the AI CHECKER a
-seventh (`_run_ai_check_job`, same `_tool_workers` bookkeeping, no
-should_stop yet — Phase 15's own scope), so up
+seventh (`_run_ai_check_job`, same `_tool_workers` bookkeeping — GUI
+rework Phase 15 threads its OWN real should_stop into its loop the
+identical way, closing what was this section's own flagged gap), so up
 to seven jobs run
 CONCURRENTLY; each tool worker only backs up + processes files under
 its own picked folder and its own `JobTemp` subdir (disjoint writes;
@@ -1815,11 +1947,12 @@ rare control messages still apply immediately). Queue messages:
 (`.get` is the defensive guard for a late event after a panel closed),
 `('__worker_done__', key)` reveals the site panel's CLOSE and clears
 the worker bookkeeping, and `('__tool_done__', slot)` does the SAME on
-a natural finish — but (GUI rework Phase 14) instead CLOSES the panel
-outright (`_close_panel` — same as a manual Close) and calls
-`_request_menu()` when this slot's should_stop event is set (a
-Stop-triggered finish, see **Standalone-tool settings panels**' own
-"Stop" write-up); a quota `TerminalState` posts its `retry_after_s`
+a natural finish — but (GUI rework Phase 14, widened to `"aicheck"` by
+Phase 15) instead CLOSES the panel outright (`_close_panel` — same as
+a manual Close) and calls `_request_menu()` when this slot's
+should_stop event is set (a Stop-triggered finish, see
+**Standalone-tool settings panels**' own "Stop" write-up); a quota
+`TerminalState` posts its `retry_after_s`
 the same way and the main thread schedules the auto-restart via
 `root.after` (the panel keeps its countdown, no CLOSE, until the
 restart or a Stop).
@@ -1851,12 +1984,11 @@ exact same poll-wait (`config.PAUSE_POLL_INTERVAL_S`, no busy spin):
   checked between sheet items; a Stop always wins over a pending pause
   (`should_stop` is re-checked on every poll tick inside the wait).
 - `_run_tool_job` and `_run_ai_check_job` call `wait_while_paused`
-  directly, once per loop iteration, BETWEEN images. `_run_ai_check_job`
-  still passes `should_stop=None` (no Stop of its own yet — Phase 15's
-  own scope — so the wait simply blocks for Resume, nothing to lose
-  to). `_run_tool_job` (GUI rework Phase 14) now passes its OWN real
-  `should_stop=stop_event.is_set` — a Stop wins over a pending Pause
-  here too, the exact same contract as `_drive_site`'s row above (see
+  directly, once per loop iteration, BETWEEN images, each passing its
+  OWN real `should_stop=stop_event.is_set` (`_run_tool_job`, GUI rework
+  Phase 14; `_run_ai_check_job`, Phase 15, closing what used to be this
+  section's own flagged gap) — a Stop wins over a pending Pause here
+  too, the exact same contract as `_drive_site`'s row above (see
   **Standalone-tool settings panels** under **The window** for the
   full Stop write-up).
 
@@ -1865,17 +1997,21 @@ LAST item right as Pause was clicked — the for-loop just ends, so the
 toggle is never revisited — would otherwise leave a phantom "paused"
 button/state on an now-idle panel, and a bad carry-over would silently
 pre-pause the NEXT run of that kind. Two guards close this: every
-`_start_*` method (`_start_site`, `_start_ai_check`, and — via
-`_launch_tool_worker`'s shared tail, GUI rework Phase 13/14, EVERY
-standalone tool's Start now goes through it — `_start_tool_from_panel`)
-clears a stale pause for its kind BEFORE spawning the worker (a fresh
-Start never begins pre-paused), and the `__worker_done__` /
-`__tool_done__` dispatch handlers ALSO clear it the moment a job
-finishes (so an idle/finished panel never shows a stale "Resume").
-`_stop_site` clears it too when actually stopping a running site —
-belt-and-suspenders with the `should_stop` re-check inside the wait,
-which already lets a PAUSED run stop promptly either way; `_stop_tool`
-(GUI rework Phase 14) does the exact same thing for a standalone tool.
+`_start_*` method clears a stale pause for its kind BEFORE spawning the
+worker (a fresh Start never begins pre-paused) — `_start_site` its own
+copy; every standalone tool's Start via `_launch_tool_worker`'s shared
+tail (GUI rework Phase 13/14, `_start_tool_from_panel`'s own caller);
+`_start_ai_check` (GUI rework Phase 15) its OWN copy of the identical
+sweep, since it does not share `_launch_tool_worker` (see
+**Standalone-tool settings panels**' own Phase 15 write-up for why) —
+and the `__worker_done__`/`__tool_done__` dispatch handlers ALSO clear
+it the moment a job finishes (so an idle/finished panel never shows a
+stale "Resume"). `_stop_site` clears it too when actually stopping a
+running site — belt-and-suspenders with the `should_stop` re-check
+inside the wait, which already lets a PAUSED run stop promptly either
+way; `_stop_tool` (GUI rework Phase 14, reused UNCHANGED for the AI
+checker since Phase 15) does the exact same thing for any standalone
+job.
 
 **Stale-STOP hygiene** (GUI rework Phase 14, the SAME shape as the
 pause guard above, one event earlier in the chain): `_launch_tool_
@@ -1883,10 +2019,12 @@ worker` ALSO clears the tool's stop event before spawning the worker
 — mirrors `_start_site`'s own `self._stop_events[key].clear()` —
 so a job Stopped once and then Started again never begins already
 should_stop()-True (which would halt it before a single image runs).
-The event is intentionally NOT cleared right after `_stop_tool`
-requests the halt or right when `__tool_done__` consumes it (reading
-`is_set()` to decide the "smart"/natural-finish branch) — only the
-NEXT Start's own sweep clears it, same timing as the pause guard.
+`_start_ai_check` (GUI rework Phase 15) does the identical sweep by
+hand, for the same reason it has its own stale-pause copy above. The
+event is intentionally NOT cleared right after `_stop_tool` requests
+the halt or right when `__tool_done__` consumes it (reading `is_set()`
+to decide the "smart"/natural-finish branch) — only the NEXT Start's
+own sweep clears it, same timing as the pause guard.
 
 Caveat: `_drive_site`'s OUTER per-collection loop has no pause check
 of its own — only `run_sheet`'s per-ITEM loop does. Pausing while the
@@ -1900,16 +2038,18 @@ items" is satisfied, and the gap is cosmetic, never functional.
 **GUI rework Phase 11** extends `_toggle_pause_job` at its tail (the
 bookkeeping above is otherwise untouched): pausing a SITE while the
 running view is up also reveals its settings panel — see **Running
-view**'s Start/Pause/Stop table below. **GUI rework Phase 13/14**
-widens the SAME tail to ALL FOUR standalone tools (bg/crop, Phase 13;
-upscale/aspect, Phase 14 — one generic `kind in self._tool_panels`
-check, no per-slot code): pausing any of them while the running view
-is up reveals ITS OWN `ToolSettingsPanel` the identical way
-(`_inline_kind` set to that slot), and additionally keeps the revealed
-panel's own Pause/Resume button label in sync (`_tool_panels[kind].
-set_paused`) — the AI checker still has no persistent panel to reveal
-(Phase 15's own scope), so pausing it stays exactly the no-op it
-always was beyond its own dashboard button.
+view**'s Start/Pause/Stop table below. **GUI rework Phase 13/14/15**
+widens the SAME tail to ALL FIVE standalone jobs (bg/crop, Phase 13;
+upscale/aspect, Phase 14; the AI checker, Phase 15): pausing any of
+them while the running view is up reveals ITS OWN `ToolSettingsPanel`
+via the new `PainterGui._tool_panel_key(kind)` (identical to `kind` for
+the four tools, `"image_checker"` for `"aicheck"` — see
+**Standalone-tool settings panels**' own note on why the checker's
+JOB_ORDER slot differs from its MENU_TILES id), and additionally keeps
+the revealed panel's own Pause/Resume button label in sync
+(`_tool_panels[panel_key].set_paused`) — no kind is left without a
+panel to reveal any more; the check is a no-op only outside
+`"running"`.
 
 ## Connections
 

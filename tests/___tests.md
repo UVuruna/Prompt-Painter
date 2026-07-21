@@ -109,7 +109,12 @@ rework Phase 11 adds `TILE_JOB_KINDS` coverage — every `MENU_TILES` id
 has an entry, every kind it lists is a real `JOB_ORDER` member,
 `website_gen` maps to both gen sites, the two AI dialogs map to `()`,
 and (the inverse check) every `JOB_ORDER` kind is reachable from some
-tile.
+tile. GUI rework Phase 15 adds `tile_for_kind` (the REVERSE lookup
+behind `PainterGui._tool_panel_key`) — the four standalone tools
+resolve to themselves, `"aicheck"` resolves to `"image_checker"` (the
+one kind whose MENU_TILES id differs from its JOB_ORDER slot), and a
+multi-kind tile's own kinds (chatgpt/gemini) or an unknown kind both
+return `None`.
 
 ### `test_aspect.py` — Change-Aspect Deform
 The grow-only stretch rule, already-at-ratio byte-unchanged no-ops,
@@ -276,18 +281,34 @@ resolve correctly even though `self` is the fake. Covers: entering
 finishes, the IconBar recolouring on both, `_apply_running_layout`'s
 controls-box-only-while-website_gen-inline packing (and never showing
 a stale collapsed strip), `_request_menu`'s refuse-while-active status
-hint, `_click_icon_bar_tile`'s three branches (already-active → focus
+hint, `_click_icon_bar_tile`'s branches (already-active → focus
 Dashboard, website_gen → toggle the real inline `_controls_box`, every
-other not-running tile → its EXISTING modal/dialog handler via
-`_tile_handler`, shared with `_select_tile` — one mapping, not two),
-and `_toggle_pause_job`'s Phase 11 addition (pausing a SITE reveals the
-website_gen panel; pausing a TOOL/the checker or pausing outside
-`"running"` is a no-op; Resume never hides it again). `IconBar` itself
-gets real-widget checks: one button per `MENU_TILES` id, only
-`api_image_gen` starts disabled, a click calls `on_select` with the
-tile id, the Menu button calls `on_menu`, and `set_active` fills/
-outlines buttons via their `border_width` (0 filled / 1 outline) —
-never touching the disabled placeholder.
+standalone-job tile → `_tile_handler`'s `_open_tool_panel` fallthrough,
+`ai_sheet_gen` → its dialog handler — shared with `_select_tile`, one
+mapping, not two), and `_toggle_pause_job`'s Phase 11 addition (pausing
+a SITE reveals the website_gen panel; pausing outside `"running"` is a
+no-op; Resume never hides it again). `IconBar` itself gets real-widget
+checks: one button per `MENU_TILES` id, only `api_image_gen` starts
+disabled, a click calls `on_select` with the tile id, the Menu button
+calls `on_menu`, and `set_active` fills/outlines buttons via their
+`border_width` (0 filled / 1 outline) — never touching the disabled
+placeholder.
+
+GUI rework Phase 13 adds `_tool_panels`/`_open_tool_panel` coverage
+(BG/Crop's own persistent panel, a real `_RecordingToolPanel` stand-in
+per slot so pack/pack_forget is exercised for real) — `_select_tile`'s
+own bg/crop shortcut straight to `"running"` (skipping the `"main"`
+hop every other tile takes) and `_toggle_pause_job`'s matching reveal;
+Phase 14 widens the SAME dict/tests to upscale/aspect, no new branch
+in any caller; Phase 15 widens it a FIFTH time to the AI checker
+(keyed `"image_checker"`, its MENU_TILES id, NOT its `"aicheck"`
+JOB_ORDER slot) and adds `_tool_panel_key`'s own alias onto `FakeGui`
+— `_select_tile("image_checker")`/`_click_icon_bar_tile("image_checker")`
+now open its panel the identical bg/upscale way, and pausing
+`"aicheck"` reveals `_tool_panels["image_checker"]`, proving the
+tile-id/slot bridge for real (the pre-Phase-15 stub that called a fake
+`_start_ai_check()` directly on a tile click is deleted along with the
+production behaviour it stood in for).
 
 ### `test_gui_agent_visibility.py` — Per-Site Show/Hide + Upscale-Gate Visibility
 GUI rework Phase 12. `gui._visible_agent_columns(order, visible)` is the
@@ -323,6 +344,40 @@ visible grids/packs both, hiding either removes ONLY that one (panel
 AND its collapsed-strip cluster) and leaves the survivor's column
 untouched or compacted to 0 as appropriate, and re-showing restores
 both original columns.
+
+### `test_gui_tool_panels.py` — Standalone-Tool Settings Panels + Stop
+GUI rework Phase 13 (`BgSettingsPanel`/`CropSettingsPanel`) through
+Phase 15 (`ImageCheckerSettingsPanel`), one growing file over the
+shared `ToolSettingsPanel` base. Pure/near-pure halves: module-level
+`gui._filter_files` (the shared pre-filter, real tiny PNGs on disk)
+and the Advanced-override field parsers (`_parse_fraction`/
+`_parse_nonneg_int`/`_parse_int_range`). Real (withdrawn) Tk root
+halves, the SAME `make_panel`/`root` convention as every other
+GUI-phase file: `resolve_input()`/`get_conditions()`/`build_func()`
+against all five panels, monkeypatched engine calls proving a
+NON-default Advanced override actually reaches
+`remove_background`/`crop_transparent`/`upscale_if_small`/
+`change_aspect`, run-state/pause/Stop button availability, and the
+settings round-trip (BG/Crop's safety+margin+ink fields, Upscale's
+min-side, Aspect's target ratio, the AI checker's `conditions`-only
+shape). `PainterGui._start_tool_from_panel`'s pre-filter path end to
+end through a duck-typed `FakeGuiForPanel` (`_run_tool_job` a
+RECORDING stand-in) for the four tools; `PainterGui._start_ai_check`'s
+OWN equivalent through a SEPARATE `FakeGuiForAiCheck`
+(`_run_ai_check_job` likewise a RECORDING stand-in) — a different fake
+because the AI checker's Start does not share `_launch_tool_worker`
+(no JobTemp, no per-file engine callable; see gui.md's own
+**Standalone-tool settings panels**). **Stop** (Phase 14, widened to
+the AI checker Phase 15 with NO new method — `PainterGui._stop_tool`
+proven generic by keying `FakeGuiForPanel` `"aicheck"` too):
+`_stop_tool`'s request half (sets the event, wins over a pending
+pause, no-ops when nothing is running) and `_run_tool_job`'s/
+`_run_ai_check_job`'s own `should_stop` halting the loop BETWEEN
+images/checks — mirrors test_runner.py's own
+`test_stop_flag_stops_between_items` — over a duck-typed fake `self`
+with a real `queue.Queue`; the checker's own version monkeypatches
+`painter.ai.check_one_image` (no network, no API quota spent) so the
+in-flight (mocked) vision call still finishes before the halt.
 
 ### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.

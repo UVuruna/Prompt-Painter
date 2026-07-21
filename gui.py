@@ -168,6 +168,7 @@ from painter.config import (
     selection_base_and_rels,
     status_pair,
     theme_pair,
+    tile_for_kind,
 )
 from painter import aspect, filters, jobtemp
 from painter.settings import load_settings, save_settings
@@ -2744,10 +2745,20 @@ class ToolSettingsPanel(ttk.Frame):
 
     # --- input picker ----------------------------------------------
 
+    def _picker_title_suffix(self) -> str:
+        """Subclass hook — what this run DOES to the picked images,
+        shown after the job label in the folder/file picker dialog
+        titles ('Folder with images — <label> <this text>'). Base:
+        every one of the four standalone tools modifies files IN
+        PLACE. Overridden by ``ImageCheckerSettingsPanel`` (GUI rework
+        Phase 15) — a read-only vision pass must never claim to write
+        anything (root Rule #1: never mislead)."""
+        return "runs IN PLACE"
+
     def _pick_folder(self) -> None:
         folder = filedialog.askdirectory(
-            title=f"Folder with images — {JOB_LABEL[self.slot]} runs"
-            " IN PLACE"
+            title=f"Folder with images — {JOB_LABEL[self.slot]}"
+            f" {self._picker_title_suffix()}"
         )
         if not folder:
             return
@@ -2759,7 +2770,8 @@ class ToolSettingsPanel(ttk.Frame):
 
     def _pick_files(self) -> None:
         picks = filedialog.askopenfilenames(
-            title=f"Image files — {JOB_LABEL[self.slot]} runs IN PLACE",
+            title=f"Image files — {JOB_LABEL[self.slot]}"
+            f" {self._picker_title_suffix()}",
             filetypes=[
                 ("Images", "*.png *.jpg *.jpeg *.webp"),
                 ("All files", "*.*"),
@@ -3254,6 +3266,71 @@ class AspectSettingsPanel(ToolSettingsPanel):
 
     def apply_theme(self) -> None:
         self._ratio_canvas.redraw_theme()
+
+
+class ImageCheckerSettingsPanel(ToolSettingsPanel):
+    """The AI image checker's persistent settings panel (GUI rework
+    Phase 15) — the SAME input-picker + Filter + Start/Pause/Stop
+    chrome every standalone tool now has, replacing the Main Menu/
+    IconBar's old direct ``_start_ai_check`` launch (its own
+    ``askdirectory`` + confirm ``askyesno``, both retired: the panel's
+    OWN picker covers the folder/files, and Start — deliberately
+    configured then clicked — already IS the confirmation, same
+    contract as every sibling panel; see ``ToolSettingsPanel``'s own
+    docstring and ``AspectSettingsPanel``'s "no confirm dialog here").
+
+    No Advanced section (``HAS_ADVANCED = False``) — the checker has
+    no engine knobs to hide, only the base's own input picker plus an
+    OPTIONAL embedded ``FilterEditor`` (unseeded — empty means check
+    EVERY image under the folder, same "empty = all" contract BG/Crop
+    already use) and a short informational footer carrying what the
+    old confirm dialog used to say (model + pacing + where flags
+    persist), so the owner still sees that information without a
+    blocking dialog.
+
+    Its Start does NOT go through ``build_func``/``PainterGui.
+    _start_tool_from_panel``/``_launch_tool_worker`` at all — the
+    checker's own worker (``_run_ai_check_job``) has a fundamentally
+    different shape from the four tools' shared ``_run_tool_job`` (no
+    JobTemp backup — the run is read-only — no per-file engine
+    callable, its own event types), so it is wired straight to
+    ``PainterGui._start_ai_check`` instead (see that method's own
+    docstring for the full flow). **Stop reuses ``PainterGui.
+    _stop_tool`` UNCHANGED** — that method never touches
+    ``_tool_panels`` and is already fully generic over any slot with a
+    ``_tool_workers``/``_stop_events`` entry (it only sets the stop
+    event, clears a pending pause and writes a status line), so a
+    second near-identical ``_stop_ai_check`` method would only
+    duplicate it byte-for-byte (Rule #5) — the constructor below wires
+    ``on_stop=PainterGui._stop_tool`` exactly like BG/Crop/Upscale/
+    Aspect.
+
+    One asymmetry from its three siblings: this panel's MENU_TILES id
+    ("image_checker") differs from its own ``SLOT``/JOB_ORDER kind
+    ("aicheck") — the checker already existed as the dashboard's
+    seventh job kind (``AiCheckPanel``, owner 2026-07-20) before this
+    panel did, so its slot name predates and is independent of the
+    tile system Phase 10 introduced. ``PainterGui._tool_panel_key``
+    (backed by ``config.tile_for_kind``) is the one translation point
+    that bridges the two spaces wherever `_toggle_pause_job`/
+    `_dispatch` need to reach THIS panel from the "aicheck" kind."""
+
+    SLOT = "aicheck"
+    HAS_ADVANCED = False
+
+    def _picker_title_suffix(self) -> str:
+        return "(read-only)"
+
+    def _build_footer(self, box: ttk.Frame) -> None:
+        ttk.Label(
+            box,
+            text="Each image goes to the Gemini vision model"
+            f" ({GEMINI_VISION_MODEL}) for banal defects only, paced"
+            f" ~{AI_CALL_PAUSE_S:.0f}s per call on the free tier."
+            f" Read-only — nothing is modified; flags persist under"
+            f" the output folder's {STATE_DIRNAME}/.",
+            style="Muted.TLabel", wraplength=JOB_PANEL_BANNER_WRAP_PX,
+        ).pack(anchor="w")
 
 
 # ---------------------------------------------------------------------
@@ -5234,12 +5311,17 @@ class PainterGui:
         # per-site run state: workers, stop events, pending restarts.
         # GUI rework Phase 14: also spans the four standalone tools
         # (bg/crop/upscale/aspect — a real should_stop for _run_tool_job,
-        # closing Phase 13's own flagged gap; see _stop_tool) — NOT
-        # "aicheck" (Phase 15's own scope), so this stays SITES + the
-        # tool kinds, not the full JOB_ORDER (_pause_events' own span).
+        # closing Phase 13's own flagged gap; see _stop_tool). GUI rework
+        # Phase 15 adds "aicheck" too (_run_ai_check_job's own should_stop,
+        # closing Phase 14's own flagged gap for THIS job) — so this now
+        # covers every _tool_workers key, still short of the full
+        # JOB_ORDER (_pause_events' own span, which also spans the two
+        # gen sites via a DIFFERENT mechanism — _drive_site's should_stop
+        # comes from this SAME dict under its site key).
         self._workers: dict[str, threading.Thread] = {}
         self._stop_events: dict[str, threading.Event] = {
-            key: threading.Event() for key in (*SITES, *JOB_TOOL_KINDS)
+            key: threading.Event()
+            for key in (*SITES, *JOB_TOOL_KINDS, "aicheck")
         }
         self._running: set[str] = set()
         # per-job PAUSE toggle (owner 2026-07-21): one threading.Event per
@@ -5392,6 +5474,26 @@ class PainterGui:
             "aspect": AspectSettingsPanel(
                 self._main_view,
                 on_start=self._start_tool_from_panel,
+                on_pause=self._toggle_pause_job,
+                on_stop=self._stop_tool,
+                filter_presets=self._filter_presets,
+                on_filter_presets_changed=self._on_filter_presets_changed,
+            ),
+            # the AI checker's own persistent panel (GUI rework Phase
+            # 15) — keyed by its MENU_TILES id ("image_checker"), NOT
+            # its JOB_ORDER slot ("aicheck") the panel's own SLOT
+            # carries: _inline_kind/_open_tool_panel/_tile_handler all
+            # operate in TILE-id space (like every other entry here,
+            # where tile id happens to equal slot), and
+            # PainterGui._tool_panel_key is the one bridge back from a
+            # JOB_ORDER kind to this dict's key (see that method).
+            # Start is NOT _start_tool_from_panel (this job has no
+            # build_func/JobTemp — see ImageCheckerSettingsPanel's own
+            # docstring); Stop reuses _stop_tool VERBATIM, same as the
+            # four tools above (Rule #5 — already fully generic).
+            "image_checker": ImageCheckerSettingsPanel(
+                self._main_view,
+                on_start=self._start_ai_check,
                 on_pause=self._toggle_pause_job,
                 on_stop=self._stop_tool,
                 filter_presets=self._filter_presets,
@@ -5692,21 +5794,23 @@ class PainterGui:
         binds no click on a disabled tile, and IconBar disables its own
         button the same way — Phase 19 wires the real handler in).
 
-        GUI rework Phase 13/14: all four standalone tools route to
-        ``_open_tool_panel`` — their persistent settings panel —
-        instead of the old ``_start_tool`` modal (deleted this phase;
-        see gui.md). In practice neither ``_select_tile`` nor
-        ``_click_icon_bar_tile`` ever reaches this dict entry for any
-        of the four (both special-case the panel toggle before falling
-        through here — ``_select_tile`` to skip a wasted view hop,
-        ``_click_icon_bar_tile`` implicitly via this same mapping), but
-        this stays a COMPLETE, truthful "tile id -> its action" table
-        regardless of which caller consults it."""
+        GUI rework Phase 13/14/15: all five standalone-job tiles route
+        to ``_open_tool_panel`` — their persistent settings panel —
+        instead of an old modal/dialog launch (``_start_tool``, deleted
+        Phase 14; the AI checker's own ``askdirectory``+confirm inline
+        in ``_start_ai_check``, deleted Phase 15; see gui.md). In
+        practice neither ``_select_tile`` nor ``_click_icon_bar_tile``
+        ever reaches this dict entry for any of the five (both special-
+        case the panel toggle before falling through here —
+        ``_select_tile`` to skip a wasted view hop, ``_click_icon_bar_
+        tile`` implicitly via this same mapping), but this stays a
+        COMPLETE, truthful "tile id -> its action" table regardless of
+        which caller consults it."""
         return {
             "website_gen": None,
             "ai_sheet_gen": self._new_collection_ai,
             "api_image_gen": None,
-            "image_checker": self._start_ai_check,
+            "image_checker": partial(self._open_tool_panel, "image_checker"),
             "bg": partial(self._open_tool_panel, "bg"),
             "crop": partial(self._open_tool_panel, "crop"),
             "upscale": partial(self._open_tool_panel, "upscale"),
@@ -6029,25 +6133,30 @@ class PainterGui:
         # _open_tool_panel — one click away regardless of which inline
         # panel (this one or a tool's own) currently shows below it, so
         # a second copy of the same four buttons here would be pure
-        # duplication (Rule #5), not a shortcut.
+        # duplication (Rule #5), not a shortcut. The AI checker's own
+        # quick button below joined them in this deletion GUI rework
+        # Phase 15, for the identical reason, once IT ALSO gained a
+        # persistent ToolSettingsPanel (ImageCheckerSettingsPanel) the
+        # IconBar reaches the same one-click way.
 
-        # the AI features row (owner 2026-07-20): the sheet GENERATOR,
-        # the batch image CHECKER (its own job/panel like the tools, in
-        # its rose job colour) and the guided key wizard — a SECOND row
-        # so the tool row never clips at the window minimum.
+        # the AI features row (owner 2026-07-20): the sheet GENERATOR
+        # and the guided key wizard — a SECOND row so the tool row
+        # never clips at the window minimum. The batch image CHECKER's
+        # own quick button used to sit here too (`_start_ai_check`
+        # directly popping its folder dialog + confirm) — deleted GUI
+        # rework Phase 15 alongside that dialog itself: the Main Menu/
+        # IconBar's "image_checker" tile now opens
+        # ImageCheckerSettingsPanel instead (see _tile_handler), the
+        # same persistent-panel surface bg/crop/upscale/aspect already
+        # have, so a second door to it here would be pure duplication
+        # (Rule #5), not a shortcut — same reasoning as the four tools
+        # above.
         ai_row = ttk.Frame(parent)
         ai_row.pack(fill="x", pady=(0, 6))
         rounded_button(
             ai_row, "New collection (AI)…", icon_name="ai",
             command=self._new_collection_ai,
         ).pack(side="left")
-        color = job_color_pair("aicheck")
-        rounded_button(
-            ai_row, f"{JOB_LABEL['aicheck']}…", icon_name=JOB_LOGO["aicheck"],
-            command=self._start_ai_check,
-            fg_color=color, hover_color=_darken_pair(color),
-            text_color=status_pair("btn_text"),
-        ).pack(side="left", padx=4)
         rounded_button(
             ai_row, "AI key…", command=self._open_key_wizard,
         ).pack(side="right")
@@ -6112,6 +6221,22 @@ class PainterGui:
         if temp is not None:
             temp.clear()
 
+    def _tool_panel_key(self, kind: str) -> str | None:
+        """The ``_tool_panels`` dict key that owns ``kind``'s
+        persistent settings panel, or None when ``kind`` has none
+        (chatgpt/gemini use ``_controls_box`` instead — a DIFFERENT
+        inline surface, see ``_toggle_pause_job``'s own "website_gen"
+        special case). Identical to ``kind`` for the four standalone
+        tools (tile id == slot, so ``config.tile_for_kind`` simply
+        returns its own input back) and ``"image_checker"`` for
+        ``"aicheck"`` (GUI rework Phase 15 — the one job kind whose
+        MENU_TILES id differs from its JOB_ORDER slot). Central so a
+        future standalone job kind never needs a new branch in
+        ``_toggle_pause_job``/``_dispatch`` below, only a
+        ``TILE_JOB_KINDS`` data entry."""
+        tile_id = tile_for_kind(kind)
+        return tile_id if tile_id in self._tool_panels else None
+
     def _toggle_pause_job(self, kind: str) -> None:
         """Flip ONE job's pause toggle (owner 2026-07-21) — the SAME
         handler wired to every job kind's btn_pause: AgentPanel's own
@@ -6138,30 +6263,31 @@ class PainterGui:
         if kind in self.agents:
             self.agents[kind].set_paused(is_paused)
         self.panels[kind].set_paused(is_paused)
-        if kind in self._tool_panels:
-            # GUI rework Phase 13: keep the persistent panel's OWN
+        panel_key = self._tool_panel_key(kind)
+        if panel_key is not None:
+            # GUI rework Phase 13/15: keep the persistent panel's OWN
             # Pause/Resume label in sync too — it may be the panel the
             # very next line reveals (see below), or already hidden
             # (the owner navigated elsewhere) and simply catching up
             # for whenever it is opened again.
-            self._tool_panels[kind].set_paused(is_paused)
+            self._tool_panels[panel_key].set_paused(is_paused)
         self._log(f"[{kind}] {'paused' if is_paused else 'resumed'}")
         # GUI rework Phase 11 (spec item 4): Pause RETURNS the settings
         # panel "for future tasks" — website_gen (chatgpt/gemini) shows
-        # the shared _controls_box; bg/crop (GUI rework Phase 13) show
-        # their OWN ToolSettingsPanel via _tool_panels, the same way
-        # _open_tool_panel does. upscale/aspect/the AI checker have no
-        # persistent panel yet (Phase 14/15), so this is a no-op for
-        # them beyond the ToolPanel/AiCheckPanel Pause/Resume toggle
-        # already handled above. Resuming never hides a revealed panel
-        # back — only a fresh Start or the owner's own icon-bar toggle
-        # does that.
+        # the shared _controls_box; every standalone job (bg/crop, GUI
+        # rework Phase 13; upscale/aspect, Phase 14; the AI checker,
+        # Phase 15) shows its OWN ToolSettingsPanel via _tool_panels,
+        # the same way _open_tool_panel does — _tool_panel_key bridges
+        # the AI checker's "aicheck" slot to its "image_checker" tile-
+        # id key (see that method). Resuming never hides a revealed
+        # panel back — only a fresh Start or the owner's own icon-bar
+        # toggle does that.
         if is_paused and self._view == "running":
             if kind in ("chatgpt", "gemini"):
                 self._inline_kind = "website_gen"
                 self._apply_running_layout()
-            elif kind in self._tool_panels:
-                self._inline_kind = kind
+            elif panel_key is not None:
+                self._inline_kind = panel_key
                 self._apply_running_layout()
 
     def _open_instructions(self) -> None:
@@ -6692,70 +6818,95 @@ class PainterGui:
         """Queue one AI-generated sheet (the same de-dup rule as Add…)."""
         self._queue_sheets([path])
 
-    def _start_ai_check(self) -> None:
-        """'AI check…' — a batch vision pass over a folder of images as
-        its OWN job/panel (read-only: it writes NOTHING but the flag
-        file under <out>/_state/). One job at a time, like the tools."""
-        if "aicheck" in self._tool_workers:
+    def _start_ai_check(self, slot: str) -> None:
+        """Start on the AI checker's persistent settings panel
+        (``ImageCheckerSettingsPanel``, GUI rework Phase 15) — a batch
+        vision pass over a folder/files as its OWN job/panel (read-
+        only: it writes NOTHING but the flag file under
+        ``<out>/_state/``). One job at a time, like the four tools.
+
+        Previously this method owned its own ``askdirectory`` folder
+        pick + a confirm ``askyesno`` — both DELETED here (Rule #6):
+        the panel's own input picker + embedded ``FilterEditor`` (see
+        ``ToolSettingsPanel``) now cover the folder/files choice, and
+        Start — deliberately configured then clicked — already IS the
+        confirmation, the same contract ``_start_tool_from_panel``
+        established for the four tools (the panel's own footer note
+        carries what the confirm dialog used to say about pacing/
+        model/where flags persist). Unlike those four, this does NOT
+        go through ``_start_tool_from_panel``/``_launch_tool_worker``
+        — the checker's worker (``_run_ai_check_job``) has no
+        JobTemp/engine-func shape to share with ``_run_tool_job`` (see
+        ``ImageCheckerSettingsPanel``'s own docstring), so its spawn is
+        inlined here instead, by hand mirroring ``_launch_tool_
+        worker``'s own tail (stale-Stop sweep, stale-pause sweep,
+        dashboard reveal, thread spawn, ``_sync_running_state``)."""
+        if slot in self._tool_workers:
             messagebox.showerror(
                 "PromptPainter",
-                f"{JOB_LABEL['aicheck']} is already running — wait for it"
+                f"{JOB_LABEL[slot]} is already running — wait for it"
                 " to finish, or Close its panel.",
             )
             return
         if not self._ensure_ai_key():
             return
-        folder = filedialog.askdirectory(
-            title="Folder with images — AI check (read-only)"
-        )
-        if not folder:
+        panel = self._tool_panels["image_checker"]
+        try:
+            folder_path, files = panel.resolve_input()
+            conditions = panel.get_conditions()
+        except ValueError as exc:
+            messagebox.showerror("PromptPainter", str(exc))
             return
-        folder_path = Path(folder)
-        files = iter_images(folder_path)
-        if not files:
-            messagebox.showinfo(
-                "PromptPainter", f"No images under:\n{folder}"
-            )
-            return
+        files = _filter_files(files, conditions, self._log)
         out_base = self._out_base()
-        if not messagebox.askyesno(
-            "PromptPainter",
-            f"AI-check {len(files)} image(s) under:\n{folder}?\n\n"
-            "Each image goes to the Gemini vision model (banal defects"
-            f" only), paced ~{AI_CALL_PAUSE_S:.0f}s per call on the free"
-            " tier. Nothing is modified; flags persist under\n"
-            f"{out_base / STATE_DIRNAME}.",
-        ):
-            return
 
-        panel = self.panels["aicheck"]
-        panel.folder = folder_path
-        panel.out_base = out_base
-        panel.reset(active=True, total=len(files))
-        self._dashgrid.add("aicheck")
+        dash = self.panels[slot]
+        dash.folder = folder_path
+        dash.out_base = out_base
+        dash.reset(active=True, total=len(files))
+        self._dashgrid.add(slot)
         self.notebook.select(0)
-        self.status_var.set(f"{JOB_LABEL['aicheck']} running …")
+        self.status_var.set(f"{JOB_LABEL[slot]} running …")
 
-        if "aicheck" in self._paused:
-            self._toggle_pause_job("aicheck")  # never start pre-paused
+        if slot in self._paused:
+            self._toggle_pause_job(slot)  # never start pre-paused
+        self._stop_events[slot].clear()  # ditto for a stale Stop (Phase 15)
         worker = threading.Thread(
             target=self._run_ai_check_job,
-            args=(folder_path, files, out_base, self._pause_events["aicheck"]),
+            args=(
+                folder_path, files, out_base, self._pause_events[slot],
+                self._stop_events[slot],
+            ),
             daemon=True,
         )
-        self._tool_workers["aicheck"] = worker
+        self._tool_workers[slot] = worker
         worker.start()
+        panel.set_run_state(running=True)
+        # Start hides the launching panel (spec item 4, mirrors
+        # _start_tool_from_panel's own tail) — the view is already
+        # "running" (this panel can only be visible while it is), so
+        # _sync_running_state()'s own view-transition check is a no-op
+        # here; this explicit call is what actually re-packs the region.
+        self._inline_kind = None
+        self._apply_running_layout()
         self._sync_running_state()  # GUI rework Phase 11
 
-    def _run_ai_check_job(self, folder, files, out_base, pause_event) -> None:
+    def _run_ai_check_job(
+        self, folder, files, out_base, pause_event, stop_event,
+    ) -> None:
         """The checker worker: prune stale flags (regenerated files),
         then one paced vision call per image — flagged entries are
         recorded (merged) into the flag file as they land, an OK image
         CLEARS any old flag it had, and a per-image API failure is loud
-        but never kills the batch (the tool-job convention). ``pause_event``
-        (owner 2026-07-21) blocks BETWEEN images while set, the same
-        wait pattern as the in-place tools (no should_stop — there is
-        no Stop for this job either)."""
+        but never kills the batch (the tool-job convention).
+        ``pause_event`` (owner 2026-07-21) blocks BETWEEN images while
+        set. ``stop_event`` (GUI rework Phase 15, closing Phase 14's
+        own flagged gap for THIS job) is checked at the SAME between-
+        images boundary — mirrors ``_run_tool_job``'s/``run_sheet``'s
+        own ``should_stop`` exactly: the in-flight vision call always
+        finishes first, and it is also threaded into
+        ``wait_while_paused`` so a Stop wins over a pending Pause
+        instead of hanging until Resume."""
         from painter import ai
         from painter.runner import wait_while_paused
 
@@ -6777,7 +6928,20 @@ class PainterGui:
             }
             t0 = time.time()
             for i, src in enumerate(files, start=1):
-                wait_while_paused(pause_event.is_set, None, log, emit)
+                if stop_event.is_set():
+                    log(
+                        f"STOPPED on request —"
+                        f" {flagged + ok + errors}/{len(files)} this run"
+                    )
+                    break
+                if wait_while_paused(
+                    pause_event.is_set, stop_event.is_set, log, emit
+                ):
+                    log(
+                        f"STOPPED on request —"
+                        f" {flagged + ok + errors}/{len(files)} this run"
+                    )
+                    break
                 emit({
                     "type": "item_start", "idx": i, "of": len(files),
                     "title": src.name,
@@ -7450,11 +7614,13 @@ class PainterGui:
                 # on an idle panel (owner 2026-07-21)
                 if slot in self._paused:
                     self._toggle_pause_job(slot)
-                if slot in self._tool_panels:
-                    # GUI rework Phase 13: re-enable the panel's own
-                    # Start button — "aicheck" has no entry here (its
-                    # own panel is AiCheckPanel, not a ToolSettingsPanel)
-                    self._tool_panels[slot].set_run_state(running=False)
+                panel_key = self._tool_panel_key(slot)
+                if panel_key is not None:
+                    # GUI rework Phase 13/15: re-enable the panel's own
+                    # Start button ("aicheck" resolves to its
+                    # "image_checker" ToolSettingsPanel via
+                    # _tool_panel_key since GUI rework Phase 15).
+                    self._tool_panels[panel_key].set_run_state(running=False)
                 if stopped:
                     # the "smart" half of _stop_tool: the worker has
                     # NOW actually halted (not merely requested to,

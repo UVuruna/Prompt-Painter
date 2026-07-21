@@ -51,8 +51,9 @@ match.
   panel it migrated (GUI rework Phase 4's `AspectRatioDialog`, later
   retired — GUI rework Phase 14 — by `AspectSettingsPanel`), and
   (GUI rework Phase 10) `MenuTile`/`MENU_TILES`/`MENU_TILE_*` behind
-  `MainMenu`, and (GUI rework Phase 11) `TILE_JOB_KINDS` behind the
-  running view's `IconBar`
+  `MainMenu`, (GUI rework Phase 11) `TILE_JOB_KINDS` behind the
+  running view's `IconBar`, and (GUI rework Phase 15) `tile_for_kind`
+  behind `PainterGui._tool_panel_key`
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`, `ASPECT_LABEL_DECIMALS`
 - [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
@@ -458,6 +459,20 @@ match.
   `IconBar` code change; `test_tile_job_kinds_*` in `test_config.py`
   checks coverage BOTH ways (every `MENU_TILES` id has an entry, every
   `JOB_ORDER` kind is reachable from some tile).
+- `tile_for_kind(kind) -> str | None` (GUI rework Phase 15) — the
+  REVERSE of `TILE_JOB_KINDS`: the one `MENU_TILES` id whose kinds
+  tuple is EXACTLY `(kind,)`, i.e. a job kind's OWN persistent-panel
+  tile (bg/crop/upscale/aspect resolve to themselves — tile id ==
+  slot; `"aicheck"` resolves to `"image_checker"`, since the AI
+  checker's dashboard slot predates the tile system, GUI rework Phase
+  11, and never renamed to match it); `None` for a kind sharing a
+  tile with another (chatgpt/gemini under `"website_gen"`) or with no
+  tile at all. Behind [GUI](../gui.md)'s `PainterGui._tool_panel_key`,
+  the one bridge `_toggle_pause_job`/the `__tool_done__` dispatch
+  branch need to reach the AI checker's settings panel from its
+  `"aicheck"` JOB_ORDER kind — PURE DATA-DRIVEN, so a future
+  standalone job kind never needs a new branch there, only a
+  `TILE_JOB_KINDS` entry; `test_tile_for_kind_*` in `test_config.py`.
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text, style=None)` — the
   rule block appended to every prompt: the chosen background (each

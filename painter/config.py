@@ -809,6 +809,27 @@ TILE_JOB_KINDS: dict[str, tuple[str, ...]] = {
 }
 
 
+def tile_for_kind(kind: str) -> str | None:
+    """The ONE ``MENU_TILES`` id that is kind's OWN persistent-panel
+    home, derived from ``TILE_JOB_KINDS`` (Rule #5 — one data table,
+    not a hand-special-cased branch per kind): the tile whose kinds
+    tuple is EXACTLY ``(kind,)``, or None when no tile maps to it
+    alone (``"chatgpt"``/``"gemini"`` share "website_gen" with each
+    other, so neither resolves here — that pairing is a DIFFERENT
+    kind of surface, `PainterGui`'s own ``_controls_box``, not a
+    per-kind ``ToolSettingsPanel``). GUI rework Phase 15: this is what
+    lets ``PainterGui._tool_panel_key`` translate the AI checker's
+    JOB_ORDER slot ("aicheck") to its MENU_TILES id ("image_checker")
+    — the one job kind whose tile id differs from its slot, the exact
+    same shape `bg`/`crop`/`upscale`/`aspect` already have (tile id ==
+    slot, so they resolve to themselves) — without a NEW per-kind
+    branch anywhere a future standalone job kind might need one."""
+    for tile_id, kinds in TILE_JOB_KINDS.items():
+        if kinds == (kind,):
+            return tile_id
+    return None
+
+
 # --- Tool temp / before-after / restore (owner 2026-07-19) -----------
 #
 # The four in-place tools back the ORIGINAL of every file up before they

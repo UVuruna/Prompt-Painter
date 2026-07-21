@@ -31,7 +31,14 @@ bg/crop through instead of the old ``_start_tool`` modal). GUI rework
 Phase 14 widens ``_tool_panels`` to all FOUR standalone tools
 (upscale/aspect join bg/crop, both old modal dialogs deleted) — same
 mechanism, no new branch in either caller, so the upscale-specific
-tests below just prove the dict now covers it too.
+tests below just prove the dict now covers it too. GUI rework Phase
+15 adds the AI checker as a FIFTH entry, keyed by its MENU_TILES id
+"image_checker" — its own JOB_ORDER slot is "aicheck" (it predates the
+tile system, GUI rework Phase 11), so ``_tool_panel_key`` (aliased
+onto ``FakeGui`` alongside the other unbound methods below) is the one
+new bridge ``_toggle_pause_job`` needs; ``_select_tile``/
+``_click_icon_bar_tile``/``_open_tool_panel`` need NONE — they already
+operate purely in tile-id space.
 """
 
 from __future__ import annotations
@@ -127,6 +134,7 @@ class FakeGui:
     _tile_handler = gui.PainterGui._tile_handler
     _apply_running_layout = gui.PainterGui._apply_running_layout
     _toggle_pause_job = gui.PainterGui._toggle_pause_job
+    _tool_panel_key = gui.PainterGui._tool_panel_key
     _open_tool_panel = gui.PainterGui._open_tool_panel
     _select_tile = gui.PainterGui._select_tile
 
@@ -140,16 +148,19 @@ class FakeGui:
 
         self._controls_box = ttk.Frame(root)
         self._compact_box = ttk.Frame(root)
-        # all FOUR standalone tools' own persistent settings panel
-        # stand-ins (bg/crop, GUI rework Phase 13; upscale/aspect,
-        # Phase 14) — real ttk.Frames so _apply_running_layout's pack/
+        # all FIVE standalone-job settings-panel stand-ins (bg/crop, GUI
+        # rework Phase 13; upscale/aspect, Phase 14; the AI checker,
+        # Phase 15) — real ttk.Frames so _apply_running_layout's pack/
         # pack_forget is exercised for real (see this module's own
-        # docstring); "aicheck" deliberately has NO entry here, matching
-        # PainterGui._tool_panels' real scope (Phase 15's own scope).
+        # docstring). Keyed by MENU_TILES id, exactly like the real
+        # PainterGui._tool_panels — "image_checker", NOT "aicheck" (its
+        # own JOB_ORDER slot): _tool_panel_key is the bridge tested
+        # below.
         self._tool_panels: dict[str, _RecordingToolPanel] = {
             "bg": _RecordingToolPanel(root), "crop": _RecordingToolPanel(root),
             "upscale": _RecordingToolPanel(root),
             "aspect": _RecordingToolPanel(root),
+            "image_checker": _RecordingToolPanel(root),
         }
         self.notebook = ttk.Notebook(root)
         self.notebook.add(ttk.Frame(self.notebook), text="Dashboard")
@@ -161,7 +172,6 @@ class FakeGui:
         )
 
         self.new_collection_calls = 0
-        self.start_ai_check_calls = 0
 
         # _toggle_pause_job's own attribute surface (Start/Pause/Stop
         # view semantics, spec item 4) — plain recorders, never a real
@@ -183,9 +193,6 @@ class FakeGui:
 
     def _new_collection_ai(self) -> None:
         self.new_collection_calls += 1
-
-    def _start_ai_check(self) -> None:
-        self.start_ai_check_calls += 1
 
     def _log(self, msg: str) -> None:
         self.log_lines.append(msg)
@@ -371,23 +378,27 @@ def test_click_icon_bar_tile_website_gen_toggles_the_inline_panel(root):
     assert fake._controls_box.winfo_manager() == ""
 
 
-def test_click_icon_bar_tile_a_not_running_tool_invokes_its_existing_handler(
+def test_click_icon_bar_tile_image_checker_not_running_opens_its_inline_panel(
     root,
 ):
-    """image_checker (Phase 15's own scope) has no persistent panel —
-    clicking still launches through the SAME handler the Main Menu
-    itself uses (_tile_handler), undisturbed by some OTHER job that
-    keeps running. (All FOUR standalone tools DO have one now — GUI
-    rework Phase 13/14 — see
-    test_click_icon_bar_tile_bg_not_running_opens_its_inline_panel /
-    test_click_icon_bar_tile_upscale_not_running_opens_its_inline_panel
-    below.)"""
+    """The AI checker now ALSO has a persistent settings panel (GUI
+    rework Phase 15, same family as bg/crop/upscale/aspect) — clicking
+    while not running toggles it inline (via _tile_handler's
+    _open_tool_panel entry), undisturbed by some OTHER job that keeps
+    running. Keyed by its MENU_TILES id "image_checker" in
+    _tool_panels, NOT its "aicheck" JOB_ORDER slot — _click_icon_bar_
+    tile/_open_tool_panel/_inline_kind all operate in tile-id space,
+    same as every other tile."""
     fake = FakeGui(root)
     fake._view = "running"
     fake._running = {"chatgpt"}
     gui.PainterGui._click_icon_bar_tile(fake, "image_checker")
-    assert fake.start_ai_check_calls == 1
-    assert fake._inline_kind is None  # website_gen panel never touched
+    assert fake._inline_kind == "image_checker"
+    assert fake._tool_panels["image_checker"].winfo_manager() == "pack"
+
+    gui.PainterGui._click_icon_bar_tile(fake, "image_checker")  # click again
+    assert fake._inline_kind is None
+    assert fake._tool_panels["image_checker"].winfo_manager() == ""
 
 
 def test_click_icon_bar_tile_bg_not_running_opens_its_inline_panel(root):
@@ -428,17 +439,15 @@ def test_click_icon_bar_tile_upscale_not_running_opens_its_inline_panel(
 
 
 def test_click_icon_bar_tile_ai_sheet_gen_always_opens_its_dialog(root):
+    """ai_sheet_gen is now the ONLY tile with no persistent settings
+    panel of its own — every other functionality (bg/crop/upscale/
+    aspect since GUI rework Phase 13/14, the AI checker since Phase
+    15) routes through _open_tool_panel instead; see the tests
+    above."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._click_icon_bar_tile(fake, "ai_sheet_gen")
     assert fake.new_collection_calls == 1
-
-
-def test_click_icon_bar_tile_image_checker_not_running_starts_it(root):
-    fake = FakeGui(root)
-    fake._view = "running"
-    gui.PainterGui._click_icon_bar_tile(fake, "image_checker")
-    assert fake.start_ai_check_calls == 1
 
 
 def test_tile_handler_website_gen_and_the_disabled_tile_have_no_handler(root):
@@ -497,6 +506,24 @@ def test_select_tile_upscale_skips_main_and_opens_the_panel_in_running(
     assert fake._tool_panels["upscale"].winfo_manager() == "pack"
 
 
+def test_select_tile_image_checker_skips_main_and_opens_the_panel_in_running(
+    root,
+):
+    """GUI rework Phase 15: the AI checker takes the SAME bg/crop/
+    upscale/aspect shortcut straight to "running" with its own panel
+    shown — the old askdirectory+confirm launch is gone. _inline_kind
+    lands on the MENU_TILES id "image_checker", not the "aicheck"
+    JOB_ORDER slot _select_tile was called with — _tool_panels itself
+    is keyed by tile id, exactly like every sibling tool."""
+    fake = FakeGui(root)
+    fake._view = "menu"
+    gui.PainterGui._select_tile(fake, "image_checker")
+    assert fake.view_log == ["running"]  # never visited "main"
+    assert fake._view == "running"
+    assert fake._inline_kind == "image_checker"
+    assert fake._tool_panels["image_checker"].winfo_manager() == "pack"
+
+
 # ---------------------------------------------------------------------
 # _toggle_pause_job — Pause "returns the settings panel" (spec item 4)
 # ---------------------------------------------------------------------
@@ -516,21 +543,28 @@ def test_toggle_pause_job_on_a_site_reveals_the_website_gen_panel_while_running(
     assert fake._controls_box.winfo_manager() == "pack"
 
 
-def test_toggle_pause_job_on_a_tool_never_touches_the_inline_panel(root):
-    """"aicheck" has no persistent settings panel yet (Phase 15's own
-    scope) — pausing it is a no-op beyond its own existing Pause/Resume
-    toggle (already reflected via panels[kind].set_paused). (ALL FOUR
-    standalone tools DO have one now — GUI rework Phase 13/14 — see
-    test_toggle_pause_job_on_bg_reveals_its_own_inline_panel /
-    test_toggle_pause_job_on_upscale_reveals_its_own_inline_panel
-    below.)"""
+def test_toggle_pause_job_on_the_ai_checker_reveals_its_own_inline_panel(
+    root,
+):
+    """The AI checker now ALSO has a persistent settings panel (GUI
+    rework Phase 15) — pausing "aicheck" reveals it inline exactly
+    like bg/crop/upscale/aspect below, EXCEPT _inline_kind lands on
+    its MENU_TILES id "image_checker" (via _tool_panel_key), not the
+    "aicheck" kind _toggle_pause_job was called with — the one job
+    kind whose tile id differs from its slot."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._toggle_pause_job(fake, "aicheck")
     assert "aicheck" in fake._paused
     assert fake.panels["aicheck"].paused_calls == [True]
     assert "aicheck" not in fake.agents  # tools have no AgentPanel entry
-    assert fake._inline_kind is None
+    assert fake._tool_panels["image_checker"].paused_calls == [True]
+    assert fake._inline_kind == "image_checker"
+    assert fake._tool_panels["image_checker"].winfo_manager() == "pack"
+
+    gui.PainterGui._toggle_pause_job(fake, "aicheck")  # resume
+    assert fake._tool_panels["image_checker"].paused_calls == [True, False]
+    assert fake._inline_kind == "image_checker"  # still there
 
 
 def test_toggle_pause_job_on_bg_reveals_its_own_inline_panel(root):
