@@ -822,7 +822,10 @@ key is gone (a stale one in an old settings.json is ignored).
   **Image**. The running collection appears live and open; **Show**
   (or double-click a row) opens the same formatted viewer — a
   collection's whole file, a folder's sheet excerpt, or an image's
-  prompt + the saved image.
+  prompt + the saved image. **Steps…** (GUI rework Phase 9, beside
+  Show — never the double-click) opens a per-step restore filmstrip
+  for the SAME focused image row; see **Per-step restore viewer**
+  below.
 - **Status badges** (owner 2026-07-20; the `aspect` dot added GUI
   rework Phase 8) — each image row carries small coloured DOTS beside
   its name for what actually HAPPENED to that image: green `bg` = BG
@@ -986,6 +989,71 @@ its own `apply_theme()` (calls the canvas's `redraw_theme()`) and
 registers itself in `THEME_TOPLEVELS` despite not being a Toplevel —
 see **Theming**'s note on that list really meaning "anything exposing
 apply_theme()", not literally "every Toplevel".
+
+#### Per-step restore viewer (GUI rework Phase 9)
+`DashPanel` gains the same two attributes `ToolPanel` has always had
+for its own before/after viewer — `self.jobtemp` (now declared once on
+the shared `JobPanel` base, Rule #5, so both subclasses inherit it
+identically instead of redeclaring the same line) and a NEW
+`self.out_base` (mirrors `ToolPanel.folder`'s role — the site's output
+root, needed to resolve a row's SITE-AGNOSTIC drop path into the
+JobTemp `rel`/live file via `dest_for`). `_start_site` sets both,
+right beside `reset()`, the same grouping `_start_tool` already uses
+for `panel.folder`/`panel.jobtemp`.
+
+A new **Steps…** button sits beside **Show** in the Collections
+sub-header — a SEPARATE button, never overloaded onto the tree's own
+double-click (which stays wired to `_show_selected`/"Show prompt +
+image", untouched). No dedicated icon exists yet for "restore a
+pipeline stage", so it is plain text (flagged, not a design decision).
+It acts on the SAME focused/selected row `_show_selected` would use;
+`DashPanel._show_steps` resolves `rel = dest_for(info["drop"],
+self.slot_key)`, guards with three info dialogs (no image row
+selected; no `jobtemp`/`out_base` yet — Steps clicked before this
+panel instance ever ran a job; `jobtemp.steps_for(rel)` empty — no
+post-save step ran, or "Keep every pipeline step" was off) and, once
+past those, opens a `StepRestoreWindow`.
+
+`StepRestoreWindow(tk.Toplevel)` shows one image's kept pipeline
+stages as a horizontal filmstrip — Original → BG → Crop → Aspect →
+Upscale (whichever the JobTemp actually backed up, plus the pristine
+baseline; "Fixer" joins once Phase 20 lands), each thumbnail its own
+**Restore to here** button, PLUS the CURRENT live file last (no
+button — it already is the live state). The ordered `(label, path)`
+list itself is a PURE, Tk-free module function, `_filmstrip_stages(temp,
+rel, live_path)` — every named step `steps_for(rel)` returns, in its
+own pipeline order, paired with `before_path`, followed by exactly one
+final `(STEP_RESTORE_CURRENT_LABEL, live_path)` entry; a caller can zip
+`stages[:-1]` 1:1 against `steps_for(rel)` to know which JobTemp step
+name a given thumbnail's button targets (`StepRestoreWindow._render`
+does exactly this). Labels come from `config.JOBTEMP_STEP_LABEL` —
+reusing `JOB_LABEL` for the four real tool stages (Rule #5), plus
+"Original"/"Fixer AI" for the two pipeline bookends that are not tools
+themselves. Clicking **Restore to here** calls `JobTemp.restore_to(rel,
+step)`, RE-RENDERS the whole filmstrip in place (the 'Current'
+thumbnail and the remaining stage list both re-read straight off disk,
+so a restore is immediately visible without closing/reopening the
+window), then calls `on_restored` — `DashPanel.refresh_image_row`,
+which re-reads the row's resolution/size straight off disk. Badge dots
+are NOT retroactively recomputed on a restore (no per-row action
+string survives past insert, only the rendered PIL dots already
+drawn) — a known, cosmetic gap; the restored FILE itself is always
+correct regardless of what its dots still show.
+
+Non-modal, themed exactly like `BeforeAfterWindow` (skinned Toplevel,
+registered in `THEME_TOPLEVELS`, its scaled `PhotoImage`s held on
+`self._photos` so tk cannot GC them, `_scaled_photo(..., on_checker=
+True)` so a transparent intermediate — e.g. right after BG removal —
+reads as removed rather than as the window colour) — the one
+structural difference is a HORIZONTAL `ScrollFrame` (`STEP_RESTORE_W`/
+`STEP_RESTORE_THUMB_PX` geometry) instead of BeforeAfterWindow's
+stacked vertical one, since pipeline stages read left-to-right like a
+real filmstrip. `StepRestoreWindow` itself carries no direct pytest
+coverage (same "real Tk/UI wiring gets a screenshot" convention as
+`BeforeAfterWindow`/`DocWindow`) — only `_filmstrip_stages` (pure) and
+`DashPanel._show_steps`/`refresh_image_row` (a real Tk root, `gui.
+StepRestoreWindow` mocked so no actual window is constructed) are
+pytest-covered; see [Tests](tests/___tests.md).
 
 ### `AiCheckPanel` — the AI image checker (owner 2026-07-20)
 The seventh job slot (`aicheck`, rose `JOB_COLORS`, the `ai` png).

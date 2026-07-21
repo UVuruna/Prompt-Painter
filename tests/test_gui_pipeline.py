@@ -29,6 +29,21 @@ Four halves:
 * ``AgentPanel``'s new fields/methods and ``DashPanel``'s new loud,
   PERSISTENT "over_cap" banner (vs the muted, overwritten ``state_var``)
   round out the GUI-facing half.
+
+A fifth, smaller half (GUI rework Phase 9) covers ``DashPanel``'s
+``jobtemp``/``out_base`` wiring and its 'Steps…' button
+(``_show_steps``/``refresh_image_row``): the three info-dialog guards
+(no row selected, no JobTemp yet, no kept stages) via a monkeypatched
+``messagebox.showinfo`` — never a REAL blocking dialog — and the happy
+path via a monkeypatched ``gui.StepRestoreWindow`` capturing its call
+args, the SAME "mock the class, never construct the real Toplevel"
+convention this whole suite already applies to every other viewer
+window (BeforeAfterWindow/DocWindow have no direct pytest coverage
+either — real Tk/UI wiring gets a screenshot, per gui.py's own
+"barely Tk-unit-tested by design" convention noted in ___tests.md).
+``_filmstrip_stages`` itself (the pure list-builder StepRestoreWindow
+renders) is tested in test_viewer.py, alongside its sibling pure
+viewer helpers.
 """
 
 from __future__ import annotations
@@ -608,3 +623,153 @@ def test_dash_panel_over_cap_event_shows_a_loud_persistent_banner(root):
     # only a fresh run (reset(), what _start_site calls) hides it again
     panel.reset(active=True, task_total=1, task_themes=1)
     assert panel._cap_banner.winfo_manager() == ""
+
+
+# ---------------------------------------------------------------------
+# DashPanel — the per-step restore viewer (GUI rework Phase 9)
+# ---------------------------------------------------------------------
+
+
+def make_progress_event(drop: str, size: int) -> dict:
+    """The minimal item_progress payload DashPanel.handle needs to add
+    one image row — mirrors runner.py's own emitted shape."""
+    return {
+        "type": "item_progress", "idx": 1, "of": 1, "title": drop,
+        "drop_path": drop, "gen_s": 5.0, "orig_res": "10x10",
+        "final_res": "10x10", "size": size, "actions": "", "retried": False,
+    }
+
+
+def test_dash_panel_show_steps_with_no_row_selected_shows_info(root, monkeypatch):
+    panel = gui.DashPanel(root, "gemini")
+    calls = []
+    monkeypatch.setattr(
+        gui.messagebox, "showinfo", lambda *a, **k: calls.append(a)
+    )
+    panel._show_steps()  # nothing focused in a brand-new tree
+    assert len(calls) == 1
+
+
+def test_dash_panel_show_steps_without_a_jobtemp_shows_info(root, monkeypatch, tmp_path):
+    """A row exists (an image was saved) but this panel never got a
+    JobTemp/out_base — e.g. Steps clicked before Start ever ran the
+    pipeline for THIS panel instance."""
+    img = tmp_path / "a.png"
+    make_png(img, 10, 10)
+    panel = gui.DashPanel(root, "gemini")
+    drop = "assets/emblem/Glory.png"
+    panel.handle(make_progress_event(drop, img.stat().st_size))
+    row = panel._child_ids[drop]
+    panel.tree.selection_set(row)
+    panel.tree.focus(row)
+
+    calls = []
+    monkeypatch.setattr(
+        gui.messagebox, "showinfo", lambda *a, **k: calls.append(a)
+    )
+    panel._show_steps()  # panel.jobtemp / panel.out_base still None
+    assert len(calls) == 1
+
+
+def test_dash_panel_show_steps_with_no_kept_stages_shows_info(root, monkeypatch, tmp_path):
+    """A real JobTemp IS attached but holds no backup for this rel at
+    all (every post-save switch was off) — steps_for(rel) == []."""
+    out_base = tmp_path / "out"
+    out_base.mkdir()
+    drop = "assets/emblem/Glory.png"
+    rel = gui.dest_for(drop, "gemini")
+    live = out_base / rel
+    live.parent.mkdir(parents=True)
+    make_png(live, 10, 10)
+
+    panel = gui.DashPanel(root, "gemini")
+    panel.handle(make_progress_event(drop, live.stat().st_size))
+    row = panel._child_ids[drop]
+    panel.tree.selection_set(row)
+    panel.tree.focus(row)
+    panel.jobtemp = JobTemp("show-steps-empty", out_base)
+    panel.out_base = out_base
+
+    calls = []
+    monkeypatch.setattr(
+        gui.messagebox, "showinfo", lambda *a, **k: calls.append(a)
+    )
+    panel._show_steps()
+    assert len(calls) == 1
+
+
+def test_dash_panel_show_steps_opens_step_restore_window_for_the_focused_row(
+    root, monkeypatch, tmp_path,
+):
+    """The happy path: resolves the SAME rel the real pipeline would
+    (dest_for(drop, slot_key)) and hands StepRestoreWindow the live
+    panel's own JobTemp/live path — mocked here (never a real Toplevel,
+    same convention as every other viewer window in this suite; the
+    REAL window is screenshot-verified)."""
+    out_base = tmp_path / "out"
+    out_base.mkdir()
+    drop = "assets/emblem/Glory.png"
+    rel = gui.dest_for(drop, "gemini")
+    live = out_base / rel
+    live.parent.mkdir(parents=True)
+    make_png(live, 10, 10)
+
+    panel = gui.DashPanel(root, "gemini")
+    panel.handle(make_progress_event(drop, live.stat().st_size))
+    row = panel._child_ids[drop]
+    panel.tree.selection_set(row)
+    panel.tree.focus(row)
+    temp = JobTemp("show-steps-real", out_base)
+    temp.backup(live, rel, step="original")
+    temp.backup(live, rel, step="upscale")
+    panel.jobtemp = temp
+    panel.out_base = out_base
+
+    captured = {}
+
+    def fake_window(master, title, jt, r, live_path, *, on_restored=None):
+        captured.update(
+            master=master, title=title, temp=jt, rel=r,
+            live_path=live_path, on_restored=on_restored,
+        )
+
+    monkeypatch.setattr(gui, "StepRestoreWindow", fake_window)
+    panel._show_steps()
+
+    assert captured["temp"] is temp
+    assert captured["rel"] == rel
+    assert captured["live_path"] == live
+    assert captured["on_restored"] is not None
+    # the callback is refresh_image_row bound to THIS row's drop path —
+    # proven by actually calling it and checking the row updates
+    make_png(live, 40, 30)
+    captured["on_restored"]()
+    assert panel.tree.set(row, "res") == "40x30"
+
+
+def test_dash_panel_refresh_image_row_updates_res_and_size_from_disk(root, tmp_path):
+    out_base = tmp_path / "out"
+    out_base.mkdir()
+    drop = "assets/emblem/Glory.png"
+    rel = gui.dest_for(drop, "gemini")
+    live = out_base / rel
+    live.parent.mkdir(parents=True)
+    make_png(live, 10, 10)
+
+    panel = gui.DashPanel(root, "gemini")
+    panel.handle(make_progress_event(drop, live.stat().st_size))
+    panel.out_base = out_base
+
+    # simulate a restore having changed the live file underneath
+    make_png(live, 40, 30)
+    panel.refresh_image_row(drop)
+
+    row = panel._child_ids[drop]
+    assert panel.tree.set(row, "res") == "40x30"
+    assert panel.tree.set(row, "size") == gui.fmt_size(live.stat().st_size)
+
+
+def test_dash_panel_refresh_image_row_unknown_drop_is_a_noop(root, tmp_path):
+    panel = gui.DashPanel(root, "gemini")
+    panel.out_base = tmp_path
+    panel.refresh_image_row("never-inserted.png")  # must not raise

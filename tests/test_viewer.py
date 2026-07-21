@@ -1,4 +1,5 @@
-"""Before/after viewer transparency backdrop — the tool-panel fix.
+"""Before/after viewer transparency backdrop — the tool-panel fix — plus
+(GUI rework Phase 9) the per-step restore viewer's pure filmstrip builder.
 
 BG removal (and crop/aspect) leave the AFTER image transparent where the
 background was cleared; drawn straight onto the panel colour it looks
@@ -8,15 +9,28 @@ helpers behind that (``_checkerboard`` builds the board, ``_has_alpha``
 decides when to use it); the on-screen composite itself is verified by
 the ImageGrab screenshots, not here (it needs a live Tk PhotoImage).
 
+``_filmstrip_stages`` is ``StepRestoreWindow``'s own pure, Tk-free
+list-builder: given a real ``JobTemp`` (same construction pattern as
+test_jobtemp.py/test_gui_pipeline.py) and a rel, it returns the ordered
+``(label, path)`` pairs the filmstrip renders — every named pipeline
+stage that still holds a backup, PLUS the current live file last.
+
 Importing ``gui`` pulls tkinter/ctk but opens no window, so this runs
 headless like the rest of the suite.
 """
 
 import numpy as np
+import pytest
 from PIL import Image
 
 import gui
-from painter.config import CHECKER_DARK, CHECKER_LIGHT, CHECKER_TILE_PX
+from painter.config import (
+    CHECKER_DARK,
+    CHECKER_LIGHT,
+    CHECKER_TILE_PX,
+    STEP_RESTORE_CURRENT_LABEL,
+)
+from painter.jobtemp import JobTemp, clear_all
 
 
 def test_checkerboard_has_the_requested_size_and_two_shades():
@@ -109,3 +123,94 @@ def test_rels_in_folder_accepts_a_dict_of_rows_like_image_rows():
 def test_rels_in_folder_root_level_images_group_under_root():
     got = gui.rels_in_folder(_ROWS, gui.folder_of("Loose.png"))
     assert got == ["Loose.png"]
+
+
+# --- _filmstrip_stages (StepRestoreWindow's pure list-builder, GUI ------
+# rework Phase 9). A real JobTemp's backup root lives under the PROJECT's
+# own .painter_tmp/ (jobtemp.py's TEMP_ROOT), not tmp_path — sweep it
+# after every test, same convention as test_jobtemp.py/test_gui_pipeline.py.
+
+
+@pytest.fixture(autouse=True)
+def _sweep_temp():
+    yield
+    clear_all()
+
+
+def make_png(path, size=(4, 4)) -> None:
+    Image.new("RGBA", size, (10, 20, 30, 255)).save(path, "PNG")
+
+
+def test_filmstrip_stages_orders_named_steps_then_current(tmp_path):
+    folder = tmp_path / "out"
+    folder.mkdir()
+    rel = "a.png"
+    live_path = folder / rel
+    make_png(live_path)
+    temp = JobTemp("filmstrip-full", folder)
+    for step in ("original", "crop", "aspect", "upscale"):
+        temp.backup(live_path, rel, step=step)
+
+    stages = gui._filmstrip_stages(temp, rel, live_path)
+    assert [label for label, _ in stages] == [
+        "Original", "Crop", "Aspect ratio", "Upscale",
+        STEP_RESTORE_CURRENT_LABEL,
+    ]
+    # every named stage's path IS its own backup path...
+    assert stages[0][1] == temp.before_path(rel, step="original")
+    assert stages[1][1] == temp.before_path(rel, step="crop")
+    assert stages[2][1] == temp.before_path(rel, step="aspect")
+    assert stages[3][1] == temp.before_path(rel, step="upscale")
+    # ...and the final entry is the LIVE file, not a backup
+    assert stages[4][1] == live_path
+
+
+def test_filmstrip_stages_skips_steps_with_no_backup(tmp_path):
+    """Only SOME steps kept a backup (e.g. 'keep every step' was off, or
+    the cap was hit) — the filmstrip lists exactly those, still in
+    pipeline order, never a gap-filled full set."""
+    folder = tmp_path / "out"
+    folder.mkdir()
+    rel = "a.png"
+    live_path = folder / rel
+    make_png(live_path)
+    temp = JobTemp("filmstrip-partial", folder)
+    temp.backup(live_path, rel, step="original")
+    temp.backup(live_path, rel, step="upscale")  # crop/aspect never backed up
+
+    stages = gui._filmstrip_stages(temp, rel, live_path)
+    assert [label for label, _ in stages] == [
+        "Original", "Upscale", STEP_RESTORE_CURRENT_LABEL,
+    ]
+
+
+def test_filmstrip_stages_with_no_backups_returns_only_current(tmp_path):
+    folder = tmp_path / "out"
+    folder.mkdir()
+    rel = "a.png"
+    live_path = folder / rel
+    make_png(live_path)
+    temp = JobTemp("filmstrip-empty", folder)
+
+    stages = gui._filmstrip_stages(temp, rel, live_path)
+    assert stages == [(STEP_RESTORE_CURRENT_LABEL, live_path)]
+
+
+def test_filmstrip_stages_zips_one_to_one_against_steps_for(tmp_path):
+    """The documented contract StepRestoreWindow._render relies on:
+    stages[:-1] is the SAME length/order as temp.steps_for(rel)."""
+    folder = tmp_path / "out"
+    folder.mkdir()
+    rel = "a.png"
+    live_path = folder / rel
+    make_png(live_path)
+    temp = JobTemp("filmstrip-zip", folder)
+    temp.backup(live_path, rel, step="original")
+    temp.backup(live_path, rel, step="crop")
+    temp.backup(live_path, rel, step="upscale")
+
+    stages = gui._filmstrip_stages(temp, rel, live_path)
+    steps = temp.steps_for(rel)
+    assert len(stages) == len(steps) + 1
+    for (label, path), step in zip(stages, steps):
+        assert path == temp.before_path(rel, step=step)

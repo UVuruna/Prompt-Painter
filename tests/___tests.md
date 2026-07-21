@@ -112,7 +112,15 @@ explicit override), both rejecting a non-positive side loudly.
 ### `test_viewer.py` — Viewer Helpers
 The before/after transparency checkerboard (`_checkerboard` /
 `_has_alpha` and the composite promise) and the folder-scoped
-restore set (`rels_in_folder`).
+restore set (`rels_in_folder`). GUI rework Phase 9 added
+`_filmstrip_stages` (the per-step restore viewer's pure list-builder,
+over a REAL `JobTemp`): the ordered `(label, path)` pairs — every
+named pipeline stage that still holds a backup, in `JOBTEMP_STEP_NAMES`
+order, followed by exactly one final `(Current, live_path)` entry —
+skips a stage with no backup (never gap-fills), collapses to
+`[(Current, live_path)]` alone when nothing was ever backed up, and
+the documented `stages[:-1]` <-> `steps_for(rel)` one-to-one zip
+contract `StepRestoreWindow._render` relies on.
 
 ### `test_smooth_transition.py` — Snapshot-Cover Fallbacks
 The shared `gui.smooth_transition` helper headless (owner
@@ -163,6 +171,76 @@ and the preset Save/Load/Delete cycle — the caller's OWN injected
 `presets` dict sees the mutation, the `on_presets_changed` callback
 fires exactly once per Save/Delete, and the widget still works with
 neither injected (a private in-memory dict).
+
+### `test_gui_upscale.py` — Upscale Gate Simplification
+GUI rework Phase 6: the old four-field gate (min W / min H / aspect
+FROM / aspect TO) collapses into one min-SIDE spinner plus an embedded
+`FilterEditor`. `_upscale_params_from_side_and_filter` (pure) folds a
+seeded/stacked condition list's first IF-aspect row into
+`upscale_if_small`'s `aspect_min`/`aspect_max`, widening to `(0, inf)`
+when there is none to fold (no aspect row, only non-aspect conditions,
+or an IF-NOT aspect row that cannot be expressed that way) and taking
+the FIRST IF-aspect match when several are stacked — documented
+partial behaviour, cross-checked against the real `upscale_if_small`
+engine (a mocked binary) so the resolved kwargs actually reproduce the
+old default gate's verdicts. `_gate_and_upscale` (the per-image
+site-pipeline gate) skips the engine entirely on a failing stacked
+condition the simple kwargs cannot express, calls it unconditionally
+on an empty filter, and runs it normally when the filter passes.
+`_migrate_legacy_upscale_gate` converts both the owner's REAL per-agent
+string shape and the standalone tool's shape into the new
+`{min_side, conditions}` form (the round-tripped condition reproducing
+the exact old gate), the shipped defaults, and raises loudly on an
+unparsable value. `AgentPanel`'s new `up_minside_var`/`upscale_filter`/
+`upscale_params()`/`upscale_conditions()` get a real (withdrawn) Tk
+root — the regression guard that a freshly built panel's resolved
+params equal the OLD hardcoded defaults, a `ValueError` from a bad
+min-side or an invalid filter row propagating through unmodified (Start
+relies on this), and `get_settings`/`apply_settings` round-tripping
+both fields (a missing/None `upscale_conditions` keeps the widget's own
+seeded default, never crashing).
+
+### `test_gui_pipeline.py` — Pipeline Reorder + Force Aspect + Per-Step Backups
+GUI rework Phase 8 (plus a Phase 9 addition — see below): the post-save
+order becomes BG → Crop → Aspect(force) → Upscale, and the two gen
+SITES gain their own `JobTemp` (new plumbing — previously only the four
+standalone tools had one). `gui._run_pipeline_steps` is the pure-ish,
+Tk-free per-image engine, tested directly with fake `path -> status`
+step functions: dedup of the FIRST enabled step's pre-state into
+`step="original"` (never both), `"original"` surviving even when that
+first step is a no-op, a LATER step's own named backup dropped on a
+no-op result, the disk-cap fallback (new per-step backups stop, one
+`on_cap()` per SKIPPED backup, `"original"` still always taken) and the
+"keep every step" toggle producing the identical original-only outcome
+SILENTLY (never `on_cap`). `PainterGui._compose_post_save` itself runs
+through a small duck-typed `FakeGui` (`.agents`/`._job_temps`/`._q` —
+the only attributes it touches) carrying a REAL `AgentPanel`: the
+ordered action string with all four steps on, the correct subset with
+some off, and the CRITICAL byte-identical-output regression guard (with
+Force Aspect off, and separately with a JobTemp newly attached) — proving
+the new backup plumbing is purely additive. One REAL end-to-end test
+drives the actual engine functions (bg_remove/crop/aspect/a MOCKED
+upscale binary) through the full pipeline and cross-checks the result
+against calling the four engine functions directly in the same order,
+plus the exact backup set under `__steps__` and `restore_to` round-trips
+for the pristine baseline AND a middle stage. `AgentPanel`'s
+`force_aspect_var`/`force_aspect_w_var`/`force_aspect_h_var`/
+`keep_all_steps_var` (defaults, a bad-value `ValueError`, the embedded
+`AspectRatioCanvas` drag/typed two-way sync, `apply_theme`/
+`THEME_TOPLEVELS` registration, settings round-trip) and `DashPanel`'s
+new loud, PERSISTENT "over_cap" banner (survives further progress
+events, unlike the muted `state_var`; only `reset()` hides it again)
+round out the GUI-facing half. GUI rework Phase 9 adds `DashPanel`'s
+`jobtemp`/`out_base` wiring and its "Steps…" button
+(`_show_steps`/`refresh_image_row`): the three info-dialog guards (no
+row selected, no JobTemp yet, no kept stages for this rel) via a
+monkeypatched `messagebox.showinfo` — never a real blocking dialog —
+and the happy path via a monkeypatched `gui.StepRestoreWindow`
+capturing its call args (rel resolved through `dest_for`, the panel's
+own live JobTemp/live path, and an `on_restored` callback that is
+`refresh_image_row` itself, proven by calling it and checking the row's
+`res` column updates); `refresh_image_row` re-reads a row's resolution/
+size straight off disk and is a no-op for an unknown drop path.
 
 ### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.

@@ -299,6 +299,16 @@ match.
   message can never drift from the real cap. A plain static string —
   lives here like every other user-facing copy constant
   (`SAFER_PREAMBLE`, `CONTINUE_NUDGE`, `AI_CHECK_INSTRUCTIONS`).
+- `JOBTEMP_STEP_LABEL`, `STEP_RESTORE_CURRENT_LABEL` — GUI rework
+  Phase 9: the per-step restore viewer's (`gui.StepRestoreWindow`)
+  filmstrip labels. `JOBTEMP_STEP_LABEL` maps each raw
+  `JOBTEMP_STEP_NAMES` key to what the owner actually sees — the four
+  real pipeline stages REUSE `JOB_LABEL` (one label per tool kind,
+  never duplicated), `"original"`/`"fixer"` get their own short label
+  since neither is a tool. `STEP_RESTORE_CURRENT_LABEL` (`"Current"`)
+  is the filmstrip's own final entry — the LIVE file, not a backup, so
+  it carries no "Restore to here" of its own. Both are consumed by
+  `gui._filmstrip_stages`, the pure list-builder behind the viewer.
 - `CHECKER_TILE_PX`, `CHECKER_LIGHT`, `CHECKER_DARK` — the neutral
   light/dark checkerboard the before/after viewer composites a
   transparent AFTER over, so a removed (transparent) background reads as

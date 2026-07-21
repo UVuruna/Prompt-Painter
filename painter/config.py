@@ -770,6 +770,28 @@ JOBTEMP_CAP_BANNER_TEXT = (
     "Aspect/Upscale in-between stages."
 )
 
+# GUI rework Phase 9: the per-step restore viewer's filmstrip label for
+# each raw JOBTEMP_STEP_NAMES key ("original"/"bg"/... are internal
+# identifiers, never shown to the owner as-is). The four real pipeline
+# stages REUSE JOB_LABEL (Rule #5 — one label per tool kind, defined
+# once); "original" and "fixer" are pipeline bookends with no tool of
+# their own, so they get their own short label here. Every
+# JOBTEMP_STEP_NAMES entry has one — see gui._filmstrip_stages.
+JOBTEMP_STEP_LABEL = {
+    "original": "Original",
+    "bg": JOB_LABEL["bg"],
+    "crop": JOB_LABEL["crop"],
+    "aspect": JOB_LABEL["aspect"],
+    "upscale": JOB_LABEL["upscale"],
+    "fixer": "Fixer AI",
+}
+
+# The filmstrip's own final entry — the LIVE file as it stands right
+# now. Not a JobTemp backup at all (so it carries no "Restore to here"
+# of its own in gui.StepRestoreWindow), just the last stop after every
+# kept named step in gui._filmstrip_stages's returned list.
+STEP_RESTORE_CURRENT_LABEL = "Current"
+
 # Transparency backdrop for the before/after viewer. BG removal (and the
 # other tools) leave the AFTER image transparent where the background was
 # cleared; drawn straight onto the panel colour, "removed" looks
