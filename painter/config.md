@@ -53,9 +53,11 @@ match.
   (GUI rework Phase 10) `MenuTile`/`MENU_TILES`/`MENU_TILE_*` behind
   `MainMenu`, (GUI rework Phase 11) `TILE_JOB_KINDS` behind the
   running view's `IconBar`, (GUI rework Phase 15) `tile_for_kind`
-  behind `PainterGui._tool_panel_key`, and (GUI rework Phase 19)
+  behind `PainterGui._tool_panel_key`, (GUI rework Phase 19)
   `GEMINI_IMAGE_MODEL`, `AI_IMAGE_GATE_MESSAGE`, `AI_IMAGE_PROBE_PROMPT`
-  behind `ApiImageAdapter`/`ApiImageGenPanel`
+  behind `ApiImageAdapter`/`ApiImageGenPanel`, and (GUI rework Phase
+  20) `FIXER_MODE_API`/`FIXER_MODE_WEBSITE`/`FIXER_MODE_CHOICES` behind
+  `AgentPanel.fixer_mode_var`
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`, `ASPECT_LABEL_DECIMALS`
 - [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
@@ -579,6 +581,26 @@ match.
   `driver.TerminalState` mapping) hits the free-tier-EXHAUSTED signal:
   "API image generation needs billing enabled — free tier limit is 0;
   use Website GEN for free." Data only — the owner rewords either here.
+- `AI_FIX_PROMPT_WITH_DEFECTS`, `AI_FIX_PROMPT_NO_DEFECTS`,
+  `AI_FIX_PROMPT_RAW_SUFFIX` — GUI rework Phase 20 (the Fixer AI,
+  owner's UV/prompt.txt item 2), behind [AI Client & Flows](ai.md)'s
+  `build_fix_prompt(defects, raw)`: the WITH-defects template (a
+  bulleted "fix ONLY these" instruction) and the graceful empty-defects
+  fallback (never blank — `edit_image`/`submit_fix` always need SOME
+  instruction text), plus the suffix appended when the checker's raw
+  response is available (grounding context alongside the parsed
+  bullets, not instead of them). Data only — the owner rewords any of
+  the three here.
+- `FIXER_MODE_API`, `FIXER_MODE_WEBSITE`, `FIXER_MODE_CHOICES` — GUI
+  rework Phase 20: `AgentPanel.fixer_mode_var`'s two dispatch modes —
+  `"api"` (`ai.edit_image` on a background thread, genuinely IN
+  PARALLEL with the site's own next-image generation) or `"website"`
+  (never driven from the auto-dispatch path — QUEUED instead, since
+  the site's browser tab is busy generating the next image the instant
+  a checker result lands; see [GUI](../gui.md)'s
+  `PainterGui._queue_website_fix` for the full reasoning). The value
+  strings double as the dropdown's own display text (Rule #4, same
+  convention as `NEW_CHAT_CHOICES`/`ASPECT_FILTER_MODES` above).
 - `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`,
   `fmt_pct(value)` — the short human formatters shared by the runner
   report and the GUI dashboard. `fmt_op_duration` keeps sub-second

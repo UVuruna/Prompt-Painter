@@ -625,8 +625,11 @@ pre-running spots.
   Spinner range, the **action delay** Spinner range, the **Force
   Aspect Ratio (this site)** block (GUI rework Phase 8 — see below),
   the **Keep every pipeline step (uses more disk)** switch (see
-  **Pipeline reorder + per-step backups**) and the **Upscale
-  gate (this site)** block. GUI rework Phase 6 simplified the gate from
+  **Pipeline reorder + per-step backups**), the **Upscale
+  gate (this site)** block, and — visible only while **AI checker** is
+  on — the **Fixer AI (this site)** block (GUI rework Phase 20: an
+  "Auto-fix flagged images" switch plus a via `api`/`website` dropdown;
+  see **Fixer AI wiring** below). GUI rework Phase 6 simplified the gate from
   four scalar fields to ONE **min-side** Spinner (the smaller side's
   target minimum, px) plus an embedded stacked **`FilterEditor`**
   (deciding WHICH images qualify, pre-seeded with a single Aspect
@@ -2204,6 +2207,175 @@ at the same time; both calls funnel through `ai.py`'s ONE
 parallel checker can trail generation by more than one image — an
 expected UX characteristic (Risk #7 in the binding design doc), not a
 bug.
+
+### Fixer AI wiring (GUI rework Phase 20)
+The owner's UV/prompt.txt item 1 ("dok generise sledecu sliku paralelno
+ona koja je generisana cek jer provjeri i ako ustanovi gresku salje
+fikseru da ispravi i to u situaciji ako su oba ukljucena") and item 2
+("Checker double click na tu stavku daje FULL REPORT ... i gore buttone
+za IMAGE FIX i WEBSITE fix ako je procenio gresku — u oba slucaja kreira
+PROMPT koji salje uz sliku"). Two INDEPENDENT surfaces share the same
+prompt-builder and JobTemp convention: an **AUTO-DISPATCH** half wired
+off the parallel checker's own result, and a **MANUAL** half in the
+checker report viewer — plus the pre-existing **Send flagged to
+generator** stays untouched as a third option. `painter.ai.
+build_fix_prompt(defects, raw) -> str` is the ONE shared prompt-builder
+(pure, Rule #5): named defects become a bulleted "fix ONLY these"
+instruction (`config.AI_FIX_PROMPT_WITH_DEFECTS`), an empty list a
+graceful "use your own judgement" fallback
+(`AI_FIX_PROMPT_NO_DEFECTS` — never blank, since `edit_image`/
+`submit_fix` always need SOME text), and the checker's VERBATIM raw
+response — when given — is appended after, as extra grounding context
+the parsed bullets can lose (`AI_FIX_PROMPT_RAW_SUFFIX`).
+
+**Auto-dispatch** — `AgentPanel` gains `fixer_var` (default OFF) and
+`fixer_mode_var` (`config.FIXER_MODE_API`/`_WEBSITE`, default `api`),
+visible ONLY while `checker_var` is on (`_apply_fixer_visibility`, a
+`checker_var` trace — same "hidden until its own gate switch is on"
+composition `_apply_upscale_gate_visibility` already uses). On every
+`item_checked` the parallel checker posts, `PainterGui._dispatch` now
+ALSO calls `_maybe_spawn_fixer(key, event)` (beside the EXISTING
+`_maybe_spawn_checker` call on `item_progress` — a sibling branch, not
+a rewrite). The pure, Tk-free `_fixer_decision(agent, event) -> str`
+(headlessly tested — the whole branch table needs no Tk) reads
+`fixer_var`/`fixer_mode_var` LIVE, exactly like `_maybe_spawn_checker`
+reads `checker_var` live, so a mid-run toggle takes effect from the
+NEXT checked image:
+
+- `"none"` — the switch is off, or the image was not flagged.
+- `"api"` — `_run_fixer_api` spawns a background `threading.Thread`
+  RIGHT NOW: a plain `ai.edit_image` REST call, so it genuinely
+  overlaps the site's OWN next-image generation on the SAME browser
+  tab — the intended parallel flow. It backs the pre-fix file up via
+  THIS site's live `JobTemp` (`PainterGui._job_temps[key]`) under
+  `step="fixer"` (`_backup_before_fix` — best-effort: a slot with no
+  live JobTemp, e.g. its dashboard panel was already Closed this
+  session, skips the backup LOUDLY rather than silently, root Rule #1),
+  overwrites the image, then posts a new `item_fixed` event
+  `DashPanel.handle` applies — it re-reads the row's resolution/size
+  off disk (`refresh_image_row`, the SAME helper the Phase 9 restore
+  viewer's own callback uses) and appends "→ fixed" to the Check
+  column. A gated (`ai.PaidFeatureRequired`) or failed
+  (`ai.AiError`) call is LOUD in the Log and NEVER FATAL — it never
+  touches the run this image came from, the same convention
+  `_run_checker_one` already established.
+- `"website_queue"` — **the documented choice, read this before
+  changing it**: the site's browser tab is BUSY generating the NEXT
+  image the instant `item_checked` fires (the checker's background
+  thread reports well before the run finishes), so
+  `_queue_website_fix` NEVER drives `driver.submit_fix` from this
+  path — doing so would collide with the in-flight
+  `submit_prompt`/`await_done` (one tab, one operation). Instead it
+  folds the flagged item into `AiCheckPanel`'s OWN `_flagged`/`_raw`
+  bucket via its EXISTING `handle({"type": "item_flagged", ...})` —
+  the IDENTICAL append-only state the standalone batch checker already
+  fills — and reveals that panel on the dashboard grid (`DashGrid.add`,
+  idempotent) so the queued item is IMMEDIATELY VISIBLE as a real row,
+  never a silent internal list. The owner's EXISTING **Send flagged to
+  generator** button (`AiCheckPanel._do_resend` ->
+  `PainterGui._resend_flagged`) is the ONE send path — reused
+  VERBATIM, never duplicated — whenever they choose to click it;
+  typically once the site is idle again, since `_resend_flagged`'s own
+  `_start_site` call already refuses a site that is still
+  `self._running`, so a click can never collide with the still-running
+  generation even if it happens immediately. (A future "auto-drain the
+  moment the tab frees up" was considered and DELIBERATELY not built —
+  auto-restarting a site right after the owner's own explicit Stop
+  would be surprising; the queued row plus the existing button keeps
+  the owner in control of WHEN a website fix actually drives the
+  browser.)
+
+**Manual buttons** — the checker's report viewer (`DocWindow`, opened
+by BOTH `DashPanel._show_check` and `AiCheckPanel._on_activate` — Rule
+#5, one call site: `PainterGui._build_fix_workers(rel, out_base,
+defects, raw, jobtemp_slot=None)`) gains **IMAGE FIX** and **WEBSITE
+FIX** buttons, shown ONLY when the report actually carries defects
+(both callers pass `on_image_fix=None, on_website_fix=None` otherwise —
+`DocWindow` then builds no fix-action row at all). `DashPanel` already
+knows its own site (`self.slot_key`, passed as `jobtemp_slot`);
+`AiCheckPanel` — the standalone checker, with no site of its own —
+passes `None`, and `_build_fix_workers` resolves BOTH the site (for
+WEBSITE FIX) and the JobTemp slot (for the pre-fix backup) via
+`ai.drop_and_site_for(rel)`, the SAME `dest_for` reverse `ai.
+plan_resend`'s own re-send already uses. `image_fix_worker` is ALWAYS
+offered (`ai.edit_image` needs no site concept — ANY checked image,
+regardless of provenance, can be IMAGE-FIXED);
+`website_fix_worker` is `None` when no `SITES` entry resolves (an API
+Image GEN output — no browser tab at all — or a standalone-checked
+image from outside any queued generation).
+
+Each button's zero-arg worker (`PainterGui._run_image_fix` /
+`_run_website_fix`) runs on a background thread `DocWindow._run_fix`
+spawns (mirrors `ApiImageGenPanel._probe_access`'s own private-queue +
+`self.after(AI_POLL_MS, …)` poll shape exactly — Rule #5, the SAME
+"background network/browser call never blocks the Tk event loop"
+pattern), and returns a `("ok"/"gated"/"error", message)` pair.
+`_run_website_fix` — an OWNER-TRIGGERED one-off automation, driving a
+FRESH `SiteDriver` (attach -> `submit_fix` -> `await_done` ->
+`extract_image` -> `close`), never the running site's own worker
+thread — refuses with a transient `"error"` (not a permanent
+`"gated"`) while THIS site is `self._running`: the SAME one-tab
+collision the auto-dispatch's `_queue_website_fix` avoids, just
+surfaced as a clear message instead of silently queuing (a manual
+click is the owner's OWN choice of timing, so a retry-able refusal is
+enough). Both workers back the pre-fix file up via `_backup_before_fix`
+(`step="fixer"`, best-effort) before overwriting — restorable in the
+Phase 9 `StepRestoreWindow` filmstrip exactly like a pipeline stage
+(`JOBTEMP_STEP_NAMES`/`JOBTEMP_STEP_LABEL` already reserved `"fixer"` /
+"Fixer AI" since Phase 7/9 — no config change needed here).
+
+The pure `_fix_result_ui(which, result) -> (status_text, enable_image,
+enable_website)` (Tk-free, headlessly tested — no test in this suite
+ever constructs a real `tk.Toplevel`, the same "pure helpers get
+pytest, real Tk/UI wiring gets a screenshot" split every phase
+follows) sits behind `DocWindow._apply_fix_result`, which only ever
+APPLIES the mapping to the real buttons: `"ok"` leaves BOTH disabled
+(the report is now STALE — a fresh Check… is the honest next step,
+never a second blind fix off the same old defects); `"gated"` — a
+PERMANENT condition (no billing / no selectors) — leaves the button
+that fired disabled but RE-ENABLES the other (a gate on one path
+should not block trying the other); `"error"` re-enables both
+(transient, retry-able — e.g. "the site is currently generating").
+Both buttons disable together the instant either is clicked (never a
+double-fix race against the same file).
+
+**Non-regression:** `AiCheckPanel`'s **Send flagged to generator** /
+**Clear flags** buttons, the checker report viewer's EXISTING content
+(the defects list, the verbatim raw response, the embedded image), the
+parallel checker itself (Phase 16), Safer retry / Continue nudge, and
+the generation run's own pipeline are all untouched — every Fixer
+addition is a NEW, additive surface.
+
+**Verified (0.0.09x):** full suite green (605 passed + 1 skipped, up
+from 563) — `painter.ai.build_fix_prompt` (defects -> bulleted
+instruction, empty defects -> the non-blank fallback, raw appended/
+omitted); `AgentPanel.fixer_var`/`fixer_mode_var` (defaults,
+`_PERSIST`/settings round-trip, visibility tied to `checker_var` via
+`winfo_manager()` — the shared `tk_root` fixture is withdrawn, so
+`winfo_ismapped()` cannot be used); `_fixer_decision`'s full branch
+table; `_maybe_spawn_fixer`/`_run_fixer_api`/`_queue_website_fix` run
+for REAL through a duck-typed `_FakeGuiForFixer` (mocked
+`ai.edit_image`, a REAL `JobTemp` proving the `step="fixer"` backup,
+a bounded `Queue.get`/`_wait_for_event` wait for the background
+thread's `item_fixed`, and — the core physical-constraint proof —
+website mode monkeypatches BOTH `ai.edit_image` and
+`driver.SiteDriver` to raise if EVER touched); `_build_fix_workers`'s
+site resolution (explicit `jobtemp_slot` vs the `drop_and_site_for`
+fallback, `"api_image"` correctly getting no website worker);
+`_run_image_fix`/`_run_website_fix`'s gate/success paths (a duck-typed
+fake `SiteDriver` proving the attach -> submit_fix -> await_done ->
+extract_image -> close call SEQUENCE, and that it is ALWAYS closed,
+even on `FixNotConfigured`); `_fix_result_ui`'s mapping; and
+`DashPanel`'s new `item_fixed` row handling. Real-window screenshots
+(Day theme, `settings.json` redirected to a scratch file, every
+ai.py/driver.py call MOCKED — no live quota, no live Chrome):
+(1) an isolated `AgentPanel` with AI checker ON and Settings expanded,
+showing the new Fixer AI switches; (2) the checker report `DocWindow`
+with WEBSITE FIX driven to its GATED/disabled state (the
+`FixNotConfigured`-shaped message) while IMAGE FIX stays available;
+(3) a `StepRestoreWindow` filmstrip — driven through the REAL
+`_run_fixer_api` with a mocked `ai.edit_image` — showing Original ->
+Fixer AI -> Current as three distinct stages.
 
 ## Theming
 Two coordinated palettes — **night** (the built-in `darkly`, kept

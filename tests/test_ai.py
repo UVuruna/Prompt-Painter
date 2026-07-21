@@ -649,6 +649,47 @@ def test_fix_note_joins_the_defects():
     assert "Regenerate" in note
 
 
+# --- build_fix_prompt (GUI rework Phase 20 — the Fixer AI) --------------
+
+
+def test_build_fix_prompt_with_defects_lists_each_as_a_bullet():
+    prompt = ai.build_fix_prompt(
+        ["subject cropped at the shoulder", "stray line near the halo"],
+    )
+    assert "- subject cropped at the shoulder" in prompt
+    assert "- stray line near the halo" in prompt
+
+
+def test_build_fix_prompt_empty_defects_is_never_blank():
+    """A caller that (against the gate) calls this with no defects still
+    gets a SENSIBLE, non-empty instruction — edit_image/submit_fix
+    always need SOME text; this function stays honest about ANY input
+    regardless of whether an upstream gate held (root Rule #1)."""
+    prompt = ai.build_fix_prompt([])
+    assert prompt.strip()
+    assert "no specific defect" in prompt.lower()
+
+
+def test_build_fix_prompt_appends_raw_verbatim_when_given():
+    raw = "DEFECTS:\n- the halo is off-centre to the left"
+    prompt = ai.build_fix_prompt(["halo off-centre"], raw)
+    assert "halo off-centre" in prompt          # the parsed bullet
+    assert "off-centre to the left" in prompt   # the verbatim raw, too
+    assert prompt.index("halo off-centre") < prompt.index("off-centre to the left")
+
+
+def test_build_fix_prompt_omits_raw_section_when_raw_is_none_or_blank():
+    base = ai.build_fix_prompt(["x"])
+    assert base == ai.build_fix_prompt(["x"], None)
+    assert base == ai.build_fix_prompt(["x"], "   ")  # whitespace-only
+
+
+def test_build_fix_prompt_is_pure_and_deterministic():
+    a = ai.build_fix_prompt(["x", "y"], "raw text")
+    b = ai.build_fix_prompt(["x", "y"], "raw text")
+    assert a == b
+
+
 # --- flag memory --------------------------------------------------------
 
 

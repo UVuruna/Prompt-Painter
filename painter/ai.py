@@ -43,6 +43,9 @@ from painter.config import (
     AI_CALL_PAUSE_S,
     AI_FLAGS_FILENAME,
     AI_FIX_NOTE,
+    AI_FIX_PROMPT_NO_DEFECTS,
+    AI_FIX_PROMPT_RAW_SUFFIX,
+    AI_FIX_PROMPT_WITH_DEFECTS,
     AI_IMAGE_QUOTA_MARKERS,
     AI_MAX_QUESTIONS,
     AI_QUESTIONS_SYSTEM,
@@ -662,6 +665,40 @@ def parse_check_response(text: str) -> list[str]:
 def fix_note(defects: list[str]) -> str:
     """The per-item extra suffix for a re-sent flagged image."""
     return AI_FIX_NOTE.format(defects="; ".join(defects))
+
+
+def build_fix_prompt(defects: list[str], raw: str | None = None) -> str:
+    """The Fixer AI's instruction (GUI rework Phase 20, owner's
+    UV/prompt.txt item 2: "u oba slucaja kreira PROMPT koji salje uz
+    sliku") — turns one checked image's parsed defect list (+ its
+    VERBATIM raw response, for extra context the parsed bullets can
+    lose) into the text sent ALONGSIDE the flagged image. PURE: no I/O,
+    no network — offline-testable.
+
+    Shared by every fixer surface (Rule #5, one prompt-builder instead
+    of several near-copies): the manual IMAGE FIX / WEBSITE FIX buttons
+    in the checker's report viewer (both call ``ai.edit_image``/
+    ``driver.submit_fix`` with THIS text) and the API-mode auto-fixer
+    (``PainterGui._run_fixer_api``).
+
+    An EMPTY ``defects`` list still returns a sensible, non-blank
+    instruction (``AI_FIX_PROMPT_NO_DEFECTS``) rather than raising or
+    returning "" — ``edit_image``/``submit_fix`` always need SOME
+    instruction text, and this function stays honest about ANY input
+    regardless of whether the caller already gates on defects existing
+    (root Rule #1: never assume an upstream gate held). ``raw`` — when
+    given and non-blank — is appended VERBATIM after the instruction,
+    never in place of it (the parsed bullets are the actionable part;
+    the raw response is grounding context alongside them).
+    """
+    if defects:
+        bullets = "\n".join(f"- {d}" for d in defects)
+        instruction = AI_FIX_PROMPT_WITH_DEFECTS.format(bullets=bullets)
+    else:
+        instruction = AI_FIX_PROMPT_NO_DEFECTS
+    if raw and raw.strip():
+        instruction += AI_FIX_PROMPT_RAW_SUFFIX.format(raw=raw.strip())
+    return instruction
 
 
 def flags_path(out_base: Path) -> Path:

@@ -47,7 +47,10 @@ traffic), the free-tier pacing sleep, the sheet-generator flow with
 a mocked `gen` (questions parsing + cap, skipped answers, the
 whole-file fence unwrap, real-parser validation, exactly ONE repair
 round, the still-broken path that must NOT load, slugged
-collision-free saves), the checker's strict OK/DEFECTS format, and
+collision-free saves), the checker's strict OK/DEFECTS format, the
+Fixer AI's `build_fix_prompt` (GUI rework Phase 20 — pure, defects
+become bullets, an empty list still returns a non-blank fallback, raw
+appended verbatim when given and omitted when blank), and
 the flag memory (round-trip, merge, clear, the mtime-based prune of
 regenerated/missing files, relative-vs-absolute keys, the
 `dest_for` reverse mapping and the full `plan_resend` grouping —
@@ -419,6 +422,35 @@ still a graceful 'error', never an unhandled thread exception; and
 `PainterGui._dispatch` itself is proven to route `item_progress` (and
 ONLY that event type — NOT `item_done`, NOT a tool panel's own events)
 through the spawn.
+
+### `test_gui_fixer.py` — Fixer AI Wiring
+GUI rework Phase 20. Mirrors test_gui_checker.py's own structure. Six
+halves: `AgentPanel`'s new `fixer_var`/`fixer_mode_var` (defaults,
+`_PERSIST`/settings round-trip, visibility tied to `checker_var` via
+`winfo_manager()` — the withdrawn shared root makes `winfo_ismapped()`
+unusable); `gui._fixer_decision`'s pure branch table (fixer off; not
+flagged; empty defects; api mode; website mode) against a bare
+duck-typed switches stand-in, no Tk; `PainterGui._maybe_spawn_fixer`/
+`_run_fixer_api`/`_queue_website_fix` run for REAL through a
+`_FakeGuiForFixer` (mocked `ai.edit_image`, a REAL `JobTemp` proving
+the `step="fixer"` backup, a bounded `_wait_for_event` wait for the
+background thread's `item_fixed` past any log lines that precede it,
+and — the core physical-constraint proof — website mode monkeypatches
+BOTH `ai.edit_image` and `driver.SiteDriver` to raise if EVER touched,
+plus proving the queued item lands in `AiCheckPanel._flagged` and
+`DashGrid.add("aicheck")` fires); `_dispatch` routing `item_checked`
+(and ONLY that type) into the fixer; `PainterGui._build_fix_workers`'s
+site resolution (an explicit `jobtemp_slot` vs the
+`ai.drop_and_site_for` fallback, `"api_image"` correctly getting no
+website worker) and `_run_image_fix`/`_run_website_fix`'s gate/success
+paths (a duck-typed fake `SiteDriver` proving the attach -> submit_fix
+-> await_done -> extract_image -> close call SEQUENCE and that it is
+ALWAYS closed, even on `FixNotConfigured`; "site currently running"
+refuses WITHOUT ever constructing a driver); and `gui._fix_result_ui`'s
+pure result-to-UI mapping behind `DocWindow._apply_fix_result`
+(Tk-free — no test in this suite constructs a real `tk.Toplevel`) plus
+`DashPanel._show_check`/`AiCheckPanel._on_activate` passing fix workers
+into `DocWindow` only when the report actually carries defects.
 
 ### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.

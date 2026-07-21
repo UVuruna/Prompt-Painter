@@ -191,6 +191,7 @@ def test_shared_report_helper_identical_output_from_both_panels(
 
     def fake_docwindow(
         master, title, md, copy_text=None, hint=None, image_path=None,
+        on_image_fix=None, on_website_fix=None,
     ):
         captured.append(
             {"title": title, "md": md, "image_path": image_path}
@@ -412,6 +413,7 @@ def test_dash_panel_show_check_opens_doc_window_with_the_report(
 
     def fake_docwindow(
         master, title, md, copy_text=None, hint=None, image_path=None,
+        on_image_fix=None, on_website_fix=None,
     ):
         captured.update(
             master=master, title=title, md=md, copy_text=copy_text,

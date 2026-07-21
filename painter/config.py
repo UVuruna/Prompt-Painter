@@ -1392,6 +1392,53 @@ AI_FIX_NOTE = (
     " same image correcting them."
 )
 
+# --- the Fixer AI (GUI rework Phase 20, owner's UV/prompt.txt item 1/2:
+# "ako ustanovi gresku salje fikseru da ispravi"; "u oba slucaja kreira
+# PROMPT koji salje uz sliku") -----------------------------------------
+#
+# gui.ai.build_fix_prompt(defects, raw) turns a checked image's defect
+# list (+ its verbatim raw response, for extra context the parsed
+# bullets can lose) into the instruction sent ALONGSIDE the flagged
+# image to ai.edit_image (IMAGE FIX) or driver.submit_fix (WEBSITE
+# FIX) — both the manual report-viewer buttons and the API-mode auto-
+# fixer share this ONE function. Two templates: WITH named defects (the
+# common case) and a graceful NO-defects fallback (never blank —
+# edit_image/submit_fix always need SOME instruction text; a checker
+# that flags an image with an empty defects list is a malformed corner
+# case this function stays honest about regardless of what the caller
+# already gates on).
+AI_FIX_PROMPT_WITH_DEFECTS = (
+    "A quality check found defects in this image. Fix ONLY these,"
+    " keeping composition, colours and style exactly as they are"
+    " otherwise:\n{bullets}"
+)
+AI_FIX_PROMPT_NO_DEFECTS = (
+    "A quality check flagged this image as needing correction but"
+    " named no specific defect. Use your own judgement to fix whatever"
+    " looks wrong, keeping composition, colours and style exactly as"
+    " they are otherwise."
+)
+# appended verbatim when the checker's raw response is available —
+# {raw} is NOT the parsed defects list above (already folded into the
+# instruction) but the model's own words, which sometimes carry
+# qualifying detail ("the halo is on the LEFT side") the parsed bullets
+# flatten away.
+AI_FIX_PROMPT_RAW_SUFFIX = "\n\nFull quality-check report:\n{raw}"
+
+# the Fixer AI's dispatch MODE (AgentPanel.fixer_mode_var): "api"
+# (ai.edit_image, a REST call that runs on a background thread
+# genuinely IN PARALLEL with the site's own next-image generation — the
+# intended flow) or "website" (driver.submit_fix — QUEUED instead of
+# driven immediately, since the site's browser tab is busy generating
+# the NEXT image the instant a checker result lands; see
+# gui.PainterGui._queue_website_fix's own docstring for exactly why).
+# The value strings double as the AgentPanel dropdown's own display
+# text (Rule #4, same convention as NEW_CHAT_CHOICES/ASPECT_FILTER_MODES
+# above).
+FIXER_MODE_API = "api"
+FIXER_MODE_WEBSITE = "website"
+FIXER_MODE_CHOICES = (FIXER_MODE_API, FIXER_MODE_WEBSITE)
+
 
 # --- Timing ----------------------------------------------------------
 

@@ -174,6 +174,27 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   viewer always shows what happened.
 - `fix_note(defects)` — the re-send's per-item extra suffix
   (`AI_FIX_NOTE`, "; "-joined defects).
+- `build_fix_prompt(defects, raw=None) -> str` (GUI rework Phase 20,
+  the Fixer AI, owner's UV/prompt.txt item 2: "u oba slucaja kreira
+  PROMPT koji salje uz sliku") — the instruction sent ALONGSIDE a
+  flagged image to `edit_image` (IMAGE FIX / the API-mode auto-fixer)
+  or [CDP Driver](driver.md)'s `submit_fix` (WEBSITE FIX). PURE — no
+  I/O, offline-testable. Named `defects` become a bulleted "fix ONLY
+  these, keep everything else as it is" instruction
+  (`AI_FIX_PROMPT_WITH_DEFECTS`); an EMPTY list still returns a
+  sensible, non-blank fallback (`AI_FIX_PROMPT_NO_DEFECTS`) rather than
+  raising or returning `""` — `edit_image`/`submit_fix` always need
+  SOME instruction text, and this function stays honest about ANY
+  input regardless of whether the caller already gates on defects
+  existing (root Rule #1). `raw` — when given and non-blank — is
+  appended VERBATIM after the instruction (`AI_FIX_PROMPT_RAW_SUFFIX`),
+  never in place of it: the parsed bullets are the actionable part, the
+  raw model response is grounding context alongside them (it sometimes
+  carries qualifying detail the parsed bullets flatten away, e.g. "the
+  halo is on the LEFT side"). Shared by every fixer surface (Rule #5):
+  the manual IMAGE FIX / WEBSITE FIX buttons in [GUI](../gui.md)'s
+  checker report viewer and the API-mode auto-fixer
+  (`PainterGui._run_fixer_api`) all call this ONE function.
 - Flags file `<out>/_state/ai_flags.json`, atomic writes, keyed by
   `flag_key(image, out_base)` — the image's POSIX path RELATIVE to
   the out base (absolute when the image lives outside it; such keys
