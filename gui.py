@@ -1848,18 +1848,28 @@ class AgentPanel(ttk.Labelframe):
         # edits. "keep_all_steps" is the per-agent "keep every pipeline
         # step" disk-usage toggle (JOBTEMP_KEEP_ALL_STEPS_DEFAULT).
         "force_aspect", "force_aspect_w", "force_aspect_h", "keep_all_steps",
+        # this site's show/hide toggle (GUI rework Phase 12, spec item
+        # 3A) — default True (both panels visible, today's behaviour);
+        # see visible_var's own docstring for the "never hide a live
+        # job's only control surface" guarantee.
+        "visible",
     )
 
     def __init__(
         self, master, site_key: str, on_start, on_stop, on_pause,
         filter_presets: dict[str, list[dict]] | None = None,
         on_filter_presets_changed: Callable[[], None] | None = None,
+        on_log: Callable[[str], None] | None = None,
     ):
         super().__init__(master)
         self.site_key = site_key
         self._on_start = on_start
         self._on_stop = on_stop
         self._on_pause = on_pause
+        # optional so a headless AgentPanel (no PainterGui — every
+        # gui_*.py test's own make_panel()) still works, same pattern as
+        # on_filter_presets_changed below
+        self._on_log = on_log or (lambda _msg: None)
         # the SHARED filter-preset library (GUI rework Phase 6) — the
         # same dict/callback PainterGui hands every FilterEditor
         # instance (see filters.py's module docstring: one preset
@@ -1922,6 +1932,28 @@ class AgentPanel(ttk.Labelframe):
         # True = fine-tune hidden (default). A BooleanVar so it persists and
         # auto-saves through the same per-agent trace as every other field.
         self.settings_collapsed_var = tk.BooleanVar(value=True)
+
+        # this site's SHOW/HIDE toggle (GUI rework Phase 12, spec item 3A:
+        # "moze da se prikaze/sakrije bilo koji ... da ostane samo jedan
+        # vidljiv" — either site's panel can be hidden so only the other
+        # stays visible). True = shown (default, today's behaviour). The
+        # toggle widget itself lives ABOVE both panels (PainterGui.
+        # _build_options's "Show:" row, via build_visibility_toggle below)
+        # — never INSIDE this panel, or hiding it would hide its own only
+        # way back. set_run_state is the single choke point that (a)
+        # greys _visible_btn out while this site's job is running or a
+        # quota auto-restart is pending (Stop/Pause live only on THIS
+        # panel, so hiding it then would strand the job with no control
+        # surface) and (b) forces this back to True — logging why — if a
+        # HIDDEN site's job goes live without a click (a quota
+        # auto-restart, an AI-check resend: both call PainterGui.
+        # _start_site directly, bypassing btn_start).
+        self.visible_var = tk.BooleanVar(value=True)
+        # set once PainterGui builds this site's entry in the "Show:" row
+        # (build_visibility_toggle, after __init__ returns) — None until
+        # then, exactly like _button_pairs' second (compact) entry is
+        # absent until build_compact runs; set_run_state tolerates either.
+        self._visible_btn: ctk.CTkSwitch | None = None
 
         # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — OFF
         # by default (a deliberate DEFORM, not everyone's images need
@@ -2123,11 +2155,23 @@ class AgentPanel(ttk.Labelframe):
             self.keep_all_steps_var,
         ).pack(side="left")
 
+        # the whole Upscale-gate sub-block (GUI rework Phase 12): makes
+        # sense ONLY while the Upscale switch itself is on, so it lives
+        # in its OWN sub-frame, packed/unpacked by
+        # _apply_upscale_gate_visibility — independently of
+        # settings_collapsed_var (this sub-frame is a CHILD of ``box``;
+        # hiding/showing ``box`` itself never touches a child's own
+        # pack state, so the two toggles compose like a plain AND: only
+        # visible when BOTH the Settings gear is expanded AND Upscale
+        # is on).
+        self._upscale_gate_box = ttk.Frame(box)
+
         ttk.Label(
-            box, text="Upscale gate (this site):", style="Head.TLabel"
+            self._upscale_gate_box, text="Upscale gate (this site):",
+            style="Head.TLabel",
         ).pack(anchor="w", pady=(4, 0))
 
-        row = ttk.Frame(box)
+        row = ttk.Frame(self._upscale_gate_box)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="min side", width=8).pack(side="left")
         Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
@@ -2140,11 +2184,36 @@ class AgentPanel(ttk.Labelframe):
         # WHICH images qualify — a stacked FilterEditor (Phase 4) sharing
         # the app-wide preset library, seeded with today's aspect gate
         self.upscale_filter = FilterEditor(
-            box, conditions=self._default_upscale_conditions,
+            self._upscale_gate_box,
+            conditions=self._default_upscale_conditions,
             presets=self._filter_presets,
             on_presets_changed=self._on_filter_presets_changed,
         )
         self.upscale_filter.pack(fill="x", pady=(2, 0))
+
+        # live show/hide as Upscale itself is flipped — even while the
+        # Settings gear stays expanded (GUI rework Phase 12); also
+        # covers a settings-restore .set() (apply_settings, via _vars())
+        # since a trace fires on every write, not only interactive ones
+        self.upscale_var.trace_add(
+            "write", lambda *_a: self._apply_upscale_gate_visibility()
+        )
+        self._apply_upscale_gate_visibility()  # correct initial state
+
+    def _apply_upscale_gate_visibility(self) -> None:
+        """Reflect ``upscale_var`` onto the Upscale-gate sub-block (GUI
+        rework Phase 12): the min-side spinner + its FilterEditor are
+        meaningless once Upscale itself is off, so they disappear even
+        if the Settings gear stays expanded. Plain pack/pack_forget, no
+        smooth_transition — unlike _toggle_settings's own deliberate
+        owner-click animation, this fires from a trace on EVERY write
+        (an interactive click through the switch AND a silent settings
+        restore alike), so it stays as unobtrusive as
+        _apply_finetune_visibility's own plain reflect."""
+        if self.upscale_var.get():
+            self._upscale_gate_box.pack(fill="x")
+        else:
+            self._upscale_gate_box.pack_forget()
 
     def _apply_finetune_visibility(self) -> None:
         """Reflect ``settings_collapsed_var``: pack or unpack this agent's
@@ -2251,11 +2320,32 @@ class AgentPanel(ttk.Labelframe):
         """Start is available unless the site runs; Stop is available
         while it runs OR while a quota auto-restart is pending (Stop
         then cancels the pending restart). Styles every registered
-        button pair (full panel + collapsed strip)."""
+        button pair (full panel + collapsed strip).
+
+        GUI rework Phase 12: the SAME "running or pending_restart"
+        window also (a) greys out the show/hide toggle — this panel is
+        the only place Stop/Pause live for this site, so hiding it
+        while either is needed would strand the job — and (b), since a
+        HIDDEN panel's site can still go live without a click (a quota
+        auto-restart, an AI-check resend both call PainterGui.
+        _start_site directly), forces visible_var back to True and logs
+        why whenever that happens, so the control and what is on screen
+        never silently disagree."""
         for start_btn, stop_btn in self._button_pairs:
             style_action_button(start_btn, "success", not running)
             style_action_button(
                 stop_btn, "danger", running or pending_restart
+            )
+        locked = running or pending_restart
+        if locked and not self.visible_var.get():
+            self._on_log(
+                f"{SITES[self.site_key].name}: un-hiding its panel — a"
+                " live job needs its Start/Stop/Pause controls"
+            )
+            self.visible_var.set(True)
+        if self._visible_btn is not None:
+            self._visible_btn.configure(
+                state="disabled" if locked else "normal"
             )
 
     def set_paused(self, is_paused: bool) -> None:
@@ -2294,6 +2384,21 @@ class AgentPanel(ttk.Labelframe):
         self._button_pairs.append((start, stop))
         return cluster
 
+    def build_visibility_toggle(self, parent) -> ctk.CTkSwitch:
+        """This site's entry in the shared "Show:" row above both
+        AgentPanels (GUI rework Phase 12, spec item 3A) — a plain switch
+        bound to ``visible_var`` so the row and the panel can never
+        silently disagree (Tk's ``variable=`` binding keeps them in
+        lockstep both ways: a click here flips the var, a programmatic
+        ``.set()`` — settings restore, or set_run_state's own forced
+        re-show — updates the switch). Kept as ``self._visible_btn`` so
+        ``set_run_state`` can grey it out while this site's job needs
+        its own panel reachable."""
+        self._visible_btn = rounded_switch(
+            parent, SITES[self.site_key].name, self.visible_var,
+        )
+        return self._visible_btn
+
     def pace_floats(self) -> tuple[float, float, float, float]:
         """The four pace numbers — ValueError propagates to the
         caller's validation message."""
@@ -2327,6 +2432,7 @@ class AgentPanel(ttk.Labelframe):
             "force_aspect_w": self.force_aspect_w_var,
             "force_aspect_h": self.force_aspect_h_var,
             "keep_all_steps": self.keep_all_steps_var,
+            "visible": self.visible_var,
         }
 
     def persist_vars(self) -> list[tk.Variable]:
@@ -4112,6 +4218,36 @@ def _migrate_legacy_upscale_gate(min_width, aspect_min, aspect_max) -> dict:
     }
 
 
+def _visible_agent_columns(
+    order: list[str], visible: dict[str, bool],
+) -> dict[str, int]:
+    """Left-to-right column index for each VISIBLE key in ``order`` (GUI
+    rework Phase 12, spec item 3A: either site's AgentPanel can be
+    hidden so only the other stays on screen). A hidden key
+    (``visible.get(key, True)`` is False) is simply ABSENT from the
+    result — the remaining visible panel(s) compact toward column 0
+    instead of leaving a dead gap where the hidden one used to sit, e.g.
+    ChatGPT hidden, Gemini alone -> ``{"gemini": 0}``, never
+    ``{"gemini": 1}``. Both visible -> ``{"chatgpt": 0, "gemini": 1}``;
+    both hidden (never reached in practice — set_run_state forces a
+    running site back to visible, and a site that never ran can still
+    be hidden by hand, which IS a legal "nothing showing" state) ->
+    ``{}``.
+
+    Pure and Tk-free — ``PainterGui._relayout_agents`` is the only
+    caller, applying the result to real ``grid()``/``grid_remove()``
+    calls plus each column's weight (0 for an unused column so the
+    visible one(s) expand into the freed width, the same reset-then-
+    reassign technique ``DashGrid.relayout`` already uses)."""
+    cols: dict[str, int] = {}
+    i = 0
+    for key in order:
+        if visible.get(key, True):
+            cols[key] = i
+            i += 1
+    return cols
+
+
 # ---------------------------------------------------------------------
 # Main Menu (GUI rework Phase 10)
 # ---------------------------------------------------------------------
@@ -4573,16 +4709,67 @@ class PainterGui:
         """The collapsed strip: one '[logo] Name [Start][Stop]' cluster
         per site. Built once (unpacked); _set_collapsed swaps it in for
         the full controls. The freshly-created Start/Stop buttons inherit
-        the correct availability via each panel's set_run_state."""
+        the correct availability via each panel's set_run_state.
+
+        GUI rework Phase 12: this is also where each site's visible_var
+        starts driving _relayout_agents — wired here (not in
+        _build_options) because _relayout_agents also hides/shows THESE
+        clusters, so it needs them to already exist; both this method's
+        own reassert loop and the fresh trace read/observe the SAME
+        settled state, in the SAME loop, once."""
         self._compact_box = ttk.Frame(parent)
+        self._compact_clusters: dict[str, ttk.Frame] = {}
         for key in sorted(SITES):
             cluster = self.agents[key].build_compact(self._compact_box)
             cluster.pack(side="left", padx=(0, COMPACT_CLUSTER_GAP_PX))
+            self._compact_clusters[key] = cluster
         for key, panel in self.agents.items():
             panel.set_run_state(
                 running=key in self._running,
                 pending_restart=key in self._restart_jobs,
             )
+            panel.visible_var.trace_add(
+                "write", lambda *_a: self._relayout_agents()
+            )
+
+    def _relayout_agents(self) -> None:
+        """Reconcile BOTH per-site surfaces — the full ``agents`` grid
+        AND the collapsed strip's ``build_compact`` clusters — with the
+        current ``visible_var`` of each (GUI rework Phase 12, spec item
+        3A). Driven by the trace ``_build_compact`` wires on every
+        panel's ``visible_var``, so a toggle click, a settings restore,
+        and ``set_run_state``'s own forced re-show (a hidden site's job
+        going live) all reach here the SAME way — one reconciliation
+        function, not three call sites re-deriving it.
+
+        ``_visible_agent_columns`` (pure, Tk-free) decides which column
+        each VISIBLE site lands in, compacting toward 0 so hiding one
+        site never leaves the other stuck in a half-width column with a
+        dead gap beside it — the unused column's weight drops to 0 (the
+        same reset-then-reassign technique ``DashGrid.relayout`` already
+        uses) so the remaining panel's column takes all the freed width.
+        The compact strip needs no such column bookkeeping: ``pack``
+        already closes the gap on its own when one cluster is
+        forgotten."""
+        visible = {
+            key: panel.visible_var.get() for key, panel in self.agents.items()
+        }
+        cols = _visible_agent_columns(sorted(SITES), visible)
+        for c in range(len(SITES)):
+            self._agents_frame.columnconfigure(c, weight=0)
+        for key, panel in self.agents.items():
+            shown = key in cols
+            if shown:
+                panel.grid(row=0, column=cols[key], sticky="nsew", padx=4)
+                self._agents_frame.columnconfigure(cols[key], weight=1)
+            else:
+                panel.grid_remove()
+            cluster = self._compact_clusters[key]
+            if shown:
+                cluster.pack(side="left", padx=(0, COMPACT_CLUSTER_GAP_PX))
+            else:
+                cluster.pack_forget()
+        self._scroll.refresh()
 
     def _set_collapsed(self, collapsed: bool) -> None:
         """Swap the full controls for the thin per-agent strip (or back).
@@ -4919,22 +5106,38 @@ class PainterGui:
             row, "Browse…", command=self._pick_out,
         ).pack(side="left", padx=(8, 0))
 
+        # the shared "Show:" row (GUI rework Phase 12, spec item 3A) —
+        # ABOVE both panels, deliberately never INSIDE either one: a
+        # control that could hide itself would strand the owner with no
+        # way back. Built once both panels exist below (loop first, row
+        # second) since it needs each AgentPanel's build_visibility_
+        # toggle; relayout wiring (the trace that actually grids/hides
+        # the panels) is registered in _build_compact, once the
+        # collapsed-strip clusters it also drives exist too.
+        show_row = ttk.Frame(lf)
+        show_row.pack(fill="x", pady=(0, 2))
+        ttk.Label(show_row, text="Show:").pack(side="left")
+
         # the two per-agent panels side by side — everything below the
         # shared Output line is PER SITE (full agent separation)
-        agents = ttk.Frame(lf)
-        agents.pack(fill="x", pady=(4, 2))
+        self._agents_frame = ttk.Frame(lf)
+        self._agents_frame.pack(fill="x", pady=(4, 2))
         self.agents: dict[str, AgentPanel] = {}
         for i, key in enumerate(sorted(SITES)):
             panel = AgentPanel(
-                agents, key,
+                self._agents_frame, key,
                 on_start=self._start_site, on_stop=self._stop_site,
                 on_pause=self._toggle_pause_job,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
+                on_log=self._log,
             )
             panel.grid(row=0, column=i, sticky="nsew", padx=4)
-            agents.columnconfigure(i, weight=1)
+            self._agents_frame.columnconfigure(i, weight=1)
             self.agents[key] = panel
+            panel.build_visibility_toggle(show_row).pack(
+                side="left", padx=(6, 0)
+            )
 
     def _build_toolbar(self, parent) -> None:
         row = ttk.Frame(parent)

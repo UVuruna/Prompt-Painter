@@ -496,6 +496,31 @@ their pre-running spots.
   report would collide).
 - **Output** — the folder; images save DIRECTLY to
   `<out>/<site>/<drop-path>` (no approval step).
+- **Show/hide per site** (GUI rework Phase 12, spec item 3A — "moze da
+  se prikaze/sakrije bilo koji tj da ostane samo jedan vidljiv") — a
+  "Show:" row of two compact switches sits ABOVE both panels (never
+  INSIDE either one — a control that could hide itself would strand
+  the owner with no way back), each bound to that `AgentPanel`'s own
+  `visible_var` (`build_visibility_toggle`, default True, persisted
+  per agent). `PainterGui._relayout_agents` — driven by a trace on
+  `visible_var`, wired once both the panel grid and the collapsed
+  strip's `build_compact` clusters exist — `grid()`/`grid_remove()`s
+  each panel AND its collapsed-strip cluster together, and the pure
+  `_visible_agent_columns(order, visible)` helper compacts whichever
+  panel(s) remain toward column 0 (reset-then-reassign column weight,
+  the same technique `DashGrid.relayout` already uses) so hiding one
+  site never leaves the other stuck in a half-width column with a dead
+  gap beside it. Hiding a site whose job is RUNNING or has a pending
+  quota auto-restart is disallowed — `set_run_state` greys the toggle
+  out for that same window (Stop/Pause live only on this panel, so
+  hiding it then would strand the job) and, since a HIDDEN site can
+  still go live without a click (a quota auto-restart, an AI-check
+  resend both call `_start_site` directly), forces `visible_var` back
+  to True and logs why whenever that happens, so the toggle and what
+  is on screen never silently disagree. DashGrid's own JOB_ORDER-driven
+  dashboard-panel handling is untouched by any of this — a hidden
+  site's Dashboard panel still appears exactly as before when its job
+  runs; only the CONTROLS surface hides.
 - **The two AGENT PANELS** (2026-07-18, full per-agent
   separation) — ChatGPT and Gemini each get their OWN
   `AgentPanel` labelframe (site logo in the header) holding
@@ -558,7 +583,21 @@ their pre-running spots.
   filter row's own FROM ≤ TO is already enforced by `FilterEditor`
   itself, so no separate aspect-ordering check is needed here) before
   spawning. The shipped default (min side 800, Aspect (range) 0.90–1.10
-  IF) reproduces the OLD locked/four-field gate byte-identically.
+  IF) reproduces the OLD locked/four-field gate byte-identically. GUI
+  rework Phase 12 additionally gates the WHOLE gate sub-block
+  (`_upscale_gate_box`: the "Upscale gate (this site):" heading, the
+  min-side Spinner row and the embedded `FilterEditor`) on the
+  **Upscale** switch itself, live, via a `trace_add("write", …)` on
+  `upscale_var` calling `_apply_upscale_gate_visibility` — turning
+  Upscale off hides the whole sub-block EVEN WHILE the Settings gear
+  stays expanded (it used to sit there always, gear-expanded or not);
+  turning it back on reshows it with whatever it was last configured
+  to. Composes as a plain AND with the gear's own collapse (a pack/
+  pack_forget on a CHILD of `_finetune_box` is independent of the
+  parent's own pack state), and the trace fires identically for an
+  interactive click and a settings-restore `.set()` — no separate
+  "apply on load" call needed, unlike `settings_collapsed_var`, which
+  has no trace of its own.
   **Force Aspect Ratio (this site)** (GUI rework Phase 8, default OFF)
   — a `Force to ratio` switch plus a target **W : H** pair, edited
   two-way with an embedded **`AspectRatioCanvas`** (the SAME Phase 5

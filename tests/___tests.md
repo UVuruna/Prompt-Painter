@@ -289,6 +289,41 @@ tile id, the Menu button calls `on_menu`, and `set_active` fills/
 outlines buttons via their `border_width` (0 filled / 1 outline) —
 never touching the disabled placeholder.
 
+### `test_gui_agent_visibility.py` — Per-Site Show/Hide + Upscale-Gate Visibility
+GUI rework Phase 12. `gui._visible_agent_columns(order, visible)` is the
+pure, Tk-free column resolver behind `PainterGui._relayout_agents`: both
+visible keep their order, hiding either one leaves the survivor
+compacted into column 0 (never stuck in column 1 with a dead gap
+beside it), both hidden is a legal empty result, and a missing key
+defaults visible (matches everything). `AgentPanel`'s new
+`visible_var`/`build_visibility_toggle`/`set_run_state` get a real
+(withdrawn) Tk root (the SAME `make_panel` convention
+test_gui_upscale.py/test_gui_pipeline.py already established): the var
+defaults True, is in `_PERSIST`/`_vars()`, and round-trips through
+`get_settings`/`apply_settings` (a missing key on an old settings.json
+keeps the default, like every other field); `set_run_state` tolerates
+no toggle built yet (the real `__init__` order — PainterGui calls
+`build_visibility_toggle` only AFTER construction), greys the toggle
+out while `running` OR `pending_restart` (the same window Stop already
+uses), and — the one genuinely stateful behaviour — forces a HIDDEN
+panel's `visible_var` back to True and calls `on_log` exactly once on
+the False→True transition (never on an already-visible run, never
+without `on_log` passed — defaults to a harmless no-op, so every OTHER
+test file's own headless `make_panel` stays unaffected). The
+Upscale-gate sub-block (`_upscale_gate_box`, Phase 6's min-side
+Spinner + `FilterEditor`) is proven to track `upscale_var` live via its
+`winfo_manager()` (packed/`""`) independently of
+`settings_collapsed_var` — a settings-restore `.set()` fires the same
+trace as an interactive click. `PainterGui._relayout_agents` itself
+runs unbound against a small duck-typed `FakeGui` carrying REAL
+`AgentPanel`/`ttk.Frame` widgets in the SAME two-container shape
+production uses (a grid-managed `_agents_frame` and a pack-managed
+compact strip — Tk refuses to mix managers on one parent): both
+visible grids/packs both, hiding either removes ONLY that one (panel
+AND its collapsed-strip cluster) and leaves the survivor's column
+untouched or compacted to 0 as appropriate, and re-showing restores
+both original columns.
+
 ### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.
 Also the session-scoped `tk_root` fixture (GUI rework Phase 4) — ONE
