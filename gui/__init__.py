@@ -22,7 +22,6 @@ table) and the detailed **Log**.
 
 from __future__ import annotations
 
-import io
 import math
 import queue
 import random
@@ -32,7 +31,6 @@ import time
 import tkinter as tk
 import webbrowser
 from dataclasses import replace
-from tkinter import font as tkfont
 from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
@@ -42,7 +40,7 @@ from typing import Callable
 
 import customtkinter as ctk
 import ttkbootstrap as tb
-from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageGrab, ImageTk
+from PIL import Image, ImageDraw, ImageTk
 
 from painter.config import (
     AI_CALL_PAUSE_S,
@@ -179,9 +177,91 @@ from painter.config import (
     theme_pair,
     tile_for_kind,
 )
-from painter import aspect, filters, jobtemp
+from painter import aspect, config, filters, jobtemp
 from painter.settings import load_settings, save_settings
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
+from . import widgets
+from .icons import (
+    ICON_DIR,
+    ICON_TARGET_PX,
+    SVG_OVERSAMPLE,
+    _ICONS,
+    _QT_APP,
+    _QT_UNSUPPORTED_SVG,
+    _radial_disc,
+    _render_moon_knob,
+    _render_sun_knob,
+    _render_switch_track,
+    _render_theme_cover_icon,
+    _svg_to_pil,
+    icon,
+)
+from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
+from .switch import DayNightSwitch
+from .theme import (
+    THEME_TOPLEVELS,
+    THEMED_TK,
+    TOOL_CHANGED_TAG,
+    TOOL_SKIP_TAG,
+    _TK_SKIN,
+    _apply_listbox_skin,
+    _apply_surface_skin,
+    _apply_text_skin,
+    _apply_theme_now,
+    _apply_tree_skin,
+    _fade_out_overlay,
+    _skin,
+    _snapshot_overlay,
+    apply_theme,
+    recolor_tk_registry,
+    register_painter_day,
+    setup_style,
+    skin_canvas,
+    skin_listbox,
+    skin_text,
+    skin_toplevel,
+    skin_tree,
+    smooth_transition,
+)
+from .widgets import (
+    BTN_HEIGHT,
+    BTN_RADIUS,
+    FONT_BASE_DEFAULT,
+    FONT_MAX,
+    FONT_MIN,
+    FONT_MONOSPACE,
+    FONT_ROLES,
+    FONT_SANS,
+    HOVER_DARKEN,
+    INPUT_HEIGHT,
+    INPUT_RADIUS,
+    EdgeIconButton,
+    Spinner,
+    _button_colors,
+    _CTK_FONTS,
+    _darken,
+    _darken_pair,
+    _input_colors,
+    _parse_fraction,
+    _parse_int_range,
+    _parse_nonneg_int,
+    _style_icon_bar_button,
+    _TK_FONTS,
+    _untheme_inner_entry,
+    ctk_font,
+    folder_of,
+    font_size,
+    job_color,
+    rels_in_folder,
+    rounded_button,
+    rounded_combo,
+    rounded_entry,
+    rounded_switch,
+    set_font_base,
+    status,
+    style_action_button,
+    tk_font,
+)
 
 # ---------------------------------------------------------------------
 # Theming — TWO coordinated backbones flipped as one (owner 2026-07-18)
@@ -197,140 +277,10 @@ from painter.sheet_parser import Sheet, SheetError, parse_sheet
 
 # the LIVE theme name — status()/skinners read it at call time, so
 # lazily-built widgets never hold a stale global
-ACTIVE_THEME = "night"
 
 
-def status(role: str) -> str:
-    """The ACTIVE theme's semantic status colour for one role (read
-    live, so a widget built after a flip gets the right colour)."""
-    return THEMES[ACTIVE_THEME]["status"][role]
 
 
-def job_color(kind: str) -> str:
-    """The ACTIVE theme's single hex for one job kind — resolves the
-    (day, night) ``JOB_COLORS`` pair the same way ``status()`` resolves
-    the status palette, for plain-tk drawing (Canvas shapes) that CTk's
-    automatic light/dark tuple resolution can't reach (e.g.
-    ``AspectRatioCanvas``)."""
-    day, night = job_color_pair(kind)
-    return day if ACTIVE_THEME == "day" else night
-
-# button icons — SVG-first (the owner's assets/icons/*.svg), rasterized
-# through Qt's QSvgRenderer (PySide6, already a monorepo build dep) at
-# 4x and LANCZOS-downscaled for crispness; PNG is the fallback for
-# icons with no svg (web, ai) and for svgs Qt cannot render (see
-# _QT_UNSUPPORTED_SVG). Resolved beside gui.py, never the CWD.
-ICON_DIR = Path(__file__).resolve().parent / "assets" / "icons"
-ICON_TARGET_PX = 20  # max icon side inside a button / beside a switch
-SVG_OVERSAMPLE = 4  # rasterize at 4x, then LANCZOS down
-
-# QtSvg implements the SVG Tiny profile: clipPath/mask/filter (typical
-# of Illustrator raster-trace exports like gemini.svg, 12 embedded
-# rasters under 28 clipPaths) render as garbage — such files need a
-# pre-rasterized .png sibling (gemini.png was rendered once from the
-# svg via chromium, transparent, 512 px).
-_QT_UNSUPPORTED_SVG = (b"<clipPath", b"<mask", b"<filter")
-
-# CTk widgets show CTkImage (PIL-backed, smooth downscale) — cached per
-# (name, size) for the whole process so every widget reuses one
-# instance per icon.
-_ICONS: dict[tuple[str, int], ctk.CTkImage] = {}
-
-# QSvgRenderer needs a live QGuiApplication; created lazily on the
-# first svg icon and kept for the whole process (never exec()-ed — it
-# only serves offscreen painting, tkinter keeps the event loop).
-_QT_APP = None
-
-# the site logos (assets/icons stems) now live in config.JOB_LOGO —
-# one home shared by the agent panels, dashboard panels and buttons.
-
-# ---------------------------------------------------------------------
-# the font registry — CSS-rem style: ONE root size, every role a
-# multiplier of it. Ctrl+MouseWheel / Ctrl+(+/-) zoom the root and the
-# whole window rescales proportionally (set_font_base).
-# ---------------------------------------------------------------------
-
-FONT_SANS = "Segoe UI"
-FONT_MONOSPACE = "Consolas"
-FONT_BASE_DEFAULT = 10  # the root ("rem") size the GUI ships with
-FONT_MIN, FONT_MAX = 7, 20  # zoom clamp
-FONT_BASE = FONT_BASE_DEFAULT  # the LIVE root size (zoom mutates it)
-
-# role -> (multiplier, family, weight). The multipliers reproduce the
-# pre-zoom look exactly (Big 16/root 10 = 1.6 and so on).
-FONT_ROLES: dict[str, tuple[float, str, str]] = {
-    "root": (1.0, FONT_SANS, "normal"),   # body text, entries, combos
-    "bold": (1.0, FONT_SANS, "bold"),     # buttons, Value labels, **bold**
-    "head": (1.1, FONT_SANS, "bold"),     # section headers, doc h3
-    "title": (1.6, FONT_SANS, "bold"),    # the site panel titles
-    "spin": (1.2, FONT_SANS, "bold"),     # the Spinner +/- glyphs
-    "mono": (0.9, FONT_MONOSPACE, "normal"),  # log, queue list, code
-    "doc_h1": (1.5, FONT_SANS, "bold"),   # DocWindow headings
-    "doc_h2": (1.2, FONT_SANS, "bold"),
-}
-TREE_ROW_FACTOR = 2.4  # Treeview rowheight = root size * this
-
-# one SHARED font object per role — tk named fonts and CTkFonts both
-# propagate a .configure(size=...) to every widget/style/tag that
-# references them, so re-applying a zoom is automatic
-_TK_FONTS: dict[str, tkfont.Font] = {}
-_CTK_FONTS: dict[str, ctk.CTkFont] = {}
-
-
-def font_size(role: str) -> int:
-    """The role's CURRENT pixel size (root size x its multiplier)."""
-    return max(round(FONT_BASE * FONT_ROLES[role][0]), 5)
-
-
-def tk_font(role: str) -> tkfont.Font:
-    """The role's shared named tk font — for ttk styles, tk widgets
-    and Text tags (created lazily; needs the root window)."""
-    if role not in _TK_FONTS:
-        _mult, family, weight = FONT_ROLES[role]
-        _TK_FONTS[role] = tkfont.Font(
-            family=family, size=font_size(role), weight=weight
-        )
-    return _TK_FONTS[role]
-
-
-def ctk_font(role: str) -> ctk.CTkFont:
-    """The role's shared CTkFont — for every customtkinter widget."""
-    if role not in _CTK_FONTS:
-        _mult, family, weight = FONT_ROLES[role]
-        _CTK_FONTS[role] = ctk.CTkFont(
-            family=family, size=font_size(role), weight=weight
-        )
-    return _CTK_FONTS[role]
-
-
-def set_font_base(size: int) -> bool:
-    """Zoom: move the root size (clamped) and rescale EVERY role.
-
-    Both font families are shared objects, so one .configure(size=...)
-    per role updates every widget, ttk style and Text tag at once;
-    only the Treeview row height needs an explicit re-apply. Returns
-    False when the clamp made it a no-op."""
-    global FONT_BASE
-    size = min(max(size, FONT_MIN), FONT_MAX)
-    if size == FONT_BASE:
-        return False
-    FONT_BASE = size
-    for role, f in _TK_FONTS.items():
-        f.configure(size=font_size(role))
-    for role, f in _CTK_FONTS.items():
-        f.configure(size=font_size(role))
-    tb.Style().configure(
-        "Treeview", rowheight=round(FONT_BASE * TREE_ROW_FACTOR)
-    )
-    return True
-
-# the rounded-control geometry — one place so every control matches
-# (RHMH runs CTkButton corner_radius 10–12; hover = colour * 0.75)
-BTN_RADIUS = 12
-BTN_HEIGHT = 30
-INPUT_RADIUS = 8
-INPUT_HEIGHT = 28
-HOVER_DARKEN = 0.75
 
 # --- Select-images window geometry (Rule #4) --------------------------
 # The three-level tree (collection -> folder -> image) is a frame-tree
@@ -453,7 +403,6 @@ WINDOW_MIN_W = 900          # root.minsize width
 WINDOW_MIN_H = 640          # root.minsize height
 WINDOW_SCREEN_MARGIN_PX = 80  # taskbar + titlebar + slack subtracted from
 #                               screen w/h when clamping a restored geometry
-WHEEL_DELTA_UNIT = 120      # one mouse-wheel notch (event.delta per detent)
 COMPACT_CLUSTER_GAP_PX = 24  # gap between the two agent clusters when collapsed
 COLLAPSE_GLYPH_EXPANDED = "▾  Controls"   # toggle label while controls show
 COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
@@ -498,1133 +447,34 @@ DENSE_COL_WRAP_PX = 320  # wraplength for a caption/note living in ONE
 # rather than depending on a wraplength that does not actually apply.
 MENU_TILE_CELL_MIN_PX = MENU_TILE_W + MENU_TILE_GAP_PX + 24
 
-# the Treeview row tags for a tool panel's image rows — their foregrounds
-# come from the theme's status colours, re-applied on a flip via skin_tree.
-# CHANGED (restorable) rows get a BOLD striking green/teal so they POP;
-# SKIPPED (unchanged) rows a muted grey so the two never blur together.
-TOOL_CHANGED_TAG = "toolchanged"
-TOOL_SKIP_TAG = "skip"
 
 
-def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
-    """Rasterize one SVG via QSvgRenderer: aspect-fit ``target_px`` on
-    the longer side, rendered at SVG_OVERSAMPLE x and LANCZOS-downscaled
-    so ~20 px icons stay crisp."""
-    global _QT_APP
-    from PySide6.QtCore import QBuffer, Qt
-    from PySide6.QtGui import QGuiApplication, QImage, QPainter
-    from PySide6.QtSvg import QSvgRenderer
 
-    if _QT_APP is None:
-        _QT_APP = QGuiApplication.instance() or QGuiApplication([])
-    renderer = QSvgRenderer(str(path))
-    if not renderer.isValid():
-        raise ValueError(f"unrenderable SVG: {path}")
-    base = renderer.defaultSize()
-    scale = target_px / max(base.width(), base.height())
-    final = (
-        max(round(base.width() * scale), 1),
-        max(round(base.height() * scale), 1),
-    )
-    qimg = QImage(
-        final[0] * SVG_OVERSAMPLE, final[1] * SVG_OVERSAMPLE,
-        QImage.Format.Format_ARGB32,
-    )
-    qimg.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(qimg)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-    renderer.render(painter)
-    painter.end()
-    buffer = QBuffer()
-    buffer.open(QBuffer.OpenModeFlag.ReadWrite)
-    qimg.save(buffer, "PNG")
-    pil = Image.open(io.BytesIO(bytes(buffer.data()))).convert("RGBA")
-    return pil.resize(final, Image.LANCZOS)
 
 
-def icon(name: str, size: int = ICON_TARGET_PX) -> ctk.CTkImage:
-    """The named icon, loaded once per (name, size) and scaled to fit.
 
-    ``name.svg`` wins when Qt can render it; ``name.png`` covers the
-    rest (web/ai have no svg; gemini.svg needs its pre-rasterized
-    sibling). A missing/unrenderable icon is a loud error (root
-    Rule #1) — no silent icon-less fallback.
-    """
-    key = (name, size)
-    if key not in _ICONS:
-        svg_path = ICON_DIR / f"{name}.svg"
-        png_path = ICON_DIR / f"{name}.png"
-        svg_ok = svg_path.is_file() and not any(
-            tag in svg_path.read_bytes() for tag in _QT_UNSUPPORTED_SVG
-        )
-        if svg_ok:
-            img = _svg_to_pil(svg_path, size)
-        elif png_path.is_file():
-            img = Image.open(png_path)
-            scale = min(size / max(img.width, img.height), 1.0)
-            img = img.convert("RGBA").resize(
-                (
-                    max(round(img.width * scale), 1),
-                    max(round(img.height * scale), 1),
-                ),
-                Image.LANCZOS,
-            )
-        elif svg_path.is_file():
-            raise FileNotFoundError(
-                f"GUI icon {svg_path} uses SVG features QtSvg cannot"
-                " render (clipPath/mask/filter) and has no .png sibling"
-                " — pre-rasterize it once (e.g. via a browser) and save"
-                f" it as {png_path}"
-            )
-        else:
-            raise FileNotFoundError(
-                f"GUI icon missing: {svg_path} / {png_path}"
-            )
-        _ICONS[key] = ctk.CTkImage(
-            light_image=img, dark_image=img, size=img.size
-        )
-    return _ICONS[key]
 
 
-# --- Day/Night switch art — anti-aliased PIL images (owner 2026-07-18)
-# tkinter Canvas has no anti-aliasing, so the switch composites PIL
-# images instead of raw ovals: the TWO track pills come straight from the
-# owner's website SVGs (reusing the _svg_to_pil path above), the SUN/MOON
-# knobs are rendered here as RGBA discs with a radial gradient, at
-# SWITCH_SUPERSAMPLE x the final size then LANCZOS-downscaled for smooth
-# edges. All four are built ONCE per switch (the switch is a fixed size —
-# it does not follow the font zoom) and held on the widget.
 
 
-def _radial_disc(
-    px: int, center_hex: str, edge_hex: str, hilite: tuple[float, float]
-) -> Image.Image:
-    """A supersampled RGBA disc (``px`` square): a radial gradient from
-    ``center_hex`` at the ``hilite`` point (fraction of the box) to
-    ``edge_hex`` at the rim, opaque inside the inscribed circle and fully
-    transparent outside. Rendered at native ``px`` — the caller LANCZOS-
-    downscales the whole knob so the rim anti-aliases smoothly."""
-    import numpy as np
 
-    yy, xx = np.mgrid[0:px, 0:px].astype(np.float32)
-    r = px / 2.0
-    hx, hy = hilite[0] * px, hilite[1] * px
-    # distance from the highlight, normalised so the farthest rim point
-    # (opposite the highlight) maps to 1.0 — keeps the ramp inside [0, 1]
-    dist = np.sqrt((xx - hx) ** 2 + (yy - hy) ** 2)
-    far = r + np.sqrt((hx - r) ** 2 + (hy - r) ** 2)
-    t = np.clip(dist / far, 0.0, 1.0)[..., None]
-    c0 = np.array(ImageColor.getrgb(center_hex), np.float32)
-    c1 = np.array(ImageColor.getrgb(edge_hex), np.float32)
-    rgb = c0 * (1.0 - t) + c1 * t
-    # circular alpha mask (hard here; the downscale smooths the rim)
-    dc = np.sqrt((xx - r + 0.5) ** 2 + (yy - r + 0.5) ** 2)
-    alpha = np.where(dc <= r, 255.0, 0.0)[..., None]
-    out = np.concatenate([rgb, alpha], axis=2).astype(np.uint8)
-    return Image.fromarray(out, "RGBA")
 
 
-def _render_moon_knob(d_px: int, ss: int) -> Image.Image:
-    """The MOON — a real moon, not a flat disc (owner 2026-07-20).
 
-    Three layers over the silver radial-gradient sphere, all driven by
-    the SWITCH_MOON_* / SWITCH_CRATER* config constants:
-      * 7 CRATERS of varied sizes (darker floors), each with a lit RIM
-        ARC on the side facing the incoming light;
-      * TERMINATOR shading — brightness ramps from the lit limb (the
-        SWITCH_MOON_LIGHT_DIR side) down to SWITCH_MOON_DARK_FLOOR on
-        the far limb across a soft smoothstep band, darkening crater
-        floors and rims with the surface so the sphere reads as lit
-        from one side;
-      * subtle surface MOTTLING — a low-res value-noise grid (FIXED
-        seed, so the moon is identical every build) bicubic-upscaled
-        over the disc, ± SWITCH_MOON_NOISE_AMPL brightness steps.
-    ``d_px`` = final diameter, ``ss`` = supersample factor (rendered at
-    ss x, LANCZOS-downscaled like every knob)."""
-    import numpy as np
 
-    s = d_px * ss
-    disc = _radial_disc(
-        s, SWITCH_MOON_CENTER, SWITCH_MOON_EDGE, SWITCH_KNOB_HILIGHT
-    )
-    draw = ImageDraw.Draw(disc)
-    crater = (*ImageColor.getrgb(SWITCH_CRATER), 255)
-    # the rims live on their own layer and alpha-BLEND onto the disc —
-    # drawing a translucent fill straight into the RGBA disc would
-    # REPLACE the alpha (a see-through ring), and a solid near-white
-    # arc read as a pac-man ring instead of a subtle lit rim
-    rims = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    rim_draw = ImageDraw.Draw(rims)
-    rim = (*ImageColor.getrgb(SWITCH_CRATER_RIM), SWITCH_CRATER_RIM_ALPHA)
-    lx, ly = SWITCH_MOON_LIGHT_DIR
-    # PIL arc degrees (x right, y down, clockwise from 3 o'clock): the
-    # rim arc is centred on the direction the light comes FROM
-    light_deg = math.degrees(math.atan2(ly, lx))
-    half_arc = SWITCH_CRATER_RIM_ARC_DEG / 2
-    for cf, cxf, cyf in SWITCH_CRATERS:
-        cd = s * cf
-        ccx, ccy = cxf * s, cyf * s
-        box = [ccx - cd / 2, ccy - cd / 2, ccx + cd / 2, ccy + cd / 2]
-        draw.ellipse(box, fill=crater)
-        rim_draw.arc(
-            box, start=light_deg - half_arc, end=light_deg + half_arc,
-            fill=rim, width=max(round(cd * SWITCH_CRATER_RIM_FRAC), ss),
-        )
-    disc.alpha_composite(rims)
-    # terminator shading x mottling on the RGB channels (alpha untouched)
-    arr = np.asarray(disc).astype(np.float32)
-    r = s / 2.0
-    yy, xx = np.mgrid[0:s, 0:s].astype(np.float32)
-    nx, ny = (xx - r + 0.5) / r, (yy - r + 0.5) / r
-    # projection onto the light direction: +1 = the lit limb, -1 = far
-    proj = (nx * lx + ny * ly) / math.hypot(lx, ly)
-    soft = SWITCH_MOON_TERMINATOR_SOFT
-    u = np.clip((proj + soft) / (2.0 * soft), 0.0, 1.0)
-    u = u * u * (3.0 - 2.0 * u)  # smoothstep across the terminator band
-    shade = SWITCH_MOON_DARK_FLOOR + (1.0 - SWITCH_MOON_DARK_FLOOR) * u
-    rng = np.random.default_rng(SWITCH_MOON_NOISE_SEED)
-    cells = rng.uniform(-1.0, 1.0, (SWITCH_MOON_NOISE_CELLS,) * 2)
-    noise = Image.fromarray(
-        ((cells + 1.0) * 127.5).astype(np.uint8), "L"
-    ).resize((s, s), Image.BICUBIC)
-    mottle = (
-        np.asarray(noise).astype(np.float32) / 127.5 - 1.0
-    ) * SWITCH_MOON_NOISE_AMPL
-    arr[..., :3] = np.clip(
-        arr[..., :3] * shade[..., None] + mottle[..., None], 0.0, 255.0
-    )
-    disc = Image.fromarray(arr.astype(np.uint8), "RGBA")
-    return disc.resize((d_px, d_px), Image.LANCZOS)
 
 
-def _render_sun_knob(d_px: int, ss: int) -> Image.Image:
-    """The SUN: a gold radial-gradient sphere over a soft blurred gold
-    glow. The image is SWITCH_SUN_CELL_SCALE x the knob so the glow has
-    room to fade; the sun disc sits centred. ``d_px`` = knob diameter."""
-    cell = round(d_px * SWITCH_SUN_CELL_SCALE)
-    s = cell * ss
-    # glow: a low-alpha gold disc behind, GaussianBlur-ed to a soft halo
-    glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    gd = d_px * SWITCH_SUN_GLOW_SCALE * ss
-    gc = s / 2.0
-    ImageDraw.Draw(glow).ellipse(
-        [gc - gd / 2, gc - gd / 2, gc + gd / 2, gc + gd / 2],
-        fill=(*ImageColor.getrgb(SWITCH_SUN_GLOW), SWITCH_SUN_GLOW_ALPHA),
-    )
-    glow = glow.filter(
-        ImageFilter.GaussianBlur(SWITCH_SUN_GLOW_BLUR * d_px * ss)
-    )
-    disc = _radial_disc(
-        d_px * ss, SWITCH_SUN_CENTER, SWITCH_SUN_EDGE, SWITCH_KNOB_HILIGHT
-    )
-    off = round((s - d_px * ss) / 2)
-    glow.alpha_composite(disc, (off, off))
-    return glow.resize((cell, cell), Image.LANCZOS)
 
 
-def _render_theme_cover_icon(target_name: str, min_dim: int) -> Image.Image:
-    """The BIG centred icon that rides the theme cross-fade cover: the
-    SUN of the theme being switched TO (day) or the MOON (night), the
-    SAME anti-aliased PIL renderers as the switch knob, sized to
-    ``SWITCH_COVER_ICON_FRAC`` of the window's min dimension. RGBA with
-    transparent surroundings so it composites cleanly onto the snapshot
-    (owner 2026-07-19)."""
-    d = max(round(min_dim * SWITCH_COVER_ICON_FRAC), 1)
-    ss = SWITCH_COVER_ICON_SS
-    if THEMES[target_name]["switch_on"]:   # going to day -> the sun
-        return _render_sun_knob(d, ss)
-    return _render_moon_knob(d, ss)        # going to night -> the moon
 
 
-def _render_switch_track(stem: str, w: int, h: int) -> Image.Image:
-    """One track pill: the owner's website switch SVG (in assets/icons),
-    rasterized anti-aliased through the icon SVG->PIL path and sized to
-    the exact pill box. A missing SVG is a loud error (Rule #1)."""
-    svg_path = ICON_DIR / f"{stem}.svg"
-    if not svg_path.is_file():
-        raise FileNotFoundError(
-            f"Day/Night switch track SVG missing: {svg_path}"
-        )
-    pil = _svg_to_pil(svg_path, w)
-    if pil.size != (w, h):
-        pil = pil.resize((w, h), Image.LANCZOS)
-    return pil
 
 
-def _darken(hex_color: str, factor: float = HOVER_DARKEN) -> str:
-    """The hover shade RHMH uses: the same colour scaled toward black."""
-    r = int(hex_color[1:3], 16)
-    g = int(hex_color[3:5], 16)
-    b = int(hex_color[5:7], 16)
-    return (
-        f"#{int(r * factor):02x}{int(g * factor):02x}{int(b * factor):02x}"
-    )
 
 
-def _darken_pair(
-    pair: tuple[str, str], factor: float = HOVER_DARKEN
-) -> tuple[str, str]:
-    """Darken each end of a (day, night) tuple so hover shades stay
-    theme-aware tuples the appearance mode can flip."""
-    return (_darken(pair[0], factor), _darken(pair[1], factor))
 
 
-def _button_colors(kind: str) -> dict:
-    """CTkButton colour kwargs for one semantic kind, as (day, night)
-    tuples — a single ctk.set_appearance_mode() then repaints every
-    button with zero re-walk. Solid kinds draw their fill AND label from
-    the per-theme BUTTON_FILL / BUTTON_TEXT pairs (owner 2026-07-19): the
-    DAY shade differs from NIGHT for every kind, and the neutral
-    'secondary' is a LIGHT sand fill with DARK text on day (never the
-    dark warm-grey that read brown on the cream window); coloured kinds
-    keep a white label in both themes."""
-    solid = ("secondary", "success", "danger", "info")
-    if kind in solid:
-        fill = button_fill_pair(kind)
-        return dict(
-            fg_color=fill, hover_color=_darken_pair(fill),
-            text_color=button_text_pair(kind),
-            text_color_disabled=theme_pair("light"),
-        )
-    outline = {
-        "secondary-outline": theme_pair("light"),
-        "danger-outline": theme_pair("danger"),
-        "success-outline": theme_pair("success"),
-    }
-    if kind in outline:
-        color = outline[kind]
-        return dict(
-            fg_color="transparent", border_width=1, border_color=color,
-            hover_color=_darken_pair(color, 0.35),
-            text_color=color, text_color_disabled=theme_pair("secondary"),
-        )
-    if kind == "link":  # borderless accent button (dashboard 'Show')
-        return dict(
-            fg_color="transparent", hover_color=theme_pair("dark"),
-            text_color=theme_pair("info"),
-            text_color_disabled=theme_pair("secondary"),
-        )
-    if kind == "expander":  # flat left-aligned ▶/▼ section header
-        return dict(
-            fg_color="transparent", hover_color=theme_pair("dark"),
-            text_color=theme_pair("fg"),
-            text_color_disabled=theme_pair("secondary"),
-            anchor="w",
-        )
-    raise ValueError(f"unknown button kind: {kind}")
 
-
-class EdgeIconButton(ctk.CTkButton):
-    """A CTkButton whose ICON sits at the left edge while the TEXT
-    centers in the remaining width — for stacked equal-width buttons
-    (Add…/Remove/Clear), where the default centered icon+text block
-    makes the icons jitter with the text length.
-
-    CTkButton lays image and text on an internal 5x5 grid (pad, image,
-    spacing, text, pad); this override pins the image column west and
-    gives the text cell all the remaining weight, centered."""
-
-    def _create_grid(self):
-        super()._create_grid()
-        if self._image_label is None or self._text_label is None:
-            return  # icon-less (or image-only) — default layout stands
-        # col 0 keeps its minsize (the corner inset) but stops growing;
-        # col 3 takes ALL the slack so the un-sticky text centers in it
-        self.grid_columnconfigure(0, weight=0)
-        self.grid_columnconfigure((1, 2), weight=0)
-        self.grid_columnconfigure(3, weight=1)
-        self.grid_columnconfigure(4, weight=0)
-        self._image_label.grid(row=2, column=1, sticky="w")
-        self._text_label.grid(row=2, column=3, sticky="")
-
-
-def rounded_button(
-    parent,
-    text: str,
-    command=None,
-    kind: str = "secondary",
-    icon_name: str | None = None,
-    compound: str = "left",
-    width: int = 0,
-    icon_edge: bool = False,
-    **kwargs,
-) -> ctk.CTkButton:
-    """Every GUI button: a rounded CTkButton in the darkly palette —
-    the RHMH look. ``width`` is a minimum in px (0 = fit the text);
-    the button grows to fit longer text either way. ``icon_edge``
-    pins the icon to the left edge and centers the text (the stacked
-    Collections buttons)."""
-    opts = _button_colors(kind)
-    opts.setdefault("bg_color", theme_pair("bg"))
-    opts.update(kwargs)
-    cls = EdgeIconButton if icon_edge else ctk.CTkButton
-    return cls(
-        parent, text=text, command=command, width=width,
-        height=BTN_HEIGHT, corner_radius=BTN_RADIUS,
-        font=ctk_font("bold"),
-        image=icon(icon_name) if icon_name else None,
-        compound=compound, **opts,
-    )
-
-
-def _input_colors() -> dict:
-    """Shared colour kwargs for rounded CTk entry/combobox fields, as
-    (day, night) tuples.
-
-    ``bg_color`` is pinned to the active window background so the canvas
-    corners around the rounded field never show the CTk theme's own gray
-    on a ttk parent."""
-    return dict(
-        fg_color=theme_pair("inputbg"), border_color=theme_pair("secondary"),
-        text_color=theme_pair("inputfg"), bg_color=theme_pair("bg"),
-    )
-
-
-def _untheme_inner_entry(field) -> None:
-    """Kill the square ring inside CTk entry-like widgets.
-
-    ttkbootstrap wraps EVERY plain-tk widget constructor and re-themes
-    the widget right after creation — the tkinter.Entry INSIDE a
-    CTkEntry/CTkComboBox gets ``highlightthickness=1`` with the darkly
-    selectbg ring, which reads as a lighter SQUARE inside the rounded
-    field. Unsubscribe it from ttkbootstrap's re-style publisher and
-    drop the ring so the field is one smooth rounded shape."""
-    from ttkbootstrap.publisher import Publisher
-
-    inner = field._entry
-    Publisher.unsubscribe(str(inner))
-    inner.configure(highlightthickness=0)
-
-
-def rounded_entry(parent, width: int = 140, **kwargs) -> ctk.CTkEntry:
-    """A rounded, bordered entry in the darkly palette."""
-    opts = _input_colors()
-    opts.update(kwargs)
-    field = ctk.CTkEntry(
-        parent, width=width, height=INPUT_HEIGHT,
-        corner_radius=INPUT_RADIUS, border_width=1,
-        font=ctk_font("root"), **opts,
-    )
-    _untheme_inner_entry(field)
-    return field
-
-
-def rounded_combo(
-    parent, values, variable, width: int = 140, **kwargs
-) -> ctk.CTkComboBox:
-    """A rounded dropdown bound to ``variable`` — read-only by default
-    (pass ``state="normal"`` to also allow free typing, e.g. the
-    FilterEditor preset-name combo, which doubles as a "type a new
-    name to save" field)."""
-    opts = _input_colors()
-    opts.update(
-        button_color=theme_pair("secondary"),
-        button_hover_color=_darken_pair(theme_pair("secondary")),
-        dropdown_fg_color=theme_pair("dark"),
-        dropdown_hover_color=theme_pair("selectbg"),
-        dropdown_text_color=theme_pair("fg"),
-    )
-    opts.update(kwargs)
-    state = opts.pop("state", "readonly")
-    field = ctk.CTkComboBox(
-        parent, values=list(values), variable=variable, width=width,
-        height=INPUT_HEIGHT, corner_radius=INPUT_RADIUS, border_width=1,
-        state=state, font=ctk_font("root"),
-        dropdown_font=ctk_font("root"), **opts,
-    )
-    _untheme_inner_entry(field)
-    return field
-
-
-class Spinner(ctk.CTkFrame):
-    """A compact [-][entry][+] spinner as ONE rounded unit (Rule #5:
-    one class — the four pace fields are its instances).
-
-    The entry keeps the caller's StringVar, direct typing stays
-    allowed and Start's validation is unchanged; +/- steps the value
-    (never below 0). Unparsable text is left for Start to report."""
-
-    def __init__(
-        self, parent, variable, step: float, entry_width: int = 40,
-        decimals: int | None = None,
-    ):
-        super().__init__(
-            parent, corner_radius=INPUT_RADIUS, border_width=1,
-            fg_color=theme_pair("inputbg"), border_color=theme_pair("secondary"),
-            bg_color=theme_pair("bg"),
-        )
-        self._var = variable
-        self._step = step
-        # 1.0 steps show "8", 0.1 steps show "0.6"; an explicit ``decimals``
-        # overrides (the aspect fields step 0.05 but want 2 decimals)
-        self._decimals = (
-            decimals if decimals is not None
-            else (0 if float(step).is_integer() else 1)
-        )
-        # the +/- pads: ~24 px wide (clickable), slightly lower than the
-        # frame so their canvases never overpaint the frame's own 1 px
-        # border (CTk scales canvases; a 24 px child + 2 px pady used to
-        # cover the bottom border row under the buttons)
-        btn = dict(
-            width=24, height=20, corner_radius=INPUT_RADIUS - 2,
-            fg_color="transparent", hover_color=theme_pair("selectbg"),
-            text_color=theme_pair("fg"), font=ctk_font("spin"),
-        )
-        ctk.CTkButton(
-            self, text="−", command=partial(self._bump, -1.0), **btn
-        ).pack(side="left", padx=(3, 0), pady=4)
-        entry = ctk.CTkEntry(
-            self, width=entry_width, height=INPUT_HEIGHT - 10,
-            corner_radius=0, border_width=0, fg_color="transparent",
-            text_color=theme_pair("inputfg"), justify="center",
-            font=ctk_font("root"), textvariable=variable,
-        )
-        _untheme_inner_entry(entry)
-        entry.pack(side="left", fill="x", expand=True, pady=4)
-        ctk.CTkButton(
-            self, text="+", command=partial(self._bump, 1.0), **btn
-        ).pack(side="left", padx=(0, 3), pady=4)
-
-    def _bump(self, sign: float) -> None:
-        try:
-            value = float(self._var.get())
-        except ValueError:
-            return  # typed garbage — Start's validation reports it
-        value = max(value + sign * self._step, 0.0)
-        self._var.set(f"{value:.{self._decimals}f}")
-
-
-def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
-    """A rounded on/off switch for the main run options."""
-    return ctk.CTkSwitch(
-        parent, text=text, variable=variable,
-        onvalue=True, offvalue=False,
-        font=ctk_font("root"),
-        fg_color=theme_pair("secondary"), progress_color=theme_pair("success"),
-        text_color=theme_pair("fg"), bg_color=theme_pair("bg"),
-    )
-
-
-def setup_style() -> None:
-    """The few named styles the active ttkbootstrap theme does not ship.
-
-    Reads ``style.colors`` LIVE, so re-running it after a theme_use()
-    reproduces the styles in the new palette (this is how the ttk half
-    of the app flips). Every font comes from the registry's shared named
-    fonts, so a zoom (set_font_base) re-renders all of them without
-    touching the styles again."""
-    style = tb.Style()
-    colors = style.colors
-    style.configure(".", font=tk_font("root"))
-    style.configure("Head.TLabel", font=tk_font("head"),
-                    foreground=colors.info)
-    style.configure("Big.TLabel", font=tk_font("title"))
-    style.configure("Value.TLabel", font=tk_font("bold"))
-    style.configure("Muted.TLabel", foreground=colors.light)
-    style.configure("Mono.TLabel", font=tk_font("mono"),
-                    foreground=colors.light)
-    style.configure("Treeview", font=tk_font("root"),
-                    rowheight=round(FONT_BASE * TREE_ROW_FACTOR))
-    style.configure("Treeview.Heading", font=tk_font("bold"))
-
-
-# ---------------------------------------------------------------------
-# Plain-tk colour registry — the ONLY place plain tk Text/Listbox/
-# Canvas/Toplevel colours live. Each widget is created through a skin_*
-# helper that colours it AND registers (widget, role); apply_theme()
-# then re-walks the flat registry, re-applying each role's skin from the
-# now-active palette and pruning dead widgets. ttk styles and CTk tuples
-# flip on their own; these do not, so they need the registry.
-# ---------------------------------------------------------------------
-THEMED_TK: list[tuple[tk.Misc, str]] = []
-
-
-def _apply_text_skin(widget: tk.Text) -> None:
-    colors = tb.Style().colors
-    widget.configure(
-        background=colors.inputbg, foreground=colors.inputfg,
-        insertbackground=colors.inputfg,
-        selectbackground=colors.selectbg,
-        selectforeground=colors.selectfg,
-        relief="flat", highlightthickness=0,
-    )
-
-
-def _apply_listbox_skin(widget: tk.Listbox) -> None:
-    colors = tb.Style().colors
-    widget.configure(
-        background=colors.inputbg, foreground=colors.inputfg,
-        selectbackground=colors.selectbg,
-        selectforeground=colors.selectfg,
-        relief="flat", highlightthickness=1,
-        highlightbackground=colors.border,
-        highlightcolor=colors.primary,
-    )
-
-
-def _apply_surface_skin(widget: tk.Misc) -> None:
-    """Canvas / Toplevel: just the active window background."""
-    widget.configure(background=tb.Style().colors.bg)
-
-
-def _apply_tree_skin(widget: ttk.Treeview) -> None:
-    """A tool-panel Treeview: (re-)tint the CHANGED- and SKIPPED-row tags
-    from the active theme's status colours. The base row colours follow
-    the ttk 'Treeview' style, but a per-widget TAG foreground does not — so
-    both are registered here and re-applied on every flip (owner
-    2026-07-19): CHANGED rows a striking green/teal, SKIPPED rows muted."""
-    widget.tag_configure(TOOL_CHANGED_TAG, foreground=status("toolchanged"))
-    widget.tag_configure(TOOL_SKIP_TAG, foreground=status("skip"))
-
-
-_TK_SKIN = {
-    "text": _apply_text_skin,
-    "listbox": _apply_listbox_skin,
-    "canvas": _apply_surface_skin,
-    "toplevel": _apply_surface_skin,
-    "tree": _apply_tree_skin,
-}
-
-
-def _skin(widget: tk.Misc, role: str) -> None:
-    _TK_SKIN[role](widget)
-    THEMED_TK.append((widget, role))
-
-
-def skin_text(widget: tk.Text) -> None:
-    """Colour a plain tk Text from the active palette and register it."""
-    _skin(widget, "text")
-
-
-def skin_listbox(widget: tk.Listbox) -> None:
-    _skin(widget, "listbox")
-
-
-def skin_canvas(widget: tk.Canvas) -> None:
-    _skin(widget, "canvas")
-
-
-def skin_tree(widget: ttk.Treeview) -> None:
-    """Configure a tool-panel tree's SKIPPED-row tag and register it so
-    the tint re-applies on a theme flip."""
-    _skin(widget, "tree")
-
-
-def skin_toplevel(widget: tk.Misc) -> None:
-    _skin(widget, "toplevel")
-
-
-def recolor_tk_registry() -> None:
-    """Re-apply every registered plain-tk widget's role skin from the
-    now-active palette; prune widgets destroyed since (the codebase's
-    tk.TclError idiom)."""
-    alive: list[tuple[tk.Misc, str]] = []
-    for widget, role in THEMED_TK:
-        try:
-            _TK_SKIN[role](widget)
-            alive.append((widget, role))
-        except tk.TclError:
-            pass  # widget destroyed — drop it
-    THEMED_TK[:] = alive
-
-
-# every theme-aware Toplevel (SelectWindow, DocWindow) registers itself
-# here on __init__ and unregisters on <Destroy>; apply_theme fires each
-# open one's own apply_theme() so it flips coherently with the main
-# window (their per-widget foregrounds do not follow ttk styles)
-THEME_TOPLEVELS: list = []
-
-
-def _apply_theme_now(name: str) -> None:
-    """The actual coherent flip (no animation): swap the ttkbootstrap
-    theme + re-run setup_style (the ttk half), flip the customtkinter
-    appearance mode (every CTk tuple re-resolves), recolour the plain-tk
-    registry, then fire every open Toplevel's apply_theme. No window
-    teardown — an active run's worker threads, dashboard counters and
-    quota countdowns all survive."""
-    global ACTIVE_THEME
-    ACTIVE_THEME = name
-    theme = THEMES[name]
-    tb.Style().theme_use(theme["ttkname"])
-    setup_style()
-    ctk.set_appearance_mode(theme["mode"])
-    recolor_tk_registry()
-    for top in list(THEME_TOPLEVELS):
-        try:
-            top.apply_theme()
-        except tk.TclError:
-            pass  # closed mid-flip
-
-
-# --- Snapshot cover + fade — the ONE transition mechanism ------------
-# tkinter cannot animate a relayout or a palette change: a live theme
-# flip repaints as a visible cascade of half-themed frames, and a big
-# collapse/expand (the Controls toggle, an agent's Settings gear) or a
-# window maximize/restore lands as one hard jump. ONE shared mechanism
-# hides all of these (owner 2026-07-20, generalizing the theme
-# cross-fade — Rule #5): smooth_transition() grabs the window into a
-# borderless topmost overlay, FORCES the cover painted, runs the mutate
-# callback (the theme flip / the relayout) hidden behind it, then fades
-# the overlay's window alpha out. A pure visual nicety — any cover
-# failure (ImageGrab unavailable, alpha unsupported, an unmapped
-# window) degrades to the plain instant mutate, never a stuck overlay.
-
-
-def _snapshot_overlay(root: tk.Misc, icon_factory=None) -> tk.Toplevel:
-    """Grab the root window's client area (PIL.ImageGrab) and mount it
-    in a borderless, topmost, fully-opaque Toplevel placed exactly over
-    the window. ``icon_factory(w, h)`` may return a PIL RGBA image (the
-    theme flip's big sun/moon) composited centred INTO the snapshot —
-    its transparent surroundings blend onto the grab, so the whole
-    cover fades as one. The PhotoImage is held on the overlay (tk keeps
-    no ref of its own) so it survives the whole fade."""
-    x, y = root.winfo_rootx(), root.winfo_rooty()
-    w, h = root.winfo_width(), root.winfo_height()
-    snap = ImageGrab.grab(bbox=(x, y, x + w, y + h)).convert("RGBA")
-    if icon_factory is not None:
-        icon = icon_factory(w, h)
-        snap.alpha_composite(
-            icon, ((w - icon.width) // 2, (h - icon.height) // 2)
-        )
-    photo = ImageTk.PhotoImage(snap)
-    overlay = tk.Toplevel(root)
-    overlay.overrideredirect(True)
-    overlay.geometry(f"{w}x{h}+{x}+{y}")
-    overlay.attributes("-topmost", True)
-    overlay.attributes("-alpha", 1.0)
-    label = tk.Label(
-        overlay, image=photo, borderwidth=0, highlightthickness=0
-    )
-    label.image = photo          # tk holds no ref — keep it alive here
-    label.pack(fill="both", expand=True)
-    overlay._snapshot = photo    # belt-and-braces: outlives the whole fade
-    overlay.update_idletasks()
-    return overlay
-
-
-def _fade_out_overlay(
-    root: tk.Misc, overlay: tk.Toplevel, fade_ms: int, fade_steps: int
-) -> None:
-    """Ramp the overlay's window alpha 1.0 -> 0.0 across ``fade_steps``
-    root.after ticks over ``fade_ms`` (ease-out — the stale snapshot
-    clears fast, then eases), then destroy it. A destroyed-mid-fade
-    overlay (TclError) ends the ramp cleanly, so no overlay is ever
-    left stuck on screen."""
-    steps = max(fade_steps, 1)
-    interval = max(round(fade_ms / steps), 1)
-
-    def tick(i: int) -> None:
-        try:
-            frac = i / steps
-            if frac >= 1.0:
-                overlay.destroy()
-                return
-            overlay.attributes("-alpha", (1.0 - frac) ** 2)  # ease-out
-            root.after(interval, tick, i + 1)
-        except tk.TclError:
-            try:
-                overlay.destroy()
-            except tk.TclError:
-                pass  # already gone
-
-    tick(1)
-
-
-def smooth_transition(
-    root,
-    mutate,
-    *,
-    icon_factory=None,
-    fade_ms: int = TRANSITION_FADE_MS,
-    fade_steps: int = TRANSITION_FADE_STEPS,
-) -> None:
-    """Run ``mutate()`` (a relayout / theme repaint) hidden behind a
-    snapshot cover, then fade the cover out — shared by the theme flip,
-    the Controls collapse, each agent's Settings gear and the window
-    maximize/restore cover.
-
-    The ORDER is what kills the visible jump (owner 2026-07-19): the
-    cover is forced fully mapped + painted by the window manager FIRST
-    (deiconify → lift → update, so DWM really shows it), only then does
-    the mutate run and settle (update_idletasks) behind it, and only
-    then does the fade start. With no window on screen — or on ANY
-    cover failure — the mutate simply runs instantly with a one-line
-    note (root Rule #1): the cover can never be the reason a toggle
-    stops working. ``mutate`` itself is NOT guarded — an exception in
-    it propagates loudly (never masked), with the overlay still fading
-    out via the ``finally`` so nothing sticks."""
-    if root is None or not (root.winfo_ismapped() and root.winfo_viewable()):
-        mutate()
-        return
-    overlay = None
-    try:
-        overlay = _snapshot_overlay(root, icon_factory)
-        # FORCE the cover fully mapped + painted BEFORE the mutate, so
-        # the relayout/repaint cascade is NEVER seen — only the snapshot.
-        overlay.deiconify()
-        overlay.lift()
-        overlay.update_idletasks()
-        overlay.update()            # DWM actually paints the cover now
-    except Exception as exc:        # visual nicety — never block the action
-        if overlay is not None:
-            try:
-                overlay.destroy()
-            except tk.TclError:
-                pass
-        print(f"[transition] cover unavailable, mutating instantly: {exc}")
-        mutate()
-        return
-    try:
-        mutate()                    # the change, hidden behind the cover
-        root.update_idletasks()     # settle the relayout, still hidden
-    finally:
-        _fade_out_overlay(root, overlay, fade_ms, fade_steps)
-
-
-def apply_theme(name: str, animate: bool = False) -> None:
-    """The ONE coherent theme flip, used by BOTH startup and the toggle.
-
-    Startup passes ``animate=False`` (no window exists yet) for an
-    instant flip. The switch passes ``animate=True``: the repaint
-    cascade hides behind the shared smooth_transition cover, riding the
-    NEXT theme's big sun/moon icon and the theme's own longer
-    SWITCH_FADE_* timing (a theme flip is ceremonial; the collapse and
-    maximize covers keep the snappier TRANSITION_FADE_* default)."""
-    root = tb.Style().master
-    if not animate or root is None:
-        _apply_theme_now(name)
-        return
-    smooth_transition(
-        root,
-        partial(_apply_theme_now, name),
-        icon_factory=lambda w, h: _render_theme_cover_icon(name, min(w, h)),
-        fade_ms=SWITCH_FADE_MS,
-        fade_steps=SWITCH_FADE_STEPS,
-    )
-
-
-def register_painter_day() -> None:
-    """Register the custom light theme ONCE (idempotent). No stock light
-    theme carries the owner's warm-gold accent, so 'day' is a custom
-    ThemeDefinition drawing every ttk widget from the site colours."""
-    from ttkbootstrap.style import ThemeDefinition
-
-    style = tb.Style()
-    day = THEMES["day"]
-    if day["ttkname"] in style.theme_names():
-        return
-    style.register_theme(
-        ThemeDefinition(day["ttkname"], day["ttk"], day["mode"])
-    )
-
-
-def folder_of(drop_path: str) -> str:
-    """The POSIX parent directory of a drop path — the L2 folder
-    identity shared by the dashboard tree and the Select window
-    (e.g. 'assets/archetype/trinity/Jesus.png' -> 'assets/archetype/
-    trinity'). A path with no directory collapses to '(root)'."""
-    folder = PurePosixPath(drop_path).parent.as_posix()
-    return "(root)" if folder in (".", "") else folder
-
-
-def rels_in_folder(rels, folder: str) -> list[str]:
-    """The subset of drop paths whose parent folder is exactly ``folder``
-    (by ``folder_of``) — backs the ToolPanel's folder-scoped before/after
-    viewer + RESTORE, so double-clicking one folder node touches ONLY that
-    folder's images, never the whole job (owner 2026-07-19)."""
-    return [rel for rel in rels if folder_of(rel) == folder]
-
-
-class ScrollFrame(ttk.Frame):
-    """A vertically (optionally also horizontally) scrollable frame.
-
-    Add children to ``self.body``. Without horizontal scroll the body
-    is stretched to the canvas width (content wraps, no x scrollbar);
-    with it the body keeps its natural width and a horizontal bar
-    appears.
-
-    ``fill_height=True`` additionally self-heals (owner 2026-07-21
-    workflow fix, ``_poll_fill_height``): whenever the embedded body's
-    true required height grows past what was last applied — a Settings
-    gear reveal, a filter row added, anything with no reference to THIS
-    ScrollFrame to call ``refresh()`` on, or even the very first settle
-    at construction — a cheap periodic check (``config.
-    SCROLL_FILL_HEIGHT_POLL_MS``) catches the mismatch and recomputes,
-    so a short window can always reach the true bottom of the content
-    by scrollbar or wheel, regardless of which caller forgot to ask.
-    """
-
-    def __init__(
-        self, master, horizontal: bool = False, fill_height: bool = False
-    ):
-        super().__init__(master)
-        self._stretch = not horizontal
-        # fill_height: keep the body AT LEAST as tall as the canvas, so a
-        # child packed expand=True (the notebook) fills the whole viewport
-        # when the content is shorter than the window (see
-        # _apply_fill_height) — and self-heals via _poll_fill_height, see
-        # the class docstring above.
-        self._fill_height = fill_height
-        self._fill_h = 0  # last forced body height (change-guarded loop break)
-        self._sr_job = None  # coalesced scrollregion pass (see _on_body)
-        self._sr_suspended = False  # bulk-build pause (see suspend_...)
-        self._resizing = False  # active window-resize debounce (see _on_canvas)
-        self._settle_job = None  # the resize-settle after() id
-        self._canvas_w = 0   # the newest canvas width (from <Configure>)
-        self._applied_w = -1  # the body width actually applied (deferred)
-        self._poll_job = None  # the fill_height self-heal poll after() id
-        self.canvas = tk.Canvas(self, highlightthickness=0)
-        skin_canvas(self.canvas)  # registered so its bg re-tints on a flip
-        vbar = ttk.Scrollbar(
-            self, orient="vertical", command=self.canvas.yview,
-            bootstyle="round",
-        )
-        self.canvas.configure(yscrollcommand=vbar.set)
-        self.body = ttk.Frame(self.canvas)
-        self._win = self.canvas.create_window(
-            (0, 0), window=self.body, anchor="nw"
-        )
-        self.body.bind("<Configure>", self._on_body)
-        self.canvas.bind("<Configure>", self._on_canvas)
-        vbar.pack(side="right", fill="y")
-        if horizontal:
-            hbar = ttk.Scrollbar(
-                self, orient="horizontal", command=self.canvas.xview,
-                bootstyle="round",
-            )
-            self.canvas.configure(xscrollcommand=hbar.set)
-            hbar.pack(side="bottom", fill="x")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.canvas.bind("<Enter>", self._bind_wheel)
-        self.canvas.bind("<Leave>", self._unbind_wheel)
-        # a global <MouseWheel> binding outlives the widget — drop it
-        # when the canvas is destroyed (e.g. the Select window closes
-        # while the pointer is still over it) so it never fires on a
-        # dead widget; and cancel any pending scrollregion pass
-        self.canvas.bind("<Destroy>", self._on_destroy)
-        if self._fill_height:
-            self._poll_fill_height()  # self-arms its own next tick, see below
-
-    def _on_body(self, _event) -> None:
-        # COALESCE: one expand that grids dozens of children fires a
-        # <Configure> per child — recomputing bbox('all') each time is
-        # O(N^2). Instead flag one after_idle pass and let the whole
-        # settled layout be scanned exactly ONCE.
-        if self._sr_suspended or self._resizing or self._sr_job is not None:
-            return
-        self._sr_job = self.after_idle(self._recompute_sr)
-
-    def suspend_scrollregion(self) -> None:
-        """Pause the per-settle scrollregion recompute for a bulk build.
-        Each ``bbox('all')`` scan is O(current content); across a chunked
-        Expand-all that is one growing scan PER TICK. Suspend during the
-        build, ``resume_scrollregion`` once at the end for a SINGLE scan."""
-        self._sr_suspended = True
-
-    def resume_scrollregion(self) -> None:
-        if not self._sr_suspended:
-            return
-        self._sr_suspended = False
-        if self._sr_job is None:
-            self._sr_job = self.after_idle(self._recompute_sr)
-
-    def _recompute_sr(self) -> None:
-        self._sr_job = None
-        self._apply_fill_height()
-        try:
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        except tk.TclError:
-            pass  # canvas destroyed between the schedule and the pass
-
-    def _apply_fill_height(self) -> None:
-        """Stretch the body window to at least the canvas height so a
-        child packed expand=True fills the viewport even when the content
-        is shorter than the window. The change-guard (target != self._fill_h)
-        is REQUIRED: forcing the window height re-fires the body's
-        <Configure>, and re-applying an unchanged height would loop —
-        reqheight is driven by child requests and is invariant under the
-        forced allocated height, so a single settle converges."""
-        if not self._fill_height:
-            return
-        try:
-            target = max(
-                self.canvas.winfo_height(), self.body.winfo_reqheight()
-            )
-            if target != self._fill_h:
-                self._fill_h = target
-                self.canvas.itemconfigure(self._win, height=target)
-        except tk.TclError:
-            pass  # canvas destroyed between the schedule and the pass
-
-    def refresh(self) -> None:
-        """Re-fit after a structural change (collapse/expand) — coalesced
-        like _on_body so a burst of changes triggers one settle."""
-        if self._sr_job is None:
-            self._sr_job = self.after_idle(self._recompute_sr)
-
-    def _poll_fill_height(self) -> None:
-        """Self-heal for ``fill_height`` (owner 2026-07-21 workflow fix —
-        see ``config.SCROLL_FILL_HEIGHT_POLL_MS``'s own comment for the
-        full mechanism this guards against): once ``_apply_fill_height``
-        has ever forced ``body``'s actual height via canvas
-        ``itemconfigure``, body's OWN ``<Configure>`` stops firing from
-        nested content simply growing (the canvas now dictates body's
-        real size, decoupled from its children's pack-driven request),
-        so ``_on_body`` can go quiet forever even while
-        ``body.winfo_reqheight()`` keeps climbing — a content-height
-        change from a widget with no reference to THIS ScrollFrame to
-        call ``refresh()`` on would otherwise leave the scrollregion
-        stuck too short, unreachable, until an actual window resize
-        happens to fix it as a side effect. Recomputes the SAME target
-        ``_apply_fill_height`` would (cheap: two winfo reads, one
-        compare) and only schedules the real recompute pass on a
-        genuine mismatch — self-reschedules every
-        ``SCROLL_FILL_HEIGHT_POLL_MS`` until the widget is destroyed."""
-        try:
-            target = max(
-                self.canvas.winfo_height(), self.body.winfo_reqheight()
-            )
-            if (
-                target != self._fill_h and self._sr_job is None
-                and not self._resizing
-            ):
-                self._sr_job = self.after_idle(self._recompute_sr)
-        except tk.TclError:
-            return  # destroyed between polls — let the poll chain end
-        self._poll_job = self.after(
-            SCROLL_FILL_HEIGHT_POLL_MS, self._poll_fill_height
-        )
-
-    def _on_destroy(self, event) -> None:
-        if self._sr_job is not None:
-            self.after_cancel(self._sr_job)
-            self._sr_job = None
-        if self._settle_job is not None:
-            self.after_cancel(self._settle_job)
-            self._settle_job = None
-        if self._poll_job is not None:
-            self.after_cancel(self._poll_job)
-            self._poll_job = None
-        self._unbind_wheel(event)
-
-    def _on_canvas(self, event) -> None:
-        # DEBOUNCE (owner 2026-07-19; width deferred too 2026-07-20): a
-        # window drag / maximize fires <Configure> many times a second.
-        # Running the fill-height + scrollregion bbox scan on EACH was
-        # the original customtkinter re-render jank; the per-frame body
-        # WIDTH itemconfigure that survived that first round was the
-        # rest of it — every width write reflows the body and fires a
-        # <Configure> into each CTk child (measured over a synthetic
-        # 30-step drag: 30 width writes -> 55 CTk _draw re-renders;
-        # deferring the width drops both to 0 during the drag). So
-        # while a resize is underway NOTHING is applied — the newest
-        # width is only remembered — and the whole re-fit (width +
-        # fill-height + scrollregion) runs ONCE on settle. The FIRST
-        # configure of a SETTLED window (initial layout / a lone
-        # resize) still applies immediately so the viewport never opens
-        # with a dead strip. Trade-off (owner accepted 2026-07-20): mid
-        # drag the content freezes at its pre-drag width — a window-bg
-        # strip grows (or the content clips) at the right edge — and
-        # snaps to fit RESIZE_SETTLE_MS after release.
-        self._canvas_w = event.width
-        if not self._resizing:
-            self._apply_width()
-            self._apply_fill_height()
-        self._arm_settle()
-
-    def _apply_width(self) -> None:
-        """Stretch the body window to the newest canvas width — only on
-        a real change (the write itself is what reflows the body)."""
-        if self._stretch and self._canvas_w != self._applied_w:
-            self._applied_w = self._canvas_w
-            self.canvas.itemconfigure(self._win, width=self._canvas_w)
-
-    def _arm_settle(self) -> None:
-        """Flag an active resize and (re)start the settle timer. Gates
-        ``_on_body``'s per-<Configure> scheduling; the heavy re-fit is
-        deferred to ``_settle`` (RESIZE_SETTLE_MS after the LAST
-        <Configure> — 'wait for mouse release')."""
-        self._resizing = True
-        if self._settle_job is not None:
-            self.after_cancel(self._settle_job)
-        self._settle_job = self.after(RESIZE_SETTLE_MS, self._settle)
-
-    def _settle(self) -> None:
-        """The size settled — clear the resize flag, apply the deferred
-        body width, and run ONE re-fit (fill-height + scrollregion),
-        coalesced like ``_on_body``."""
-        self._settle_job = None
-        self._resizing = False
-        self._apply_width()
-        if self._sr_job is None:
-            self._sr_job = self.after_idle(self._recompute_sr)
-
-    def _bind_wheel(self, _event) -> None:
-        self.canvas.bind_all("<MouseWheel>", self._on_wheel)
-
-    def _unbind_wheel(self, _event) -> None:
-        try:
-            self.canvas.unbind_all("<MouseWheel>")
-        except tk.TclError:
-            pass
-
-    def _on_wheel(self, event) -> None:
-        try:
-            self.canvas.yview_scroll(
-                int(-event.delta / WHEEL_DELTA_UNIT), "units"
-            )
-        except tk.TclError:
-            # the canvas was destroyed but the global binding lingered
-            self.canvas.unbind_all("<MouseWheel>")
-
-
-def style_action_button(
-    btn: ctk.CTkButton, kind: str, available: bool
-) -> None:
-    """Start/Stop availability styling: AVAILABLE = FILLED with its
-    colour, UNAVAILABLE = disabled OUTLINE (coloured border, dark
-    inside). ``kind`` is a semantic palette key ('success' / 'danger')
-    resolved to a (day, night) tuple, so the runtime recolour flips with
-    the appearance mode like every other CTk control. Re-applied on
-    every run-state change."""
-    color = theme_pair(kind)
-    if available:
-        btn.configure(
-            state="normal", fg_color=color, border_width=0,
-            hover_color=_darken_pair(color), text_color=status_pair("btn_text"),
-        )
-    else:
-        btn.configure(
-            state="disabled", fg_color="transparent", border_width=1,
-            border_color=color, text_color=color,
-            text_color_disabled=color,
-        )
-
-
-def _style_icon_bar_button(
-    btn: ctk.CTkButton, color: tuple[str, str], active: bool
-) -> None:
-    """IconBar tile colouring (GUI rework Phase 11) — generalizes
-    ``style_action_button``'s filled/outline language from a NAMED
-    semantic kind to an arbitrary ``(day, night)`` accent pair (a
-    ``MENU_TILES``/``JOB_COLORS`` tuple): ACTIVE (one of the tile's
-    ``TILE_JOB_KINDS`` has a live job right now) = FILLED with the
-    accent; IDLE = a quiet outline in the same accent. UNLIKE
-    ``style_action_button``, both states stay ``state="normal"`` — an
-    idle tile is exactly what the owner clicks to configure/launch the
-    next tool (IconBar itself disables the ONE permanently-disabled
-    placeholder tile separately)."""
-    if active:
-        btn.configure(
-            fg_color=color, border_width=0,
-            hover_color=_darken_pair(color), text_color=status_pair("btn_text"),
-        )
-    else:
-        btn.configure(
-            fg_color="transparent", border_width=1, border_color=color,
-            text_color=color, hover_color=theme_pair("dark"),
-        )
 
 
 # the unit suffix shown per kind (a display nicety mirroring the old
@@ -2754,39 +1604,6 @@ class AgentPanel(ttk.Labelframe):
 # ---------------------------------------------------------------------
 
 
-def _parse_fraction(text: str, field_name: str) -> float:
-    """Parse ONE Advanced-override fraction field (0 < x <= 1) —
-    raises ``ValueError`` naming the field, the same "which field
-    failed" contract every other panel/dialog validator in this file
-    already follows (``_FilterConditionRow.to_condition``,
-    ``AgentPanel.pace_floats`` et al.)."""
-    try:
-        value = float(text.strip())
-    except ValueError:
-        raise ValueError(f"{field_name}: must be a number.") from None
-    if not (0.0 < value <= 1.0):
-        raise ValueError(f"{field_name}: must be greater than 0 and at most 1.")
-    return value
-
-
-def _parse_nonneg_int(text: str, field_name: str) -> int:
-    """Parse ONE Advanced-override whole-number field (>= 0)."""
-    try:
-        value = int(float(text.strip()))
-    except ValueError:
-        raise ValueError(f"{field_name}: must be a whole number.") from None
-    if value < 0:
-        raise ValueError(f"{field_name}: must not be negative.")
-    return value
-
-
-def _parse_int_range(text: str, field_name: str, lo: int, hi: int) -> int:
-    """``_parse_nonneg_int`` plus an inclusive upper bound (the alpha
-    fields are 0-255)."""
-    value = _parse_nonneg_int(text, field_name)
-    if not (lo <= value <= hi):
-        raise ValueError(f"{field_name}: must be between {lo} and {hi}.")
-    return value
 
 
 class ToolSettingsPanel(ttk.Frame):
@@ -6754,9 +5571,9 @@ class PainterGui:
         return "break"
 
     def _zoom_step(self, step: int) -> None:
-        if set_font_base(FONT_BASE + step):
+        if set_font_base(widgets.FONT_BASE + step):
             self.status_var.set(
-                f"font size {FONT_BASE} (Ctrl+wheel / Ctrl+'+'/'-')"
+                f"font size {widgets.FONT_BASE} (Ctrl+wheel / Ctrl+'+'/'-')"
             )
             self._schedule_save()
 
@@ -7494,7 +6311,7 @@ class PainterGui:
                 self._apply_running_layout()
 
     def _open_instructions(self) -> None:
-        path = Path(__file__).resolve().parent / "instructions.md"
+        path = config.PROJECT_ROOT / "instructions.md"
         try:
             text = path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -9461,8 +8278,8 @@ class PainterGui:
     def _collect_settings(self) -> dict:
         return {
             "output": self.out_var.get(),
-            "font_base": FONT_BASE,
-            "theme": ACTIVE_THEME,
+            "font_base": widgets.FONT_BASE,
+            "theme": widgets.ACTIVE_THEME,
             "geometry": self.root.geometry(),
             "controls_collapsed": self._collapsed,
             # the AI features' credential (owner 2026-07-20): held on
@@ -10559,7 +9376,7 @@ class AspectRatioCanvas(tk.Canvas):
         modal host, see the class docstring) on a Day/Night flip."""
         self.delete("all")
         accent = job_color("aspect")
-        palette = THEMES[ACTIVE_THEME]["ttk"]
+        palette = THEMES[widgets.ACTIVE_THEME]["ttk"]
         box, pad = ASPECT_CANVAS_BOX_PX, ASPECT_CANVAS_PAD_PX
 
         # the arena guide — the max extent either edge can be dragged to
@@ -11610,155 +10427,6 @@ class StepRestoreWindow(tk.Toplevel):
             THEME_TOPLEVELS.remove(self)
 
 
-class DayNightSwitch(tk.Canvas):
-    """The mini Day/Night toggle, top-right — an image pill ported from
-    the owner's website switch (geometry/colours in the SWITCH_* config).
-    OFF/left = MOON on the dark starfield track; ON/right = SUN (with a
-    soft glow) on the sky-and-clouds track. A click flips the theme
-    SYNCHRONOUSLY (the app is coherent instantly) and persists it, then a
-    ~600 ms smoothstep slide runs as flourish.
-
-    CRISP art (owner 2026-07-18): tkinter Canvas has no anti-aliasing, so
-    the pill is composited from anti-aliased PIL images — the two track
-    pills straight from the website SVGs, the sun/moon knobs rendered with
-    a supersampled radial gradient (see the render helpers). The four
-    images (+ two hover variants) are built ONCE at construction and held
-    on ``self._imgs`` so tkinter cannot garbage-collect them; each redraw
-    just re-places the track + knob at the animated x. The track hard-
-    swaps at the knob's midpoint. The canvas is registered as a 'canvas'
-    surface so its own background re-tints with the window (the pill's
-    transparent corners then blend into the top strip in both themes)."""
-
-    def __init__(self, master, gui: "PainterGui"):
-        self._h = SWITCH_H
-        self._pad = SWITCH_PAD_PX
-        self._track_w = round(self._h * SWITCH_ASPECT)
-        self._knob_d = round(self._h * SWITCH_KNOB_FACTOR)
-        inset = (self._h - self._knob_d) / 2
-        super().__init__(
-            master,
-            width=self._track_w + 2 * self._pad,
-            height=self._h + 2 * self._pad,
-            highlightthickness=0, bd=0, cursor="hand2",
-        )
-        skin_canvas(self)  # its background follows the window bg on a flip
-        self._gui = gui
-        self._x_off = self._pad + inset
-        self._x_on = self._pad + self._track_w - self._knob_d - inset
-        self._hover = False
-        self._anim_job: str | None = None
-        self._imgs = self._build_images()  # held so tk can't GC them
-        self._on = THEMES[ACTIVE_THEME]["switch_on"]  # reflect the theme
-        self._knob_x = self._x_on if self._on else self._x_off
-        self.bind("<Button-1>", self._on_click)
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
-        self._redraw()
-
-    def _build_images(self) -> dict[str, ImageTk.PhotoImage]:
-        """Render the two track pills and the sun/moon knobs (each in a
-        rest + a 1.05x hover size) ONCE — the switch is a fixed size, so
-        this never needs re-running (it does not follow the font zoom)."""
-        ss = SWITCH_SUPERSAMPLE
-        d = self._knob_d
-        dh = max(round(d * SWITCH_HOVER_SCALE), d + 1)
-        return {
-            "track_night": ImageTk.PhotoImage(
-                _render_switch_track(
-                    SWITCH_TRACK_NIGHT_SVG, self._track_w, self._h
-                )
-            ),
-            "track_day": ImageTk.PhotoImage(
-                _render_switch_track(
-                    SWITCH_TRACK_DAY_SVG, self._track_w, self._h
-                )
-            ),
-            "moon": ImageTk.PhotoImage(_render_moon_knob(d, ss)),
-            "moon_hover": ImageTk.PhotoImage(_render_moon_knob(dh, ss)),
-            "sun": ImageTk.PhotoImage(_render_sun_knob(d, ss)),
-            "sun_hover": ImageTk.PhotoImage(_render_sun_knob(dh, ss)),
-        }
-
-    # --- public API ----------------------------------------------------
-
-    def set(self, name: str, animate: bool = False) -> None:
-        """Reflect a theme name on the knob (used if the theme is set by
-        something other than a click); no apply_theme call, no recursion."""
-        self._on = THEMES[name]["switch_on"]
-        if animate:
-            self._animate()
-        else:
-            self._cancel_anim()
-            self._knob_x = self._x_on if self._on else self._x_off
-            self._redraw()
-
-    # --- events --------------------------------------------------------
-
-    def _on_click(self, _event=None) -> None:
-        self._on = not self._on
-        name = "day" if self._on else "night"
-        # cross-fade the whole app (snapshot overlay hides the repaint
-        # cascade); the knob slide below runs concurrently underneath it
-        apply_theme(name, animate=True)
-        self._gui._schedule_save()  # persist the choice
-        self._animate()            # slide the knob as flourish
-
-    def _on_enter(self, _event) -> None:
-        self._hover = True
-        self._redraw()
-
-    def _on_leave(self, _event) -> None:
-        self._hover = False
-        self._redraw()
-
-    # --- animation -----------------------------------------------------
-
-    def _cancel_anim(self) -> None:
-        if self._anim_job is not None:
-            self.after_cancel(self._anim_job)
-            self._anim_job = None
-
-    def _animate(self) -> None:
-        self._cancel_anim()
-        target = self._x_on if self._on else self._x_off
-        start = self._knob_x
-        frames = max(round(SWITCH_ANIM_MS / SWITCH_FRAME_MS), 1)
-        self._anim_i = 0
-
-        def step():
-            self._anim_i += 1
-            t = self._anim_i / frames
-            ease = t * t * (3 - 2 * t)  # smoothstep
-            self._knob_x = start + (target - start) * ease
-            self._redraw()
-            if self._anim_i < frames:
-                self._anim_job = self.after(SWITCH_FRAME_MS, step)
-            else:
-                self._knob_x = target
-                self._anim_job = None
-                self._redraw()
-
-        step()
-
-    # --- drawing -------------------------------------------------------
-
-    def _redraw(self) -> None:
-        self.delete("all")
-        day = self._knob_x > (self._x_off + self._x_on) / 2
-        # the track pill fills the canvas centre (transparent corners show
-        # the strip bg); it hard-swaps night<->day at the knob's midpoint
-        self.create_image(
-            self._pad + self._track_w / 2, self._pad + self._h / 2,
-            image=self._imgs["track_day" if day else "track_night"],
-            anchor="center",
-        )
-        # the knob, centred on its animated x — the sun/moon image already
-        # carries the gradient, craters and glow, so this is one placement
-        base = "sun" if day else "moon"
-        key = f"{base}_hover" if self._hover else base
-        cx = self._knob_x + self._knob_d / 2
-        cy = self._pad + self._h / 2
-        self.create_image(cx, cy, image=self._imgs[key], anchor="center")
 
 
 def main() -> None:

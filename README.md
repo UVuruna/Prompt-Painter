@@ -23,8 +23,10 @@ consumer: DOMY Watch prompt sheets.
 📁 PromptPainter/
   🐍 main.py            ← THE entry point (no args: GUI; sheets: CLI)
   📝 main.md
-  🐍 gui.py             ← the tkinter window (main.py opens it)
-  📝 gui.md
+  📁 gui/                ← the tkinter window (main.py opens it)
+    📝 ___gui.md            split into the toolkit modules + the
+                            still-monolithic PainterGui (god-file
+                            refactor, in progress)
   ⚙️ requirements.txt   ← playwright, numpy/scipy/pillow, pytest
   📁 assets/
     🖼️ logo.svg
@@ -56,7 +58,7 @@ consumer: DOMY Watch prompt sheets.
   [Chrome Launcher](painter/chrome.md),
   [Background Remover](painter/bg_remove.md),
   [Postprocess](painter/postprocess.md)
-- [GUI](gui.md) — the window, the sheet queue, the threading
+- [GUI (folder)](gui/___gui.md) — the window, the sheet queue, the threading
 - [Main (Entry Point)](main.md) — usage, options, exit codes
 - [Tests (folder)](tests/___tests.md) — the offline safety net
 
