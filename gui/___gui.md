@@ -12,14 +12,18 @@ submodule extracted so far — one explicit `from .widgets import
 (...)` block per submodule — so every existing `gui.X` / `from gui
 import X` call site kept working UNCHANGED across the split.
 
-This step moved only the **toolkit** — the leaf widget/theme/icon
-helpers with no dependency on the app's own panels or `PainterGui`
-itself. The god-class `PainterGui` (~3,350 lines), the dashboards,
-the tool/agent panels, `SelectWindow`, the AI dialogs and the viewers
-all still live in `__init__.py`, unmoved — [gui.md](../gui.md) (the
-pre-existing script doc, one level up, beside this folder) still
-documents that remaining content; it migrates into further submodules
-in later steps of the same refactor.
+Step 2/8 moved the **toolkit** — the leaf widget/theme/icon helpers
+with no dependency on the app's own panels or `PainterGui` itself.
+Step 3/8 (this step) moved the **reusable widgets + pure logic +
+dashboard helpers**: `FilterEditor`, `AspectRatioCanvas`, the
+Tk-free module-level functions (`logic.py`), and the shared dashboard
+support helpers (`dash_helpers.py`). The god-class `PainterGui`
+(~3,350 lines), the dashboards' own panel classes, the tool/agent
+panels, `SelectWindow`, the AI dialogs and the viewers all still live
+in `__init__.py`, unmoved — [gui.md](../gui.md) (the pre-existing
+script doc, one level up, beside this folder) still documents that
+remaining content; it migrates into further submodules in later steps
+of the same refactor.
 
 ## Files
 
@@ -84,6 +88,42 @@ while the knob itself slides as a smoothstep-eased flourish. Depends
 on `gui.widgets` (the live `ACTIVE_THEME`), `gui.icons` (the knob/track
 renderers) and `gui.theme` (`apply_theme`, `skin_canvas`).
 
+### `filter_editor.py` — FilterEditor
+The reusable stacked-filter widget (GUI rework Phase 4): removable
+condition rows (kind/polarity combos + numeric fields) over
+`painter.filters`, an "+ Add condition" button, and a save/load/delete
+PRESET row. Depends on `gui.widgets` (`rounded_button`/`rounded_entry`/
+`rounded_combo`, `INPUT_HEIGHT`).
+
+### `aspect_canvas.py` — AspectRatioCanvas
+A live, draggable preview of the target output ratio (GUI rework
+Phase 5): a rectangle in a fixed square arena whose 4 edges reshape it
+(LEFT/RIGHT change WIDTH, TOP/BOTTOM change HEIGHT), with a live
+decimal + reduced-integer label underneath. Depends on `gui.theme`
+(`skin_canvas`) and `gui.widgets` (`job_color`, `tk_font`, the live
+`ACTIVE_THEME`).
+
+### `logic.py` — Pure Logic Helpers
+The Tk-free module-level functions: the shared-filter engine glue
+(`_filter_files`, `_parse_condition_dicts`, the legacy
+aspect-filter/upscale-gate migrations), the per-image post-save
+pipeline runner (`_run_pipeline_steps`), the dashboard's per-scope stat
+formatter (`_scope_stats`), the fixer auto-dispatch decision
+(`_fixer_decision`), the manual-fix result-to-UI mapping
+(`_fix_result_ui`), and small pure view-layout helpers
+(`_visible_agent_columns`, `_menu_tile_columns`, `_next_view`). No Tk
+dependency at all — every function is directly unit-testable.
+
+### `dash_helpers.py` — Dashboard Support Helpers
+Small helpers shared by two or more dashboard surfaces: the badge-dot
+`PhotoImage` cache (`badge_dots`), the tool-panel timing summary line
+(`fmt_time_summary`), the AI-check report/tag helpers shared by
+`AiCheckPanel` and `DashPanel` (`ai_check_doc_md`/`ai_check_image_file`/
+`ai_check_tag`), the shared `Treeview` builder (`build_job_tree`), and
+the before/after transparency-checkerboard helpers (`_checkerboard`/
+`_has_alpha`/`_scaled_photo`). Depends on `gui.theme`
+(`TOOL_CHANGED_TAG`/`TOOL_SKIP_TAG`, `skin_tree`).
+
 ## Connections
 
 ### Uses
@@ -95,15 +135,21 @@ renderers) and `gui.theme` (`apply_theme`, `skin_canvas`).
 
 ## Design Decisions
 
-**Why a toolkit-first extraction order.** The five modules above are
+**Why a toolkit-first extraction order.** The five step-2 modules are
 true leaves (icons) or near-leaves (widgets -> icons; theme -> widgets
 + icons; scroll -> theme; switch -> icons + theme + widgets) — nothing
 in `PainterGui` or the panels needs to change to make room for them,
-so this step carries zero risk to the app's actual behavior. Later
-steps peel the reusable widgets (`FilterEditor`, `AspectRatioCanvas`),
-the control panels, the dashboards, the menu/nav layer and finally
-`PainterGui` itself (split into responsibility mixins — see
-`REFACTOR-GODFILES.md`, the owner's binding plan, untracked).
+so that step carried zero risk to the app's actual behavior. Step 3
+(this step) peeled the next layer: the two reusable widgets
+(`FilterEditor`, `AspectRatioCanvas` — each only a near-leaf, depending
+on the step-2 toolkit) plus the PURE module-level functions
+(`logic.py`, no Tk at all) and the shared dashboard support helpers
+(`dash_helpers.py`, depending on `gui.theme`) — again nothing in
+`PainterGui` or the remaining panel classes needed to change, only
+their imports. Later steps peel the control panels, the dashboards,
+the menu/nav layer and finally `PainterGui` itself (split into
+responsibility mixins — see `REFACTOR-GODFILES.md`, the owner's
+binding plan, untracked).
 
 **The two mutable-global exceptions to the re-export pattern.**
 `__init__.py`'s re-export blocks make every moved name reachable as
