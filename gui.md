@@ -688,6 +688,99 @@ pre-running spots.
   every run-state change (while a quota auto-restart is pending,
   BOTH are available: Start starts earlier, Stop cancels the
   timer).
+- **Two-column-dense settings-panel layout** (owner 2026-07-21 layout
+  fix, LAYOUT ONLY — Rule #16: the owner's screenshots showed every
+  control hugging the LEFT half of a settings panel with the entire
+  RIGHT half dead empty). `AgentPanel` is RESPONSIVE to the SAME
+  visible-count state Phase 12's show/hide already tracks: its four
+  content rows (Background/New-chat, Style, and the two switch rows)
+  now live in one grid container (`self._content`) that
+  `AgentPanel._apply_dense_columns`/`set_dense_columns` regrid between
+  the narrow single-column stack (today's order — correct while BOTH
+  sites share the row, each panel already only ~half width) and a
+  two-column-dense fill — the switch rows LEFT, the dropdown rows RIGHT
+  — used ONLY while a panel is the SOLE visible site (the panel then
+  spans the whole controls width). `PainterGui._relayout_agents`
+  computes `dense = len(cols) == 1` from `_visible_agent_columns`'s own
+  result — the SAME KNOWN visible-count state that already decides
+  panel/compact-cluster placement — and calls `panel.set_dense_columns
+  (dense)` for every agent right there, so a Show/Hide toggle click, a
+  settings restore and `set_run_state`'s own forced re-show all reach
+  the new layout the SAME way, with NO `<Configure>` width probe
+  (deterministic, not fragile). Start/Pause/Stop + the Settings gear
+  stay in their own always-full-width bottom row, unchanged (buttons
+  left, gear right already fills the row). The Settings-gear fine-tune
+  block (`_build_finetune` — pause/action-delay ranges, Force Aspect
+  Ratio, the Upscale gate) is DELIBERATELY untouched by this fix (out
+  of the owner's stated scope) — it keeps working (expand/collapse,
+  every field) but stays a single narrow column even in a wide panel;
+  a real caveat, not a regression.
+
+  The `ToolSettingsPanel` family (`BgSettingsPanel`/`CropSettingsPanel`/
+  `UpscaleSettingsPanel`/`AspectSettingsPanel`/
+  `ImageCheckerSettingsPanel`) and `ApiImageGenPanel` are ALWAYS
+  full-width single panels (they never share a row with a sibling), so
+  they use the two-column fill UNCONDITIONALLY, built once in
+  `__init__` — no responsive toggle needed. `ToolSettingsPanel.__init__`
+  grids a `body` frame with two child frames, `left`/`right`, both
+  weight 1: LEFT holds the input picker (Folder…/Files… + the picked-
+  path label) and the Filter editor narrowing WHICH images the run
+  touches; RIGHT holds the subclass's own primary knobs (`_extra_box`
+  — Upscale's min-side spinner, Aspect's target-ratio canvas), the
+  Advanced collapsible (when `HAS_ADVANCED`) and the footer note — the
+  owner's own illustrative split ("input picker + filter on one side,
+  switches/extras on the other"). `ApiImageGenPanel` mirrors this:
+  LEFT carries the AgentPanel-like quick controls (description,
+  Background/Style, the post-save switches, the pause range, the
+  "Check API access" gate row), RIGHT carries the two detailed editor
+  blocks (the Force-Aspect canvas, the Upscale gate's FilterEditor).
+  Every widget keeps its exact parent ROW frame, variable and command —
+  only which FRAME hosts each row, and that row's `grid()`/`pack()`
+  call, changed.
+
+  Two new Rule #4 pixel constants, `DENSE_COL_GAP_PX` (16, the gap
+  between the two columns — DESIGN.md's 8pt grid, the same 2-unit gap
+  `MENU_TILE_GAP_PX` already uses) and `DENSE_COL_WRAP_PX` (320, a
+  narrower wraplength for a caption/note now living in ONE column
+  instead of the panel's old full width), live in **gui.py's own**
+  Rule #4 block (beside `SETTINGS_GLYPH_*`) — NOT `painter/config.py`:
+  this project's established split (see [Config](painter/config.md)'s
+  own note on `FILTER_ASPECT_EXACT_TOL`) already assigns pure Tk
+  pixel-geometry constants with no engine relevance to gui.py's own
+  blocks, and painter/config.py only pure/engine-relevant or
+  Tk-free-testable data — these two are neither. A real bug surfaced
+  and fixed while building this: `ToolSettingsPanel`'s picked-folder-
+  path label (`_picked_var`) had NO wraplength — harmless at the old
+  full panel width, but an unwrapped long path in the new HALF-width
+  LEFT column could force that column wider than its budget and
+  squeeze RIGHT's content toward clipping (caught by a real screenshot
+  with a long scratch temp path, not by pytest — geometry bugs at
+  Tk's actual pixel level rarely are). Fixed by giving the label its
+  OWN row (full LEFT-column width to wrap into) with
+  `wraplength=DENSE_COL_WRAP_PX`. The same risk existed for every
+  other unbounded caption now confined to a half-width column:
+  `UpscaleSettingsPanel`'s/`ApiImageGenPanel`'s min-side captions had
+  NO wraplength before (now `DENSE_COL_WRAP_PX`, newly added);
+  `AspectSettingsPanel`'s/`ImageCheckerSettingsPanel`'s footer notes
+  and `ApiImageGenPanel`'s description + gate-status labels already
+  had one (the old full-width `JOB_PANEL_BANNER_WRAP_PX` — tightened
+  to `DENSE_COL_WRAP_PX` for their new half-width column).
+
+  **Verified:** `python -m pytest tests -q` stays green at 563 passed +
+  1 skipped (unchanged — this is geometry only, no test asserted the
+  old row/column shape). Real-window screenshots (Day theme, one Night
+  confirmation; `settings.json` redirected to a scratch file) for: (1)
+  Gemini hidden — the ChatGPT `AgentPanel` alone, now filling the width
+  in two columns (directly comparable to the owner's own bug
+  screenshot, `phase12_1_gemini_hidden.png`); (2) both sites shown —
+  pixel-identical to before, confirming the narrow path is untouched;
+  (3) all FIVE `ToolSettingsPanel` subclasses (BG with Advanced
+  expanded, Crop with Advanced expanded, Upscale, Aspect, the AI
+  checker — the sparsest RIGHT column, footer note only) plus (4)
+  `ApiImageGenPanel`, all filling the width with no dead right half and
+  no clipped/overflowing left; (5) the Settings-gear fine-tune block
+  confirmed still fully functional (expand/collapse, every field) in a
+  wide panel, visibly the one deliberately-untouched narrow column.
 - **Open Chrome (login)** — launches the automation Chrome with
   both sites' tabs (dedicated `chrome-profile/`; log in once,
   sessions persist).

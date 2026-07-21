@@ -460,6 +460,23 @@ ICON_BAR_GAP_PX = 4  # gap between IconBar tile buttons (GUI rework Phase 11)
 # stays compact. The gear carries settings.png (a gear icon) + this caret.
 SETTINGS_GLYPH_EXPANDED = "▾  Settings"   # gear label while fine-tune shows
 SETTINGS_GLYPH_COLLAPSED = "▸  Settings"  # gear label while hidden
+
+# --- Two-column-dense settings-panel layout (owner 2026-07-21 layout
+# fix — Rule #16: a settings panel with room to spare fills the width in
+# TWO logical columns instead of cramming everything into the left half
+# with the right sitting dead). AgentPanel switches to this arrangement
+# ONLY while it is the SOLE visible site (PainterGui._relayout_agents,
+# driven off the KNOWN visible-count state — see
+# AgentPanel.set_dense_columns — never a fragile <Configure> width
+# probe); the ToolSettingsPanel family and ApiImageGenPanel are ALWAYS
+# full-width single panels, so they use it unconditionally.
+DENSE_COL_GAP_PX = 16    # gap between the two columns (DESIGN.md 8pt grid,
+#                          same 2-unit gap MENU_TILE_GAP_PX already uses)
+DENSE_COL_WRAP_PX = 320  # wraplength for a caption/note living in ONE
+#                          column instead of the panel's old full width
+#                          (narrower than JOB_PANEL_BANNER_WRAP_PX, which
+#                          still wraps a full-width dashboard banner)
+
 # the Treeview row tags for a tool panel's image rows — their foregrounds
 # come from the theme's status colours, re-applied on a flip via skin_tree.
 # CHANGED (restorable) rows get a BOLD striking green/teal so they POP;
@@ -1998,52 +2015,75 @@ class AgentPanel(ttk.Labelframe):
             value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
         )
 
-        row = ttk.Frame(self)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Background:").pack(side="left")
+        # the four content rows below live in ONE grid container so their
+        # order can flip between the narrow single-column stack (today's
+        # order — correct while both AgentPanels share the row, GUI rework
+        # Phase 12's ~half-width columns) and a two-column-dense fill —
+        # switches LEFT, dropdowns RIGHT — used while THIS is the sole
+        # visible panel (owner 2026-07-21 layout fix). See
+        # _apply_dense_columns/set_dense_columns below: only grid() calls
+        # move these FOUR EXISTING frames — every widget inside keeps its
+        # exact parent row, variable and command.
+        self._content = ttk.Frame(self)
+        self._content.pack(fill="x")
+
+        self._row_dropdowns = ttk.Frame(self._content)
+        ttk.Label(self._row_dropdowns, text="Background:").pack(side="left")
         rounded_combo(
-            row, BACKGROUND_CHOICES, self.background_var, width=105,
+            self._row_dropdowns, BACKGROUND_CHOICES, self.background_var,
+            width=105,
         ).pack(side="left", padx=(2, 10))
-        ttk.Label(row, text="New chat:").pack(side="left")
+        ttk.Label(self._row_dropdowns, text="New chat:").pack(side="left")
         rounded_combo(
-            row, NEW_CHAT_CHOICES, self.new_chat_var, width=100,
+            self._row_dropdowns, NEW_CHAT_CHOICES, self.new_chat_var,
+            width=100,
         ).pack(side="left", padx=(2, 0))
 
         # the Style dropdown — a primary per-generation choice like
         # Background, so it lives in the ALWAYS-VISIBLE area, not under the
         # Settings gear (owner 2026-07-19)
-        row = ttk.Frame(self)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Style:").pack(side="left")
+        self._row_style = ttk.Frame(self._content)
+        ttk.Label(self._row_style, text="Style:").pack(side="left")
         rounded_combo(
-            row, STYLE_CHOICES, self.style_var, width=150,
+            self._row_style, STYLE_CHOICES, self.style_var, width=150,
         ).pack(side="left", padx=(2, 0))
 
-        row = ttk.Frame(self)
-        row.pack(fill="x", pady=2)
-        rounded_switch(row, "BG removal", self.bg_removal_var).pack(
-            side="left"
-        )
-        rounded_switch(row, "Crop", self.crop_var).pack(side="left", padx=8)
-        rounded_switch(row, "Upscale", self.upscale_var).pack(side="left")
-
-        row = ttk.Frame(self)
-        row.pack(fill="x", pady=2)
-        rounded_switch(row, "Report txt", self.report_var).pack(side="left")
-        rounded_switch(row, "Safer retry", self.safer_var).pack(
+        self._row_switches1 = ttk.Frame(self._content)
+        rounded_switch(
+            self._row_switches1, "BG removal", self.bg_removal_var,
+        ).pack(side="left")
+        rounded_switch(self._row_switches1, "Crop", self.crop_var).pack(
             side="left", padx=8
         )
-        rounded_switch(row, "Continue nudge", self.continue_nudge_var).pack(
-            side="left"
-        )
+        rounded_switch(
+            self._row_switches1, "Upscale", self.upscale_var,
+        ).pack(side="left")
+
+        self._row_switches2 = ttk.Frame(self._content)
+        rounded_switch(
+            self._row_switches2, "Report txt", self.report_var,
+        ).pack(side="left")
+        rounded_switch(
+            self._row_switches2, "Safer retry", self.safer_var,
+        ).pack(side="left", padx=8)
+        rounded_switch(
+            self._row_switches2, "Continue nudge", self.continue_nudge_var,
+        ).pack(side="left")
         # the parallel Checker AI (GUI rework Phase 16) sits right beside
         # Safer retry/Continue nudge — the owner's other "watch this run
         # and self-correct" switches — even though it works differently
         # (checks the SAVED image on a background thread instead of
         # reacting to a refusal/stall; see PainterGui._maybe_spawn_checker)
-        rounded_switch(row, "AI checker", self.checker_var).pack(
-            side="left", padx=8
-        )
+        rounded_switch(
+            self._row_switches2, "AI checker", self.checker_var,
+        ).pack(side="left", padx=8)
+
+        # narrow (both sites visible) by default — matches the grid this
+        # constructor just built above byte-for-byte; PainterGui.
+        # _relayout_agents flips this the moment a visibility change makes
+        # this the sole visible panel (or restores both).
+        self._dense = False
+        self._apply_dense_columns()
 
         row = ttk.Frame(self)
         row.pack(fill="x", pady=(6, 2))
@@ -2092,6 +2132,61 @@ class AgentPanel(ttk.Labelframe):
         # lifetime as the app itself, like every dashboard JobPanel.
         THEME_TOPLEVELS.append(self)
         self.bind("<Destroy>", self._on_destroy)
+
+    def _apply_dense_columns(self) -> None:
+        """Regrid the four content rows (``_row_dropdowns``,
+        ``_row_style``, ``_row_switches1``, ``_row_switches2``) between
+        the narrow single-column stack (today's order — correct while
+        both AgentPanels share the row, GUI rework Phase 12's
+        ~half-width columns) and a two-column-dense fill — switches
+        LEFT, dropdowns RIGHT — used while this is the SOLE visible
+        panel (owner 2026-07-21 layout fix: the panel then spans the
+        WHOLE controls width, and the old single stack left it half
+        empty). Only ``grid()`` calls on these four EXISTING frames —
+        nothing is created, destroyed or reparented, so every
+        switch/combo inside keeps its exact variable and command."""
+        rows = (
+            self._row_dropdowns, self._row_style,
+            self._row_switches1, self._row_switches2,
+        )
+        for w in rows:
+            w.grid_forget()
+        if self._dense:
+            self._row_switches1.grid(row=0, column=0, sticky="ew", pady=2)
+            self._row_switches2.grid(row=1, column=0, sticky="ew", pady=2)
+            self._row_dropdowns.grid(
+                row=0, column=1, sticky="ew", pady=2,
+                padx=(DENSE_COL_GAP_PX, 0),
+            )
+            self._row_style.grid(
+                row=1, column=1, sticky="ew", pady=2,
+                padx=(DENSE_COL_GAP_PX, 0),
+            )
+            self._content.columnconfigure(0, weight=1)
+            self._content.columnconfigure(1, weight=1)
+        else:
+            self._row_dropdowns.grid(row=0, column=0, sticky="ew", pady=2)
+            self._row_style.grid(row=1, column=0, sticky="ew", pady=2)
+            self._row_switches1.grid(row=2, column=0, sticky="ew", pady=2)
+            self._row_switches2.grid(row=3, column=0, sticky="ew", pady=2)
+            self._content.columnconfigure(0, weight=1)
+            self._content.columnconfigure(1, weight=0)
+
+    def set_dense_columns(self, dense: bool) -> None:
+        """``PainterGui._relayout_agents`` drives this off the KNOWN
+        visible-count state (GUI rework Phase 12's own
+        ``_visible_agent_columns``) — ``dense=True`` only while this is
+        the SOLE visible AgentPanel (the panel then spans the full
+        controls width); ``dense=False`` — the original stacked order —
+        while both sites share the row (each panel is already only
+        ~half width there, so the old left-hugging layout is not a
+        Rule #16 problem). A deliberate visible-COUNT switch, never a
+        ``<Configure>`` width probe (fragile, and this state is already
+        known exactly)."""
+        if dense == self._dense:
+            return
+        self._dense = dense
+        self._apply_dense_columns()
 
     def _build_finetune(self) -> None:
         """This agent's collapsible FINE-TUNE area (owner 2026-07-19),
@@ -2665,8 +2760,24 @@ class ToolSettingsPanel(ttk.Frame):
             style="Head.TLabel",
         ).pack(side="left")
 
-        pick_row = ttk.Frame(self)
-        pick_row.pack(fill="x", pady=(8, 2))
+        # two-column-dense body (owner 2026-07-21 layout fix): this panel
+        # is ALWAYS shown full-width (unlike AgentPanel, which shares the
+        # row with its sibling site), so a single left-hugging stack left
+        # the right half dead (Rule #16). LEFT holds the input picker plus
+        # the Filter narrowing WHICH images the run touches; RIGHT holds
+        # this tool's own primary knobs (_extra_box), the Advanced
+        # collapsible and the footer note.
+        body = ttk.Frame(self)
+        body.pack(fill="x", pady=(8, 0))
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        left = ttk.Frame(body)
+        left.grid(row=0, column=0, sticky="new")
+        right = ttk.Frame(body)
+        right.grid(row=0, column=1, sticky="new", padx=(DENSE_COL_GAP_PX, 0))
+
+        pick_row = ttk.Frame(left)
+        pick_row.pack(fill="x")
         rounded_button(
             pick_row, "Folder…", command=self._pick_folder, kind="info",
             width=90,
@@ -2675,29 +2786,34 @@ class ToolSettingsPanel(ttk.Frame):
             pick_row, "Files…", command=self._pick_files, kind="info",
             width=90,
         ).pack(side="left", padx=(6, 0))
+        # its OWN row, full LEFT-column width to wrap into (owner 2026-07-21
+        # layout fix) — inline beside the two buttons, an unwrapped long
+        # path used to be free to force the whole column wider than its
+        # two-column-dense budget, squeezing RIGHT's content near-clipped
         self._picked_var = tk.StringVar(value="(pick a folder or files)")
         ttk.Label(
-            pick_row, textvariable=self._picked_var, style="Muted.TLabel",
-        ).pack(side="left", padx=(10, 0))
+            left, textvariable=self._picked_var, style="Muted.TLabel",
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(anchor="w", pady=(4, 0))
+
+        ttk.Label(
+            left,
+            text="Filter — which images this run touches (empty = all):",
+        ).pack(anchor="w", pady=(8, 2))
+        self.filter = FilterEditor(
+            left, conditions=self._default_conditions(),
+            presets=filter_presets,
+            on_presets_changed=on_filter_presets_changed,
+        )
+        self.filter.pack(fill="x")
 
         # subclass hook — always-visible PRIMARY controls (Upscale's
         # min-side spinner, Aspect's target-ratio canvas); base no-op,
         # so BG/Crop see no change at all (an empty frame packs at
         # zero height)
-        self._extra_box = ttk.Frame(self)
+        self._extra_box = ttk.Frame(right)
         self._extra_box.pack(fill="x")
         self._build_extra(self._extra_box)
-
-        ttk.Label(
-            self,
-            text="Filter — which images this run touches (empty = all):",
-        ).pack(anchor="w", pady=(8, 2))
-        self.filter = FilterEditor(
-            self, conditions=self._default_conditions(),
-            presets=filter_presets,
-            on_presets_changed=on_filter_presets_changed,
-        )
-        self.filter.pack(fill="x")
 
         # the Advanced collapsible — the SAME Settings-gear idiom
         # AgentPanel._toggle_settings/_apply_finetune_visibility already
@@ -2706,7 +2822,7 @@ class ToolSettingsPanel(ttk.Frame):
         # has nothing to hide behind it (HAS_ADVANCED = False) — see
         # this class's own docstring.
         if self.HAS_ADVANCED:
-            adv_head = ttk.Frame(self)
+            adv_head = ttk.Frame(right)
             adv_head.pack(fill="x", pady=(10, 0))
             ttk.Label(adv_head, text="Advanced", style="Head.TLabel").pack(
                 side="left"
@@ -2717,14 +2833,14 @@ class ToolSettingsPanel(ttk.Frame):
             )
             self._advanced_btn.pack(side="left", padx=(6, 0))
             self._advanced_collapsed_var = tk.BooleanVar(value=True)
-            self._advanced_box = ttk.Frame(self)
+            self._advanced_box = ttk.Frame(right)
             self._build_advanced(self._advanced_box)
             self._apply_advanced_visibility()
 
         # subclass hook — a short always-visible note just above the
         # button row (Aspect's non-proportional-stretch warning); base
         # no-op
-        self._footer_box = ttk.Frame(self)
+        self._footer_box = ttk.Frame(right)
         self._footer_box.pack(fill="x", pady=(6, 0))
         self._build_footer(self._footer_box)
 
@@ -3134,6 +3250,7 @@ class UpscaleSettingsPanel(ToolSettingsPanel):
         ttk.Label(
             row, text="px — the smaller side reaches this; the Filter"
             " below decides WHICH images qualify",
+            wraplength=DENSE_COL_WRAP_PX,
         ).pack(side="left", padx=(4, 0))
 
     def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
@@ -3231,7 +3348,7 @@ class AspectSettingsPanel(ToolSettingsPanel):
             " STRETCH, written IN PLACE. Originals are backed up so you"
             " can Restore; images already at this ratio are skipped"
             " untouched.",
-            style="Muted.TLabel", wraplength=JOB_PANEL_BANNER_WRAP_PX,
+            style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
         ).pack(anchor="w")
 
     def _on_canvas_drag(self, w: int, h: int) -> None:
@@ -3355,7 +3472,7 @@ class ImageCheckerSettingsPanel(ToolSettingsPanel):
             f" ~{AI_CALL_PAUSE_S:.0f}s per call on the free tier."
             f" Read-only — nothing is modified; flags persist under"
             f" the output folder's {STATE_DIRNAME}/.",
-            style="Muted.TLabel", wraplength=JOB_PANEL_BANNER_WRAP_PX,
+            style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
         ).pack(anchor="w")
 
 
@@ -3430,13 +3547,29 @@ class ApiImageGenPanel(ttk.Frame):
             style="Head.TLabel",
         ).pack(side="left")
 
+        # two-column-dense body (owner 2026-07-21 layout fix): this panel
+        # is ALWAYS shown full-width, exactly like the ToolSettingsPanel
+        # family, so a single left-hugging stack left the right half dead
+        # (Rule #16). LEFT mirrors AgentPanel's own quick controls —
+        # description, Background/Style, the post-save switches, pacing,
+        # the API-access gate; RIGHT holds the two detailed editor blocks
+        # (the Force-Aspect canvas, the Upscale gate's FilterEditor).
+        body = ttk.Frame(self)
+        body.pack(fill="x", pady=(6, 0))
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        left = ttk.Frame(body)
+        left.grid(row=0, column=0, sticky="new")
+        right = ttk.Frame(body)
+        right.grid(row=0, column=1, sticky="new", padx=(DENSE_COL_GAP_PX, 0))
+
         ttk.Label(
-            self,
+            left,
             text="Generates the SAME queued Collections (.md sheets) as"
             " Website GEN, through the paid Gemini image API instead of"
             " a browser tab.",
-            style="Muted.TLabel", wraplength=JOB_PANEL_BANNER_WRAP_PX,
-        ).pack(anchor="w", pady=(6, 4))
+            style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
+        ).pack(anchor="w", pady=(0, 4))
 
         # background/style — the SAME prompt_suffix machinery every
         # AgentPanel already feeds (Rule #5); "white" default (not a
@@ -3444,7 +3577,7 @@ class ApiImageGenPanel(ttk.Frame):
         # real transparency — see this class's own docstring
         self.background_var = tk.StringVar(value="white")
         self.style_var = tk.StringVar(value=STYLE_DEFAULT)
-        row = ttk.Frame(self)
+        row = ttk.Frame(left)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="Background:").pack(side="left")
         rounded_combo(
@@ -3463,7 +3596,7 @@ class ApiImageGenPanel(ttk.Frame):
         self.crop_var = tk.BooleanVar(value=True)
         self.force_aspect_var = tk.BooleanVar(value=True)
         self.upscale_var = tk.BooleanVar(value=True)
-        row = ttk.Frame(self)
+        row = ttk.Frame(left)
         row.pack(fill="x", pady=2)
         rounded_switch(row, "BG removal", self.bg_removal_var).pack(
             side="left"
@@ -3478,7 +3611,7 @@ class ApiImageGenPanel(ttk.Frame):
         self.keep_all_steps_var = tk.BooleanVar(
             value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
         )
-        row = ttk.Frame(self)
+        row = ttk.Frame(left)
         row.pack(fill="x", pady=2)
         rounded_switch(row, "Report txt", self.report_var).pack(side="left")
         rounded_switch(
@@ -3486,15 +3619,45 @@ class ApiImageGenPanel(ttk.Frame):
             self.keep_all_steps_var,
         ).pack(side="left", padx=8)
 
+        # pace between prompts — run_sheet's own pacing wait, unrelated
+        # to ai.py's internal AI_CALL_PAUSE_S free-tier throttle; no
+        # action-delay field (that is SiteDriver._hesitate()'s DOM
+        # concept — there is no DOM here).
+        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
+        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
+        row = ttk.Frame(left)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="pause", width=12).pack(side="left")
+        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+
+        # --- GATING: the "Check API access" probe (spec item 5) -------
+        gate_row = ttk.Frame(left)
+        gate_row.pack(fill="x", pady=(8, 2))
+        self._gate_btn = rounded_button(
+            gate_row, "Check API access", command=self._probe_access,
+            kind="info",
+        )
+        self._gate_btn.pack(side="left")
+        self._gate_var = tk.StringVar(value="")
+        ttk.Label(
+            gate_row, textvariable=self._gate_var, style="Muted.TLabel",
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(side="left", padx=(8, 0))
+        self._probe_q: queue.Queue = queue.Queue()
+        self._probe_poll_job: str | None = None
+
         # Force Aspect Ratio target — the SAME AspectRatioCanvas two-way
         # sync AgentPanel's own Force-Aspect block / AspectSettingsPanel
         # already use (Rule #5)
         ttk.Label(
-            self, text="Force Aspect Ratio target:", style="Head.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
+            right, text="Force Aspect Ratio target:", style="Head.TLabel",
+        ).pack(anchor="w")
         self.force_aspect_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
         self.force_aspect_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
-        fa_box = ttk.Frame(self)
+        fa_box = ttk.Frame(right)
         fa_box.pack(fill="x", pady=2)
         fa_fields = ttk.Frame(fa_box)
         fa_fields.pack(side="left", anchor="n")
@@ -3527,22 +3690,23 @@ class ApiImageGenPanel(ttk.Frame):
         # the upscale gate — min-side spinner + embedded FilterEditor,
         # the SAME shape AgentPanel/UpscaleSettingsPanel already use
         ttk.Label(
-            self, text="Upscale gate:", style="Head.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
+            right, text="Upscale gate:", style="Head.TLabel",
+        ).pack(anchor="w", pady=(8, 0))
         self.up_minside_var = tk.StringVar(
             value=str(UPSCALE_MIN_SIDE_DEFAULT)
         )
-        row = ttk.Frame(self)
+        row = ttk.Frame(right)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="min side", width=8).pack(side="left")
         Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
             side="left"
         )
         ttk.Label(
-            row, text="px (the smaller side reaches this)"
+            row, text="px (the smaller side reaches this)",
+            wraplength=DENSE_COL_WRAP_PX,
         ).pack(side="left", padx=(4, 0))
         self.upscale_filter = FilterEditor(
-            self,
+            right,
             conditions=[filters.FilterCondition(
                 kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
                 lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
@@ -3551,36 +3715,6 @@ class ApiImageGenPanel(ttk.Frame):
             on_presets_changed=self._on_filter_presets_changed,
         )
         self.upscale_filter.pack(fill="x", pady=(2, 0))
-
-        # pace between prompts — run_sheet's own pacing wait, unrelated
-        # to ai.py's internal AI_CALL_PAUSE_S free-tier throttle; no
-        # action-delay field (that is SiteDriver._hesitate()'s DOM
-        # concept — there is no DOM here).
-        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
-        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
-        row = ttk.Frame(self)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="pause", width=12).pack(side="left")
-        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-
-        # --- GATING: the "Check API access" probe (spec item 5) -------
-        gate_row = ttk.Frame(self)
-        gate_row.pack(fill="x", pady=(8, 2))
-        self._gate_btn = rounded_button(
-            gate_row, "Check API access", command=self._probe_access,
-            kind="info",
-        )
-        self._gate_btn.pack(side="left")
-        self._gate_var = tk.StringVar(value="")
-        ttk.Label(
-            gate_row, textvariable=self._gate_var, style="Muted.TLabel",
-            wraplength=JOB_PANEL_BANNER_WRAP_PX,
-        ).pack(side="left", padx=(8, 0))
-        self._probe_q: queue.Queue = queue.Queue()
-        self._probe_poll_job: str | None = None
 
         btn_row = ttk.Frame(self)
         btn_row.pack(fill="x", pady=(10, 0))
@@ -6327,11 +6461,22 @@ class PainterGui:
         uses) so the remaining panel's column takes all the freed width.
         The compact strip needs no such column bookkeeping: ``pack``
         already closes the gap on its own when one cluster is
-        forgotten."""
+        forgotten.
+
+        GUI rework (owner 2026-07-21 layout fix): the SAME ``cols``
+        result also drives each panel's OWN internal two-column-dense
+        layout (``AgentPanel.set_dense_columns``) — exactly one visible
+        panel means it spans the whole controls width, so its content
+        switches from the narrow stack to switches-left/dropdowns-right;
+        two visible panels keep today's narrow stack (each already only
+        ~half width). A hidden panel is told the same way (harmless —
+        it is not on screen) so it is already correctly laid out the
+        moment a later toggle re-shows it."""
         visible = {
             key: panel.visible_var.get() for key, panel in self.agents.items()
         }
         cols = _visible_agent_columns(sorted(SITES), visible)
+        dense = len(cols) == 1
         for c in range(len(SITES)):
             self._agents_frame.columnconfigure(c, weight=0)
         for key, panel in self.agents.items():
@@ -6341,6 +6486,7 @@ class PainterGui:
                 self._agents_frame.columnconfigure(cols[key], weight=1)
             else:
                 panel.grid_remove()
+            panel.set_dense_columns(dense)
             cluster = self._compact_clusters[key]
             if shown:
                 cluster.pack(side="left", padx=(0, COMPACT_CLUSTER_GAP_PX))
