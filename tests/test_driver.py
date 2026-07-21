@@ -15,12 +15,18 @@ agent-verifiable:
   being routed through the new shared ``_paste_and_send`` helper.
 """
 
+import time
 from dataclasses import replace
 
 import pytest
 
 from painter.config import SITES, TIMING, Timing
-from painter.driver import FixNotConfigured, SelectorRot, SiteDriver
+from painter.driver import (
+    FixNotConfigured,
+    ImageGenFailed,
+    SelectorRot,
+    SiteDriver,
+)
 
 # Zero out every human-rhythm pause and shrink the selector-timeout
 # polling step so these tests run instantly — only the LOOKUP logic is
@@ -345,3 +351,168 @@ def test_submit_prompt_normal_path_never_reloads():
     driver.submit_prompt("hello world")
 
     assert ("reload",) not in page.calls
+
+
+# --- (e) BUG 3 — "Image generation failed" caught DURING the wait,
+# never burning the whole hard timeout (owner 2026-07-21) --------------
+
+_CHATGPT_FAILURE_TEXT = (
+    "I wasn't able to generate the image because the image generation"
+    " tool encountered an error. I can't retry it automatically after"
+    " this kind of failure. Please send the same prompt again (or"
+    " simply reply with 'retry'), and I'll generate it on the new"
+    " request."
+)
+
+
+class TextLocator:
+    """Duck-typed playwright Locator standing for a response
+    container: ``count()``/``last``/``inner_text()`` — enough for
+    ``_last_response``/``_response_text``. ``holder`` is a one-item
+    list so a test can flip the text the driver reads mid-poll."""
+
+    def __init__(self, holder: list[str]):
+        self._holder = holder
+
+    def count(self):
+        return 1
+
+    @property
+    def last(self):
+        return self
+
+    def inner_text(self):
+        return self._holder[0]
+
+
+class PresentLocator:
+    """Duck-typed Locator for a busy/stop signal that is ALWAYS
+    present — mirrors ChatGPT's stuck-forever busy state (BUG 3): the
+    done edge this stands for never comes on its own."""
+
+    def count(self):
+        return 1
+
+    def nth(self, k):
+        return self
+
+    def is_visible(self):
+        return True
+
+
+class FlipLocator:
+    """Duck-typed Locator present for ``n_present`` polls, then gone —
+    a normal busy signal that clears once generation finishes."""
+
+    def __init__(self, n_present: int):
+        self._n = n_present
+
+    def count(self):
+        if self._n > 0:
+            self._n -= 1
+            return 1
+        return 0
+
+    def nth(self, k):
+        return self
+
+    def is_visible(self):
+        return True
+
+
+def test_chatgpt_ships_image_failed_markers_gemini_does_not():
+    """The marker set is ChatGPT-specific (SITES data, not invented in
+    the driver) — Gemini's tuple stays empty until the owner captures
+    a live Gemini failure text."""
+    assert SITES["chatgpt"].image_failed_text_markers != ()
+    assert SITES["gemini"].image_failed_text_markers == ()
+
+
+def test_check_image_failed_raises_on_a_marked_response():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        [_CHATGPT_FAILURE_TEXT]
+    )
+    driver = _driver(site, page)
+
+    with pytest.raises(ImageGenFailed):
+        driver._check_image_failed()
+
+
+def test_check_image_failed_is_a_noop_without_markers_configured():
+    """Gemini-safe: the exact same failure text never raises on a site
+    whose ``image_failed_text_markers`` is empty."""
+    site = SITES["gemini"]
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        [_CHATGPT_FAILURE_TEXT]
+    )
+    driver = _driver(site, page)
+
+    driver._check_image_failed()  # must not raise
+
+
+def test_check_image_failed_is_a_noop_on_a_normal_response():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        ["Here is your generated image."]
+    )
+    driver = _driver(site, page)
+
+    driver._check_image_failed()  # must not raise
+
+
+def test_await_done_raises_image_gen_failed_without_burning_timeout():
+    """The exact real failure (owner's log, BUG 3): the busy/stop
+    signal never clears for this ChatGPT state, so the SECOND await
+    loop ("still generating ...") must catch the failure text WHILE
+    still polling instead of waiting out the whole hard
+    ``generation_timeout_s``."""
+    site = SITES["chatgpt"]
+    timing = replace(
+        TIMING,
+        poll_interval_s=0.01,
+        progress_log_interval_s=1000.0,
+        busy_appear_timeout_s=1.0,
+        generation_timeout_s=5.0,
+    )
+    page = FakePage()
+    page.locators[site.busy_signal[0]] = PresentLocator()
+    page.locators[site.response_container[0]] = TextLocator(
+        [_CHATGPT_FAILURE_TEXT]
+    )
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+
+    start = time.monotonic()
+    with pytest.raises(ImageGenFailed):
+        driver.await_done(log=lambda s: None)
+    elapsed = time.monotonic() - start
+    # caught within a couple of polls, nowhere near the 5s hard timeout
+    assert elapsed < 1.0
+
+
+def test_await_done_normal_response_never_raises_image_gen_failed():
+    """MUST NOT REGRESS: a normal successful generation (busy signal
+    appears, then clears on its own after a few polls) is byte-behavior
+    unchanged — the new text scan never fires on ordinary response
+    text."""
+    site = SITES["chatgpt"]
+    timing = replace(
+        TIMING,
+        poll_interval_s=0.01,
+        progress_log_interval_s=1000.0,
+        busy_appear_timeout_s=1.0,
+        generation_timeout_s=5.0,
+    )
+    page = FakePage()
+    page.locators[site.busy_signal[0]] = FlipLocator(3)
+    page.locators[site.response_container[0]] = TextLocator(
+        ["Here is your generated image."]
+    )
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+
+    driver.await_done(log=lambda s: None)  # must not raise

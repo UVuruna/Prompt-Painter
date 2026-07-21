@@ -16,6 +16,8 @@ import pytest
 from painter import runner as runner_module
 from painter.config import (
     CONTINUE_NUDGE,
+    IMAGE_FAILED_RETRY_MAX,
+    IMAGE_RETRY_NUDGE,
     SAFER_PREAMBLE,
     SITES,
     STYLES,
@@ -23,7 +25,7 @@ from painter.config import (
     dest_for,
     prompt_suffix,
 )
-from painter.driver import ItemRefused, NoImage, TerminalState
+from painter.driver import ImageGenFailed, ItemRefused, NoImage, TerminalState
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
@@ -346,6 +348,119 @@ def test_no_continue_nudge_stops_on_the_first_no_image(tmp_path):
     # only the original submit — no nudge at all
     assert len(driver.submitted) == 1
     assert CONTINUE_NUDGE not in driver.submitted
+
+
+def test_image_gen_failed_recovers_on_a_later_retry(tmp_path):
+    """BUG 3: ChatGPT's own "Image generation failed" answer — the
+    driver already caught it (ImageGenFailed) WITHOUT burning the hard
+    timeout (see test_driver.py); the runner resends IMAGE_RETRY_NUDGE
+    ("retry") into the same chat and recovers once the site finally
+    produces the image."""
+    class FailsTwiceThenWorks(FakeDriver):
+        def extract_image(self):
+            retries = [
+                s for s in self.submitted if s == IMAGE_RETRY_NUDGE
+            ]
+            if len(retries) >= 2:  # succeeds on the 2nd "retry" resend
+                return PNG_1PX
+            raise ImageGenFailed(
+                "ChatGPT: image generation failed (matched 'image"
+                " generation failed'): ..."
+            )
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    events: list[dict] = []
+    driver = FailsTwiceThenWorks(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST,
+        log=logs.append, on_event=events.append,
+    )
+    assert generated == 1
+    assert (out / "chatgpt" / "fake" / "img_0.png").read_bytes() == PNG_1PX
+    assert any("retry RECOVERED" in line for line in logs)
+    # original submit + 2 "retry" resends
+    assert driver.submitted == [
+        "prompt 0", IMAGE_RETRY_NUDGE, IMAGE_RETRY_NUDGE,
+    ]
+    assert any(e["type"] == "item_retry" for e in events)
+
+
+def test_image_gen_failed_gives_up_after_retry_max(tmp_path):
+    """Still failing after IMAGE_FAILED_RETRY_MAX resends -> the item
+    is SKIPPED (never overwritten/silently dropped) and the run
+    continues with the next item, exactly like a safety refusal."""
+    class FailsItem0Only(FakeDriver):
+        def extract_image(self):
+            if "prompt 1" in self.submitted[-1]:
+                return PNG_1PX
+            raise ImageGenFailed("ChatGPT: image generation failed: ...")
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = FailsItem0Only(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, log=logs.append,
+    )
+    # item 0 exhausted its retries and was skipped; item 1 still ran
+    assert generated == 1
+    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert any("GENERATION FAILED" in line for line in logs)
+    # original submit + IMAGE_FAILED_RETRY_MAX "retry" resends for item 0
+    assert driver.submitted[:1 + IMAGE_FAILED_RETRY_MAX] == [
+        "prompt 0"
+    ] + [IMAGE_RETRY_NUDGE] * IMAGE_FAILED_RETRY_MAX
+    report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "REFUSED" in report  # reuses the existing skip/report path
+    assert "Refused: 1" in report
+
+    # the rerun drives ONLY the failed item (file-existence resume)
+    driver2 = FakeDriver(SITES["chatgpt"])
+    assert run_sheet(sheet, driver2, out, "chatgpt", FAST) == 1
+    assert "prompt 0" in driver2.submitted[0]
+
+
+def test_image_failed_retry_off_stops_the_site_immediately(tmp_path):
+    """image_failed_retry=False: the FIRST ImageGenFailed propagates
+    and stops the site, no "retry" ever sent — same shape as
+    continue_nudge=False for NoImage."""
+    class AlwaysFails(FakeDriver):
+        def extract_image(self):
+            raise ImageGenFailed("ChatGPT: image generation failed: ...")
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = AlwaysFails(SITES["chatgpt"])
+    with pytest.raises(ImageGenFailed):
+        run_sheet(
+            sheet, driver, out, "chatgpt", FAST, image_failed_retry=False,
+        )
+    # only the original submit — no "retry" resend at all
+    assert driver.submitted == ["prompt 0"]
+    report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "image generation failed" in report
+
+
+def test_image_gen_failed_does_not_regress_a_normal_run(tmp_path):
+    """A normal run (no ImageGenFailed ever raised) is byte-behavior
+    unchanged: no "retry" resend, no extra events, plain success."""
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = FakeDriver(SITES["chatgpt"])
+    events: list[dict] = []
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, on_event=events.append,
+    )
+    assert generated == 2
+    assert IMAGE_RETRY_NUDGE not in driver.submitted
+    assert not any(e["type"] == "item_retry" for e in events)
 
 
 def test_no_report_flag(tmp_path):

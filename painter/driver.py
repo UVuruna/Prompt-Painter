@@ -75,6 +75,23 @@ class NoImage(DriverError):
     any other ``DriverError`` and the site stops loudly."""
 
 
+class ImageGenFailed(DriverError):
+    """ChatGPT's image tool failed outright — the assistant's OWN text
+    already names the failure (e.g. "Image generation failed ... I
+    can't retry it automatically after this kind of failure ... reply
+    with 'retry'"), matched against the site's
+    ``image_failed_text_markers`` (owner 2026-07-21, BUG 3). Distinct
+    from ``NoImage`` (matches NO known marker — an unknown DOM state)
+    and from ``ItemRefused``/``TerminalState`` (real refusal/quota
+    markers): this state is recognized WHILE the busy/stop signal is
+    still present (it never clears for this failure, so the done edge
+    would never come) — ``await_done`` raises it immediately instead
+    of burning the whole ``generation_timeout_s``. The runner catches
+    it and resends the site's own suggested word ("retry") into the
+    same chat, up to a configured number of attempts, before giving up
+    on the item."""
+
+
 class FixNotConfigured(DriverError):
     """WEBSITE FIX (``submit_fix``, GUI rework Phase 17) is disabled
     for this site — its ``attach_button``/``file_input`` selectors are
@@ -349,6 +366,13 @@ class SiteDriver:
                     f"{self.site.name}: no done edge after"
                     f" {t.generation_timeout_s:.0f}s (hard timeout)"
                 )
+            # BUG 3 (owner 2026-07-21): ChatGPT's "Image generation
+            # failed" answer leaves the busy/stop signal stuck FOREVER
+            # — the done edge this loop waits for never comes. Scan the
+            # response text on EVERY poll so the failure is caught in
+            # seconds instead of burning the whole hard timeout; a
+            # no-op wherever the site names no such marker (Gemini).
+            self._check_image_failed()
             if now - last_log >= t.progress_log_interval_s:
                 log(f"    ... still generating ({now - start:.0f}s)")
                 last_log = now
@@ -512,6 +536,26 @@ class SiteDriver:
                 raise ItemRefused(
                     f"{self.site.name}: prompt refused"
                     f" (matched '{marker}'): {text[:200]}"
+                )
+
+    def _check_image_failed(self) -> None:
+        """Raise ``ImageGenFailed`` when the CURRENT response text
+        already names a known image-generation failure (BUG 3, owner
+        2026-07-21) — a silent no-op wherever
+        ``site.image_failed_text_markers`` is empty (Gemini today), so
+        this is safe to call unconditionally from ``await_done``'s
+        wait loop for every site. Distinct from ``_check_markers``
+        (refusal/quota) — an entirely different failure mode, with its
+        own recovery (the runner resends the site's own "retry" word)."""
+        if not self.site.image_failed_text_markers:
+            return
+        text = self._response_text()
+        lowered = text.lower()
+        for marker in self.site.image_failed_text_markers:
+            if marker in lowered:
+                raise ImageGenFailed(
+                    f"{self.site.name}: image generation failed"
+                    f" (matched '{marker}'): {text[:300]}"
                 )
 
     def _raise_no_image(self, situation: str) -> None:

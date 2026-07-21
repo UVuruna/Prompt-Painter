@@ -132,8 +132,11 @@ The per-site prompt suffix machinery (`BACKGROUND_CHOICES`,
 — the aspect-ratio law picked from the prompt text itself, Gemini's
 extra "no reflections" law); the per-agent STYLE clause (`STYLES`,
 `STYLE_CHOICES`, `STYLE_DEFAULT`); `SAFER_PREAMBLE` (the safety-refusal
-one-shot retry preamble) and `CONTINUE_NUDGE` (the ChatGPT stall
-nudge); the free Gemini API block (`GEMINI_*` model names,
+one-shot retry preamble), `CONTINUE_NUDGE` (the ChatGPT stall
+nudge), and `IMAGE_RETRY_NUDGE`/`IMAGE_FAILED_RETRY_MAX` (BUG 3,
+owner 2026-07-21 — the "retry" word ChatGPT's own "Image generation
+failed" answer asks for, and how many times the runner resends it
+before giving up on the item); the free Gemini API block (`GEMINI_*` model names,
 `AI_CALL_PAUSE_S`/`AI_TIMEOUT_S`/`AI_TEST_PROMPT`, the transient-retry
 knobs, `AI_IMAGE_QUOTA_MARKERS`); the AI sheet generator's prompt
 templates (`AI_MAX_QUESTIONS`, `SHEETS_DIR`, `AI_QUESTIONS_SYSTEM`,
@@ -147,9 +150,12 @@ checker's copy (`AI_FLAGS_FILENAME`, `AI_CHECK_INSTRUCTIONS`,
 `Timing` (the frozen dataclass of every wait/pace, `TIMING` the
 instance), `PAUSE_POLL_INTERVAL_S`, `MIN_IMAGE_PX`; `SiteConfig` (the
 per-site DOM hook dataclass — prompt box, send/busy/response/result
-selectors, refusal/quota text markers, the WEBSITE FIX attach
-selectors) and `SITES` (`chatgpt`/`gemini`, both shipping with WEBSITE
-FIX disabled until the owner captures real selectors); `NEW_CHAT_CHOICES`.
+selectors, refusal/quota text markers, `image_failed_text_markers`
+(BUG 3, owner 2026-07-21 — ChatGPT's own "Image generation failed"
+answer text, empty for sites with no such marker), the WEBSITE FIX
+attach selectors) and `SITES` (`chatgpt`/`gemini`, both shipping with
+WEBSITE FIX disabled until the owner captures real selectors);
+`NEW_CHAT_CHOICES`.
 
 ## Connections
 

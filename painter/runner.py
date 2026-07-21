@@ -22,6 +22,8 @@ from typing import Callable
 
 from painter.config import (
     CONTINUE_NUDGE,
+    IMAGE_FAILED_RETRY_MAX,
+    IMAGE_RETRY_NUDGE,
     PAUSE_POLL_INTERVAL_S,
     REPORT_SUFFIX,
     SAFER_PREAMBLE,
@@ -32,6 +34,7 @@ from painter.config import (
     fmt_size,
 )
 from painter.driver import (
+    ImageGenFailed,
     ItemRefused,
     NoImage,
     SiteDriver,
@@ -222,6 +225,7 @@ def run_sheet(
     on_event: OnEvent | None = None,
     safer_retry: bool = False,
     continue_nudge: bool = True,
+    image_failed_retry: bool = True,
     new_chat_per_folder: bool = False,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
@@ -248,6 +252,16 @@ def run_sheet(
     spin) until it returns False (Resume) or ``should_stop`` fires
     (Stop always wins over a pending pause). Emits ``sheet_paused`` /
     ``sheet_resumed`` on the ``on_event`` stream, once per transition.
+    ``image_failed_retry`` (owner 2026-07-21, BUG 3, default on) is the
+    ``ImageGenFailed`` recovery: ChatGPT's own "Image generation
+    failed" answer is caught by the driver WHILE it is still waiting
+    (never a burned hard timeout); the runner resends the driver's
+    ``IMAGE_RETRY_NUDGE`` ("retry", the site's own suggested word) into
+    the same chat up to ``IMAGE_FAILED_RETRY_MAX`` times, and if it
+    still fails, skips the item exactly like a safety refusal (logged,
+    counted, added to the report) — never silently. With it off, the
+    first ``ImageGenFailed`` propagates and stops the site immediately,
+    same shape as ``continue_nudge=False``.
     """
     state_dir = out_base / STATE_DIRNAME / site_key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -443,6 +457,51 @@ def run_sheet(
                 emit({"type": "item_nudge", "drop_path": item.drop_path})
                 data, t_send = generate_one(CONTINUE_NUDGE)
                 log("    continue nudge RECOVERED")
+            except ImageGenFailed as exc:
+                # BUG 3: ChatGPT's OWN text already named the failure
+                # ("Image generation failed ... reply with 'retry'")
+                # while the busy/stop signal was still stuck — the
+                # driver caught it WITHOUT burning the hard timeout.
+                # Its own instructions say how to recover: resend the
+                # word "retry" into the same chat, up to the configured
+                # number of attempts, same skip-and-continue shape as a
+                # safety refusal when it still won't budge.
+                if not image_failed_retry:
+                    raise
+                reason = str(exc)
+                data = None
+                for attempt in range(1, IMAGE_FAILED_RETRY_MAX + 1):
+                    log(
+                        "    IMAGE GENERATION FAILED — sending"
+                        f" '{IMAGE_RETRY_NUDGE}' ({attempt}/"
+                        f"{IMAGE_FAILED_RETRY_MAX}) ..."
+                    )
+                    emit({"type": "item_retry"})
+                    try:
+                        data, t_send = generate_one(IMAGE_RETRY_NUDGE)
+                        log("    retry RECOVERED")
+                        break
+                    except ImageGenFailed as exc2:
+                        reason = str(exc2)
+                        data = None
+                if data is None:
+                    refused += 1
+                    log(f"    GENERATION FAILED — {reason}")
+                    log(
+                        "    continuing with the next item; rerun later"
+                        " to retry"
+                    )
+                    if run_report is not None:
+                        run_report.refused(item.drop_path, reason)
+                    emit(
+                        {
+                            "type": "item_refused",
+                            "drop_path": item.drop_path,
+                        }
+                    )
+                    if idx < total:
+                        _pause(timing, should_stop, log)
+                    continue
             t_image = time.monotonic()
             gen_s = t_image - t_send
 
@@ -540,6 +599,7 @@ def run_sheet(
         stopped_why = {
             "GenerationTimeout": "generation timed out",
             "NoImage": "no image — DOM state unknown",
+            "ImageGenFailed": "image generation failed (site's own error)",
         }.get(type(exc).__name__, f"aborted: {type(exc).__name__}")
         raise
     finally:

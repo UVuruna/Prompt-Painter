@@ -174,6 +174,24 @@ SAFER_PREAMBLE = (
 CONTINUE_NUDGE = "Continue - please finish generating the image."
 
 
+# --- Image-generation-failed retry (ChatGPT, owner 2026-07-21) --------
+
+# BUG 3: ChatGPT's image tool sometimes fails outright ("Image
+# generation failed" / "I wasn't able to generate the image ... reply
+# with 'retry'") while the busy/stop signal never clears — the driver
+# raises ImageGenFailed the instant it recognizes the site's own
+# SiteConfig.image_failed_text_markers (empty for sites with no such
+# marker, e.g. Gemini) instead of waiting out the whole
+# generation_timeout_s. ChatGPT's own message says exactly how to
+# recover: reply with this word, in the SAME chat.
+IMAGE_RETRY_NUDGE = "retry"
+# how many times the runner resends IMAGE_RETRY_NUDGE before giving up
+# on the item (same shape as safer_retry's one-shot preamble resend,
+# but this failure is flaky enough on the owner's runs to warrant more
+# than one attempt)
+IMAGE_FAILED_RETRY_MAX = 2
+
+
 # --- AI features: free Gemini API (owner 2026-07-20) ------------------
 #
 # painter/ai.py drives the FREE AI Studio REST API (no SDK) for two GUI

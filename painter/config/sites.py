@@ -94,6 +94,15 @@ class SiteConfig:
     # substrings marking a quota/rate limit — TERMINAL for the whole
     # site: report and stop, never blind-retry
     quota_text_markers: tuple[str, ...]
+    # substrings marking ChatGPT's OWN "image generation failed" answer
+    # (owner 2026-07-21, BUG 3): distinct from refusal/quota — the busy
+    # signal never clears for this state, so `await_done`'s "still
+    # generating" loop scans for these on EVERY poll and raises
+    # `ImageGenFailed` immediately instead of burning the whole
+    # `generation_timeout_s` waiting for a done edge that never comes.
+    # EMPTY BY DEFAULT (Gemini has shown no such failure text) — the
+    # check is a silent no-op wherever this tuple is empty.
+    image_failed_text_markers: tuple[str, ...] = ()
     # the sidebar "New chat" control (owner captures 2026-07-18) —
     # clicked between collections/folders when the option is on
     new_chat: tuple[str, ...] = ()
@@ -186,6 +195,23 @@ SITES = {
             "limit resets",
             "generation limit",
             "image generation limit",
+        ),
+        # live capture 2026-07-21 (BUG 3 — a real run lost 7 minutes to
+        # this): "Image generation failed / Try again" heading, body "I
+        # wasn't able to generate the image because the image
+        # generation tool encountered an error. I can't retry it
+        # automatically after this kind of failure. Please send the
+        # same prompt again (or simply reply with 'retry'), and I'll
+        # generate it on the new request." The busy/stop signal never
+        # clears for this state (no done edge ever comes), so these
+        # markers are scanned for DURING the "still generating" wait,
+        # not just after it gives up. Distinctive substrings only —
+        # never bare "retry" (would false-positive on ordinary text).
+        image_failed_text_markers=(
+            "image generation failed",
+            "wasn't able to generate the image",
+            "image generation tool encountered an error",
+            "can't retry it automatically after this kind of failure",
         ),
         new_chat=(
             'a[data-testid="create-new-chat-button"]',

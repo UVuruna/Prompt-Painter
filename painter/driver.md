@@ -62,7 +62,16 @@ handed back for the runner to save under the sheet's own name.
    with the SAME `await_done`/`extract_image` below, unchanged.
 2. `await_done(log)` — the done edge: the busy signal (stop button)
    must appear, then disappear, under the hard generation timeout;
-   long waits log progress at the configured cadence.
+   long waits log progress at the configured cadence. **BUG 3 text
+   scan** (owner 2026-07-21): on EVERY poll of the "busy signal
+   present" wait, `_check_image_failed()` also scans the current
+   response text for the site's `image_failed_text_markers` (ChatGPT
+   only today — empty for Gemini, a silent no-op there) and raises
+   `ImageGenFailed` IMMEDIATELY on a match, instead of waiting out the
+   whole `generation_timeout_s`. This exists because ChatGPT's "Image
+   generation failed" answer leaves the busy/stop signal stuck
+   forever — the done edge this loop is waiting for never comes on
+   its own.
 2b. `new_chat(log)` — clicks the sidebar's New-chat control (config
    selectors, captured live 2026-07-18) and waits for the fresh
    composer; the callers use it between collections/folder groups
@@ -111,6 +120,18 @@ pasted text lands).
 While waiting for the result `<img>`, the response text is checked
 every poll, so refusals raise in seconds instead of burning the
 image timeout.
+- `ImageGenFailed` — BUG 3 (owner 2026-07-21): ChatGPT's image tool
+  failed outright and its OWN text already names the failure ("Image
+  generation failed" / "I wasn't able to generate the image ... reply
+  with 'retry'") while the busy/stop signal never clears. Distinct
+  from `NoImage` (matches NO known marker — an unknown DOM state) and
+  from `ItemRefused`/`TerminalState` (real refusal/quota markers);
+  raised by `_check_image_failed()`, called from `await_done`'s
+  "still generating" loop on every poll — a silent no-op wherever the
+  site's `image_failed_text_markers` is empty (Gemini today). The
+  runner catches it and resends the site's own suggested "retry" word
+  into the same chat, up to `IMAGE_FAILED_RETRY_MAX` attempts, before
+  giving up on the item exactly like a safety refusal.
 - `FixNotConfigured` — GUI rework Phase 17: `submit_fix` (WEBSITE
   FIX) is disabled for this site because `attach_button`/`file_input`
   are empty in `SITES` — the shipped default for BOTH chatgpt and
