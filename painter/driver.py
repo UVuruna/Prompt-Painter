@@ -74,6 +74,17 @@ class NoImage(DriverError):
     any other ``DriverError`` and the site stops loudly."""
 
 
+class FixNotConfigured(DriverError):
+    """WEBSITE FIX (``submit_fix``, GUI rework Phase 17) is disabled
+    for this site — its ``attach_button``/``file_input`` selectors are
+    empty in ``SITES`` (the shipped default for BOTH chatgpt and
+    gemini). The owner must capture the live selectors first, the same
+    way every other selector in this file was captured, and paste them
+    into the site's config block. Raised immediately, before
+    ``submit_fix`` touches the page at all — never a guessed
+    selector."""
+
+
 # Runs on the <img> element inside the page. Canvas first: site CSP
 # (Gemini's connect-src) blocks fetch() of blob: URLs, while drawing
 # the already-loaded <img> onto a canvas needs no request at all —
@@ -186,9 +197,13 @@ class SiteDriver:
             )
         )
 
-    def submit_prompt(self, prompt: str) -> None:
-        """Paste the prompt byte-identical and press send — with a
-        person's rhythm (click ... paste ... send), never instant."""
+    def _paste_and_send(self, prompt: str) -> None:
+        """Click the prompt box, select-all + delete, paste ``prompt``
+        verbatim, click send — the paste+send tail shared by
+        ``submit_prompt`` (text only) and ``submit_fix`` (image
+        attach + follow-up prompt, GUI rework Phase 17). This is
+        ``submit_prompt``'s original body, extracted unchanged so both
+        entry points end the same human-paced way."""
         box = self._require(self.site.prompt_box, "the prompt box")
         self._hesitate()
         box.click()
@@ -201,6 +216,64 @@ class SiteDriver:
         self._hesitate()
         send = self._require(self.site.send_button, "the send button")
         send.click()
+
+    def submit_prompt(self, prompt: str) -> None:
+        """Paste the prompt byte-identical and press send — with a
+        person's rhythm (click ... paste ... send), never instant."""
+        self._paste_and_send(prompt)
+
+    def submit_fix(self, image_path: str, prompt: str) -> None:
+        """WEBSITE FIX (GUI rework Phase 17): re-attach a previously
+        generated image into the SAME chat and paste+send a follow-up
+        ``prompt`` asking the site to correct it — the AI Checker's
+        flagged defects turned into a focused fix note instead of a
+        blind full regeneration.
+
+        GATED: raises ``FixNotConfigured`` immediately — before
+        touching the page at all — while this site's
+        ``attach_button``/``file_input`` are empty (the shipped
+        default for both chatgpt and gemini). Real selectors are the
+        OWNER's job: capture them from the live DOM, exactly like
+        every other selector in ``SITES``, and paste them into the
+        site's config block; this method never guesses them.
+
+        Only SUBMITS the fix (attaches the image, pastes+sends the
+        prompt). Awaiting the done edge and reading the corrected
+        image back reuse the EXISTING ``await_done``/``extract_image``
+        unchanged — the caller invokes them next, exactly as after
+        ``submit_prompt``.
+        """
+        if not self.site.attach_button or not self.site.file_input:
+            raise FixNotConfigured(
+                f"{self.site.name}: WEBSITE FIX is not configured —"
+                " attach_button/file_input are empty in SITES; the"
+                " owner must capture the live selectors first (see"
+                " config.py's SiteConfig comment) before this feature"
+                " can run"
+            )
+        attach = self._require(
+            self.site.attach_button, "the attach/upload control"
+        )
+        self._hesitate()
+        attach.click()
+        self._hesitate()
+        # File inputs are routinely hidden by design (a styled attach
+        # button drives them via JS) — Playwright's set_input_files
+        # does not require visibility the way a real click does, so
+        # this lookup does not filter on is_visible() either.
+        file_input = self._require(
+            self.site.file_input, "the file input", require_visible=False
+        )
+        file_input.set_input_files(image_path)
+        # No dedicated "upload complete" selector is configured (only
+        # attach_button/file_input, per this phase's scope) — the same
+        # human-rhythm pause used everywhere else in this driver
+        # stands in for "let it settle". If a real site needs a
+        # stronger signal (e.g. a thumbnail preview appearing), that
+        # is a follow-up config addition once the owner captures it
+        # live.
+        self._hesitate()
+        self._paste_and_send(prompt)
 
     def await_done(self, log: Log = print) -> None:
         """Watch the done edge: the busy signal appears, then goes.
@@ -306,27 +379,42 @@ class SiteDriver:
 
     # --- DOM plumbing ---------------------------------------------------
 
-    def _query(self, selectors: tuple[str, ...]) -> Locator | None:
-        """First visible match across the fallback selectors, else None."""
+    def _query(
+        self, selectors: tuple[str, ...], require_visible: bool = True
+    ) -> Locator | None:
+        """First match across the fallback selectors, else None.
+
+        ``require_visible=False`` skips the ``is_visible()`` filter —
+        for elements legitimately hidden by design (see ``_require``).
+        """
         for sel in selectors:
             loc = self.page.locator(sel)
             for k in range(loc.count()):
                 cand = loc.nth(k)
-                if cand.is_visible():
+                if not require_visible or cand.is_visible():
                     return cand
         return None
 
-    def _require(self, selectors: tuple[str, ...], what: str) -> Locator:
+    def _require(
+        self,
+        selectors: tuple[str, ...],
+        what: str,
+        require_visible: bool = True,
+    ) -> Locator:
         """Wait for any fallback selector to match; loud after timeout.
 
         Sites are async SPAs — elements morph a beat after input
         events (the ChatGPT composer button turns into its send
         state only once the pasted text lands), so a one-shot query
-        would fail on honest timing.
+        would fail on honest timing. ``require_visible=False`` (GUI
+        rework Phase 17's file input) waits for the selector to be
+        ATTACHED only, not visible — Playwright's ``set_input_files``
+        does not need a visible element, and file inputs are commonly
+        hidden by design.
         """
         deadline = time.monotonic() + self._timing.selector_timeout_s
         while True:
-            loc = self._query(selectors)
+            loc = self._query(selectors, require_visible=require_visible)
             if loc is not None:
                 return loc
             if time.monotonic() > deadline:

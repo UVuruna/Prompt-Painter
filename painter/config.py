@@ -1430,6 +1430,22 @@ class SiteConfig:
     # the sidebar "New chat" control (owner captures 2026-07-18) —
     # clicked between collections/folders when the option is on
     new_chat: tuple[str, ...] = ()
+    # GUI rework Phase 17 (WEBSITE FIX, HIGH RISK / owner-dependent):
+    # the attach/upload control that opens this site's file picker in
+    # the chat composer, and the (often hidden-by-design) <input
+    # type="file"> it drives. EMPTY BY DEFAULT = WEBSITE FIX DISABLED
+    # for this site — SiteDriver.submit_fix raises FixNotConfigured
+    # immediately instead of guessing. DO NOT INVENT THESE SELECTORS.
+    #
+    # OWNER: to enable WEBSITE FIX for a site, open its chat in the
+    # automation Chrome profile, inspect the "+"/attach button and the
+    # file input it drives (DevTools -> Elements — same method used to
+    # capture every other selector in this file), and paste them here
+    # as tuples of fallback CSS selectors, e.g.:
+    #   attach_button=('button[aria-label="Attach files"]',),
+    #   file_input=('input[type="file"]',),
+    attach_button: tuple[str, ...] = ()
+    file_input: tuple[str, ...] = ()
 
 
 SITES = {
@@ -1508,6 +1524,11 @@ SITES = {
             'a[data-testid="create-new-chat-button"]',
             'a[href="/"][data-sidebar-item="true"]',
         ),
+        # WEBSITE FIX (GUI rework Phase 17) — DISABLED for ChatGPT
+        # until the OWNER pastes real selectors here (see SiteConfig's
+        # field comment above for exactly what to capture and how).
+        attach_button=(),
+        file_input=(),
     ),
     "gemini": SiteConfig(
         name="Gemini",
@@ -1583,6 +1604,11 @@ SITES = {
             'a[aria-label="New chat"]',
             'gem-icon-button a[href="/app"]',
         ),
+        # WEBSITE FIX (GUI rework Phase 17) — DISABLED for Gemini
+        # until the OWNER pastes real selectors here (see SiteConfig's
+        # field comment above for exactly what to capture and how).
+        attach_button=(),
+        file_input=(),
     ),
 }
 

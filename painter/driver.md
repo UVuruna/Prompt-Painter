@@ -19,7 +19,22 @@ handed back for the runner to save under the sheet's own name.
    interaction here (and in the send retry and `new_chat`) is
    preceded by `_hesitate()` — a random human-like pause from the
    config's action-delay range (owner's #8), so nothing ever fires
-   machine-instant.
+   machine-instant. This click/select-all/delete/insert/send body
+   lives in a shared private `_paste_and_send(prompt)`;
+   `submit_prompt` is a one-line call onto it.
+1b. `submit_fix(image_path, prompt)` — **WEBSITE FIX** (GUI rework
+   Phase 17, **GATED**): click the site's attach/upload control,
+   `set_input_files(image_path)` on its file input (often
+   hidden-by-design — this lookup does not require visibility, unlike
+   every other selector here), a settle pause, then the SAME
+   `_paste_and_send(prompt)` `submit_prompt` uses. Raises
+   `FixNotConfigured` immediately — before touching the page at all —
+   while the site's `attach_button`/`file_input` are empty (`SITES`'
+   shipped default for BOTH chatgpt and gemini today; the OWNER must
+   capture the live selectors first, the same way every other
+   selector in this file was captured). Only SUBMITS the fix — the
+   caller awaits the done edge and reads the corrected image back
+   with the SAME `await_done`/`extract_image` below, unchanged.
 2. `await_done(log)` — the done edge: the busy signal (stop button)
    must appear, then disappear, under the hard generation timeout;
    long waits log progress at the configured cadence.
@@ -68,6 +83,12 @@ pasted text lands).
 While waiting for the result `<img>`, the response text is checked
 every poll, so refusals raise in seconds instead of burning the
 image timeout.
+- `FixNotConfigured` — GUI rework Phase 17: `submit_fix` (WEBSITE
+  FIX) is disabled for this site because `attach_button`/`file_input`
+  are empty in `SITES` — the shipped default for BOTH chatgpt and
+  gemini until the owner captures the live selectors. Raised
+  immediately, before `submit_fix` touches the page at all — never a
+  guessed selector.
 - `DriverError` — anything else the config block does not
   recognize, always with the response's opening text quoted. Both the
   CLI and the GUI catch `DriverError`, so `NoImage` (when a nudge does
@@ -87,8 +108,9 @@ image timeout.
 
 ### SiteDriver
 `attach()` (find the tab by URL fragment; several tabs → the last
-one), `submit_prompt()`, `await_done()`, `extract_image()`,
-`close()` (detaches; never closes the owner's browser).
+one), `submit_prompt()`, `submit_fix()` (GATED — see Failure
+taxonomy), `await_done()`, `extract_image()`, `close()` (detaches;
+never closes the owner's browser).
 
 ## Functions
 

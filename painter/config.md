@@ -561,6 +561,17 @@ suffix key `auto` resolves to), `prompt_box`, `send_button`,
 (visible only while generating — its disappearance is the done
 edge), `response_container`, `result_image`, and
 `refusal_text_markers` (the substrings that mark a no-image
-response as terminal).
+response as terminal). GUI rework Phase 17 (WEBSITE FIX, HIGH RISK /
+owner-dependent): `attach_button` / `file_input` (both default `()`)
+are the file-attach selectors [CDP Driver](driver.md)'s `submit_fix`
+needs — the CSS selector(s) for the chat's attach/upload control and
+the (often hidden-by-design) `<input type="file">` it drives. EMPTY
+BY DEFAULT = WEBSITE FIX disabled for that site; `submit_fix` raises
+`FixNotConfigured` immediately rather than guess. These are NOT
+invented — the owner must capture them from the live DOM, the same
+way every other selector on this page was captured, and paste them
+into the site's block (the dataclass field carries a comment with the
+exact CSS shape to paste).
 
-`SITES` maps `chatgpt` / `gemini` to their blocks.
+`SITES` maps `chatgpt` / `gemini` to their blocks — both ship today
+with WEBSITE FIX disabled (`attach_button=()`, `file_input=()`).
