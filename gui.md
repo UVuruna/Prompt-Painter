@@ -1,6 +1,22 @@
 # GUI
 
-**Script:** [GUI (script)](gui.py)
+**Script:** [GUI (folder)](gui/___gui.md)
+
+> **Where the code actually lives now (root Rule #20 god-file split,
+> step 7/8):** this file predates the package split and still
+> describes the app FEATURE BY FEATURE (Main Menu, Running view, the
+> Dashboard, Theming, Threading, Pause…) — every fact below stays
+> accurate, but `PainterGui` itself is no longer one class in one
+> file. It is composed from five mixins, each in its own module: the
+> constructor + widget construction
+> ([Build Mixin](gui/app_build.md)), the Main Menu / running-view
+> state machine ([View Mixin](gui/app_views.md)), the site + API-image
+> run loop, dashboard dispatch, Checker AI and Fixer AI
+> ([Site Jobs Mixin](gui/app_jobs.md)), the four standalone tools + the
+> AI image checker ([Tool Jobs Mixin](gui/app_tools.md)), and queue/
+> settings/prerequisite handling ([Settings Mixin](gui/app_settings.md))
+> — composed into `PainterGui` in [App (composition)](gui/app.md). See
+> [GUI (folder)](gui/___gui.md) for the full package map.
 
 ## Purpose
 The owner's front door — a themed tkinter window over the same

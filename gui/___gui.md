@@ -31,15 +31,68 @@ its real owner `_AiDialog` out of `gui/__init__.py` into
 `gui/dialogs.py` (see that module's own Design Decisions). This step
 (6/8) moved the **MENU + DASHBOARD-PANEL classes**: `MainMenu`/
 `IconBar` (`menu.py`), `JobPanel`/`DashPanel` (`dash_panels.py`), and
-`ToolPanel`/`AiCheckPanel`/`DashGrid` (`tool_dash.py`). Only the
-god-class `PainterGui` (~3,350 lines) and `main()` still live in
-`__init__.py`, unmoved — [gui.md](../gui.md) (the pre-existing script
-doc, one level up, beside this folder) still documents that remaining
-content; it migrates into the mixin submodules (`app_build.py`/
-`app_views.py`/`app_jobs.py`/`app_tools.py`/`app_settings.py`/`app.py`)
-in step 7/8 of the same refactor.
+`ToolPanel`/`AiCheckPanel`/`DashGrid` (`tool_dash.py`). This step
+(7/8 — the critical one) split the god-class itself: `PainterGui`
+(~3,350 lines, 94 methods) is now composed from FIVE responsibility
+mixins, one file each — `BuildMixin` (`app_build.py`, the constructor +
+widget construction), `ViewMixin` (`app_views.py`, the Main Menu /
+running-view state machine), `SiteJobsMixin` (`app_jobs.py`, the site +
+API-image run loop, dashboard dispatch, Checker AI, Fixer AI),
+`ToolJobsMixin` (`app_tools.py`, the four standalone tools + the AI
+image checker) and `SettingsMixin` (`app_settings.py`, queue/sheet
+management, prerequisite actions, settings persistence) — combined by
+inheritance in `app.py`'s `class PainterGui(BuildMixin, ViewMixin,
+SiteJobsMixin, ToolJobsMixin, SettingsMixin):`, which also carries
+`main()`. `__init__.py` is now a PURE re-export shell: `from .app
+import PainterGui, main` plus every existing `from .submodule import
+(...)` block, unchanged — no class or def body of its own.
+[gui.md](../gui.md) (the pre-existing FEATURE-by-feature script doc,
+one level up) now points readers at these five modules for where the
+described behavior actually lives; step 8/8 is the final cross-project
+verification pass (see `REFACTOR-GODFILES.md`, the owner's binding
+plan, untracked).
 
 ## Files
+
+### `app.py` — App (composition)
+`class PainterGui(BuildMixin, ViewMixin, SiteJobsMixin, ToolJobsMixin,
+SettingsMixin):` — no method bodies of its own, just the MRO glue —
+plus `main()` and the `if __name__ == "__main__":` guard. See
+[App (composition)](app.md).
+
+### `app_build.py` — Build Mixin
+`BuildMixin` — `PainterGui`'s constructor (the ONLY mixin with
+`__init__`) and every `_build_*` widget-construction helper, the
+global font-zoom/wheel-routing bindings, `_relayout_agents`, and the
+maximize/restore cover + drag-resize event-buffering watcher. See
+[Build Mixin](app_build.md).
+
+### `app_views.py` — View Mixin
+`ViewMixin` — the Main Menu / "main" / "running" three-way view switch,
+the Main Menu tile router (shared with the running view's `IconBar`),
+the running-view layout reconciler, the "which jobs are active"
+queries, and the Controls collapse toggle. See [View Mixin](app_views.md).
+
+### `app_jobs.py` — Site Jobs Mixin
+`SiteJobsMixin` — the two browser-driven SITE jobs plus the paid-API
+image job's shared run loop, the worker-queue pump/dispatch, the
+per-job Pause toggle and dashboard-panel close, the quota auto-restart
+timers, the post-save pipeline composer, the parallel Checker AI and
+the Fixer AI (both its auto-dispatch half and its manual-button
+worker builders). See [Site Jobs Mixin](app_jobs.md).
+
+### `app_tools.py` — Tool Jobs Mixin
+`ToolJobsMixin` — the four standalone tools' (BG removal / Crop /
+Upscale / Aspect ratio) Start/worker/Stop, the AI image checker's own
+job, and its two report-viewer actions (Send flagged to generator /
+Clear flags). See [Tool Jobs Mixin](app_tools.md).
+
+### `app_settings.py` — Settings Mixin
+`SettingsMixin` — the Collections queue, the sheet parsing/planning
+helpers shared by the site jobs, the dashboard row "Show" viewers, the
+top-strip prerequisite button handlers, the AI features' key gate, and
+the whole settings round-trip (collect/apply/migrate/save). See
+[Settings Mixin](app_settings.md).
 
 ### `agent_panel.py` — Agent Panel
 `AgentPanel` — one site's (ChatGPT/Gemini) OWN control panel:
@@ -322,3 +375,47 @@ before/after viewer (`BeforeAfterWindow`) has no such test coverage
 (confirmed by grep across `tests/*.py` before this split) and stays a
 plain real-path import from `gui.viewers` — late-binding it too would
 be indirection nothing depends on.
+
+**Step 7/8 — every method assigned to exactly one mixin by
+responsibility, never re-derived per file.** The 94 methods on the old
+`PainterGui` were grepped once (`^    def `) and each assigned to
+`BuildMixin`/`ViewMixin`/`SiteJobsMixin`/`ToolJobsMixin`/
+`SettingsMixin` by what it does, not by where it happened to sit in
+the 3,350-line file — e.g. `_close_panel`/`_tool_panel_key` went to
+`SiteJobsMixin` (their heaviest readers, `_dispatch`/
+`_toggle_pause_job`, both live there) even though a dashboard-panel
+"close" sounds view-ish; `_on_root_configure`/`_resize_settled`/
+`_clamp_geometry` stayed in `BuildMixin` (they are window/geometry
+plumbing armed once at the tail of `__init__`, not a view switch) even
+though they run throughout the app's life. Each mixin's own `.md`
+records exactly which ambiguous methods it claimed and why, so the
+assignment is auditable per file, not just asserted here.
+
+**Step 7/8 — one MORE late-binding case, found only by running the
+full test suite after the mechanical move.** The 4 known
+`monkeypatch.setattr(gui, ...)` targets going in
+(`DocWindow`, `StepRestoreWindow`, `_snapshot_overlay`,
+`_fade_out_overlay`) were joined by a 5th discovered only when
+`test_gui_pipeline.py::test_compose_post_save_all_four_on_orders_
+bg_crop_aspect_upscale` failed post-split:
+`monkeypatch.setattr(gui, "_gate_and_upscale", fake)`, reached from
+`SiteJobsMixin._compose_post_save`'s `post_save` closure. Multi-line
+`monkeypatch.setattr(\n    gui, "name", ...\n)` calls do not show up in
+a single-line grep for `setattr(gui, "` — a multiline-aware search
+(or, as here, simply running the tests) is required to find every
+such target before trusting a split is complete. Fixed the same way as
+every other case: a deferred `import gui` inside the closure, `gui.
+_gate_and_upscale(...)` instead of a top-level `from .logic import
+_gate_and_upscale`.
+
+**Step 7/8 — `PainterGui` itself is now just MRO glue.** `app.py`
+holds `class PainterGui(BuildMixin, ViewMixin, SiteJobsMixin,
+ToolJobsMixin, SettingsMixin):` with no method bodies of its own, plus
+`main()`. `BuildMixin` is first in the MRO (and the only base with
+`__init__`), so `PainterGui(root)` still runs exactly one constructor;
+every other mixin's methods reach the SAME instance's attributes via
+`self.`, unchanged from when they were one class's methods. Verified:
+`python -c "import gui; print(gui.PainterGui.__mro__)"` shows all five
+mixins in declaration order, and the full suite (617 passed, 1
+skipped) plus the GUI-heavy files individually (260 passed) pass
+unmodified.
