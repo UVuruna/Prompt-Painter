@@ -14,18 +14,49 @@ import X` call site kept working UNCHANGED across the split.
 
 Step 2/8 moved the **toolkit** — the leaf widget/theme/icon helpers
 with no dependency on the app's own panels or `PainterGui` itself.
-Step 3/8 (this step) moved the **reusable widgets + pure logic +
-dashboard helpers**: `FilterEditor`, `AspectRatioCanvas`, the
-Tk-free module-level functions (`logic.py`), and the shared dashboard
-support helpers (`dash_helpers.py`). The god-class `PainterGui`
-(~3,350 lines), the dashboards' own panel classes, the tool/agent
-panels, `SelectWindow`, the AI dialogs and the viewers all still live
-in `__init__.py`, unmoved — [gui.md](../gui.md) (the pre-existing
-script doc, one level up, beside this folder) still documents that
-remaining content; it migrates into further submodules in later steps
-of the same refactor.
+Step 3/8 moved the **reusable widgets + pure logic + dashboard
+helpers**: `FilterEditor`, `AspectRatioCanvas`, the Tk-free
+module-level functions (`logic.py`), and the shared dashboard support
+helpers (`dash_helpers.py`). Step 4/8 (this step) moved the **three
+CONTROL-PANEL classes**: `AgentPanel` (`agent_panel.py`), the whole
+`ToolSettingsPanel` family — base + `BgSettingsPanel`/
+`CropSettingsPanel`/`UpscaleSettingsPanel`/`AspectSettingsPanel`/
+`ImageCheckerSettingsPanel` (`tool_panels.py`) — and `ApiImageGenPanel`
++ `ApiImageAdapter` (`api_panel.py`). The god-class `PainterGui`
+(~3,350 lines), the dashboards' own panel classes (`JobPanel`/
+`DashPanel`/`ToolPanel`/`AiCheckPanel`/`DashGrid`), `MainMenu`/
+`IconBar`, `SelectWindow`, the AI dialogs and the viewers all still
+live in `__init__.py`, unmoved — [gui.md](../gui.md) (the
+pre-existing script doc, one level up, beside this folder) still
+documents that remaining content; it migrates into further submodules
+in later steps of the same refactor.
 
 ## Files
+
+### `agent_panel.py` — Agent Panel
+`AgentPanel` — one site's (ChatGPT/Gemini) OWN control panel:
+background/style dropdowns, the three composable post-save switches,
+Report/Safer retry/Continue nudge/Checker AI/Fixer AI, the Force
+Aspect Ratio block, the collapsible pause/action-delay/upscale-gate
+fine-tune, and its own Start/Pause/Stop. See
+[Agent Panel](agent_panel.md).
+
+### `api_panel.py` — API Panel
+`ApiImageGenPanel` (the paid Gemini image-API job's settings panel —
+mirrors `AgentPanel` since its input is the shared queued Collections
+list, not a folder of images) and `ApiImageAdapter` (a `SiteDriver`-
+shaped stand-in so that job reuses `_drive_site`/`run_sheet`
+unchanged). See [API Panel](api_panel.md).
+
+### `tool_panels.py` — Standalone-Tool Settings Panels
+`ToolSettingsPanel` (the shared base: input picker, embedded
+`FilterEditor`, an optional Advanced collapsible, Start/Pause/Stop)
+plus its five concrete subclasses — `BgSettingsPanel`/
+`CropSettingsPanel`/`UpscaleSettingsPanel`/`AspectSettingsPanel`/
+`ImageCheckerSettingsPanel`. Also owns the two-column-dense layout
+constants every control-panel family (this one, `AgentPanel`,
+`ApiImageGenPanel`) shares. See
+[Standalone-Tool Settings Panels](tool_panels.md).
 
 ### `widgets.py` — Themed Widget Toolkit
 Status/job-colour lookups (`status`, `job_color`), the font-zoom
@@ -175,3 +206,28 @@ the name would never reach `theme.py`'s own global lookup, silently
 un-patching the collaborator. Every real (non-test) caller sees
 identical behavior either way, since `gui.X` and `gui.theme.X` are the
 same function object unless a test overrides one of them.
+
+**Step 4/8 — shared layout constants live in `tool_panels.py`, not
+`__init__.py`.** `AgentPanel`, the `ToolSettingsPanel` family and
+`ApiImageGenPanel` all read the SAME two-column-dense layout constants
+(`DENSE_COL_GAP_PX`/`DENSE_COL_WRAP_PX`/`ASPECT_DIALOG_ENTRY_W`, plus
+the Settings-gear caret glyphs `AgentPanel`/`ToolSettingsPanel` share).
+Rather than leave them as bare `gui/__init__.py` module constants
+(which `gui.agent_panel`/`gui.api_panel` could only reach through a
+circular `from . import X`, since `__init__.py` imports THEM), they
+now live in `gui/tool_panels.py` — a real leaf module both sibling
+panel modules import from directly (`from .tool_panels import ...`),
+with zero circular-import risk since `tool_panels.py` depends on
+neither of them.
+
+**The one exception: `AI_POLL_MS` stays in `__init__.py`.** Unlike the
+constants above, `AI_POLL_MS` is read by `ApiImageGenPanel` (moved)
+AND `_AiDialog` (not moved, still in `__init__.py`) — moving it to
+either module would just relocate the same circular-import problem
+onto the other caller. `gui/api_panel.py`'s `_arm_probe_poll` instead
+reaches it through a deferred `import gui` inside the method body
+(never at module level) — the identical late-binding idiom
+`gui/theme.py`'s `_pkg()` already established for a callback that
+must reach back into the still-monolithic part of the package; by the
+time `_arm_probe_poll` actually runs (well after import time), the
+`gui` package has always finished initializing.
