@@ -519,6 +519,24 @@ match.
   `AI_CHECK_INSTRUCTIONS` (banal defects only, strict OK/DEFECTS
   format) and `AI_FIX_NOTE` (the re-send's per-item note). All prompt
   text is DATA — the owner rewords it here.
+- `GEMINI_IMAGE_MODEL` (GUI rework Phase 18, [AI Client & Flows](ai.md)'s
+  `generate_image`/`edit_image`) — the image-generation/edit model,
+  separate from the free `GEMINI_TEXT_MODEL`/`GEMINI_VISION_MODEL`
+  above. PAID-ONLY on the owner's key TODAY (every free-tier quota for
+  this model reads `limit: 0` — see `AI_IMAGE_QUOTA_MARKERS` right
+  below); Google retires this generation in October 2026 in favour of
+  "Nano Banana 2" (`gemini-3.1-flash-image`) — bump the string then,
+  nothing else names the model.
+- `AI_IMAGE_QUOTA_MARKERS` (GUI rework Phase 18) — the free-tier-
+  EXHAUSTED signal that makes a 429 PERMANENT
+  (`ai.PaidFeatureRequired`) instead of transient: a tuple of AND-
+  groups (every substring in a group must appear, case-insensitive;
+  ANY group matching is enough), captured verbatim from the owner's
+  real 429 body — `("free_tier", "limit: 0")` and `("check your plan
+  and billing details",)`. Consumed by `ai._is_paid_quota_error`,
+  which deliberately does NOT key on the same body's "retry in Xs"
+  hint (present on both a permanent and an ordinary transient 429 —
+  see ai.md's Design Decisions for the full trap writeup).
 - `fmt_duration(seconds)`, `fmt_op_duration(seconds)`, `fmt_size(bytes)`,
   `fmt_pct(value)` — the short human formatters shared by the runner
   report and the GUI dashboard. `fmt_op_duration` keeps sub-second

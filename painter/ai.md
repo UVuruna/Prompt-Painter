@@ -4,29 +4,39 @@
 
 ## Purpose
 
-The engine behind the three AI features (owner 2026-07-20): a
-MINIMAL Gemini REST client over `urllib` (no SDK, free AI Studio
-key), the SHEET-GENERATOR flow helpers (clarifying questions →
-final `.md` → real-parser validation + one repair round), and the
-image checker's FLAG MEMORY (`<out>/_state/ai_flags.json`). All of
-it is offline-testable: the HTTP layer is one monkeypatchable alias
-(`_urlopen`) and the flow helpers take a `gen` callable resolved at
-call time.
+The engine behind the AI features (owner 2026-07-20; image generation
+added GUI rework Phase 18): a MINIMAL Gemini REST client over
+`urllib` (no SDK) covering both the FREE-TIER text/vision calls
+(`generate_text`/`check_image`) and the PAID image model
+(`generate_image`/`edit_image`), the SHEET-GENERATOR flow helpers
+(clarifying questions → final `.md` → real-parser validation + one
+repair round), and the image checker's FLAG MEMORY
+(`<out>/_state/ai_flags.json`). All of it is offline-testable: the
+HTTP layer is one monkeypatchable alias (`_urlopen`) and the flow
+helpers take a `gen` callable resolved at call time.
 
 Loud failure taxonomy (Rule #1): every HTTP error, API refusal/block
 and malformed response raises `AiError`; a missing key raises the
 specific `NoKey`, which the GUI answers by AUTO-OPENING the guided
-key wizard. Consecutive API calls are PACED `AI_CALL_PAUSE_S` apart
-— the free tier allows roughly 10 requests/minute.
+key wizard, and a 429 carrying the free-tier-EXHAUSTED signal raises
+the specific `PaidFeatureRequired` (GUI rework Phase 18) instead of
+retrying. Consecutive API calls are PACED `AI_CALL_PAUSE_S` apart —
+the free tier allows roughly 10 requests/minute.
 
 TRANSIENT failures RETRY (owner 2026-07-21): the free tier 503s under
 load ("model experiencing high demand") and 429s at the rate cap —
 those, plus a 500, are retried up to `AI_RETRY_MAX` attempts with a
 backoff between them, instead of being counted an error and skipped.
 PERMANENT failures (400/401/403/404 — a bad request, bad key or
-unknown model) raise on the first try. The retry keys on the numeric
-HTTP status, which the client attaches to the raised `AiError`
-(`.status`).
+unknown model) raise on the first try. A 429 is checked FIRST for the
+free-tier-EXHAUSTED signal (`_is_paid_quota_error` /
+`AI_IMAGE_QUOTA_MARKERS`, GUI rework Phase 18) — that one is ALSO
+permanent and short-circuits to `PaidFeatureRequired` on the very
+first attempt, even though its body also names a "retry in Xs" hint
+like an ordinary rate-limit 429 (the trap: classify on the signal,
+never that hint — see Design Decisions). The retry keys on the
+numeric HTTP status, which the client attaches to the raised
+`AiError` (`.status`).
 
 ## Connections
 
@@ -57,6 +67,13 @@ so the retry logic and callers key on the code, not the message.
 `AiError` subclass: `settings.json` holds no key. The GUI's
 documented reaction is opening the guided wizard.
 
+### PaidFeatureRequired
+`AiError` subclass (GUI rework Phase 18): a 429 carried the free-
+tier-EXHAUSTED signal (`_is_paid_quota_error` /
+`AI_IMAGE_QUOTA_MARKERS`) — the account has ZERO free quota for the
+requested model. PERMANENT: raised on the FIRST attempt inside
+`_call_raw`, never retried like an ordinary rate-limit 429.
+
 ## Functions — the REST client
 
 - `api_key() -> str` — the key from `settings.json`
@@ -69,19 +86,47 @@ documented reaction is opening the guided wizard.
   lines.
 - `check_image(image_path, instructions, *, key=None, model=...,
   log=print)` — the vision call: the instructions text part + the
-  image as base64 `inlineData` (png/jpg/webp by suffix). `log` receives
-  the transient-retry lines.
-- Both go through `_call`, which does the pacing + the TRANSIENT-error
+  image as base64 `inlineData` (png/jpg/webp by suffix, via
+  `_mime_for`). `log` receives the transient-retry lines.
+- `generate_image(prompt, *, key=None, model=GEMINI_IMAGE_MODEL,
+  log=print) -> bytes` (GUI rework Phase 18) — one IMAGE-GENERATION
+  call against the PAID `GEMINI_IMAGE_MODEL`: the SAME text payload
+  `generate_text` builds (`_payload_text`, no system instruction),
+  widened with `generationConfig.responseModalities: ["TEXT",
+  "IMAGE"]` so the model returns an inline image part. Returns the
+  decoded PNG bytes (`_response_image`).
+- `edit_image(image_path, prompt, *, key=None, model=
+  GEMINI_IMAGE_MODEL, log=print) -> bytes` (GUI rework Phase 18) —
+  one image EDIT call: the source image embedded exactly like
+  `check_image` (`_payload_image` + `_mime_for`) plus the edit
+  instruction, same `responseModalities` widening. Returns the
+  decoded edited PNG bytes.
+- `generate_text`/`check_image` go through `_call`, a THIN wrapper
+  over `_call_raw(model, payload, key, *, log) -> dict` applying
+  `_response_text`; `generate_image`/`edit_image` call `_call_raw`
+  directly and apply `_response_image` themselves (GUI rework Phase
+  18 split — Rule #5, one retry/pace/HTTP shell instead of two
+  near-identical copies; behavior-preserving for the text/vision
+  path — every prior `_call` test still passes unchanged against the
+  new split). `_call_raw` does the pacing + the TRANSIENT-error
   RETRY: on a 503/429/500 it waits and re-POSTs up to `AI_RETRY_MAX`
   attempts (503/500 wait `AI_RETRY_BACKOFF_S`; a 429 honours the
   server's own `retryDelay` / "retry in Xs", capped at
   `AI_RETRY_MAX_WAIT_S`), logging each retry; a permanent code raises
-  at once. The HTTP body is parsed ONCE (`_http_error`) for both the
-  message and the 429 backoff.
-- Response parsing tolerates the candidates/parts structure (empty
-  candidates skipped, parts concatenated) and is LOUD on
-  `promptFeedback.blockReason`, a non-STOP `finishReason` with no
-  text, and any shape carrying no text.
+  at once — EXCEPT a 429 carrying the free-tier-EXHAUSTED signal
+  (`_is_paid_quota_error`), checked BEFORE the transient branch, which
+  raises `PaidFeatureRequired` immediately instead. The HTTP body is
+  parsed ONCE (`_http_error`) for both the message and the 429
+  backoff.
+- Response parsing: `_response_text` (text calls) tolerates the
+  candidates/parts structure (empty candidates skipped, parts
+  concatenated) and is LOUD on `promptFeedback.blockReason`, a
+  non-STOP `finishReason` with no text, and any shape carrying no
+  text. `_response_image` (GUI rework Phase 18) mirrors it for the
+  image calls — reads the first `inlineData` part instead of text
+  (an image-gen answer often carries both a caption text part and the
+  image part; only the latter counts), LOUD when no candidate carries
+  an image part at all.
 
 ## Functions — the sheet-generator flow (owner's #2)
 
@@ -183,3 +228,19 @@ documented reaction is opening the guided wizard.
   per-image logic (key, time, parse, flag, emit) inline; extracting it
   makes the response↔image pairing testable WITHOUT a GUI and gives
   the raw/time one place to live.
+- **Paid-quota classification keys on the signal, never the retry
+  hint** (GUI rework Phase 18). The owner's captured free-tier-
+  exhausted 429 body ALSO names a "retry in Xs" hint — identical in
+  shape to an ordinary transient rate-limit 429's body. Classifying by
+  that hint would misfire both ways, so `_is_paid_quota_error` instead
+  matches the free-tier-zero substrings (`AI_IMAGE_QUOTA_MARKERS`:
+  `"free_tier"` + `"limit: 0"`, or `"check your plan and billing
+  details"`). An ambiguous 429 (matches neither) defaults to
+  transient — retrying a permanent error wastes a few calls, but
+  giving up on a genuinely transient one is worse.
+- **`_call_raw` is the ONE shell.** Extracting the retry/pace/HTTP
+  plumbing out of `_call` (which now only adds `_response_text`) lets
+  the paid image calls reuse the exact same shell — including the
+  paid-quota short-circuit — instead of a second near-copy of the
+  retry loop (Rule #5). The split is behavior-preserving BY
+  CONSTRUCTION: `_call`'s body is unchanged in spirit, just delegated.

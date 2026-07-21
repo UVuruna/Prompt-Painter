@@ -3,14 +3,18 @@
 Three cohesive parts, all offline-testable with a mocked HTTP layer
 (the tests monkeypatch ``_urlopen`` — no SDK, no live calls):
 
-* the MINIMAL REST CLIENT over urllib against the free AI Studio key:
-  ``generate_text`` and ``check_image`` POST ``v1beta
-  models/<model>:generateContent`` with the key in the
+* the MINIMAL REST CLIENT over urllib against the AI Studio key:
+  ``generate_text``/``check_image`` (free tier) and, GUI rework Phase
+  18, ``generate_image``/``edit_image`` (the PAID image model) all
+  POST ``v1beta models/<model>:generateContent`` with the key in the
   ``x-goog-api-key`` header. Every HTTP error, refusal/block and
   malformed response raises a loud ``AiError`` (Rule #1); a missing
   key raises the specific ``NoKey`` so the GUI can open its guided
-  wizard. Consecutive calls are PACED ``AI_CALL_PAUSE_S`` apart (the
-  free tier is ~10 requests/minute).
+  wizard, and a 429 carrying the free-tier-EXHAUSTED signal raises the
+  specific ``PaidFeatureRequired`` instead of retrying (the owner's
+  key has ZERO free quota for the image model today). Consecutive
+  calls are PACED ``AI_CALL_PAUSE_S`` apart (the free tier is ~10
+  requests/minute).
 * the SHEET-GENERATOR flow helpers (owner's #2): parse the model's
   numbered clarifying questions, build the two calls from the sheet
   contract (instructions.md), validate a produced ``.md`` with the
@@ -39,6 +43,7 @@ from painter.config import (
     AI_CALL_PAUSE_S,
     AI_FLAGS_FILENAME,
     AI_FIX_NOTE,
+    AI_IMAGE_QUOTA_MARKERS,
     AI_MAX_QUESTIONS,
     AI_QUESTIONS_SYSTEM,
     AI_REPAIR_PROMPT,
@@ -50,6 +55,7 @@ from painter.config import (
     AI_TIMEOUT_S,
     AI_TRANSIENT_STATUS,
     GEMINI_API_BASE,
+    GEMINI_IMAGE_MODEL,
     GEMINI_KEY_SETTING,
     GEMINI_TEXT_MODEL,
     GEMINI_VISION_MODEL,
@@ -78,6 +84,18 @@ class NoKey(AiError):
     opening the guided key wizard (the documented auto-open path)."""
 
 
+class PaidFeatureRequired(AiError):
+    """A 429 carried the free-tier-EXHAUSTED signal
+    (``_is_paid_quota_error`` / ``AI_IMAGE_QUOTA_MARKERS``) — the
+    account has ZERO free quota for the requested model (GUI rework
+    Phase 18: verified live against the owner's key on
+    ``GEMINI_IMAGE_MODEL``, 2026-07-21). PERMANENT: raised on the
+    FIRST attempt inside ``_call_raw``, never retried like an ordinary
+    rate-limit 429 — no wait ever fixes a zero quota, the account
+    needs billing enabled on the AI Studio project. ``status`` is
+    always 429 (set by the raise site, inherited from ``AiError``)."""
+
+
 # ---------------------------------------------------------------------
 # The REST client
 # ---------------------------------------------------------------------
@@ -85,13 +103,29 @@ class NoKey(AiError):
 # module alias so tests can monkeypatch the HTTP layer in ONE place
 _urlopen = urllib.request.urlopen
 
-# image suffix -> request mime type (the checker feeds saved outputs)
+# image suffix -> request mime type (the checker feeds saved outputs,
+# and GUI rework Phase 18's edit_image feeds the source to be edited)
 _MIME = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
 }
+
+
+def _mime_for(image_path: Path, *, purpose: str) -> str:
+    """The MIME type for one image FILE, by suffix (``_MIME``); a loud
+    ``AiError`` naming ``purpose`` ("the checker" / "editing") when the
+    suffix is unsupported. Shared by every call that embeds a saved
+    image as inline base64 — ``check_image`` and ``edit_image`` (Rule
+    #5: one lookup+raise, not two copies of the same four lines)."""
+    mime = _MIME.get(image_path.suffix.lower())
+    if mime is None:
+        raise AiError(
+            f"{image_path.name}: unsupported image type for {purpose}"
+        )
+    return mime
+
 
 _last_call_t: float | None = None  # monotonic time of the last API call
 
@@ -189,6 +223,30 @@ def _retry_wait(code: int, retry_s: float | None) -> float:
     return AI_RETRY_BACKOFF_S
 
 
+def _is_paid_quota_error(status: int, message: str) -> bool:
+    """True when a 429's message carries the free-tier-EXHAUSTED
+    signal (``AI_IMAGE_QUOTA_MARKERS``) rather than an ordinary rate
+    limit — PERMANENT, so ``_call_raw`` raises ``PaidFeatureRequired``
+    immediately instead of retrying.
+
+    Classifies on THESE substrings only — never the "retry in Xs" hint
+    the SAME body also carries (the trap: that hint sits on both a
+    genuinely transient rate-limit 429 and this permanent free-tier-
+    zero one, so it cannot tell them apart). Only a 429 is ever
+    checked — every other status is False, already handled by the
+    existing transient/permanent status split. A 429 matching NEITHER
+    marker group is AMBIGUOUS and defaults to False/transient (owner
+    decision, Phase 18): retrying a permanent error wastes a few
+    calls, but giving up on a genuinely transient one is worse."""
+    if status != 429:
+        return False
+    lowered = message.lower()
+    return any(
+        all(marker in lowered for marker in group)
+        for group in AI_IMAGE_QUOTA_MARKERS
+    )
+
+
 def _response_text(data: dict, model: str) -> str:
     """The first candidate's concatenated text parts.
 
@@ -220,6 +278,40 @@ def _response_text(data: dict, model: str) -> str:
     )
 
 
+def _response_image(data: dict, model: str) -> bytes:
+    """The first ``inlineData`` (base64) part found across the
+    response's candidates, decoded to bytes — the image-generation
+    counterpart of ``_response_text``: tolerates the SAME candidates/
+    parts shape (empty candidates skipped) but reads the IMAGE part
+    instead of the text part (an image-gen answer often carries both a
+    caption/refusal text part AND the inlineData part; only the latter
+    is the picture). LOUD on a prompt block, a non-STOP stop with no
+    image, or a response that carries no image part at all (Rule #1)
+    — a text-only answer is not a valid result here."""
+    if not isinstance(data, dict):
+        raise AiError(f"{model}: malformed response (not a JSON object)")
+    block = (data.get("promptFeedback") or {}).get("blockReason")
+    if block:
+        raise AiError(f"{model}: prompt blocked by the API ({block})")
+    for cand in data.get("candidates") or ():
+        if not isinstance(cand, dict):
+            continue
+        parts = (cand.get("content") or {}).get("parts") or ()
+        for part in parts:
+            if isinstance(part, dict):
+                inline = part.get("inlineData")
+                if inline and inline.get("data"):
+                    return base64.b64decode(inline["data"])
+        finish = cand.get("finishReason")
+        if finish and finish != "STOP":
+            raise AiError(
+                f"{model}: generation stopped ({finish}) with no image"
+            )
+    raise AiError(
+        f"{model}: response carries no image part (keys: {sorted(data)})"
+    )
+
+
 def _raise_http(model: str, exc: urllib.error.HTTPError, message: str) -> None:
     """Raise the loud ``AiError`` for an HTTP failure, carrying the
     numeric ``.status`` so callers key on the code, not the message."""
@@ -228,16 +320,44 @@ def _raise_http(model: str, exc: urllib.error.HTTPError, message: str) -> None:
     raise err from exc
 
 
-def _call(model: str, payload: dict, key: str, *, log=print) -> str:
-    """POST one generateContent request; returns the response TEXT.
+def _raise_paid_quota(
+    model: str, exc: urllib.error.HTTPError, message: str
+) -> None:
+    """Raise the loud ``PaidFeatureRequired`` for a free-tier-exhausted
+    429 — mirrors ``_raise_http`` (carries ``.status``) but as the
+    PERMANENT paid-quota subtype instead of a plain ``AiError``."""
+    err = PaidFeatureRequired(
+        f"{model}: paid feature required — the free tier has zero"
+        f" quota for this model ({message})"
+    )
+    err.status = exc.code
+    raise err from exc
+
+
+def _call_raw(model: str, payload: dict, key: str, *, log=print) -> dict:
+    """POST one generateContent request; returns the PARSED JSON body —
+    the retry/pace/HTTP SHELL shared by every caller: ``_call`` (a thin
+    wrapper applying ``_response_text``, for ``generate_text``/
+    ``check_image``) and the PAID image calls ``generate_image``/
+    ``edit_image`` (which apply ``_response_image`` themselves) — Rule
+    #5, one shell instead of two near-identical copies.
 
     TRANSIENT API failures (``AI_TRANSIENT_STATUS`` — 503 high-demand,
     429 rate-limit, 500) are RETRIED up to ``AI_RETRY_MAX`` attempts,
     with a backoff between them (503/500 a fixed ``AI_RETRY_BACKOFF_S``;
     429 the server's own "retry in Xs", capped at ``AI_RETRY_MAX_WAIT_S``)
     — each retry is logged. PERMANENT failures (400/401/403/404: a bad
-    request, bad key or unknown model) raise on the FIRST try. Every
-    attempt is PACED like any other call (``_pace``)."""
+    request, bad key or unknown model) raise on the FIRST try.
+
+    A 429 is checked FIRST for the free-tier-EXHAUSTED signal
+    (``_is_paid_quota_error``): that one SHORT-CIRCUITS straight to a
+    loud ``PaidFeatureRequired`` on the FIRST attempt, before the
+    transient-retry branch even runs — its body also carries a "retry
+    in Xs" hint just like an ordinary rate-limit 429, but no wait ever
+    fixes a ZERO free-tier quota. A 429 without the signal is an
+    ordinary rate limit and retries exactly as before.
+
+    Every attempt is PACED like any other call (``_pace``)."""
     req = urllib.request.Request(
         f"{GEMINI_API_BASE}/models/{model}:generateContent",
         data=json.dumps(payload).encode("utf-8"),
@@ -254,6 +374,8 @@ def _call(model: str, payload: dict, key: str, *, log=print) -> str:
                 raw = resp.read()
         except urllib.error.HTTPError as exc:
             message, retry_s = _http_error(exc)
+            if _is_paid_quota_error(exc.code, message):
+                _raise_paid_quota(model, exc, message)
             if exc.code not in AI_TRANSIENT_STATUS or attempt >= AI_RETRY_MAX:
                 _raise_http(model, exc, message)
             wait = _retry_wait(exc.code, retry_s)
@@ -266,14 +388,20 @@ def _call(model: str, payload: dict, key: str, *, log=print) -> str:
         except urllib.error.URLError as exc:
             raise AiError(f"Gemini API unreachable: {exc.reason}") from exc
         try:
-            data = json.loads(raw)
+            return json.loads(raw)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise AiError(
                 f"Gemini API returned non-JSON: {raw[:200]!r}"
             ) from exc
-        return _response_text(data, model)
     # unreachable: the final transient attempt raises above (Rule #7)
     raise AiError(f"{model}: retries exhausted")
+
+
+def _call(model: str, payload: dict, key: str, *, log=print) -> str:
+    """POST one generateContent request; returns the response TEXT — a
+    thin wrapper over ``_call_raw`` applying ``_response_text``. See
+    ``_call_raw`` for the retry/pace/HTTP-classification shell."""
+    return _response_text(_call_raw(model, payload, key, log=log), model)
 
 
 def generate_text(
@@ -303,13 +431,52 @@ def check_image(
     """One vision call over a saved image file; returns the raw text.
     ``log`` receives any transient-retry lines (see ``_call``)."""
     image_path = Path(image_path)
-    mime = _MIME.get(image_path.suffix.lower())
-    if mime is None:
-        raise AiError(
-            f"{image_path.name}: unsupported image type for the checker"
-        )
+    mime = _mime_for(image_path, purpose="the checker")
     payload = _payload_image(image_path.read_bytes(), mime, instructions)
     return _call(model, payload, key or api_key(), log=log)
+
+
+def generate_image(
+    prompt: str,
+    *,
+    key: str | None = None,
+    model: str = GEMINI_IMAGE_MODEL,
+    log=print,
+) -> bytes:
+    """One IMAGE GENERATION call (the PAID image model — see
+    ``GEMINI_IMAGE_MODEL``'s config comment). Reuses ``_payload_text``
+    (the prompt, no system instruction) widened with
+    ``responseModalities: ["TEXT", "IMAGE"]`` so the model returns an
+    inline image part instead of (or alongside) text — the SAME REST
+    shape ``generate_text`` uses otherwise. Returns the decoded image
+    BYTES; ``_response_image`` raises loudly when none comes back. A
+    free-tier-exhausted 429 raises ``PaidFeatureRequired`` instead of
+    retrying (see ``_call_raw``). ``key=None`` reads settings.json
+    (``NoKey`` when absent), like every other call in this module."""
+    payload = _payload_text(prompt, None)
+    payload["generationConfig"] = {"responseModalities": ["TEXT", "IMAGE"]}
+    data = _call_raw(model, payload, key or api_key(), log=log)
+    return _response_image(data, model)
+
+
+def edit_image(
+    image_path: Path,
+    prompt: str,
+    *,
+    key: str | None = None,
+    model: str = GEMINI_IMAGE_MODEL,
+    log=print,
+) -> bytes:
+    """One IMAGE EDIT call: reuses ``_payload_image`` (the source image
+    as inline base64 + the edit instruction text) widened with the
+    same ``responseModalities`` as ``generate_image``. Returns the
+    decoded edited image BYTES."""
+    image_path = Path(image_path)
+    mime = _mime_for(image_path, purpose="editing")
+    payload = _payload_image(image_path.read_bytes(), mime, prompt)
+    payload["generationConfig"] = {"responseModalities": ["TEXT", "IMAGE"]}
+    data = _call_raw(model, payload, key or api_key(), log=log)
+    return _response_image(data, model)
 
 
 # ---------------------------------------------------------------------

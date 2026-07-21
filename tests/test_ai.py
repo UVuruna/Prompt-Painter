@@ -8,6 +8,7 @@ missing key). The sheet-generator flow and the flag memory run against
 tmp_path with a mocked ``generate_text``.
 """
 
+import base64
 import io
 import json
 import urllib.error
@@ -19,6 +20,7 @@ from painter import ai
 from painter.config import (
     AI_MAX_QUESTIONS,
     GEMINI_API_BASE,
+    GEMINI_IMAGE_MODEL,
     GEMINI_TEXT_MODEL,
     GEMINI_VISION_MODEL,
 )
@@ -52,6 +54,27 @@ def text_response(text: str) -> dict:
                 "content": {"parts": [{"text": text}]},
                 "finishReason": "STOP",
             }
+        ]
+    }
+
+
+def image_response(png_bytes: bytes, text: str | None = None) -> dict:
+    """A generateContent body carrying an ``inlineData`` image part —
+    optionally preceded by a caption/text part, since a real image-gen
+    answer often carries both (only the inlineData part is the picture,
+    ``_response_image`` skips the rest)."""
+    parts = []
+    if text is not None:
+        parts.append({"text": text})
+    parts.append({
+        "inlineData": {
+            "mimeType": "image/png",
+            "data": base64.b64encode(png_bytes).decode("ascii"),
+        }
+    })
+    return {
+        "candidates": [
+            {"content": {"parts": parts}, "finishReason": "STOP"}
         ]
     }
 
@@ -351,6 +374,107 @@ def test_pacing_sleeps_between_calls(monkeypatch):
     ai.generate_text("two", key="k")   # second: paced
     assert len(sleeps) == 1
     assert 0 < sleeps[0] <= 60.0
+
+
+# --- API image generation (owner 2026-07-21, GUI rework Phase 18) ------
+
+# the EXACT 429 body captured against the owner's key on
+# GEMINI_IMAGE_MODEL, 2026-07-21 — carries BOTH the free-tier-zero
+# signal ("free_tier" + "limit: 0", "check your plan and billing
+# details") AND a "Please retry in Xs" hint. The hint is the TRAP:
+# classification must key on the free-tier-zero signal, never the hint.
+PAID_QUOTA_MESSAGE = (
+    "You exceeded your current quota, please check your plan and"
+    " billing details. For more information on this error, head to:"
+    " https://ai.google.dev/gemini-api/docs/rate-limits."
+    " * Quota exceeded for metric:"
+    " generativelanguage.googleapis.com/generate_content_free_tier_input_token_count,"
+    " limit: 0, model: gemini-2.5-flash-preview-image"
+    " * Quota exceeded for metric:"
+    " generativelanguage.googleapis.com/generate_content_free_tier_requests,"
+    " limit: 0, model: gemini-2.5-flash-preview-image"
+    " Please retry in 15.776751513s."
+)
+
+
+def test_generate_image_returns_decoded_bytes(monkeypatch):
+    requests = capture_call(
+        monkeypatch, image_response(PNG_1PX, text="a caption")
+    )
+    result = ai.generate_image("a stained-glass rondel", key="k")
+    assert result == PNG_1PX
+    (req, _timeout), = requests
+    assert req.full_url == (
+        f"{GEMINI_API_BASE}/models/{GEMINI_IMAGE_MODEL}:generateContent"
+    )
+    body = json.loads(req.data)
+    assert body["contents"][0]["parts"][0]["text"] == "a stained-glass rondel"
+    assert "systemInstruction" not in body
+    assert body["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
+
+
+def test_edit_image_embeds_the_source_image(monkeypatch, tmp_path):
+    img = tmp_path / "plate.png"
+    img.write_bytes(PNG_1PX)
+    requests = capture_call(monkeypatch, image_response(PNG_1PX))
+    result = ai.edit_image(img, "make the frame gold", key="k")
+    assert result == PNG_1PX
+    req = requests[0][0]
+    assert req.full_url == (
+        f"{GEMINI_API_BASE}/models/{GEMINI_IMAGE_MODEL}:generateContent"
+    )
+    body = json.loads(req.data)
+    parts = body["contents"][0]["parts"]
+    assert parts[0]["text"] == "make the frame gold"
+    inline = parts[1]["inlineData"]
+    assert inline["mimeType"] == "image/png"
+    assert base64.b64decode(inline["data"]) == PNG_1PX
+    assert body["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
+
+
+def test_edit_image_refuses_a_non_image_suffix(tmp_path):
+    with pytest.raises(ai.AiError, match="unsupported image type"):
+        ai.edit_image(tmp_path / "notes.txt", "x", key="k")
+
+
+def test_response_image_raises_when_no_inlinedata_part(monkeypatch):
+    capture_call(monkeypatch, text_response("just words, no picture"))
+    with pytest.raises(ai.AiError, match="no image part"):
+        ai.generate_image("p", key="k")
+
+
+def test_paid_quota_429_raises_PaidFeatureRequired_immediately_without_retry(
+    monkeypatch, backoff_sleeps
+):
+    """The owner's captured body ALSO names 'Please retry in 15.77...s'
+    — the trap. Classification keys on the free-tier-zero signal, not
+    that hint, so this raises on attempt ONE with zero sleeps/retries."""
+    calls = urlopen_sequence(
+        monkeypatch,
+        http_error(429, PAID_QUOTA_MESSAGE, retry_delay="15.776751513s"),
+    )
+    with pytest.raises(ai.PaidFeatureRequired) as excinfo:
+        ai.generate_image("p", key="k")
+    assert excinfo.value.status == 429
+    assert len(calls) == 1        # NO retry despite the "retry in Xs" hint
+    assert backoff_sleeps == []   # never slept/backed off
+
+
+def test_transient_429_without_free_tier_zero_still_retries(
+    monkeypatch, backoff_sleeps
+):
+    """A NORMAL rate-limit 429 (no free-tier-zero signal) on the SAME
+    image path still retries exactly like text/vision — only the
+    free-tier-exhausted body short-circuits."""
+    calls = urlopen_sequence(
+        monkeypatch,
+        http_error(429, "Rate limit. Please retry in 4s.", retry_delay="4s"),
+        image_response(PNG_1PX),
+    )
+    result = ai.generate_image("p", key="k")
+    assert result == PNG_1PX
+    assert len(calls) == 2
+    assert backoff_sleeps == [4.0]
 
 
 # --- the sheet-generator flow ------------------------------------------

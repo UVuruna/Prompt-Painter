@@ -1224,6 +1224,16 @@ GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 # for fresh keys. Verified 200 OK against a new AI Studio key 2026-07-21.
 GEMINI_TEXT_MODEL = "gemini-flash-latest"    # sheet generator (free tier)
 GEMINI_VISION_MODEL = "gemini-flash-latest"  # image checker (multimodal, reads images)
+# GUI rework Phase 18 (API Image Generation): the image-generation/edit
+# model, separate from the free TEXT/VISION models above. PAID-ONLY on
+# the owner's key TODAY — every free-tier quota for this model is 0
+# (verified live against a real captured 429, 2026-07-21; see
+# AI_IMAGE_QUOTA_MARKERS below and ai.PaidFeatureRequired), so a call
+# raises loudly until the owner enables billing on the AI Studio
+# project. Google is retiring THIS generation in October 2026 in
+# favour of "Nano Banana 2" (gemini-3.1-flash-image) — bump this
+# string when that lands; nothing else in the code names the model.
+GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
 GEMINI_KEY_SETTING = "gemini_api_key"     # the settings.json key name
 # where the wizard's step-1 button sends the browser (the key page)
 AI_STUDIO_URL = "https://aistudio.google.com/apikey"
@@ -1244,6 +1254,29 @@ AI_RETRY_BACKOFF_S = 5.0  # fixed wait before a 503/500 retry
 # a 429 carries the server's own backoff (error.details[].retryDelay /
 # "please retry in Xs"); honour it, but never wait longer than this
 AI_RETRY_MAX_WAIT_S = 30.0
+
+# GUI rework Phase 18: the free-tier-EXHAUSTED signal that makes a 429
+# PERMANENT (ai.PaidFeatureRequired) instead of transient. Each inner
+# tuple is an AND-group — every substring in it must appear
+# (case-insensitive) in the 429 message for that group to fire; the
+# whole marker fires when ANY group matches (OR across groups).
+# Captured VERBATIM from the owner's key against GEMINI_IMAGE_MODEL,
+# 2026-07-21 (the exact body lives in ai.md / test_ai.py's fixture):
+#   "You exceeded your current quota, please check your plan and
+#   billing details. ... Quota exceeded for metric: ...
+#   generate_content_free_tier_input_token_count, limit: 0, model:
+#   ... Quota exceeded for metric: ...generate_content_free_tier_
+#   requests, limit: 0, model: ... Please retry in 15.776751513s."
+# TRAP (do not "fix" this): that body ALSO names a "retry in Xs" hint,
+# same as an ordinary transient rate-limit 429 — classification keys
+# on THESE substrings only, never the retry hint. A 429 matching
+# NEITHER group is ambiguous and stays TRANSIENT (retries as today) —
+# retrying a permanent error wastes a few calls, but giving up on a
+# genuinely transient one is worse (owner decision).
+AI_IMAGE_QUOTA_MARKERS = (
+    ("free_tier", "limit: 0"),
+    ("check your plan and billing details",),
+)
 
 # --- the AI sheet generator (owner's #2: follow-up questions) ---------
 AI_MAX_QUESTIONS = 6  # the clarifying poll is capped at this many
