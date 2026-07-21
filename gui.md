@@ -229,6 +229,90 @@ reachability fixes:
   gui.py beyond `ScrollFrame` (debounced above) and the Select
   window's wrap re-flow (now also settle-debounced).
 
+## Main Menu (GUI rework Phase 10)
+
+The FIRST thing the owner sees is no longer "everything at once" — a
+full-window grid of 8 big tiles (`MainMenu(ttk.Frame)`, one per
+functionality: Website GEN, New collection (AI), API Image GEN
+(disabled placeholder — Phase 19 wires it up), AI check, BG removal,
+Crop, Upscale, Aspect ratio), reading `config.MENU_TILES` (pure data —
+id/label/description/icon stem/`(day, night)` accent colour/`enabled`).
+`MainMenu._make_tile` is the ONE tile factory (Rule #5, not 8
+copy-pasted blocks): a rounded `ctk.CTkFrame` card (`MENU_TILE_RADIUS`
+= 16, DESIGN.md's "cards, panels" bracket) holding a centred icon +
+title (`ctk_font("title")`, the SAME role the site panel titles use) +
+description, built from the SAME primitives every other rounded
+surface in this file already uses (`icon()` / `theme_pair` /
+`ctk_font`) — no new visual language. The card's `fg_color` is the
+`theme_pair("dark")` elevated surface (both themes already use this
+token for "raised" chrome — DocWindow's code box, hover surfaces);
+its border is the tile's own accent, `MENU_TILE_BORDER_PX` (2) at
+rest, `MENU_TILE_BORDER_HOVER_PX` (4) on `<Enter>` — the ONE thing
+that changes on hover, deliberately: widening the border needs no
+child widget to update in lockstep, unlike a fill-colour hover would
+(every icon/title/description label is bound to the SAME `<Button-1>`/
+`<Enter>`/`<Leave>` handlers as the card, so the whole tile is one
+click target). A DISABLED tile (`enabled=False` — only `api_image_gen`
+today) renders with a muted `theme_pair("light")` border/title instead
+of its accent and binds NO hover/click at all — visibly inert, not
+just unwired. Three tiles (website_gen/ai_sheet_gen/api_image_gen)
+have no natural `JOB_COLORS` entry (Website GEN spans BOTH gen sites,
+not one job) and carry their OWN new accent tuples in `MENU_TILES`
+(indigo/yellow/orange) chosen to stay visually distinct from the seven
+existing `JOB_COLORS` hues; the other five tiles (bg/crop/upscale/
+aspect/image_checker→`aicheck`) reuse `JOB_COLORS`/`JOB_LABEL`/
+`JOB_LOGO` directly — a genuine reuse, not a duplicate literal.
+
+**The view switch** — `PainterGui._view` (`"menu"` | `"main"`,
+initial `"menu"`, never persisted: every launch lands on the menu) is
+a state completely ORTHOGONAL to `_collapsed` (the pre-existing
+Controls toggle keeps working unmodified, independently, in either
+view — the design's suggested `_collapsed`→`_view` rename was
+deliberately NOT done: correctness + zero regression on the riskiest
+phase of the rework outweighed the tidiness). Mechanically it is
+`_set_collapsed`'s pack_forget/pack technique applied ONE LEVEL UP:
+`__init__` builds `self._main_view` (a plain `ttk.Frame(outer)`) as
+the new, sole parent for the ENTIRE pre-Phase-10 tree — the Collections
+queue, Output row, both `AgentPanel`s, the tool/AI toolbar rows, the
+Dashboard/Log notebook and the status label all construct into it
+exactly as before, only their immediate parent changed from `outer` to
+`self._main_view` (their own `_build_*` methods take `parent` as an
+argument and are otherwise byte-identical) — and `self._menu_view`
+(the `MainMenu`) as its SIBLING, also a child of `outer`. `_set_view`
+pack_forgets one and packs the other (`fill="both", expand=True`) —
+nothing is ever destroyed, every StringVar/Listbox/panel/worker thread
+keeps its state regardless of which container is currently on screen,
+so a job started from the "main" view keeps running (and its dashboard
+panel keeps updating) even after the owner navigates back to the menu.
+`_go_view(view)` is the UI-facing wrapper — a no-op when already on
+that view, otherwise the swap runs behind the shared `smooth_transition`
+snapshot cover exactly like `_toggle_collapsed` (see **Theming — the
+snapshot cover**), so it fades instead of jumping.
+
+**Tile routing** (`PainterGui._select_tile(tile_id)`) — picking ANY
+tile first calls `_go_view("main")`, then, for every functionality but
+Website GEN, invokes the SAME existing, UNMODIFIED handler the
+always-visible toolbar already called before this phase:
+
+| Tile id | Handler |
+|---|---|
+| `website_gen` | none — the owner drives the now-visible queue + per-site Start buttons, same as always |
+| `ai_sheet_gen` | `_new_collection_ai()` |
+| `api_image_gen` | none (disabled tile — `_select_tile` is never reached; Phase 19 wires the adapter) |
+| `image_checker` | `_start_ai_check()` |
+| `bg` / `crop` / `upscale` / `aspect` | `_start_tool(slot)` |
+
+None of these handlers changed AT ALL — `_start_tool` still opens its
+own file/folder picker (and, for aspect/upscale, its own modal dialog)
+and still ends by selecting the Dashboard tab (`self.notebook.select
+(0)`), which now simply happens to already be visible because the view
+switch ran first. A minimal **"Menu"** button (plain text — no icon
+asset fits "menu/home" yet, and DESIGN.md's emoji policy rules out a
+hamburger glyph standing in for a real one) sits in the pinned top
+strip beside the Day/Night switch and the Controls toggle, always
+reachable, calling `_go_view("menu")`; Phase 11 turns this into a
+proper icon bar with a live-status indicator per running job.
+
 ## The window
 
 - **Collections** — a QUEUE of one or more prompt `.md` files (each

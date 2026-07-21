@@ -44,10 +44,12 @@ match.
   `RESIZE_SETTLE_MS`, the `ASPECT_FILTER_*` constants, `iter_images`,
   `iter_md_files`,
   the `SWITCH_*`/`TRANSITION_FADE_*` theming-and-cover art block, the
-  `BADGES` block + `badge_keys_for` (the dashboard status badges), and
+  `BADGES` block + `badge_keys_for` (the dashboard status badges),
   (GUI rework Phase 4) the `FILTER_KIND_*`/`FILTER_KINDS`/
   `FILTER_POLARITY_*`/`FILTER_PRESETS_SETTING`/`FILTER_ASPECT_EXACT_TOL`
-  block behind `FilterEditor` and the migrated `AspectRatioDialog`
+  block behind `FilterEditor` and the migrated `AspectRatioDialog`, and
+  (GUI rework Phase 10) `MenuTile`/`MENU_TILES`/`MENU_TILE_*` behind
+  `MainMenu`
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
   `ASPECT_FILTER_IF`, `ASPECT_FILTER_IF_NOT`, `ASPECT_LABEL_DECIMALS`
 - [Shared Filter Framework](filters.md) — `FILTER_KIND_ASPECT_EXACT`,
@@ -414,6 +416,33 @@ match.
   LANCZOS) — dots are PIL-drawn, NOT emoji: Tk 8.6 on Windows renders
   colour emoji as identical monochrome circles (verified live
   2026-07-20).
+- `MenuTile`, `MENU_TILES`, `MENU_TILE_RADIUS`, `MENU_TILE_COLS`,
+  `MENU_TILE_W` / `MENU_TILE_H`, `MENU_TILE_GAP_PX`, `MENU_TILE_ICON_PX`,
+  `MENU_TILE_BORDER_PX` / `MENU_TILE_BORDER_HOVER_PX` — the Main Menu
+  landing screen (GUI rework Phase 10, owner decision 2026-07-21): a
+  frozen `MenuTile` dataclass (`id`, `label`, `description`, `icon`
+  stem, `color` `(day, night)` accent pair, `enabled`) and the 8-entry
+  `MENU_TILES` tuple behind it — `website_gen`, `ai_sheet_gen`,
+  `api_image_gen` (`enabled=False`; a shown-but-inert placeholder until
+  Phase 19 wires the adapter), `image_checker`, `bg`, `crop`, `upscale`,
+  `aspect` — PURE DATA, same shape/spirit as `SiteConfig`/`SITES`
+  below, so `test_menu_tiles_cover_all_eight_functionalities_with_
+  unique_ids` asserts coverage/uniqueness with no tkinter import; only
+  [GUI](../gui.md)'s `MainMenu` turns an entry into a widget. Five
+  tiles reuse `JOB_LABEL`/`JOB_LOGO`/`JOB_COLORS` directly (bg/crop/
+  upscale/aspect map straight onto their existing job kind;
+  `image_checker` onto `"aicheck"`); the other three
+  (website_gen/ai_sheet_gen/api_image_gen) have no single matching
+  `JOB_COLORS` entry (Website GEN spans BOTH gen sites, the other two
+  are net-new AI features) and carry their own new accent tuples
+  (indigo/yellow/orange) picked to stay visually distinct from the
+  seven `JOB_COLORS` hues already in use. `MENU_TILE_RADIUS` (16) sits
+  in DESIGN.md's "cards, panels" bracket, one notch above `gui.py`'s
+  own smaller `BTN_RADIUS`/`INPUT_RADIUS` "buttons, inputs" bracket;
+  the rest are the tile grid's own Rule #4 geometry (a 4×2 layout for
+  today's 8 tiles, gap/icon-size/border-width — `_HOVER_PX` is the
+  ONE thing that changes on a tile's hover, a border-width widen with
+  no fill-colour cascade to keep in sync).
 - `BACKGROUND_CHOICES`, `SITE_PROMPT_RULES`, `GEMINI_ASPECT_RULES`,
   `prompt_suffix(site_key, background, prompt_text, style=None)` — the
   rule block appended to every prompt: the chosen background (each

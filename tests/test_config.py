@@ -17,6 +17,8 @@ from painter.config import (
     BADGE_ACTION_STEPS,
     BUTTON_FILL,
     BUTTON_TEXT,
+    MENU_TILES,
+    MENU_TILE_RADIUS,
     STYLES,
     STYLE_CHOICES,
     STYLE_DEFAULT,
@@ -256,3 +258,50 @@ def test_badge_tables_are_consistent():
     for color, label in BADGES.values():
         assert color.startswith("#") and len(color) == 7
         assert label
+
+
+# --- Main Menu tiles (GUI rework Phase 10) -----------------------------
+# MENU_TILES is the startup landing screen's pure data — the ONLY test
+# surface this phase adds beyond the full suite staying green (real Tk
+# wiring gets a screenshot, never a pytest, per gui.py's own "barely
+# Tk-unit-tested by design" convention — see ___tests.md).
+
+_ICONS_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
+
+REQUIRED_MENU_TILE_IDS = {
+    "website_gen", "ai_sheet_gen", "api_image_gen", "image_checker",
+    "bg", "crop", "upscale", "aspect",
+}
+
+
+def test_menu_tiles_cover_all_eight_functionalities_with_unique_ids():
+    assert len(MENU_TILES) == 8
+    ids = [tile.id for tile in MENU_TILES]
+    assert len(set(ids)) == len(ids)  # unique — a routing key, not a label
+    assert set(ids) == REQUIRED_MENU_TILE_IDS
+
+
+def test_menu_tiles_have_a_label_description_and_a_real_icon_file():
+    for tile in MENU_TILES:
+        assert tile.label.strip()
+        assert tile.description.strip()
+        svg = _ICONS_DIR / f"{tile.icon}.svg"
+        png = _ICONS_DIR / f"{tile.icon}.png"
+        assert svg.is_file() or png.is_file(), (
+            f"{tile.id}: no assets/icons/{tile.icon}.(svg|png)"
+        )
+        day, night = tile.color
+        assert day.startswith("#") and len(day) == 7
+        assert night.startswith("#") and len(night) == 7
+
+
+def test_menu_tiles_only_api_image_gen_is_disabled():
+    """Phase 19 flips this on; every other functionality already had a
+    working handler behind it before Phase 10 (owner decision
+    2026-07-21)."""
+    disabled = {tile.id for tile in MENU_TILES if not tile.enabled}
+    assert disabled == {"api_image_gen"}
+
+
+def test_menu_tile_radius_matches_the_design_system_card_bracket():
+    assert MENU_TILE_RADIUS == 16  # DESIGN.md "cards, panels": 12-16px

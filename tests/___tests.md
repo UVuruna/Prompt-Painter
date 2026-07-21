@@ -98,7 +98,13 @@ shades (day differs from night, the neutral is LIGHT on day), the
 BADGE mapping (owner 2026-07-20) — `badge_keys_for` awards a badge
 only on a `done` step (never nothing/unclear/FAILED), adds `retry`
 from the flag, renders in `BADGES` order, and the badge tables stay
-mutually consistent.
+mutually consistent. Also the Main Menu's `MENU_TILES` (GUI rework
+Phase 10) — the 8 required ids are present and unique, every tile has
+a label/description and an icon stem that resolves to a real file
+under `assets/icons/`, only `api_image_gen` is disabled, and
+`MENU_TILE_RADIUS` matches DESIGN.md's card-radius bracket (16). Real
+`MainMenu`/`_view` Tk wiring gets a screenshot, not a pytest — see
+gui.py's own "barely Tk-unit-tested by design" convention below.
 
 ### `test_aspect.py` — Change-Aspect Deform
 The grow-only stretch rule, already-at-ratio byte-unchanged no-ops,

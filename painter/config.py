@@ -699,6 +699,96 @@ def badge_keys_for(actions: str, retried: bool = False) -> tuple:
         earned.add("retry")
     return tuple(key for key in BADGES if key in earned)
 
+
+# --- Main Menu (GUI rework Phase 10) ----------------------------------
+#
+# The startup landing screen: ONE big tile per functionality, replacing
+# "everything visible at once" (the old always-shown queue/agents/tool
+# toolbar) as the first thing the owner sees. PURE DATA — a frozen
+# dataclass + tuple, the same shape as SiteConfig/SITES below — so a
+# test asserts coverage/uniqueness with no tkinter import; gui.MainMenu
+# is the only thing that turns an entry into a widget (a tile factory,
+# not one block per tile). Card radius sits in DESIGN.md's "cards,
+# panels: 12-16px" bracket, one notch above the smaller "buttons,
+# inputs" bracket gui.py's own BTN_RADIUS/INPUT_RADIUS already use.
+MENU_TILE_RADIUS = 16          # owner decision 2026-07-21
+MENU_TILE_COLS = 4             # 4x2 grid for today's 8 tiles
+MENU_TILE_W = 180              # minimum tile width, px (grid stretches wider)
+MENU_TILE_H = 140              # minimum tile height, px
+MENU_TILE_GAP_PX = 16          # gap between tiles (DESIGN.md 8pt grid, 2 units)
+MENU_TILE_ICON_PX = 40         # icon side inside a tile (ICON_TARGET_PX=20 is
+#                                 the smaller button-icon size, gui.py-local)
+MENU_TILE_BORDER_PX = 2        # accent border width, at rest
+MENU_TILE_BORDER_HOVER_PX = 4  # accent border width, hovered (the one thing
+#                                 that changes on hover — see gui.MainMenu)
+
+
+@dataclass(frozen=True)
+class MenuTile:
+    """One Main Menu tile. ``id`` is what ``PainterGui._select_tile``
+    switches on to reach the EXISTING handler each functionality
+    already had before Phase 10 — this dataclass only decides what the
+    tile looks like, never what picking it DOES."""
+
+    id: str
+    label: str
+    description: str          # one line, shown under the label
+    icon: str                 # assets/icons stem (gui.icon() resolves it)
+    color: tuple[str, str]    # (day, night) accent hex pair
+    enabled: bool = True      # False = shown, greyed out, not clickable
+
+
+MENU_TILES: tuple[MenuTile, ...] = (
+    # spans BOTH gen sites, not one job — no single JOB_COLORS entry
+    # fits, so this gets its own accent (indigo)
+    MenuTile(
+        id="website_gen", label="Website GEN",
+        description=(
+            "Drive your logged-in ChatGPT/Gemini tabs to generate a"
+            " collection"
+        ),
+        icon="web", color=("#4338ca", "#818cf8"),
+    ),
+    MenuTile(
+        id="ai_sheet_gen", label="New collection (AI)",
+        description="Ask Gemini to draft a new prompt sheet from a request",
+        icon="ai", color=("#a16207", "#facc15"),  # yellow
+    ),
+    # Phase 19 wires the adapter + panel; shown greyed-out until then
+    MenuTile(
+        id="api_image_gen", label="API Image GEN",
+        description="Generate images via the paid Gemini API — coming soon",
+        icon="gemini", color=("#c2410c", "#fb923c"),  # orange
+        enabled=False,
+    ),
+    MenuTile(
+        id="image_checker", label=JOB_LABEL["aicheck"],
+        description="Vision pass over a folder — flags banal defects",
+        icon=JOB_LOGO["aicheck"], color=JOB_COLORS["aicheck"],
+    ),
+    MenuTile(
+        id="bg", label=JOB_LABEL["bg"],
+        description="Remove the background from every image in a folder",
+        icon=JOB_LOGO["bg"], color=JOB_COLORS["bg"],
+    ),
+    MenuTile(
+        id="crop", label=JOB_LABEL["crop"],
+        description="Autocrop every image to its content box",
+        icon=JOB_LOGO["crop"], color=JOB_COLORS["crop"],
+    ),
+    MenuTile(
+        id="upscale", label=JOB_LABEL["upscale"],
+        description="Upscale small images with Real-ESRGAN",
+        icon=JOB_LOGO["upscale"], color=JOB_COLORS["upscale"],
+    ),
+    MenuTile(
+        id="aspect", label=JOB_LABEL["aspect"],
+        description="Force every image in a folder to one aspect ratio",
+        icon=JOB_LOGO["aspect"], color=JOB_COLORS["aspect"],
+    ),
+)
+
+
 # --- Tool temp / before-after / restore (owner 2026-07-19) -----------
 #
 # The four in-place tools back the ORIGINAL of every file up before they

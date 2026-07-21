@@ -85,6 +85,15 @@ from painter.config import (
     JOBTEMP_CAP_BANNER_TEXT,
     JOBTEMP_KEEP_ALL_STEPS_DEFAULT,
     JOBTEMP_STEP_LABEL,
+    MENU_TILES,
+    MENU_TILE_BORDER_HOVER_PX,
+    MENU_TILE_BORDER_PX,
+    MENU_TILE_COLS,
+    MENU_TILE_GAP_PX,
+    MENU_TILE_H,
+    MENU_TILE_ICON_PX,
+    MENU_TILE_RADIUS,
+    MENU_TILE_W,
     NEW_CHAT_CHOICES,
     RESIZE_SETTLE_MS,
     SHEETS_DIR,
@@ -4076,6 +4085,103 @@ def _migrate_legacy_upscale_gate(min_width, aspect_min, aspect_max) -> dict:
     }
 
 
+# ---------------------------------------------------------------------
+# Main Menu (GUI rework Phase 10)
+# ---------------------------------------------------------------------
+
+class MainMenu(ttk.Frame):
+    """The startup landing screen: a full-window grid of big tiles, one
+    per functionality (``config.MENU_TILES``) — replacing "everything
+    visible at once" as the first thing the owner sees. Built ONCE,
+    beside the existing controls/notebook tree, and shown/hidden by
+    ``PainterGui._set_view``; picking a tile runs the SAME existing,
+    unmodified handler the always-visible toolbar already called before
+    this phase (see ``PainterGui._select_tile``) — this class only
+    decides what the picker looks like, never what a pick DOES."""
+
+    def __init__(self, parent, on_select: Callable[[str], None]):
+        super().__init__(parent)
+        self._on_select = on_select
+
+        header = ttk.Frame(self)
+        header.pack(pady=(24, 4))
+        ttk.Label(header, text="PromptPainter", style="Big.TLabel").pack()
+        ttk.Label(header, text="Pick what to do", style="Muted.TLabel").pack()
+
+        grid = ttk.Frame(self)
+        grid.pack(fill="both", expand=True, padx=24, pady=(8, 24))
+        cols = MENU_TILE_COLS
+        for i, tile in enumerate(MENU_TILES):
+            r, c = divmod(i, cols)
+            self._make_tile(grid, tile).grid(
+                row=r, column=c, sticky="nsew",
+                padx=MENU_TILE_GAP_PX // 2, pady=MENU_TILE_GAP_PX // 2,
+            )
+        rows = math.ceil(len(MENU_TILES) / cols)
+        for c in range(cols):
+            grid.columnconfigure(c, weight=1, uniform="menucol")
+        for r in range(rows):
+            grid.rowconfigure(r, weight=1, uniform="menurow")
+
+    def _make_tile(self, parent, tile) -> ctk.CTkFrame:
+        """One tile: icon + title + description in a rounded, accent-
+        bordered card (DESIGN.md "cards, panels" radius bracket + Rule
+        #16 hover/depth), built from the SAME primitives every other
+        rounded surface in this file uses (``icon()``/``theme_pair``/
+        ``ctk_font``) — a factory, not 8 copy-pasted blocks (Rule #5).
+        The one thing that changes on hover is the border width (a
+        cheap, artifact-free "focus ring" — anything touching fill
+        colour would also have to walk every child label in lockstep).
+        A disabled tile (``tile.enabled`` False) renders muted, with no
+        hover/click binding at all."""
+        surface = theme_pair("dark")      # elevated "card" surface
+        window_bg = theme_pair("bg")      # what's behind the card's OWN
+        #                                   rounded corners (its ttk parent)
+        accent = tile.color if tile.enabled else theme_pair("light")
+
+        card = ctk.CTkFrame(
+            parent, corner_radius=MENU_TILE_RADIUS,
+            fg_color=surface, bg_color=window_bg,
+            border_width=MENU_TILE_BORDER_PX, border_color=accent,
+            width=MENU_TILE_W, height=MENU_TILE_H,
+        )
+        card.grid_propagate(False)
+        content = ctk.CTkFrame(card, fg_color=surface, bg_color=surface)
+        content.pack(expand=True)
+        ctk.CTkLabel(
+            content, text="", image=icon(tile.icon, MENU_TILE_ICON_PX),
+            fg_color=surface, bg_color=surface,
+        ).pack(pady=(0, 8))
+        ctk.CTkLabel(
+            content, text=tile.label, font=ctk_font("title"),
+            text_color=accent, fg_color=surface, bg_color=surface,
+        ).pack()
+        ctk.CTkLabel(
+            content, text=tile.description, font=ctk_font("root"),
+            text_color=theme_pair("light"), fg_color=surface,
+            bg_color=surface, wraplength=MENU_TILE_W - 24, justify="center",
+        ).pack(pady=(4, 0))
+
+        if not tile.enabled:
+            return card  # placeholder — no hover, no click (Phase 19)
+
+        def _hover(active: bool, _event=None) -> None:
+            card.configure(
+                border_width=MENU_TILE_BORDER_HOVER_PX if active
+                else MENU_TILE_BORDER_PX
+            )
+
+        def _click(_event=None) -> None:
+            self._on_select(tile.id)
+
+        for w in (card, content, *content.winfo_children()):
+            w.configure(cursor="hand2")
+            w.bind("<Button-1>", _click)
+            w.bind("<Enter>", lambda _e: _hover(True))
+            w.bind("<Leave>", lambda _e: _hover(False))
+        return card
+
+
 class PainterGui:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -4196,20 +4302,33 @@ class PainterGui:
         outer = ttk.Frame(self._scroll.body, padding=8)
         outer.pack(fill="both", expand=True)
 
+        # GUI rework Phase 10: the Main Menu and the whole existing app
+        # are SIBLINGS inside 'outer', each its own frame — nothing
+        # below moves, only its PARENT changes ('outer' -> _main_view),
+        # so _set_view can pack_forget/pack the entire existing tree as
+        # ONE unit, the exact technique _set_collapsed already proves
+        # safe one level down. _view is deliberately its OWN, orthogonal
+        # state — _collapsed (the Controls toggle) keeps working
+        # unmodified, independently, in either view.
+        self._view = "menu"
+        self._main_view = ttk.Frame(outer)
+        self._menu_view = MainMenu(outer, on_select=self._select_tile)
+
         # the whole upper control area — collapsed together into the thin
         # per-agent strip (built but packed by _set_collapsed, so the
         # order is deterministic regardless of build order)
         self._collapsed = False
-        self._controls_box = ttk.Frame(outer)
+        self._controls_box = ttk.Frame(self._main_view)
         self._build_queue(self._controls_box)
         self._build_options(self._controls_box)
         self._build_toolbar(self._controls_box)
-        self._build_compact(outer)
-        self._build_views(outer)
+        self._build_compact(self._main_view)
+        self._build_views(self._main_view)
 
         self.status_var = tk.StringVar(value="idle")
         ttk.Label(
-            outer, textvariable=self.status_var, style="Muted.TLabel"
+            self._main_view, textvariable=self.status_var,
+            style="Muted.TLabel",
         ).pack(fill="x", pady=(4, 0))
 
         # the mini Day/Night switch — reflects the already-applied theme
@@ -4224,10 +4343,21 @@ class PainterGui:
             command=self._toggle_collapsed, icon_name="controls",
         )
         self._collapse_btn.pack(side="right", padx=(0, 8))
+        # GUI rework Phase 10: minimal "back to the Main Menu" affordance
+        # — Phase 11 turns this into a proper icon bar; for now, one
+        # plain-text button (no icon asset fits "menu/home" yet, and
+        # DESIGN.md's emoji policy rules out a hamburger glyph standing
+        # in for one) always reachable in the pinned top strip, like the
+        # switch/collapse toggle either side of it.
+        self._menu_btn = rounded_button(
+            self._top_strip, "Menu", command=lambda: self._go_view("menu"),
+        )
+        self._menu_btn.pack(side="left")
 
         self._bind_zoom()
         self._bind_wheel_routing()
         self._set_collapsed(False)  # deterministic initial packing
+        self._set_view("menu")      # ditto — every launch lands on the menu
         self._apply_settings(self._settings)  # may restore a saved state
         self._wire_persistence()
         # the maximize/restore + drag-resize watcher — seeded and bound
@@ -4340,6 +4470,56 @@ class PainterGui:
             self.root, partial(self._set_collapsed, not self._collapsed)
         )
         self._schedule_save()
+
+    # --- Main Menu (GUI rework Phase 10) --------------------------------
+
+    def _set_view(self, view: str) -> None:
+        """Swap the Main Menu for the existing controls/queue/dashboard
+        tree, or back — ``_set_collapsed``'s pack_forget/pack technique,
+        one level up: nothing is destroyed, every StringVar/Listbox/
+        panel/worker thread keeps its state, only which CONTAINER is
+        packed into 'outer' changes. Not persisted (every launch starts
+        at "menu", see __init__) and deliberately its OWN state, never
+        entangled with ``_collapsed`` — the Controls toggle keeps
+        working unmodified, independently, in either view."""
+        self._view = view
+        if view == "menu":
+            self._main_view.pack_forget()
+            self._menu_view.pack(fill="both", expand=True)
+        else:
+            self._menu_view.pack_forget()
+            self._main_view.pack(fill="both", expand=True)
+        self._scroll.refresh()
+
+    def _go_view(self, view: str) -> None:
+        if view == self._view:
+            return
+        # the swap moves the whole window's content — run it behind the
+        # shared snapshot cover so it fades instead of jumping, exactly
+        # like _toggle_collapsed
+        smooth_transition(self.root, partial(self._set_view, view))
+
+    def _select_tile(self, tile_id: str) -> None:
+        """One Main Menu tile picked: reveal the existing app (Phase 11
+        turns this into a proper icon bar) and, for every functionality
+        but Website GEN, invoke the SAME existing handler the old
+        always-visible toolbar button already called — UNMODIFIED, this
+        phase only changes what is VISIBLE when it runs. Website GEN has
+        no single handler of its own — the owner drives the now-visible
+        queue + per-site Start buttons, same as before this phase."""
+        self._go_view("main")
+        handler = {
+            "website_gen": None,
+            "ai_sheet_gen": self._new_collection_ai,
+            "api_image_gen": None,  # disabled tile — never reaches here
+            "image_checker": self._start_ai_check,
+            "bg": partial(self._start_tool, "bg"),
+            "crop": partial(self._start_tool, "crop"),
+            "upscale": partial(self._start_tool, "upscale"),
+            "aspect": partial(self._start_tool, "aspect"),
+        }[tile_id]
+        if handler is not None:
+            handler()
 
     # --- maximize/restore cover + drag-resize event buffering ----------
 
