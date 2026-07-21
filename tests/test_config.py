@@ -26,6 +26,7 @@ from painter.config import (
     fmt_op_duration,
     fmt_pct,
     iter_images,
+    iter_md_files,
     selection_base_and_rels,
 )
 
@@ -157,6 +158,25 @@ def test_iter_images_enumerates_recursively_and_skips_non_images(tmp_path):
 
 def test_iter_images_empty_folder_is_empty(tmp_path):
     assert iter_images(tmp_path) == []
+
+
+# --- folder .md enumeration (the Collections queue's Add folder…) -----
+
+
+def test_iter_md_files_enumerates_recursively(tmp_path):
+    _touch(tmp_path / "a.md")
+    _touch(tmp_path / "b.png")                 # not a sheet -> skipped
+    _touch(tmp_path / "sub" / "c.md")           # nested -> found
+    _touch(tmp_path / "sub" / "deeper" / "d.md")  # nested further -> found
+    _touch(tmp_path / "sub" / "notes.txt")      # not a sheet -> skipped
+    found = [
+        p.relative_to(tmp_path).as_posix() for p in iter_md_files(tmp_path)
+    ]
+    assert found == ["a.md", "sub/c.md", "sub/deeper/d.md"]  # sorted
+
+
+def test_iter_md_files_empty_folder_is_empty(tmp_path):
+    assert iter_md_files(tmp_path) == []
 
 
 # --- per-agent STYLE clause (owner 2026-07-19) ------------------------

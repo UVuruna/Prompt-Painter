@@ -231,7 +231,16 @@ reachability fixes:
 
 - **Collections** — a QUEUE of one or more prompt `.md` files (each
   file is one COLLECTION — a set of images to make: a theme, an icon
-  set, a landscape series …; Add / Remove / Clear). Each site works
+  set, a landscape series …; **Add…** / **Remove** / **Clear** plus
+  **Add folder…** (owner 2026-07-21) — picks a folder and recursively
+  queues every `.md` underneath via `config.iter_md_files` (mirrors
+  `iter_images`), however deep it is nested. All four buttons share
+  ONE append/de-dup/insert body, `_queue_sheets(paths)` (de-dup is by
+  full PATH, so two same-named sheets in different sub-folders both
+  queue — see the filename-collision refusal below); `_add_sheets`
+  (the file picker) and `add_generated_sheet` (the AI sheet
+  generator's queue-one-sheet call) both reduce to a call into it —
+  Rule #5). Each site works
   through the queue in order, closing collection after collection;
   broken files are reported and dropped, never half-driven. Two
   queued files that share a filename are refused (their progress and

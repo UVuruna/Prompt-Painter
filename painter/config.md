@@ -38,6 +38,7 @@ match.
   `DEFAULT_OUT_DIR`, `SITES`, `TIMING`, `BACKGROUND_CHOICES`,
   `prompt_suffix`; GUI also `STYLES`/`STYLE_CHOICES`/`STYLE_DEFAULT`,
   `RESIZE_SETTLE_MS`, the `ASPECT_FILTER_*` constants, `iter_images`,
+  `iter_md_files`,
   the `SWITCH_*`/`TRANSITION_FADE_*` theming-and-cover art block, and
   the `BADGES` block + `badge_keys_for` (the dashboard status badges)
 - [Change Aspect Ratio](aspect.md) — `ASPECT_TOL`, `ASPECT_FILTER_OFF`,
@@ -146,6 +147,15 @@ match.
   .webp`) under a folder, sorted, recursive. ONE home for the
   folder-based tools (BG / Crop / Upscale) and the Aspect tool's folder
   input (`gui._iter_images` delegates here — Rule #5).
+- `iter_md_files(folder)` — the Collections queue's folder-input
+  enumerator (GUI rework Phase 2, 2026-07-21): every `.md` file under a
+  folder, sorted, recursive — mirrors `iter_images` byte-for-byte
+  (same local-import/`sorted(rglob(...))` shape), just filtering on the
+  `.md` suffix directly instead of `TOOL_IMAGE_EXTENSIONS` (a sheet has
+  exactly one extension, so no shared tuple constant is needed). Backs
+  [GUI](../gui.md)'s "Add folder…" button beside Add…/Remove/Clear —
+  point it at a folder of prompt sheets and every sheet underneath,
+  however nested, queues in one go.
 - `JOB_ORDER`, `JOB_TOOL_KINDS`, `JOB_LABEL`, `JOB_LOGO`,
   `JOB_COLORS`, `JOB_METRIC`, `job_color_pair(kind)`,
   `GRID_COLS_BY_COUNT` — the dashboard per-JOB panels (owner

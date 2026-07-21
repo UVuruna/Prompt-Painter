@@ -131,6 +131,7 @@ from painter.config import (
     fmt_pct,
     fmt_size,
     iter_images,
+    iter_md_files,
     badge_keys_for,
     button_fill_pair,
     button_text_pair,
@@ -3424,6 +3425,10 @@ class PainterGui:
             col, "Clear", command=self._clear_sheets, icon_name="clear",
             width=110, icon_edge=True,
         ).pack(fill="x")
+        rounded_button(
+            col, "Add folder…", command=self._add_sheets_folder,
+            icon_name="add", width=110, icon_edge=True,
+        ).pack(fill="x", pady=(4, 0))
 
     def _build_options(self, parent) -> None:
         lf = ttk.Labelframe(parent, text="Output & run options")
@@ -3709,16 +3714,33 @@ class PainterGui:
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
 
-    def _add_sheets(self) -> None:
-        paths = filedialog.askopenfilenames(
-            title="Prompt sheets", filetypes=[("Markdown", "*.md")]
-        )
+    def _queue_sheets(self, paths) -> None:
+        """Append PATHS to the collection queue, de-duplicated by path —
+        the shared body behind Add… and Add folder… (also reused by the
+        AI sheet generator's own queue-one-sheet call)."""
         for raw in paths:
             path = Path(raw)
             if path not in self._sheets:
                 self._sheets.append(path)
                 self.sheet_list.insert("end", path.name)
         self._schedule_save()
+
+    def _add_sheets(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="Prompt sheets", filetypes=[("Markdown", "*.md")]
+        )
+        self._queue_sheets(paths)
+
+    def _add_sheets_folder(self) -> None:
+        """'Add folder…' — every ``.md`` sheet under a chosen folder,
+        however nested, queued in one go (recursive, same de-dup rule
+        as Add…)."""
+        folder = filedialog.askdirectory(
+            title="Folder with prompt sheets (.md)"
+        )
+        if not folder:
+            return
+        self._queue_sheets(iter_md_files(folder))
 
     def _remove_sheet(self) -> None:
         for index in reversed(self.sheet_list.curselection()):
@@ -4166,10 +4188,7 @@ class PainterGui:
 
     def add_generated_sheet(self, path: Path) -> None:
         """Queue one AI-generated sheet (the same de-dup rule as Add…)."""
-        if path not in self._sheets:
-            self._sheets.append(path)
-            self.sheet_list.insert("end", path.name)
-        self._schedule_save()
+        self._queue_sheets([path])
 
     def _start_ai_check(self) -> None:
         """'AI check…' — a batch vision pass over a folder of images as

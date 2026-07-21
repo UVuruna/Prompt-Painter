@@ -458,6 +458,17 @@ def iter_images(folder) -> list:
     )
 
 
+def iter_md_files(folder) -> list:
+    """Every ``.md`` FILE under ``folder`` (recursive), sorted — mirrors
+    ``iter_images``. Backs the Collections queue's "Add folder…" button:
+    point it at a folder of prompt sheets and every sheet underneath,
+    however nested, is queued."""
+    from pathlib import Path
+
+    root = Path(folder)
+    return sorted(root.rglob("*.md"))
+
+
 # --- Dashboard per-JOB panels (owner 2026-07-19) ---------------------
 #
 # The dashboard shows one panel PER RUNNING JOB (up to 6 in parallel):
