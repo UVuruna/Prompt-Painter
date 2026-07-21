@@ -1438,11 +1438,12 @@ class AgentPanel(ttk.Labelframe):
         "settings_collapsed",
     )
 
-    def __init__(self, master, site_key: str, on_start, on_stop):
+    def __init__(self, master, site_key: str, on_start, on_stop, on_pause):
         super().__init__(master)
         self.site_key = site_key
         self._on_start = on_start
         self._on_stop = on_stop
+        self._on_pause = on_pause
         site = SITES[site_key]
 
         # the labelframe title: the site's logo + name
@@ -1538,6 +1539,14 @@ class AgentPanel(ttk.Labelframe):
             kind="success", icon_name="start", width=90,
         )
         self.btn_start.pack(side="left")
+        # the pause toggle (owner 2026-07-21) — a plain neutral button
+        # (no filled/outline availability dance like Start/Stop below):
+        # its label alone flips Pause <-> Resume, always clickable.
+        self.btn_pause = rounded_button(
+            row, "Pause", command=partial(on_pause, site_key),
+            kind="secondary", width=70,
+        )
+        self.btn_pause.pack(side="left", padx=6)
         self.btn_stop = rounded_button(
             row, "Stop", command=partial(on_stop, site_key),
             kind="danger-outline", width=70,
@@ -1666,6 +1675,14 @@ class AgentPanel(ttk.Labelframe):
             style_action_button(
                 stop_btn, "danger", running or pending_restart
             )
+
+    def set_paused(self, is_paused: bool) -> None:
+        """Reflect this agent's pause toggle onto its OWN btn_pause
+        label (owner 2026-07-21) — the paused STATE text lives on the
+        dashboard DashPanel's state line instead (JobPanel.set_paused,
+        reached through PainterGui.panels[site_key]; this panel has no
+        state line of its own)."""
+        self.btn_pause.configure(text="Resume" if is_paused else "Pause")
 
     def build_compact(self, parent) -> ttk.Frame:
         """A thin '[logo] Name [Start][Stop]' cluster for the collapsed
@@ -1917,11 +1934,14 @@ class JobPanel(ttk.Frame):
     never calls these.
     """
 
-    def __init__(self, master, kind: str, on_show=None, on_close=None):
+    def __init__(
+        self, master, kind: str, on_show=None, on_close=None, on_pause=None,
+    ):
         super().__init__(master, padding=6)
         self.slot_key = kind
         self._on_show = on_show   # called with a node-info dict on 'Show'
         self._on_close = on_close  # called with the slot key on CLOSE
+        self._on_pause = on_pause  # called with the slot key on Pause/Resume
         self._finished = False
         self._node_info: dict[str, dict] = {}  # tree item id -> info
         self._build_header(kind)
@@ -1947,8 +1967,20 @@ class JobPanel(ttk.Frame):
             header, "✕ Close", command=self._do_close,
             kind="danger-outline", width=76,
         )
+        # a folder-based job (ToolPanel / AiCheckPanel) owns its OWN
+        # pause toggle here, beside Close (owner 2026-07-21) — the two
+        # gen sites' button lives on AgentPanel instead, so on_pause
+        # stays None for DashPanel and this button is never built there.
+        self.btn_pause: ctk.CTkButton | None = None
+        if self._on_pause is not None:
+            self.btn_pause = rounded_button(
+                header, "Pause", command=partial(self._on_pause, kind),
+                kind="secondary", width=70,
+            )
+            self.btn_pause.pack(side="right", padx=(0, 6))
 
         # the state line — quota auto-restart countdown / current item
+        # / paused
         self.state_var = tk.StringVar(value="")
         ttk.Label(
             self, textvariable=self.state_var, style="Muted.TLabel"
@@ -1965,6 +1997,18 @@ class JobPanel(ttk.Frame):
         """Hide the CLOSE button again (a slot reused for a new run)."""
         self._finished = False
         self._close_btn.pack_forget()
+
+    def set_paused(self, is_paused: bool) -> None:
+        """Reflect a pause toggle (owner 2026-07-21): the muted state
+        line (every JobPanel has one) and, for a panel that owns a
+        btn_pause (ToolPanel / AiCheckPanel — the two gen sites' button
+        lives on AgentPanel instead, see AgentPanel.set_paused), its
+        Pause/Resume label. The next real progress event (item_start /
+        sheet_done) naturally overwrites the state line once the job is
+        running or finished again."""
+        if self.btn_pause is not None:
+            self.btn_pause.configure(text="Resume" if is_paused else "Pause")
+        self.state_var.set("paused — waiting to resume" if is_paused else "")
 
     def _do_close(self) -> None:
         if self._on_close is not None:
@@ -2484,8 +2528,10 @@ class ToolPanel(JobPanel):
     op, so a restore always puts the original back.
     """
 
-    def __init__(self, master, kind: str, on_close=None):
-        super().__init__(master, kind, on_show=None, on_close=on_close)
+    def __init__(self, master, kind: str, on_close=None, on_pause=None):
+        super().__init__(
+            master, kind, on_show=None, on_close=on_close, on_pause=on_pause,
+        )
         self._metric_name = JOB_METRIC[kind]
         self.folder: Path | None = None       # the picked folder
         self.jobtemp = None                    # painter.jobtemp.JobTemp
@@ -2762,8 +2808,14 @@ class AiCheckPanel(JobPanel):
     or the flags itself — both actions go through the GUI callbacks.
     """
 
-    def __init__(self, master, on_close=None, on_resend=None, on_clear=None):
-        super().__init__(master, "aicheck", on_show=None, on_close=on_close)
+    def __init__(
+        self, master, on_close=None, on_resend=None, on_clear=None,
+        on_pause=None,
+    ):
+        super().__init__(
+            master, "aicheck", on_show=None, on_close=on_close,
+            on_pause=on_pause,
+        )
         self._on_resend = on_resend  # called with {flag key: [defects]}
         self._on_clear = on_clear    # called with (out_base, keys) -> int
         self.folder: Path | None = None    # the checked folder
@@ -3056,6 +3108,15 @@ class PainterGui:
             key: threading.Event() for key in SITES
         }
         self._running: set[str] = set()
+        # per-job PAUSE toggle (owner 2026-07-21): one threading.Event per
+        # JOB_ORDER kind (all seven — the two sites plus the four tools
+        # plus the AI checker), polled by the runner/worker loop between
+        # items/images — see _toggle_pause_job. _paused tracks which
+        # kinds are CURRENTLY paused so button labels stay in sync.
+        self._pause_events: dict[str, threading.Event] = {
+            key: threading.Event() for key in JOB_ORDER
+        }
+        self._paused: set[str] = set()
         self._restart_jobs: dict[str, str] = {}  # site -> after id
         self._restart_deadline: dict[str, float] = {}  # site -> monotonic
         # the four in-place tools each run as their OWN job (one worker
@@ -3388,6 +3449,7 @@ class PainterGui:
             panel = AgentPanel(
                 agents, key,
                 on_start=self._start_site, on_stop=self._stop_site,
+                on_pause=self._toggle_pause_job,
             )
             panel.grid(row=0, column=i, sticky="nsew", padx=4)
             agents.columnconfigure(i, weight=1)
@@ -3467,12 +3529,14 @@ class PainterGui:
         for kind in JOB_TOOL_KINDS:
             self.panels[kind] = ToolPanel(
                 self._dashgrid, kind, on_close=self._close_panel,
+                on_pause=self._toggle_pause_job,
             )
         # the AI checker's own job slot (owner 2026-07-20) — the seventh
         # panel; its two actions call back into the GUI's engine glue
         self.panels["aicheck"] = AiCheckPanel(
             self._dashgrid, on_close=self._close_panel,
             on_resend=self._resend_flagged, on_clear=self._clear_ai_flags,
+            on_pause=self._toggle_pause_job,
         )
         self._dashgrid.attach(self.panels)
         self._dashgrid.pack(fill="both", expand=True, padx=4, pady=4)
@@ -3502,6 +3566,34 @@ class PainterGui:
         temp = self._tool_temps.pop(kind, None)
         if temp is not None:
             temp.clear()
+
+    def _toggle_pause_job(self, kind: str) -> None:
+        """Flip ONE job's pause toggle (owner 2026-07-21) — the SAME
+        handler wired to every job kind's btn_pause: AgentPanel's own
+        (chatgpt/gemini) and ToolPanel's/AiCheckPanel's own (bg/crop/
+        upscale/aspect/aicheck). Sets/clears this kind's
+        threading.Event, polled by the runner (run_sheet's
+        should_pause) or a tool/AI-check worker loop between items/
+        images (painter.runner.wait_while_paused) — a Stop always wins
+        over a pending pause (should_stop is re-checked on every poll
+        tick, and _stop_site / the __worker_done__/__tool_done__
+        handlers clear any leftover pause so a finished or freshly
+        started job is never silently pre-paused). Reflects the new
+        state onto every panel that shows this kind: the AgentPanel
+        button for a site AND its DashPanel state line (JobPanel base),
+        or the ToolPanel/AiCheckPanel button + state line (the same
+        widget) for the other five kinds."""
+        is_paused = kind not in self._paused
+        if is_paused:
+            self._paused.add(kind)
+            self._pause_events[kind].set()
+        else:
+            self._paused.discard(kind)
+            self._pause_events[kind].clear()
+        if kind in self.agents:
+            self.agents[kind].set_paused(is_paused)
+        self.panels[kind].set_paused(is_paused)
+        self._log(f"[{kind}] {'paused' if is_paused else 'resumed'}")
 
     def _open_instructions(self) -> None:
         path = Path(__file__).resolve().parent / "instructions.md"
@@ -3949,21 +4041,33 @@ class PainterGui:
         self.notebook.select(0)
         self.status_var.set(f"{label} running …")
 
+        if slot in self._paused:
+            self._toggle_pause_job(slot)  # a fresh job never starts pre-paused
         worker = threading.Thread(
             target=self._run_tool_job,
-            args=(slot, label, func, folder_path, files, temp),
+            args=(
+                slot, label, func, folder_path, files, temp,
+                self._pause_events[slot],
+            ),
             daemon=True,
         )
         self._tool_workers[slot] = worker
         worker.start()
 
-    def _run_tool_job(self, slot, label, func, folder, files, temp) -> None:
+    def _run_tool_job(
+        self, slot, label, func, folder, files, temp, pause_event,
+    ) -> None:
         """One tool job on its own thread: back up each original, run
         the engine func in place, measure BEFORE→AFTER, and stream item
         events to the slot's panel. A crash on one file is loud and
         counted FAILED (its no-op backup dropped), never kills the job.
         The measure is computed OUTSIDE the engine, from the backup vs
-        the in-place result (Rule #10 progress every 25)."""
+        the in-place result (Rule #10 progress every 25). ``pause_event``
+        (owner 2026-07-21) blocks BETWEEN images while set — tools have
+        no Stop, so unlike run_sheet this wait has no should_stop escape
+        hatch; it simply waits for Resume."""
+        from painter.runner import wait_while_paused
+
         emit = lambda ev: self._q.put(("__event__", slot, ev))
         log = lambda msg: self._q.put(f"[{label}]     {msg}")
         try:
@@ -3972,6 +4076,7 @@ class PainterGui:
             counts: dict[str, int] = {}
             t0 = time.time()
             for i, src in enumerate(files, start=1):
+                wait_while_paused(pause_event.is_set, None, log, emit)
                 rel = src.relative_to(folder).as_posix()
                 emit({
                     "type": "item_start", "idx": i, "of": len(files),
@@ -4110,21 +4215,27 @@ class PainterGui:
         self.notebook.select(0)
         self.status_var.set(f"{JOB_LABEL['aicheck']} running …")
 
+        if "aicheck" in self._paused:
+            self._toggle_pause_job("aicheck")  # never start pre-paused
         worker = threading.Thread(
             target=self._run_ai_check_job,
-            args=(folder_path, files, out_base),
+            args=(folder_path, files, out_base, self._pause_events["aicheck"]),
             daemon=True,
         )
         self._tool_workers["aicheck"] = worker
         worker.start()
 
-    def _run_ai_check_job(self, folder, files, out_base) -> None:
+    def _run_ai_check_job(self, folder, files, out_base, pause_event) -> None:
         """The checker worker: prune stale flags (regenerated files),
         then one paced vision call per image — flagged entries are
         recorded (merged) into the flag file as they land, an OK image
         CLEARS any old flag it had, and a per-image API failure is loud
-        but never kills the batch (the tool-job convention)."""
+        but never kills the batch (the tool-job convention). ``pause_event``
+        (owner 2026-07-21) blocks BETWEEN images while set, the same
+        wait pattern as the in-place tools (no should_stop — there is
+        no Stop for this job either)."""
         from painter import ai
+        from painter.runner import wait_while_paused
 
         emit = lambda ev: self._q.put(("__event__", "aicheck", ev))
         log = lambda msg: self._q.put(f"[AI check] {msg}")
@@ -4144,6 +4255,7 @@ class PainterGui:
             }
             t0 = time.time()
             for i, src in enumerate(files, start=1):
+                wait_while_paused(pause_event.is_set, None, log, emit)
                 emit({
                     "type": "item_start", "idx": i, "of": len(files),
                     "title": src.name,
@@ -4439,6 +4551,8 @@ class PainterGui:
                     selection[src] = None
 
         self._stop_events[key].clear()
+        if key in self._paused:
+            self._toggle_pause_job(key)  # a fresh Start never starts pre-paused
         self._running.add(key)
         panel.set_run_state(running=True)
         total, themes = self._plan(key, sheets, selection)
@@ -4474,6 +4588,7 @@ class PainterGui:
                 panel.continue_nudge_var.get(),
                 panel.new_chat_var.get(),
                 self._stop_events[key],
+                self._pause_events[key],
             ),
             daemon=True,
         )
@@ -4483,7 +4598,7 @@ class PainterGui:
     def _drive_site(
         self, key, sheets, out_base, timing, post_save, suffix,
         extra_suffix, report, selection, safer, continue_nudge, new_chat,
-        stop_event,
+        stop_event, pause_event,
     ) -> None:
         """One site's whole run — the theme queue in order, one thread."""
         log = lambda msg: self._q.put(f"[{key}] {msg}")
@@ -4514,6 +4629,7 @@ class PainterGui:
                         sheet, driver, out_base, key, timing,
                         log=log,
                         should_stop=stop_event.is_set,
+                        should_pause=pause_event.is_set,
                         post_save=post_save,
                         prompt_suffix=suffix,
                         extra_suffix=extra_suffix,
@@ -4594,6 +4710,12 @@ class PainterGui:
             return
         if key in self._running:
             self._stop_events[key].set()
+            # Stop must win over a pending pause (MUST NOT REGRESS): the
+            # should_stop re-check inside wait_while_paused already lets
+            # a PAUSED run stop promptly, but the toggle itself would
+            # otherwise linger and silently pre-pause the next Start.
+            if key in self._paused:
+                self._toggle_pause_job(key)
             self.status_var.set(
                 f"{key}: stopping after the current item …"
             )
@@ -4683,6 +4805,11 @@ class PainterGui:
                 slot = msg[1]
                 self.panels[slot].finish()  # reveal CLOSE
                 self._tool_workers.pop(slot, None)
+                # a job that finished its last image right as it was
+                # paused would otherwise leave a stale "paused" toggle
+                # on an idle panel (owner 2026-07-21)
+                if slot in self._paused:
+                    self._toggle_pause_job(slot)
                 if not self._tool_workers and not self._running:
                     self._update_status()
             elif msg[0] == "__worker_done__":
@@ -4692,6 +4819,8 @@ class PainterGui:
                 # while its thread is still technically alive
                 self._running.discard(key)
                 self._workers.pop(key, None)
+                if key in self._paused:  # same stale-pause guard as above
+                    self._toggle_pause_job(key)
                 self.agents[key].set_run_state(
                     running=False,
                     pending_restart=key in self._restart_jobs,

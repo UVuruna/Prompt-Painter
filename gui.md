@@ -259,7 +259,10 @@ reachability fixes:
   the runner sends `CONTINUE_NUDGE` once into the same chat to un-stick
   ChatGPT before giving up, passed to `run_sheet(continue_nudge=…)`),
   the **New chat** mode,
-  its own **Start / Stop** pair, and its own **⚙ Settings gear**
+  its own **Start / Pause / Stop** trio (owner 2026-07-21 adds
+  **Pause** between them — a plain neutral `btn_pause` whose LABEL
+  alone flips Pause ↔ Resume, wired to the shared `_toggle_pause_job`;
+  see **Pause** below), and its own **⚙ Settings gear**
   (owner 2026-07-19). The gear reveals THIS agent's collapsible
   **fine-tune** area (`_finetune_box`, hidden by default): the **pause**
   Spinner range, the **action delay** Spinner range, and the **Upscale
@@ -402,7 +405,15 @@ reachability fixes:
   real change. The panel shows the tool's own PARAMETER + timing (below).
 - **Stop** — graceful: the site finishes its current item;
   everything finished is already saved.
-- **Pause / Action delay** — both are random FROM–TO ranges: the
+- **Pause (the toggle button, owner 2026-07-21)** — indefinite, not
+  timed: blocks the run BETWEEN items/images until Resume (the same
+  button, label flipped) or Stop (Stop always wins over a pending or
+  active pause). One toggle PER JOB — pausing ChatGPT never touches
+  Gemini or a running tool. See **Pause** further below for the full
+  mechanism; not to be confused with the NEXT bullet's pace range,
+  which shares the word but is a different, pre-existing feature.
+- **Pause / Action delay (the pace RANGES, unrelated to the button
+  above)** — both are random FROM–TO ranges: the
   pause between prompts (fractional seconds) and the human-like
   hesitation between UI steps (click → paste → send, default
   0.2–0.6 s — never instant). All four fields per panel are the
@@ -521,8 +532,23 @@ running-or-ran jobs show.
 `config.JOB_LOGO` + `icon()` — a brand logo for the two sites, a
 dedicated PNG for each of the four tools, owner 2026-07-19 — plus the
 job NAME in the job's `(day, night)` `JOB_COLORS` pair), the muted state
-line (quota countdown / current item), and the
-hidden CLOSE button `finish()` reveals / `reset_finished()` hides. It
+line (quota countdown / current item / paused), an OPTIONAL `btn_pause`
+(owner 2026-07-21 — built only when the panel is constructed with
+`on_pause`; a plain `kind="secondary"` button whose label alone flips
+Pause ↔ Resume, beside Close in the header) and the
+hidden CLOSE button `finish()` reveals / `reset_finished()` hides.
+`set_paused(is_paused)` is the shared visual update both
+`_toggle_pause_job` and a panel's own construction rely on: it always
+sets the state line (`"paused — waiting to resume"` / `""`) and, when
+`btn_pause` exists, its label. `ToolPanel` and `AiCheckPanel` are
+built WITH `on_pause` (their own toggle, since neither has a separate
+control panel); `DashPanel` is built WITHOUT it (chatgpt/gemini's
+button lives on `AgentPanel` instead — a different class, its OWN
+`set_paused` toggling just its `btn_pause` label) — `set_paused` still
+works there because `DashPanel` inherits it from `JobPanel`, so the
+Dashboard tab's state line reflects a site's pause even though the
+BUTTON that caused it lives in the Controls area. See **Pause** below
+for the full mechanism. It
 also carries the shared root/folder TREE-NODE plumbing
 (`_ensure_root` / `_ensure_folder`) for the folder-based panels
 (ToolPanel, AiCheckPanel), whose rowed table itself is built by the
@@ -847,7 +873,9 @@ blend into the top strip in both themes.
 
 ## Threading
 One worker thread per site, started and stopped INDEPENDENTLY by
-its panel's buttons (per-site stop events); each creates its own
+its panel's buttons (per-site stop events, and — owner 2026-07-21 —
+per-KIND pause events, one per `JOB_ORDER` entry, seven total); each
+creates its own
 Playwright instance and `SiteDriver` (sync Playwright is
 per-thread) and walks the theme queue sequentially. The four TOOLS
 add up to four MORE daemon workers (`_run_tool_job`), one per kind
@@ -875,6 +903,60 @@ panel's CLOSE and clear the worker bookkeeping, a quota
 `TerminalState` posts its `retry_after_s` the same way and the main
 thread schedules the auto-restart via `root.after` (the panel keeps its
 countdown, no CLOSE, until the restart or a Stop).
+
+## Pause (owner 2026-07-21)
+
+A per-JOB Pause toggle — ALL SEVEN `JOB_ORDER` kinds, not just the
+two gen sites — separate from the pre-existing pace RANGE that
+happens to share the word "pause" (`Timing.pause_min_s`/`pause_max_s`,
+the random wait between prompts; see **The window** above). `self.
+_pause_events: dict[str, threading.Event]` (one per kind) and `self.
+_paused: set[str]` (which kinds are currently paused) live on
+`PainterGui`, seeded at `__init__`. **`_toggle_pause_job(kind)`** is
+the ONE handler wired to every kind's `btn_pause` — `AgentPanel`'s own
+(chatgpt/gemini) and `ToolPanel`'s/`AiCheckPanel`'s own (the other
+five): it flips the kind's `Event` + membership in `_paused`, then
+calls `set_paused(is_paused)` on the AgentPanel (if this kind has one)
+AND on `self.panels[kind]` (every kind has a dashboard panel), so both
+the button label and the Dashboard tab's state line agree, and logs a
+one-line `[kind] paused`/`resumed`.
+
+The actual wait lives in [Run Loop](painter/runner.md)'s
+`wait_while_paused(should_pause, should_stop, log, emit)` — a public
+function, not a `run_sheet`-only helper, so THREE call sites share the
+exact same poll-wait (`config.PAUSE_POLL_INTERVAL_S`, no busy spin):
+
+- `_drive_site` passes `should_pause=pause_event.is_set` into
+  `run_sheet` alongside the existing `should_stop=stop_event.is_set` —
+  checked between sheet items; a Stop always wins over a pending pause
+  (`should_stop` is re-checked on every poll tick inside the wait).
+- `_run_tool_job` and `_run_ai_check_job` call `wait_while_paused`
+  directly, once per loop iteration, BETWEEN images — with
+  `should_stop=None` (neither job has a Stop of its own, so the wait
+  simply blocks for Resume; there is nothing for it to lose to).
+
+**Stale-pause hygiene** (owner 2026-07-21): a job that finishes its
+LAST item right as Pause was clicked — the for-loop just ends, so the
+toggle is never revisited — would otherwise leave a phantom "paused"
+button/state on an now-idle panel, and a bad carry-over would silently
+pre-pause the NEXT run of that kind. Two guards close this: every
+`_start_*` method (`_start_site`, `_start_tool`, `_start_ai_check`)
+clears a stale pause for its kind BEFORE spawning the worker (a fresh
+Start never begins pre-paused), and the `__worker_done__` /
+`__tool_done__` dispatch handlers ALSO clear it the moment a job
+finishes (so an idle/finished panel never shows a stale "Resume").
+`_stop_site` clears it too when actually stopping a running site —
+belt-and-suspenders with the `should_stop` re-check inside the wait,
+which already lets a PAUSED run stop promptly either way.
+
+Caveat: `_drive_site`'s OUTER per-collection loop has no pause check
+of its own — only `run_sheet`'s per-ITEM loop does. Pausing while the
+LAST item of a collection is already generating lets that image
+finish and the NEXT collection's `run_sheet` call begin (its own log
+line prints) before the pause is honored at ITS first item boundary;
+no generation happens in the gap, only a log line's timing looks a
+beat early. Scoped out of this phase — the letter of "checked between
+items" is satisfied, and the gap is cosmetic, never functional.
 
 ## Connections
 

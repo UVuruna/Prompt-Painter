@@ -22,6 +22,7 @@ from typing import Callable
 
 from painter.config import (
     CONTINUE_NUDGE,
+    PAUSE_POLL_INTERVAL_S,
     REPORT_SUFFIX,
     SAFER_PREAMBLE,
     STATE_DIRNAME,
@@ -42,6 +43,10 @@ from painter.sheet_parser import Sheet, SkippedItem
 Log = Callable[[str], None]
 # GUI stop button etc.; checked between items and during the pause
 ShouldStop = Callable[[], bool]
+# GUI pause toggle; checked between items — while True the loop blocks
+# (poll-wait, see wait_while_paused) until it flips False or should_stop
+# fires. Same shape as ShouldStop, kept as its own alias for clarity.
+ShouldPause = Callable[[], bool]
 # background fix: (saved file) -> action string; exceptions are logged
 PostSave = Callable[[Path], str]
 # structured progress events for dashboards: receives dicts like
@@ -72,6 +77,47 @@ def _pause(timing: Timing, should_stop: ShouldStop | None, log: Log) -> None:
         if should_stop is not None and should_stop():
             break
         time.sleep(0.5)
+
+
+def wait_while_paused(
+    should_pause: ShouldPause | None,
+    should_stop: ShouldStop | None,
+    log: Log,
+    emit: OnEvent,
+) -> bool:
+    """Block between items/images while a GUI Pause toggle is on.
+
+    Distinct from the timed ``_pause`` above (a fixed random pacing
+    wait) and from a plain ``should_stop`` check (a one-way request):
+    this is an INDEFINITE wait until the owner clicks Resume. Poll-wait
+    only (no busy spin) — ``should_stop`` is re-checked every tick so a
+    Stop always wins over a pending/active pause instead of hanging
+    until Resume. Emits ``sheet_paused`` / ``sheet_resumed`` on the
+    ``emit`` stream exactly ONCE per transition (never once per poll),
+    and skips the ``sheet_resumed`` half when a Stop interrupted the
+    wait — the run is ending, not continuing. Shared by ``run_sheet``
+    (checked between sheet items) and the GUI's tool / AI-check worker
+    loops (checked between images) — see runner.md / gui.md.
+
+    Returns True when a Stop interrupted an ACTIVE pause — the caller
+    should treat that exactly like its own ``should_stop()`` firing.
+    Returns False otherwise, including the common case where
+    ``should_pause`` was never True: then ``should_stop`` is never even
+    queried here, so a caller that already checked it once this
+    iteration never double-counts the call (it may have side effects,
+    e.g. a test's call counter, or simply be non-trivial to evaluate).
+    """
+    if should_pause is None or not should_pause():
+        return False
+    log("    PAUSED — waiting to resume ...")
+    emit({"type": "sheet_paused"})
+    while should_pause():
+        if should_stop is not None and should_stop():
+            return True
+        time.sleep(PAUSE_POLL_INTERVAL_S)
+    emit({"type": "sheet_resumed"})
+    log("    RESUMED")
+    return False
 
 
 class RunReport:
@@ -167,6 +213,7 @@ def run_sheet(
     timing: Timing,
     log: Log = print,
     should_stop: ShouldStop | None = None,
+    should_pause: ShouldPause | None = None,
     post_save: PostSave | None = None,
     prompt_suffix: str | Callable[[str], str] = "",
     extra_suffix: dict[str, str] | None = None,
@@ -191,6 +238,12 @@ def run_sheet(
     re-send) maps a drop path to EXTRA text appended AFTER the site
     suffix for exactly that item (the "previous attempt had these
     flaws" fix note); items absent from the map get no extra text.
+    ``should_pause`` (owner 2026-07-21, the GUI Pause toggle) is
+    checked at the same item boundary as ``should_stop``: while it
+    returns True the loop poll-waits (``wait_while_paused``, no busy
+    spin) until it returns False (Resume) or ``should_stop`` fires
+    (Stop always wins over a pending pause). Emits ``sheet_paused`` /
+    ``sheet_resumed`` on the ``on_event`` stream, once per transition.
     """
     state_dir = out_base / STATE_DIRNAME / site_key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -283,6 +336,10 @@ def run_sheet(
     try:
         for idx, item in enumerate(queue, start=1):
             if should_stop is not None and should_stop():
+                stopped_why = "stopped on request"
+                log(f"  STOPPED on request — {generated}/{total} this run")
+                break
+            if wait_while_paused(should_pause, should_stop, log, emit):
                 stopped_why = "stopped on request"
                 log(f"  STOPPED on request — {generated}/{total} this run")
                 break

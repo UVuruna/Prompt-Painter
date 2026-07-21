@@ -40,6 +40,34 @@ re-ticking it in the GUI's Select window. This replaces the old
 on disk (an item recorded done whose file was never at the output
 location showed as done yet could not be regenerated).
 
+## Pause (owner 2026-07-21)
+
+The GUI's per-job Pause toggle — a SEPARATE concept from the
+`Timing.pause_min_s`/`pause_max_s` PACING wait between prompts (an
+unrelated, existing feature that happens to share the word "pause").
+`run_sheet` takes `should_pause: Callable[[], bool] | None`, checked
+at the SAME item boundary as `should_stop` (between items, never
+mid-generation — an in-flight image always finishes, exactly like
+Stop's graceful semantics). While `should_pause()` is True the loop
+blocks in `wait_while_paused` — a poll-wait (`PAUSE_POLL_INTERVAL_S`,
+[Config](config.md)), no busy spin — until it flips False (Resume) or
+`should_stop` fires (Stop always wins over a pending or active
+pause). `sheet_paused` / `sheet_resumed` fire on `on_event` exactly
+ONCE per transition, never once per poll; `sheet_resumed` is skipped
+when a Stop interrupted the wait (the run is ending, not continuing).
+
+`wait_while_paused(should_pause, should_stop, log, emit) -> bool` is
+a MODULE-level function (not a `run_sheet` internal) so it is shared
+verbatim by the GUI's tool / AI-check worker loops (`_run_tool_job`,
+`_run_ai_check_job` in [GUI](../gui.md)), which have no `should_stop`
+of their own (there is no Stop for those jobs — `should_stop=None` is
+passed, so the wait simply blocks for Resume) but still gain a Pause
+toggle checked between images. It returns True only when a Stop
+interrupted an ACTIVE pause, so a caller that already checked
+`should_stop()` once this iteration never double-counts the call by
+checking it again — `run_sheet`'s own loop relies on exactly this to
+keep `should_stop`'s call frequency unchanged when pause is unused.
+
 ## Classes
 
 ### RunReport
@@ -74,11 +102,12 @@ event) so the dashboard never stalls; the `item_done` event with
 ## Functions
 
 - `run_sheet(sheet, driver, out_root, timing, log, should_stop,
-  post_save, prompt_suffix, extra_suffix, report, only, on_event,
-  safer_retry, continue_nudge) -> int` — `on_event` receives structured progress
+  should_pause, post_save, prompt_suffix, extra_suffix, report, only,
+  on_event, safer_retry, continue_nudge) -> int` — `on_event` receives structured progress
   dicts: `sheet_start` (sheet, pending, total), `item_start` (title,
   idx, of), `item_retry` (safer retry), `item_nudge` (continue nudge,
-  drop_path), `item_progress` (idx, of, gen_s — the live
+  drop_path), `sheet_paused` / `sheet_resumed` (the Pause toggle, see
+  **Pause** above), `item_progress` (idx, of, gen_s — the live
   count), `item_done` (title, drop_path, gen_s, over_s, orig_res,
   final_res, size), `item_refused`, `sheet_done` (generated) — the
   GUI dashboard is built from these. `item_progress` AND `item_done`
@@ -124,3 +153,8 @@ event) so the dashboard never stalls; the `item_done` event with
   time the site named, parsed by the driver); the runner logs it
   first (`quota — reset in ~N min`) and stamps it into the report's
   stop reason.
+- `wait_while_paused(should_pause, should_stop, log, emit) -> bool`
+  (owner 2026-07-21) — the Pause wait itself, see **Pause** above;
+  public (not a `run_sheet`-only helper) so [GUI](../gui.md)'s tool /
+  AI-check worker loops share the exact same poll-wait instead of a
+  second copy of the logic.

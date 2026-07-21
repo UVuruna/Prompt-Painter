@@ -20,7 +20,7 @@ match.
   `SKIP_MARKER_PATTERN`
 - [CDP Driver](driver.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
 - [Run Loop](runner.md) — `Timing`, `STATE_DIRNAME`,
-  `REPORT_SUFFIX`, `SAFER_PREAMBLE`, `dest_for`
+  `REPORT_SUFFIX`, `SAFER_PREAMBLE`, `dest_for`, `PAUSE_POLL_INTERVAL_S`
 - [Chrome Launcher](chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 - [Postprocess](postprocess.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
@@ -329,6 +329,14 @@ match.
   3px crop reads `0.24%`, never a rounded-away `0%`. Used everywhere the
   tool panels render a % (the per-row column AND the header avg stat).
 - `MIN_IMAGE_PX` — an `<img>` narrower than this is a placeholder.
+- `PAUSE_POLL_INTERVAL_S` (owner 2026-07-21) — the poll granularity of
+  the GUI's per-job Pause toggle wait ([Run Loop](runner.md)'s
+  `wait_while_paused`, shared by [GUI](../gui.md)'s tool / AI-check
+  worker loops). A plain top-level constant, not a `Timing` field — an
+  internal wait-loop step, never a per-run/per-site tunable exposed in
+  the UI (unlike `Timing.pause_min_s`/`pause_max_s`, the random PACING
+  wait between prompts — a different, existing feature that shares the
+  word "pause" but not the mechanism).
 
 ## Classes
 

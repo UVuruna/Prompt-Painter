@@ -1030,6 +1030,15 @@ class Timing:
 
 TIMING = Timing()
 
+# The GUI's Pause toggle (owner 2026-07-21) blocks the run loop (and the
+# tool/AI-check worker loops) between items until Resume or Stop — the
+# poll granularity of that wait. A plain top-level constant, not a
+# Timing field: it is an internal wait-loop step, never a per-run/
+# per-site tunable exposed in the UI (unlike Timing.pause_min_s/max_s,
+# the random PACING wait between prompts — a different, existing
+# feature that shares the word "pause" but not the mechanism).
+PAUSE_POLL_INTERVAL_S = 0.5
+
 # An <img> narrower than this is a placeholder, not a generated image.
 MIN_IMAGE_PX = 64
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from painter import runner as runner_module
 from painter.config import (
     CONTINUE_NUDGE,
     SAFER_PREAMBLE,
@@ -595,3 +596,68 @@ def test_terminal_state_propagates_retry_after(tmp_path):
         encoding="utf-8"
     )
     assert "quota / rate limit — stopped (reset in ~27m 00s)" in report
+
+
+def test_pause_flag_waits_between_items_then_resumes(tmp_path, monkeypatch):
+    """The GUI Pause toggle (should_pause): the loop blocks BETWEEN
+    items, poll-waiting (tiny interval here, so the test stays fast)
+    until should_pause flips False, then generates normally. The
+    paused/resumed events fire exactly ONCE each, before the first
+    item, never once per poll."""
+    monkeypatch.setattr(runner_module, "PAUSE_POLL_INTERVAL_S", 0.01)
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = FakeDriver(SITES["chatgpt"])
+    events: list[dict] = []
+    polls = {"n": 0}
+
+    def should_pause():
+        polls["n"] += 1
+        return polls["n"] < 4  # True the first 3 calls, False afterwards
+
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST,
+        should_pause=should_pause, on_event=events.append,
+    )
+    assert generated == 2
+    assert len(driver.submitted) == 2  # both items still ran
+    kinds = [e["type"] for e in events]
+    assert kinds.count("sheet_paused") == 1   # once, not per poll
+    assert kinds.count("sheet_resumed") == 1
+    # paused/resumed resolve BEFORE the first item starts (checked at
+    # the top of the per-item loop, the same boundary as should_stop)
+    assert kinds.index("sheet_resumed") < kinds.index("item_start")
+
+
+def test_stop_interrupts_a_paused_run(tmp_path, monkeypatch):
+    """MUST NOT REGRESS: Stop always wins over a pending pause — a run
+    stuck paused (should_pause never flips off on its own) still stops
+    promptly once should_stop fires, instead of hanging forever. No
+    item runs and 'sheet_resumed' never fires (the run is ending, not
+    continuing)."""
+    monkeypatch.setattr(runner_module, "PAUSE_POLL_INTERVAL_S", 0.01)
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = FakeDriver(SITES["chatgpt"])
+    events: list[dict] = []
+    polls = {"n": 0}
+
+    def should_stop():
+        polls["n"] += 1
+        return polls["n"] > 3  # a few poll ticks pass, then Stop wins
+
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST,
+        should_pause=lambda: True,  # never resumes on its own
+        should_stop=should_stop,
+        on_event=events.append,
+    )
+    assert generated == 0
+    assert driver.submitted == []  # stopped before any item ran
+    kinds = [e["type"] for e in events]
+    assert "sheet_paused" in kinds
+    assert "sheet_resumed" not in kinds  # Stop wins — never "resumed"
+    report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "stopped on request" in report
