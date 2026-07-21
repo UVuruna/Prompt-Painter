@@ -22,19 +22,22 @@ CONTROL-PANEL classes**: `AgentPanel` (`agent_panel.py`), the whole
 `ToolSettingsPanel` family — base + `BgSettingsPanel`/
 `CropSettingsPanel`/`UpscaleSettingsPanel`/`AspectSettingsPanel`/
 `ImageCheckerSettingsPanel` (`tool_panels.py`) — and `ApiImageGenPanel`
-+ `ApiImageAdapter` (`api_panel.py`). This step moved the **VIEWER +
++ `ApiImageAdapter` (`api_panel.py`). Step 5/8 moved the **VIEWER +
 DIALOG Toplevels**: `SelectWindow` (`select_window.py`), `DocWindow`/
 `BeforeAfterWindow`/`_filmstrip_stages`/`StepRestoreWindow`
 (`viewers.py`), and `_ModalToolDialog`/`_AiDialog`/`AiKeyWizard`/
 `AiSheetDialog` (`dialogs.py`) — including `AI_POLL_MS`, which follows
 its real owner `_AiDialog` out of `gui/__init__.py` into
-`gui/dialogs.py` (see that module's own Design Decisions). The
-god-class `PainterGui` (~3,350 lines) and the dashboards' own panel
-classes (`JobPanel`/`DashPanel`/`ToolPanel`/`AiCheckPanel`/`DashGrid`,
-`MainMenu`/`IconBar`) still live in `__init__.py`, unmoved —
-[gui.md](../gui.md) (the pre-existing script doc, one level up,
-beside this folder) still documents that remaining content; it
-migrates into further submodules in later steps of the same refactor.
+`gui/dialogs.py` (see that module's own Design Decisions). This step
+(6/8) moved the **MENU + DASHBOARD-PANEL classes**: `MainMenu`/
+`IconBar` (`menu.py`), `JobPanel`/`DashPanel` (`dash_panels.py`), and
+`ToolPanel`/`AiCheckPanel`/`DashGrid` (`tool_dash.py`). Only the
+god-class `PainterGui` (~3,350 lines) and `main()` still live in
+`__init__.py`, unmoved — [gui.md](../gui.md) (the pre-existing script
+doc, one level up, beside this folder) still documents that remaining
+content; it migrates into the mixin submodules (`app_build.py`/
+`app_views.py`/`app_jobs.py`/`app_tools.py`/`app_settings.py`/`app.py`)
+in step 7/8 of the same refactor.
 
 ## Files
 
@@ -160,6 +163,28 @@ the before/after transparency-checkerboard helpers (`_checkerboard`/
 `_has_alpha`/`_scaled_photo`). Depends on `gui.theme`
 (`TOOL_CHANGED_TAG`/`TOOL_SKIP_TAG`, `skin_tree`).
 
+### `dash_panels.py` — Dashboard Job Panel Base + Site Panel
+`JobPanel` (the shared per-JOB dashboard panel base — header,
+close/pause, the folder>image tree-node plumbing) and `DashPanel`
+(one generation site's live view — task/theme progress, the two-scope
+stats table, the collections history tree, the per-step restore
+viewer and the parallel Checker AI's per-row report). See
+[Dashboard Job Panel Base + Site Panel](dash_panels.md).
+
+### `tool_dash.py` — Tool + AI-Checker Dashboard Panels + Grid
+`ToolPanel` (one standalone tool's live view — progress, metric,
+before/after viewer + restore), `AiCheckPanel` (the AI checker's own
+dashboard panel — flagged/OK/error counts, the defect viewer, resend/
+clear actions) and `DashGrid` (the responsive up-to-6-cell job-panel
+grid). Both panels subclass `JobPanel` from `dash_panels.py`. See
+[Tool + AI-Checker Dashboard Panels + Grid](tool_dash.md).
+
+### `menu.py` — Main Menu + Icon Bar
+`MainMenu` (the startup landing screen's responsive tile grid) and
+`IconBar` (the compact top strip shown while a job is running, one
+button per tile, lit while any of its job kinds is live). See
+[Main Menu + Icon Bar](menu.md).
+
 ### `select_window.py` — Select-Images Window
 `SelectWindow` — the per-site tick-list Toplevel over the queued
 Collections (3-level tree: collection -> folder -> image), with the
@@ -275,3 +300,25 @@ directly from `gui/viewers.py` for the same reason (one-directional).
 The only cycle risk in this step was `AI_POLL_MS` (see above), solved
 with the same late-binding idiom rather than restructuring either
 module.
+
+**Step 6/8 — the dashboard panels' viewer calls stayed monkeypatchable
+through `gui`, exactly like `smooth_transition`'s collaborators
+above.** `DashPanel._show_check`/`_show_steps`
+(`gui/dash_panels.py`) and `AiCheckPanel._on_activate`
+(`gui/tool_dash.py`) all open a viewer Toplevel (`DocWindow`/
+`StepRestoreWindow`) at the moment the owner double-clicks or clicks
+a button — several tests patch these classes via
+`monkeypatch.setattr(gui, "DocWindow", fake)` /
+`monkeypatch.setattr(gui, "StepRestoreWindow", fake)`
+(`test_gui_checker.py`, `test_gui_fixer.py`, `test_gui_pipeline.py`).
+A real-path `from .viewers import DocWindow` at the top of either new
+module would bind the REAL class at import time; the test's patch,
+which only ever reaches the `gui` package's own attribute, would then
+never be seen. Both methods instead do a deferred `import gui;
+gui.DocWindow(...)` inside the method body — the same late-binding
+idiom this file already documents for `smooth_transition`'s
+collaborators and `AI_POLL_MS`'s readers. `ToolPanel`'s own
+before/after viewer (`BeforeAfterWindow`) has no such test coverage
+(confirmed by grep across `tests/*.py` before this split) and stays a
+plain real-path import from `gui.viewers` — late-binding it too would
+be indirection nothing depends on.

@@ -29,21 +29,25 @@ screenshot" split).
   `FIXER_MODE_WEBSITE`/`MENU_TILE_*` constants)
 
 ### Used by
-- [GUI (folder)](___gui.md) — `__init__.py` re-exports the full API
-  (`gui._filter_files`, `gui._scope_stats`, `gui._next_view`, ...) for
-  `PainterGui`, `MainMenu`, `DashPanel` and the tool panels, which all
-  still call these functions by their bare names
+- [GUI (folder)](___gui.md) — `__init__.py` still re-exports the full
+  API (`gui._filter_files`, `gui._scope_stats`, `gui._next_view`, ...)
+  for `PainterGui` and external tests
+- [Main Menu + Icon Bar](menu.md) — `MainMenu` imports
+  `_menu_tile_columns`/`MENU_TILE_CELL_MIN_PX` directly (real-path,
+  post god-file split)
+- [Dashboard Job Panel Base + Site Panel](dash_panels.md) — `DashPanel`
+  imports `_scope_stats`/`_STAT_KEYS` directly
 
 ## Design Decisions
 - **`MENU_TILE_CELL_MIN_PX` moved here too, not just the functions.**
   `_menu_tile_columns`'s own docstring requires it to agree EXACTLY
   with `MainMenu._reflow`'s grid `minsize` floor — the two must share
   one source of truth. It is defined here (derived from
-  `painter.config`'s `MENU_TILE_W`/`MENU_TILE_GAP_PX`) and re-exported
-  through `gui/__init__.py` for `MainMenu`'s own use, rather than kept
-  in `__init__.py` and imported backward into this leaf module (which
-  would risk a circular import).
+  `painter.config`'s `MENU_TILE_W`/`MENU_TILE_GAP_PX`) and imported
+  directly by `gui/menu.py`'s `MainMenu` (real-path, since step 6/8),
+  plus still re-exported through `gui/__init__.py` for
+  `test_gui_running_view.py`'s own `gui.MENU_TILE_CELL_MIN_PX` reads.
 - **`_STAT_KEYS` moved alongside `_scope_stats`, for the same reason.**
-  `DashPanel` (still in `__init__.py`) iterates `_STAT_KEYS` right
+  `DashPanel` (`gui/dash_panels.py`) iterates `_STAT_KEYS` right
   after calling `_scope_stats` — the two are inseparable in practice —
   so both live here and both are re-exported.

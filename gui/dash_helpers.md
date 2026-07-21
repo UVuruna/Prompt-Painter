@@ -25,11 +25,18 @@ transparency-checkerboard compositing helpers (`_checkerboard`,
   (the row-tag names), `skin_tree` (theme-following Treeview rows)
 
 ### Used by
-- [GUI (folder)](___gui.md) — `__init__.py` re-exports the full API
-  (`gui.badge_dots`, `gui.build_job_tree`, `gui._checkerboard`, ...) for
-  `JobPanel`/`ToolPanel`/`AiCheckPanel`/`DashPanel`, `DocWindow` and
-  `BeforeAfterWindow`, which all still call these functions by their
-  bare names
+- [GUI (folder)](___gui.md) — `__init__.py` still re-exports the full
+  API (`gui.badge_dots`, `gui.build_job_tree`, `gui._checkerboard`,
+  ...) for external tests
+- [Dashboard Job Panel Base + Site Panel](dash_panels.md) — `JobPanel`/
+  `DashPanel` import `ai_check_doc_md`/`ai_check_image_file`/
+  `ai_check_tag`/`badge_dots` directly (real-path, post god-file split)
+- [Tool + AI-Checker Dashboard Panels + Grid](tool_dash.md) —
+  `ToolPanel`/`AiCheckPanel` import `build_job_tree`/`fmt_time_summary`/
+  `ai_check_tag`/`ai_check_doc_md`/`ai_check_image_file` directly
+- [Read-Only Viewers](viewers.md) — `DocWindow`/`BeforeAfterWindow`
+  import `_scaled_photo` directly (which itself calls `_checkerboard`/
+  `_has_alpha`, kept private to this module)
 
 ## Design Decisions
 - **`_BADGE_DOTS` stays a private module-level cache, not re-exported.**

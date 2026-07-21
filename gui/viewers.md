@@ -54,12 +54,16 @@ than screen" clamps every doc-shaped window shares).
 - [Dialogs](dialogs.md) — `AiSheetDialog._finish` opens a `DocWindow`
   when the AI-generated sheet still fails the contract after the
   repair round
-- `PainterGui`/`JobPanel`/`DashPanel`/`ToolPanel`/`AiCheckPanel` (still
-  in `gui/__init__.py`) — open these viewers by their re-exported bare
-  names; `monkeypatch.setattr(gui, "DocWindow"/"StepRestoreWindow",
-  fake)` in the test suite still reaches them, since those consumers
-  resolve the bare name through `gui/__init__.py`'s own module globals
-  (unchanged this step)
+- `PainterGui` (`gui/__init__.py`), `DashPanel`
+  ([Dashboard Job Panel Base + Site Panel](dash_panels.md)),
+  `ToolPanel`/`AiCheckPanel`
+  ([Tool + AI-Checker Dashboard Panels + Grid](tool_dash.md)) — open
+  these viewers through a deferred `import gui; gui.DocWindow(...)` /
+  `gui.StepRestoreWindow(...)` (never a module-level import), so
+  `monkeypatch.setattr(gui, "DocWindow"/"StepRestoreWindow", fake)` in
+  the test suite still reaches them regardless of which module the
+  caller now lives in; `ToolPanel`'s own `BeforeAfterWindow` calls stay
+  a plain real-path import (no test monkeypatches it)
 
 ## Classes
 
