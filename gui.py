@@ -110,6 +110,7 @@ from painter.config import (
     RESIZE_SETTLE_MS,
     SAFETY_MAX_REMOVE_FRAC,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
+    SCROLL_FILL_HEIGHT_POLL_MS,
     SHEETS_DIR,
     SITES,
     STATE_DIRNAME,
@@ -479,6 +480,23 @@ DENSE_COL_WRAP_PX = 320  # wraplength for a caption/note living in ONE
 #                          column instead of the panel's old full width
 #                          (narrower than JOB_PANEL_BANNER_WRAP_PX, which
 #                          still wraps a full-width dashboard banner)
+
+# --- Main Menu responsive reflow (owner 2026-07-21 workflow fix) ------
+# The real per-column footprint a MENU_TILES card needs, in px, ONE
+# authoritative value shared by _menu_tile_columns (how many columns
+# fit) and MainMenu._reflow (the grid's own minsize floor) so the two
+# can never disagree (a stricter minsize than the column-count estimate
+# assumed would make the grid wider than the viewport itself, which has
+# no horizontal scrollbar — pushing the clipping problem to the right
+# edge instead of solving it). MENU_TILE_W + MENU_TILE_GAP_PX alone
+# (the card's own footprint + its padx) measured ~20px too tight on a
+# real screenshot: CTkLabel does not actually honor a `wraplength`
+# constructor kwarg (silently forwarded, unapplied — confirmed by
+# reading the built label's own winfo_reqwidth() back), so a tile's
+# description renders at its natural ~182px width regardless of the
+# card's nominal 180px floor; this constant's extra margin absorbs that
+# rather than depending on a wraplength that does not actually apply.
+MENU_TILE_CELL_MIN_PX = MENU_TILE_W + MENU_TILE_GAP_PX + 24
 
 # the Treeview row tags for a tool panel's image rows — their foregrounds
 # come from the theme's status colours, re-applied on a flip via skin_tree.
@@ -1325,6 +1343,16 @@ class ScrollFrame(ttk.Frame):
     is stretched to the canvas width (content wraps, no x scrollbar);
     with it the body keeps its natural width and a horizontal bar
     appears.
+
+    ``fill_height=True`` additionally self-heals (owner 2026-07-21
+    workflow fix, ``_poll_fill_height``): whenever the embedded body's
+    true required height grows past what was last applied — a Settings
+    gear reveal, a filter row added, anything with no reference to THIS
+    ScrollFrame to call ``refresh()`` on, or even the very first settle
+    at construction — a cheap periodic check (``config.
+    SCROLL_FILL_HEIGHT_POLL_MS``) catches the mismatch and recomputes,
+    so a short window can always reach the true bottom of the content
+    by scrollbar or wheel, regardless of which caller forgot to ask.
     """
 
     def __init__(
@@ -1334,7 +1362,9 @@ class ScrollFrame(ttk.Frame):
         self._stretch = not horizontal
         # fill_height: keep the body AT LEAST as tall as the canvas, so a
         # child packed expand=True (the notebook) fills the whole viewport
-        # when the content is shorter than the window (see _apply_fill_height)
+        # when the content is shorter than the window (see
+        # _apply_fill_height) — and self-heals via _poll_fill_height, see
+        # the class docstring above.
         self._fill_height = fill_height
         self._fill_h = 0  # last forced body height (change-guarded loop break)
         self._sr_job = None  # coalesced scrollregion pass (see _on_body)
@@ -1343,6 +1373,7 @@ class ScrollFrame(ttk.Frame):
         self._settle_job = None  # the resize-settle after() id
         self._canvas_w = 0   # the newest canvas width (from <Configure>)
         self._applied_w = -1  # the body width actually applied (deferred)
+        self._poll_job = None  # the fill_height self-heal poll after() id
         self.canvas = tk.Canvas(self, highlightthickness=0)
         skin_canvas(self.canvas)  # registered so its bg re-tints on a flip
         vbar = ttk.Scrollbar(
@@ -1372,6 +1403,8 @@ class ScrollFrame(ttk.Frame):
         # while the pointer is still over it) so it never fires on a
         # dead widget; and cancel any pending scrollregion pass
         self.canvas.bind("<Destroy>", self._on_destroy)
+        if self._fill_height:
+            self._poll_fill_height()  # self-arms its own next tick, see below
 
     def _on_body(self, _event) -> None:
         # COALESCE: one expand that grids dozens of children fires a
@@ -1430,6 +1463,39 @@ class ScrollFrame(ttk.Frame):
         if self._sr_job is None:
             self._sr_job = self.after_idle(self._recompute_sr)
 
+    def _poll_fill_height(self) -> None:
+        """Self-heal for ``fill_height`` (owner 2026-07-21 workflow fix —
+        see ``config.SCROLL_FILL_HEIGHT_POLL_MS``'s own comment for the
+        full mechanism this guards against): once ``_apply_fill_height``
+        has ever forced ``body``'s actual height via canvas
+        ``itemconfigure``, body's OWN ``<Configure>`` stops firing from
+        nested content simply growing (the canvas now dictates body's
+        real size, decoupled from its children's pack-driven request),
+        so ``_on_body`` can go quiet forever even while
+        ``body.winfo_reqheight()`` keeps climbing — a content-height
+        change from a widget with no reference to THIS ScrollFrame to
+        call ``refresh()`` on would otherwise leave the scrollregion
+        stuck too short, unreachable, until an actual window resize
+        happens to fix it as a side effect. Recomputes the SAME target
+        ``_apply_fill_height`` would (cheap: two winfo reads, one
+        compare) and only schedules the real recompute pass on a
+        genuine mismatch — self-reschedules every
+        ``SCROLL_FILL_HEIGHT_POLL_MS`` until the widget is destroyed."""
+        try:
+            target = max(
+                self.canvas.winfo_height(), self.body.winfo_reqheight()
+            )
+            if (
+                target != self._fill_h and self._sr_job is None
+                and not self._resizing
+            ):
+                self._sr_job = self.after_idle(self._recompute_sr)
+        except tk.TclError:
+            return  # destroyed between polls — let the poll chain end
+        self._poll_job = self.after(
+            SCROLL_FILL_HEIGHT_POLL_MS, self._poll_fill_height
+        )
+
     def _on_destroy(self, event) -> None:
         if self._sr_job is not None:
             self.after_cancel(self._sr_job)
@@ -1437,6 +1503,9 @@ class ScrollFrame(ttk.Frame):
         if self._settle_job is not None:
             self.after_cancel(self._settle_job)
             self._settle_job = None
+        if self._poll_job is not None:
+            self.after_cancel(self._poll_job)
+            self._poll_job = None
         self._unbind_wheel(event)
 
     def _on_canvas(self, event) -> None:
@@ -6068,6 +6137,34 @@ def _fix_result_ui(
 # Main Menu (GUI rework Phase 10)
 # ---------------------------------------------------------------------
 
+def _menu_tile_columns(width_px: int, tile_count: int) -> int:
+    """How many ``MENU_TILES`` columns fit ``width_px`` without
+    shrinking a tile below ``MENU_TILE_CELL_MIN_PX`` (owner 2026-07-21
+    workflow fix — the grid used to hardcode ``MENU_TILE_COLS`` columns
+    regardless of the actual window width; at the narrow end of
+    ``WINDOW_MIN_W`` a slightly different font/DPI/scrollbar width was
+    enough to clip or overflow the fixed 4-wide layout). ``MainMenu.
+    _reflow`` enforces the SAME per-column floor as a real Tk
+    ``minsize`` — the two must always agree, or a stricter grid floor
+    than this function assumed would make the grid wider than the
+    (non-horizontally-scrollable) viewport itself, trading one clipping
+    failure mode for another at the right edge. Never more than
+    ``MENU_TILE_COLS`` (today's ideal 4x2 layout for 8 tiles) or more
+    than ``tile_count`` itself (no empty trailing columns), never fewer
+    than 1. ``width_px <= 0`` (no real measurement yet, e.g. the very
+    first pack before any ``<Configure>`` fires) falls back to the
+    ideal layout, exactly like today's fixed default. Pure, Tk-free —
+    mirrors ``_visible_agent_columns``/``_next_view``'s own split (the
+    Tk-facing half, ``MainMenu._reflow``, is proven by a real-window
+    screenshot, matching gui.py's established convention for widget
+    geometry — see ___tests.md)."""
+    ideal = min(MENU_TILE_COLS, max(1, tile_count))
+    if width_px <= 0:
+        return ideal
+    fit = max(1, width_px // MENU_TILE_CELL_MIN_PX)
+    return min(ideal, fit)
+
+
 class MainMenu(ttk.Frame):
     """The startup landing screen: a full-window grid of big tiles, one
     per functionality (``config.MENU_TILES``) — replacing "everything
@@ -6076,7 +6173,22 @@ class MainMenu(ttk.Frame):
     ``PainterGui._set_view``; picking a tile runs the SAME existing,
     unmodified handler the always-visible toolbar already called before
     this phase (see ``PainterGui._select_tile``) — this class only
-    decides what the picker looks like, never what a pick DOES."""
+    decides what the picker looks like, never what a pick DOES.
+
+    RESPONSIVE (owner 2026-07-21 workflow fix): the tiles no longer sit
+    at a hardcoded ``MENU_TILE_COLS`` — ``_grid``'s own ``<Configure>``
+    drives ``_menu_tile_columns``/``_reflow`` so the grid never clips or
+    overflows at a narrow window width, reflowing to fewer columns (down
+    to 1) as the width shrinks. Tiles are built ONCE in ``__init__``
+    (``self._tiles``); ``_reflow`` only re-``grid()``s them at a new
+    row/column and resets/reassigns column-and-row weights — the SAME
+    reset-then-reassign technique ``PainterGui._relayout_agents`` already
+    uses for the agent panels, one level up. No timer-debounce (unlike
+    ``ScrollFrame``'s drag handling): the change-guard in
+    ``_on_grid_configure`` already skips the real reflow work on every
+    ``<Configure>`` that does not actually change the column count — a
+    per-pixel resize very rarely crosses one of the few integer
+    thresholds, so this is not the same per-frame cost class."""
 
     def __init__(self, parent, on_select: Callable[[str], None]):
         super().__init__(parent)
@@ -6087,20 +6199,62 @@ class MainMenu(ttk.Frame):
         ttk.Label(header, text="PromptPainter", style="Big.TLabel").pack()
         ttk.Label(header, text="Pick what to do", style="Muted.TLabel").pack()
 
-        grid = ttk.Frame(self)
-        grid.pack(fill="both", expand=True, padx=24, pady=(8, 24))
-        cols = MENU_TILE_COLS
-        for i, tile in enumerate(MENU_TILES):
+        self._grid = ttk.Frame(self)
+        self._grid.pack(fill="both", expand=True, padx=24, pady=(8, 24))
+        self._tiles = [self._make_tile(self._grid, tile) for tile in MENU_TILES]
+        self._cols = _menu_tile_columns(0, len(self._tiles))  # deterministic first pack
+        self._reflow(self._cols)
+        self._grid.bind("<Configure>", self._on_grid_configure)
+
+    def _on_grid_configure(self, event) -> None:
+        cols = _menu_tile_columns(event.width, len(self._tiles))
+        if cols != self._cols:
+            self._reflow(cols)
+
+    def _reflow(self, cols: int) -> None:
+        """(Re)grid every tile at ``cols`` columns. Resets EVERY column
+        up to ``MENU_TILE_COLS`` and EVERY row up to the 1-column worst
+        case to weight 0 AND clears their ``uniform`` tag first, then
+        reassigns weight 1 (+ ``minsize``/``uniform``) only to the
+        columns/rows actually in use this pass.
+
+        BOTH resets are load-bearing, not belt-and-suspenders — caught
+        by a real screenshot, not pytest (owner 2026-07-21 workflow
+        fix): a stale column left in the "menucol" ``uniform`` GROUP
+        from a PREVIOUS, larger ``cols`` (weight reset to 0 alone does
+        NOT detach it from the group) skews Tk's shared-width
+        calculation for the group's OTHER, still-active members —
+        observed shrinking cards to ~117px, well under
+        ``MENU_TILE_W``'s supposed 180px floor, silently clipping their
+        title text. ``minsize`` is the actual hard floor Tk enforces
+        (unlike ``weight``, which only ever distributes EXTRA space);
+        the column minsize is ``MENU_TILE_CELL_MIN_PX`` — the SAME
+        per-column footprint ``_menu_tile_columns`` already assumed
+        when it decided ``cols`` fits, so the two can never disagree —
+        never the bare ``MENU_TILE_W`` (see that constant's own
+        comment for why it needs the extra margin)."""
+        self._cols = cols
+        rows = math.ceil(len(self._tiles) / cols)
+        for c in range(MENU_TILE_COLS):
+            self._grid.columnconfigure(c, weight=0, uniform="")
+        for r in range(len(self._tiles)):  # 1-column layout: one row each
+            self._grid.rowconfigure(r, weight=0, uniform="")
+        for i, card in enumerate(self._tiles):
             r, c = divmod(i, cols)
-            self._make_tile(grid, tile).grid(
+            card.grid(
                 row=r, column=c, sticky="nsew",
                 padx=MENU_TILE_GAP_PX // 2, pady=MENU_TILE_GAP_PX // 2,
             )
-        rows = math.ceil(len(MENU_TILES) / cols)
         for c in range(cols):
-            grid.columnconfigure(c, weight=1, uniform="menucol")
+            self._grid.columnconfigure(
+                c, weight=1, uniform="menucol",
+                minsize=MENU_TILE_CELL_MIN_PX,
+            )
         for r in range(rows):
-            grid.rowconfigure(r, weight=1, uniform="menurow")
+            self._grid.rowconfigure(
+                r, weight=1, uniform="menurow",
+                minsize=MENU_TILE_H + MENU_TILE_GAP_PX,
+            )
 
     def _make_tile(self, parent, tile) -> ctk.CTkFrame:
         """One tile: icon + title + description in a rounded, accent-
@@ -6531,6 +6685,26 @@ class PainterGui:
             self._top_strip, "Menu", command=self._request_menu,
         )
         self._menu_btn.pack(side="left")
+        # the #1 prerequisite, PINNED (owner 2026-07-21 workflow fix):
+        # moved here from _build_toolbar (Rule #5 — one copy, not two)
+        # because _build_toolbar's row lives inside _controls_box,
+        # itself inside _main_view — invisible on the very FIRST screen
+        # the owner sees ("menu", where _main_view as a whole is
+        # pack_forgotten for _menu_view) and, before this same session's
+        # running-view fix, invisible again the instant a job started.
+        # _top_strip is a sibling of the whole _scroll/_main_view/
+        # _menu_view tree, so these two are reachable from every view.
+        # The rest of the toolbar (Select images…/Instructions/New
+        # collection/AI key) stays exactly where it was.
+        self.btn_chrome = rounded_button(
+            self._top_strip, "Open Chrome (login)", command=self._open_chrome,
+            icon_name="web",
+        )
+        self.btn_chrome.pack(side="left", padx=(8, 0))
+        self.btn_check = rounded_button(
+            self._top_strip, "Check", command=self._check_sheets,
+        )
+        self.btn_check.pack(side="left", padx=4)
 
         self._bind_zoom()
         self._bind_wheel_routing()
@@ -6859,11 +7033,23 @@ class PainterGui:
 
     def _apply_running_layout(self) -> None:
         """Reconcile the region above the notebook for the running
-        view: the IconBar is always shown; AT MOST ONE inline settings
-        surface additionally shows, keyed by ``_inline_kind`` —
-        ``_controls_box`` for "website_gen", or the matching
-        ``ToolSettingsPanel`` from ``_tool_panels`` (GUI rework Phase
-        13: bg/crop today, Phase 14 adds upscale/aspect the same way).
+        view: the IconBar is always shown, and exactly ONE inline
+        surface always shows beneath it.
+
+        ``_controls_box`` (the Collections queue + BOTH ``AgentPanel``s
+        + toolbar) is the DEFAULT — owner 2026-07-21 workflow fix: it
+        used to show ONLY while ``_inline_kind == "website_gen"``,
+        which meant starting either site (their shared Start tail
+        unconditionally clears ``_inline_kind`` to ``None``, see
+        ``_start_site``) hid it immediately, stranding the owner with
+        no visible way to Start the OTHER site and no visible
+        Pause/Stop for the one just started. Now ``_controls_box``
+        shows whenever ``_inline_kind`` does NOT name an entry in
+        ``_tool_panels`` (``None`` or the legacy ``"website_gen"``
+        marker alike) — it is superseded ONLY by an explicitly-open
+        ``ToolSettingsPanel`` (BG/Crop/Upscale/Aspect, GUI rework Phase
+        13/14; the AI checker, Phase 15; API Image GEN, Phase 19) while
+        ``_inline_kind`` names one of them via ``_open_tool_panel``.
         Every functionality WITHOUT an entry in ``_tool_panels`` still
         launches through its existing modal/dialog handler (see
         ``_click_icon_bar_tile``). The SAME pack_forget/pack(before=
@@ -6876,12 +7062,12 @@ class PainterGui:
         for panel in self._tool_panels.values():
             panel.pack_forget()
         self._icon_bar.pack(fill="x", before=self.notebook)
-        if self._inline_kind == "website_gen":
-            self._controls_box.pack(fill="x", before=self.notebook)
-        elif self._inline_kind in self._tool_panels:
+        if self._inline_kind in self._tool_panels:
             self._tool_panels[self._inline_kind].pack(
                 fill="x", before=self.notebook
             )
+        else:
+            self._controls_box.pack(fill="x", before=self.notebook)
         self._icon_bar.set_active(self._active_tile_ids())
         self._scroll.refresh()
 
@@ -6928,32 +7114,42 @@ class PainterGui:
     def _click_icon_bar_tile(self, tile_id: str) -> None:
         """One IconBar tile clicked while ``_view == "running"``.
 
-        A tile whose job kind(s) (``TILE_JOB_KINDS``) are CURRENTLY
-        active just focuses the Dashboard tab — it is NOT a settings
-        toggle for a running job, and that job's own panel stays
-        exactly as hidden as the design requires ("without disturbing
-        any running job's own hidden panel"). A NOT-running tile
-        toggles its inline settings/launch surface: "website_gen"
-        shows/hides the existing ``_controls_box`` (the queue + both
-        AgentPanels) right above the Dashboard/Log; "bg"/"crop" route
-        through ``_tile_handler`` to ``_open_tool_panel`` (GUI rework
-        Phase 13), toggling their OWN persistent ``ToolSettingsPanel``
-        the exact same way; every other functionality (upscale/aspect/
-        image_checker/ai_sheet_gen) still launches through its EXISTING
-        modal/dialog handler (``_tile_handler`` — the SAME mapping the
-        Main Menu itself uses), since Phase 14/15 are what give THEM a
-        real persistent panel — until then, opening that dialog IS the
-        tile's launch surface, and it disturbs nothing else (always its
-        own Toplevel)."""
-        kinds = TILE_JOB_KINDS.get(tile_id, ())
-        if set(kinds) & self._active_kinds():
-            self.notebook.select(0)
-            return
+        "website_gen" is checked FIRST and unconditionally toggles
+        ``_inline_kind`` between "website_gen" and ``None`` (owner
+        2026-07-21 workflow fix): it used to fall through to the
+        "already active -> just focus the Dashboard" branch below
+        whenever EITHER site was running, which dead-ended — the owner
+        had no way back to ``_controls_box`` (and the OTHER site's
+        Start) once some other inline surface (a tool's own settings
+        panel) was showing instead. website_gen's inline surface is
+        ``_controls_box`` itself, now the running view's DEFAULT (see
+        ``_apply_running_layout``), so this toggle can never truly hide
+        it any more either — at worst it is a no-op re-pack — but it
+        ALWAYS supersedes whatever tool panel was open, which is the
+        fix: the site controls are always one click away.
+
+        Every OTHER tile keeps the pre-existing rule: a tile whose job
+        kind(s) (``TILE_JOB_KINDS``) are CURRENTLY active just focuses
+        the Dashboard tab — it is NOT a settings toggle for a running
+        job, and that job's own panel stays exactly as hidden as the
+        design requires ("without disturbing any running job's own
+        hidden panel"). A NOT-running tool tile ("bg"/"crop"/"upscale"/
+        "aspect"/"image_checker"/"api_image_gen") routes through
+        ``_tile_handler`` to ``_open_tool_panel``, toggling its OWN
+        persistent ``ToolSettingsPanel``; "ai_sheet_gen" (no persistent
+        panel of its own) always launches through its existing dialog
+        handler (``_tile_handler`` — the SAME mapping the Main Menu
+        itself uses), and it disturbs nothing else (always its own
+        Toplevel)."""
         if tile_id == "website_gen":
             self._inline_kind = (
                 None if self._inline_kind == "website_gen" else "website_gen"
             )
             self._apply_running_layout()
+            return
+        kinds = TILE_JOB_KINDS.get(tile_id, ())
+        if set(kinds) & self._active_kinds():
+            self.notebook.select(0)
             return
         handler = self._tile_handler(tile_id)
         if handler is not None:
@@ -7114,19 +7310,14 @@ class PainterGui:
     def _build_toolbar(self, parent) -> None:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(0, 6))
-        self.btn_chrome = rounded_button(
-            row, "Open Chrome (login)", command=self._open_chrome,
-            icon_name="web",
-        )
-        self.btn_chrome.pack(side="left")
-        self.btn_check = rounded_button(
-            row, "Check", command=self._check_sheets,
-        )
-        self.btn_check.pack(side="left", padx=4)
+        # "Open Chrome (login)"/"Check" used to live here — PINNED into
+        # the always-visible _top_strip instead (owner 2026-07-21
+        # workflow fix, Rule #5 — moved, not duplicated); see __init__'s
+        # own comment beside self.btn_chrome/self.btn_check for why.
         self.btn_select = rounded_button(
             row, "Select images…", command=self._select_images,
         )
-        self.btn_select.pack(side="left", padx=4)
+        self.btn_select.pack(side="left")
         rounded_button(
             row, "Instructions", command=self._open_instructions,
         ).pack(side="right")

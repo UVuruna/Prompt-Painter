@@ -1006,6 +1006,26 @@ TRANSITION_FADE_STEPS = 14  # alpha ramp ticks across TRANSITION_FADE_MS
 # ONCE, this many ms after the LAST <Configure> ("wait for mouse release").
 RESIZE_SETTLE_MS = 150
 
+# --- ScrollFrame fill_height self-heal (owner 2026-07-21 workflow fix) -
+# The fill_height re-fit above only re-triggers from an ACTUAL canvas
+# resize (a real window resize/maximize) or an explicit refresh() call —
+# once _apply_fill_height has ever forced the embedded body's height via
+# canvas itemconfigure, body's OWN <Configure> stops firing in response
+# to its nested content simply growing (a canvas "window" item's forced
+# dimension is now externally pinned, decoupled from the child's natural
+# pack-driven size request), so a content-height change from a widget
+# that has no reference to the ScrollFrame to call refresh() on (e.g. an
+# AgentPanel's Settings-gear reveal) — or even the FIRST settle during
+# construction, if it happens to land before the whole tree has finished
+# growing — can leave the scrollregion stuck too short forever, with the
+# real bottom of the content unreachable on a short window. A cheap
+# periodic comparison (cost: two winfo reads + one int compare) self-
+# heals regardless of WHICH caller forgot to refresh — current or
+# future — rather than requiring every content-height-changing widget
+# in the file to hold a reference to the ScrollFrame and remember to
+# call it.
+SCROLL_FILL_HEIGHT_POLL_MS = 250
+
 # the two track pill SVGs (stems, resolved in assets/icons) — reused
 # straight from the owner's website switch, so the starfield / sky-clouds
 # art matches the site exactly

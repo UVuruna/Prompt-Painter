@@ -54,7 +54,7 @@ from types import SimpleNamespace
 import pytest
 
 import gui
-from painter.config import JOB_ORDER, MENU_TILES
+from painter.config import JOB_ORDER, MENU_TILES, SITES
 
 
 # ---------------------------------------------------------------------
@@ -107,6 +107,51 @@ def test_next_view_menu_click_from_main_when_idle_still_works():
     assert (
         gui._next_view("main", active_count=0, menu_requested=True) == "menu"
     )
+
+
+# ---------------------------------------------------------------------
+# gui._menu_tile_columns — pure, no Tk (owner 2026-07-21 workflow fix,
+# the responsive Main Menu — MainMenu._reflow itself is Tk-facing and
+# proven by a real-window screenshot, matching gui.py's "pure helpers
+# get pytest, real Tk/UI wiring gets a screenshot" convention)
+# ---------------------------------------------------------------------
+
+
+def test_menu_tile_columns_no_measurement_yet_falls_back_to_the_ideal():
+    assert gui._menu_tile_columns(0, 8) == gui.MENU_TILE_COLS
+    assert gui._menu_tile_columns(-5, 8) == gui.MENU_TILE_COLS
+
+
+def test_menu_tile_columns_never_exceeds_menu_tile_cols():
+    huge = gui.MENU_TILE_CELL_MIN_PX * (gui.MENU_TILE_COLS + 5)
+    assert gui._menu_tile_columns(huge, 8) == gui.MENU_TILE_COLS
+
+
+def test_menu_tile_columns_never_exceeds_tile_count():
+    """No empty trailing columns even when there is ample width."""
+    huge = gui.MENU_TILE_CELL_MIN_PX * 10
+    assert gui._menu_tile_columns(huge, 2) == 2
+
+
+def test_menu_tile_columns_shrinks_as_width_shrinks():
+    per_tile = gui.MENU_TILE_CELL_MIN_PX
+    assert gui._menu_tile_columns(per_tile * 4, 8) == 4
+    assert gui._menu_tile_columns(per_tile * 3, 8) == 3
+    assert gui._menu_tile_columns(per_tile * 2, 8) == 2
+    assert gui._menu_tile_columns(per_tile * 1, 8) == 1
+
+
+def test_menu_tile_columns_never_below_one():
+    assert gui._menu_tile_columns(1, 8) == 1
+
+
+def test_menu_tile_columns_agrees_with_reflows_own_minsize_floor():
+    """_menu_tile_columns's per-tile divisor and MainMenu._reflow's own
+    grid ``minsize`` MUST use the SAME constant — a stricter minsize
+    than this function assumed would make the grid wider than the
+    (non-horizontally-scrollable) viewport, trading squeezed-card
+    clipping for off-the-right-edge clipping instead."""
+    assert gui.MENU_TILE_CELL_MIN_PX > gui.MENU_TILE_W + gui.MENU_TILE_GAP_PX
 
 
 # ---------------------------------------------------------------------
@@ -273,20 +318,33 @@ def test_sync_running_state_recolours_the_icon_bar_while_running(root):
     assert fake._icon_bar._buttons["bg"].cget("border_width") == 1  # idle
 
 
-def test_apply_running_layout_packs_icon_bar_always_controls_box_never_by_default(
+def test_apply_running_layout_packs_icon_bar_and_controls_box_by_default(
     root,
 ):
+    """Owner 2026-07-21 workflow fix: ``_controls_box`` (the queue +
+    BOTH AgentPanels + toolbar) is the DEFAULT running-view inline
+    surface — it used to stay hidden unless ``_inline_kind ==
+    "website_gen"``, which meant Start (unconditionally clearing
+    ``_inline_kind`` to ``None``) immediately hid the very controls the
+    owner needed to Start the OTHER site or reach this one's Pause/
+    Stop. ``_inline_kind is None`` (the state right after any Start) now
+    shows it, same as ``_compact_box`` staying hidden throughout."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._apply_running_layout(fake)
     assert fake._icon_bar.winfo_manager() == "pack"
-    assert fake._controls_box.winfo_manager() == ""
+    assert fake._controls_box.winfo_manager() == "pack"
     assert fake._compact_box.winfo_manager() == ""
 
 
-def test_apply_running_layout_shows_controls_box_only_while_website_gen_inline(
+def test_apply_running_layout_controls_box_shows_for_none_and_website_gen(
     root,
 ):
+    """Both ``_inline_kind`` values that do NOT name a ``_tool_panels``
+    entry — ``None`` (the post-Start default) and the legacy explicit
+    "website_gen" marker ``_click_icon_bar_tile``/``_toggle_pause_job``
+    still set — show the SAME ``_controls_box``; only an entry actually
+    IN ``_tool_panels`` supersedes it (see the sibling test below)."""
     fake = FakeGui(root)
     fake._view = "running"
     fake._inline_kind = "website_gen"
@@ -295,7 +353,7 @@ def test_apply_running_layout_shows_controls_box_only_while_website_gen_inline(
 
     fake._inline_kind = None
     gui.PainterGui._apply_running_layout(fake)
-    assert fake._controls_box.winfo_manager() == ""
+    assert fake._controls_box.winfo_manager() == "pack"
 
 
 def test_apply_running_layout_shows_a_tool_panel_only_while_its_inline(root):
@@ -358,19 +416,35 @@ def test_request_menu_from_main_when_idle_still_works(root):
     assert fake.view_log == ["menu"]
 
 
-def test_click_icon_bar_tile_on_a_running_kind_just_focuses_the_dashboard(
+def test_click_icon_bar_tile_on_a_running_tool_just_focuses_the_dashboard(
     root,
 ):
+    """A STANDALONE TOOL tile (never website_gen — see the dead-end
+    regression test below) whose kind is currently active just focuses
+    the Dashboard tab, undisturbed — that job's own panel stays exactly
+    as hidden as before; this rule is unchanged by the 2026-07-21
+    workflow fix, only website_gen's own handling changed."""
     fake = FakeGui(root)
     fake._view = "running"
-    fake._running = {"chatgpt"}
+    fake._tool_workers = {"bg": object()}
     fake.notebook.select(1)  # currently on "Log"
-    gui.PainterGui._click_icon_bar_tile(fake, "website_gen")
+    gui.PainterGui._click_icon_bar_tile(fake, "bg")
     assert fake.notebook.index("current") == 0  # jumped to Dashboard
     assert fake._inline_kind is None  # untouched — not a settings toggle
 
 
-def test_click_icon_bar_tile_website_gen_toggles_the_inline_panel(root):
+def test_click_icon_bar_tile_website_gen_toggle_never_hides_controls_box(
+    root,
+):
+    """The website_gen tile still flips ``_inline_kind`` between
+    "website_gen" and ``None`` (the toggle itself is unchanged) — but
+    since GUI rework 2026-07-21, NEITHER value ever hides
+    ``_controls_box`` any more (it is the running view's default
+    inline surface, see ``_apply_running_layout``), so the toggle is
+    now visually a no-op either way. This replaces the old assertion
+    that a second click hid the controls — that behaviour was exactly
+    the bug (the owner had no way to reach the OTHER site's Start after
+    Starting one)."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._click_icon_bar_tile(fake, "website_gen")
@@ -379,7 +453,35 @@ def test_click_icon_bar_tile_website_gen_toggles_the_inline_panel(root):
 
     gui.PainterGui._click_icon_bar_tile(fake, "website_gen")
     assert fake._inline_kind is None
-    assert fake._controls_box.winfo_manager() == ""
+    assert fake._controls_box.winfo_manager() == "pack"  # still shown
+
+
+def test_click_icon_bar_tile_website_gen_never_dead_ends_while_a_site_runs(
+    root,
+):
+    """THE regression test for the diagnosed workflow bug: clicking
+    "website_gen" while a site is ACTIVE used to fall through to the
+    generic "already active -> just focus the Dashboard" branch (since
+    website_gen's own TILE_JOB_KINDS were themselves active), leaving
+    ``_inline_kind`` untouched — a dead end if some OTHER inline surface
+    (a tool's own settings panel) happened to be showing at the time,
+    since nothing ever brought ``_controls_box`` back. website_gen is
+    now checked FIRST, unconditionally, so it ALWAYS supersedes
+    whatever tool panel was open and restores the site controls —
+    including the OTHER site's own Start button."""
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._running = {"chatgpt", "gemini"}
+    fake._inline_kind = "bg"  # some tool panel happens to be open
+    gui.PainterGui._apply_running_layout(fake)
+    assert fake._tool_panels["bg"].winfo_manager() == "pack"
+    assert fake._controls_box.winfo_manager() == ""  # superseded
+
+    gui.PainterGui._click_icon_bar_tile(fake, "website_gen")
+
+    assert fake._inline_kind == "website_gen"
+    assert fake._controls_box.winfo_manager() == "pack"  # back — no dead end
+    assert fake._tool_panels["bg"].winfo_manager() == ""  # superseded back
 
 
 def test_click_icon_bar_tile_image_checker_not_running_opens_its_inline_panel(
@@ -726,3 +828,117 @@ def test_icon_bar_set_active_fills_api_image_gen_like_any_other_tile(root):
     bar.set_active({"api_image_gen"})
     assert bar._buttons["api_image_gen"].cget("border_width") == 0
     assert bar._buttons["bg"].cget("border_width") == 1
+
+
+# ---------------------------------------------------------------------
+# End-to-end workflow regression (owner 2026-07-21 workflow fix): REAL
+# AgentPanel widgets for both sites, proving the ACTUAL controls an
+# owner would see — not just _inline_kind bookkeeping — stay correctly
+# wired when one site starts while the other is idle. Real on-screen
+# visibility (winfo_ismapped) needs a genuinely mapped window, which
+# the suite's shared WITHDRAWN tk_root deliberately never is (see
+# conftest.py) — winfo_ismapped() is 0 for every descendant of a
+# withdrawn toplevel regardless of pack state, confirmed by hand, so
+# "reachable" is proven here via winfo_manager() (packed by its own
+# parent — the same technique every OTHER assertion in this file
+# already uses), with genuine on-screen pixel proof left to the real,
+# non-withdrawn-window screenshots (see gui.md's own "Verified" note
+# for this session).
+# ---------------------------------------------------------------------
+
+
+class FakeGuiWithRealAgents(FakeGui):
+    """``FakeGui`` (above), except ``self.agents`` holds REAL
+    ``AgentPanel`` widgets — parented on ``_controls_box`` itself, the
+    SAME parent production uses — instead of ``_RecordingPanel`` stand-
+    ins, so button ``cget("state")``/``winfo_manager()`` reflect the
+    real widget tree an owner would actually see. The SAME bare-
+    ``AgentPanel`` ``make_panel`` convention test_gui_agent_visibility.
+    py/test_gui_upscale.py/test_gui_pipeline.py already established.
+
+    ``_go_view`` is overridden (the base ``FakeGui`` version is a plain
+    recorder — correct for THAT file's own tests, which drive
+    ``_apply_running_layout`` directly rather than through a real view
+    transition) to ALSO call the REAL ``_apply_running_layout`` on
+    entering "running", mirroring the one line of ``PainterGui.
+    _set_view`` this workflow test actually depends on — proving the
+    real cascade (Start -> ``_sync_running_state`` -> a genuine "main"
+    -> "running" transition -> the controls actually get packed),
+    which is exactly the connection the diagnosed bug broke."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.agents = {
+            key: gui.AgentPanel(
+                self._controls_box, key,
+                on_start=lambda *_a: None, on_stop=lambda *_a: None,
+                on_pause=lambda *_a: None,
+            )
+            for key in sorted(SITES)
+        }
+        for panel in self.agents.values():
+            panel.pack(side="left", fill="both", expand=True)
+
+    def _go_view(self, view: str) -> None:
+        self.view_log.append(view)
+        self._view = view
+        if view == "running":
+            gui.PainterGui._apply_running_layout(self)
+
+
+def _simulate_start_site_tail(fake, key: str) -> None:
+    """Mirrors ``PainterGui._start_site``'s OWN documented tail — the
+    parts this fix touches — WITHOUT its heavy sheet-parsing/
+    validation/thread-spawn prefix (already covered elsewhere, e.g.
+    test_gui_tool_panels.py's ``FakeGuiForPanel`` convention for the
+    tool-Start equivalent): mark the site running, style its own
+    panel, unconditionally clear ``_inline_kind``, then reconcile the
+    view exactly like the real method's last two lines."""
+    fake._running.add(key)
+    fake.agents[key].set_run_state(running=True)
+    fake._inline_kind = None
+    gui.PainterGui._sync_running_state(fake)
+
+
+def test_workflow_starting_chatgpt_leaves_gemini_startable_and_visible(
+    root,
+):
+    """THE literal corrected workflow, end to end, over REAL
+    AgentPanel widgets: Start ChatGPT -> ChatGPT's Pause/Stop become
+    the active controls, Gemini's OWN Start stays enabled AND packed
+    (reachable), and ``_controls_box`` (holding BOTH panels) never
+    disappears — the exact opposite of the diagnosed bug, where
+    Starting either site hid the whole controls area, stranding the
+    owner with no way to Start the other site or reach either one's
+    Pause/Stop.
+
+    Starts from "main" (the owner already clicked the Website GEN
+    tile), NOT "running" — ``_sync_running_state``'s own view-
+    transition check is a genuine no-op once ALREADY "running" (see
+    ``test_sync_running_state_never_leaves_running_on_its_own`` above),
+    so the FIRST site's Start must be the thing that actually DRIVES
+    "main" -> "running" for ``_apply_running_layout`` to run at all —
+    exactly the real ``PainterGui._start_site`` call site."""
+    fake = FakeGuiWithRealAgents(root)
+    fake._view = "main"
+
+    _simulate_start_site_tail(fake, "chatgpt")
+
+    assert fake._controls_box.winfo_manager() == "pack"
+    assert fake.agents["chatgpt"].winfo_manager() == "pack"
+    assert fake.agents["gemini"].winfo_manager() == "pack"
+    assert fake.agents["chatgpt"].btn_start.cget("state") == "disabled"
+    assert fake.agents["chatgpt"].btn_stop.cget("state") == "normal"
+    # THE core assertion: the OTHER site's Start is still fully reachable
+    assert fake.agents["gemini"].btn_start.cget("state") == "normal"
+    assert fake.agents["gemini"].btn_start.winfo_manager() == "pack"
+
+    # Gemini starts too -> BOTH panels show active Pause/Stop, in parallel
+    _simulate_start_site_tail(fake, "gemini")
+
+    assert fake._running == {"chatgpt", "gemini"}
+    assert fake._controls_box.winfo_manager() == "pack"
+    assert fake.agents["chatgpt"].btn_stop.cget("state") == "normal"
+    assert fake.agents["gemini"].btn_stop.cget("state") == "normal"
+    assert fake.agents["chatgpt"].btn_start.cget("state") == "disabled"
+    assert fake.agents["gemini"].btn_start.cget("state") == "disabled"
