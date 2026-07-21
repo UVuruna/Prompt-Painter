@@ -20,7 +20,7 @@ from dataclasses import replace
 import pytest
 
 from painter.config import SITES, TIMING, Timing
-from painter.driver import FixNotConfigured, SiteDriver
+from painter.driver import FixNotConfigured, SelectorRot, SiteDriver
 
 # Zero out every human-rhythm pause and shrink the selector-timeout
 # polling step so these tests run instantly — only the LOOKUP logic is
@@ -104,6 +104,9 @@ class FakePage:
 
     def locator(self, sel):
         return self.locators.get(sel, _MISSING)
+
+    def reload(self):
+        self.calls.append(("reload",))
 
 
 def _driver(site, page: FakePage) -> SiteDriver:
@@ -275,3 +278,70 @@ def test_submit_prompt_still_uses_only_prompt_box_and_send_selectors():
     driver.submit_prompt("hello gemini")  # must not raise / must not hang
 
     assert ("insert_text", "hello gemini") in page.calls
+
+
+# --- (d) send-button reload recovery (owner 2026-07-21) ----------------
+# A real run's exact failure: "no selector for the send button matched
+# within 10s ... site stopped" — a manual page refresh fixed it. The
+# driver now does that refresh itself, ONCE, before giving up.
+
+def test_submit_prompt_recovers_via_reload_when_send_button_missing():
+    site = SITES["gemini"]
+    page = FakePage()
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)
+    # the send button is ABSENT until the fake reload "fixes" the DOM —
+    # mirrors the real site coming back sane after a refresh
+    page.locators = {site.prompt_box[0]: prompt_box}
+    base_reload = page.reload
+
+    def reload_and_recover():
+        base_reload()
+        page.locators[site.send_button[0]] = send
+
+    page.reload = reload_and_recover
+    driver = _driver(site, page)
+    logs: list[str] = []
+
+    driver.submit_prompt("hello gemini", logs.append)
+
+    assert page.calls.count(("reload",)) == 1  # exactly one recovery attempt
+    assert ("click", "send") in page.calls
+    # the prompt was lost by the reload and re-pasted: typed twice
+    # (the failed first attempt, then the post-reload retry)
+    assert page.calls.count(("insert_text", "hello gemini")) == 2
+    assert any("reloading the page" in line for line in logs)
+
+
+def test_submit_prompt_reload_recovery_gives_up_when_still_missing():
+    """The send button is STILL missing after the reload -> the
+    original SelectorRot propagates (stops the site), exactly as
+    before this recovery existed — and only ONE reload is attempted,
+    never a retry loop."""
+    site = SITES["gemini"]
+    page = FakePage()
+    page.locators = {site.prompt_box[0]: FakeLocator("prompt_box", page)}
+    driver = _driver(site, page)
+
+    with pytest.raises(SelectorRot):
+        driver.submit_prompt("hello gemini")
+
+    assert page.calls.count(("reload",)) == 1
+
+
+def test_submit_prompt_normal_path_never_reloads():
+    """MUST NOT REGRESS: when the send button is present on the first
+    try (the common case), no reload ever happens — proven both by the
+    exact-call-list assertion above (test_submit_prompt_unchanged_
+    through_shared_helper) and explicitly here."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators = {
+        site.prompt_box[0]: FakeLocator("prompt_box", page),
+        site.send_button[0]: FakeLocator("send", page),
+    }
+    driver = _driver(site, page)
+
+    driver.submit_prompt("hello world")
+
+    assert ("reload",) not in page.calls

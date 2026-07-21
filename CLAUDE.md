@@ -200,10 +200,14 @@ fix → pause → next. Progress logging per item (elapsed, done/total —
 root Rule #10). **DONE = the FILE EXISTS at its output path**
 (`<out>/dest_for(...)`), checked on disk — not a sidecar record
 (the `.progress.json` state file was removed 2026-07-19). RESUMABLE
-for free: an unattended run skips items whose dest file already
-exists; an EXPLICIT tick list regenerates exactly those (overwriting
-an existing file — the way to redo a bad image), and Select shows
-done items green but re-tickable. At the end the owner reviews
+for free: the folder is ALWAYS the source of truth (owner 2026-07-21)
+— an unattended run skips items whose dest file already exists, and
+an EXPLICIT tick list only NARROWS which items are candidates: a
+ticked item whose file already exists is still skipped, never
+overwritten. To redo a bad image, delete the file first, then rerun
+(ticked or not). Select shows done items green but re-tickable — for
+display/selection only, ticking alone never forces a regenerate. At
+the end the owner reviews
 quality; unsatisfying prompts get reworked in the sheet or re-ticked.
 
 **GitHub:** [UVuruna/Prompt-Painter](https://github.com/UVuruna/Prompt-Painter)

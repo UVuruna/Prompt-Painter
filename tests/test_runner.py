@@ -2,8 +2,9 @@
 
 Covers what needs no browser: the per-site rule suffix, the
 assets-mirroring output layout, the report txt, resume by FILE
-EXISTENCE (a saved dest file = done; `only` overrides it to
-regenerate), the stop flag, and the loud-but-not-fatal
+EXISTENCE (a saved dest file = done; the folder is ALWAYS the source
+of truth — `only` narrows the candidates but never overwrites a file
+already on disk), the stop flag, and the loud-but-not-fatal
 background-fix hook.
 """
 
@@ -43,7 +44,7 @@ class FakeDriver:
         self.site = site
         self.submitted: list[str] = []
 
-    def submit_prompt(self, prompt):
+    def submit_prompt(self, prompt, log=print):
         self.submitted.append(prompt)
 
     def await_done(self, log=print):
@@ -464,10 +465,13 @@ def test_file_existence_resume_skips_saved_and_runs_missing(tmp_path):
     assert any("RESUME: 1/3 already saved" in line for line in logs)
 
 
-def test_only_regenerates_an_existing_file(tmp_path):
-    """A ticked `only` OVERRIDES file existence: a done image (dest
-    file already present) IS regenerated (overwritten) when ticked,
-    while a done image NOT ticked is left alone."""
+def test_only_never_overwrites_an_existing_file(tmp_path):
+    """BUG 1 fix (owner 2026-07-21): the folder is the source of truth
+    even under a ticked `only` selection — a ticked item whose dest
+    file already exists is SKIPPED, never overwritten. This was the
+    exact bug from a real run: 18 already-saved images got regenerated
+    after a restart because the old `only` branch queued straight from
+    the ticks, never checking the disk."""
     sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
     # both dests already exist from a prior run, with stale bytes
@@ -477,15 +481,36 @@ def test_only_regenerates_an_existing_file(tmp_path):
         d.write_bytes(b"STALE")
 
     driver = FakeDriver(SITES["gemini"])
-    # tick ONLY img_0 -> its queue includes it despite the file existing
+    logs: list[str] = []
+    # tick BOTH -> both already saved on disk -> neither regenerates
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST,
+        only={"fake/img_0.png", "fake/img_1.png"}, log=logs.append,
+    )
+    assert generated == 0
+    assert driver.submitted == []  # nothing was regenerated
+    assert (out / dest_for("fake/img_0.png", "gemini")).read_bytes() == b"STALE"
+    assert (out / dest_for("fake/img_1.png", "gemini")).read_bytes() == b"STALE"
+    assert any("RESUME: 2/2 already saved" in line for line in logs)
+    report = state(out, "gemini", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "already saved on disk" in report
+
+
+def test_only_still_queues_a_ticked_item_missing_on_disk(tmp_path):
+    """The other half of the same fix: `only` still narrows candidates
+    normally — a ticked item with NO dest file on disk is queued and
+    generated exactly as before."""
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = FakeDriver(SITES["gemini"])
     generated = run_sheet(
         sheet, driver, out, "gemini", FAST, only={"fake/img_0.png"}
     )
     assert generated == 1
-    assert len(driver.submitted) == 1  # only the ticked item ran
-    # img_0 overwritten with the fresh PNG; img_1 left as the stale bytes
     assert (out / dest_for("fake/img_0.png", "gemini")).read_bytes() == PNG_1PX
-    assert (out / dest_for("fake/img_1.png", "gemini")).read_bytes() == b"STALE"
+    assert not (out / dest_for("fake/img_1.png", "gemini")).exists()
 
 
 def test_extra_suffix_appends_the_per_item_note(tmp_path):

@@ -14,14 +14,39 @@ handed back for the runner to save under the sheet's own name.
 
 ## The per-item protocol
 
-1. `submit_prompt(prompt)` — click the prompt box, select-all +
-   delete, `insert_text` verbatim, click send. EVERY DOM
+1. `submit_prompt(prompt, log=print)` — click the prompt box,
+   select-all + delete, `insert_text` verbatim, click send. EVERY DOM
    interaction here (and in the send retry and `new_chat`) is
    preceded by `_hesitate()` — a random human-like pause from the
    config's action-delay range (owner's #8), so nothing ever fires
-   machine-instant. This click/select-all/delete/insert/send body
-   lives in a shared private `_paste_and_send(prompt)`;
-   `submit_prompt` is a one-line call onto it.
+   machine-instant. The click/select-all/delete/insert typing body
+   lives in a shared private `_type_into_box(prompt)`; the locate
+   + click of the send button lives in `_click_send(prompt, log)`;
+   `_paste_and_send(prompt, log)` chains the two and `submit_prompt`
+   is a one-line call onto it.
+
+   **Send-button reload recovery** (owner 2026-07-21, config
+   `SEND_RELOAD_RECOVERY`, default on): a real run's exact failure —
+   "no selector for the send button matched within 10s ... site
+   stopped" — was fixed by nothing more than a manual page refresh.
+   `_click_send` now does that refresh itself: when (and ONLY when)
+   the send-button lookup raises `SelectorRot` — never any other
+   selector miss (prompt box, busy signal, response image, ...) — it
+   calls `page.reload()`, re-runs `_type_into_box(prompt)` (the reload
+   wipes the composer's unsent text, so the prompt MUST be re-pasted),
+   and retries the send-button lookup exactly ONCE more. A second miss
+   raises `SelectorRot` same as always — the recovery is a single
+   extra attempt, never a retry loop. `submit_fix`'s follow-up prompt
+   goes through the same `_paste_and_send`, so it gets the same
+   recovery; note that a reload there would also drop the just-attached
+   image (no re-attach step exists) — an acceptable gap today since
+   WEBSITE FIX ships gated off (`FixNotConfigured`) until the owner
+   configures real selectors. `runner.py`'s `submit_prompt` call site
+   does not pass its own `log` through (the shared `driver` duck-type
+   is also `ApiImageAdapter` in `gui/__init__.py`, whose `submit_prompt`
+   takes no `log` parameter and is out of scope to change here) — the
+   recovery message falls back to `log`'s own default (`print`), same
+   as every other driver method's default-logging pattern.
 1b. `submit_fix(image_path, prompt)` — **WEBSITE FIX** (GUI rework
    Phase 17, **GATED**): click the site's attach/upload control,
    `set_input_files(image_path)` on its file input (often
@@ -56,7 +81,10 @@ pasted text lands).
 ## Failure taxonomy (all loud, root Rule #1)
 
 - `SelectorRot` — no fallback selector matched; the site reskinned,
-  fix the config block.
+  fix the config block. EXCEPTION: a `SelectorRot` on the send button
+  specifically is not immediately loud — `_click_send` first tries
+  the one-time reload recovery above (`SEND_RELOAD_RECOVERY`); only a
+  SECOND miss (post-reload) raises it for real.
 - `ItemRefused` — the response matches a SAFETY-refusal marker: the
   runner reports the item and continues with the rest.
 - `TerminalState` — the response matches a quota/rate-limit marker:
@@ -97,7 +125,8 @@ image timeout.
 ## Connections
 
 ### Uses
-- [Config (subfolder)](config/___config.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
+- [Config (subfolder)](config/___config.md) — `SiteConfig`, `Timing`,
+  `MIN_IMAGE_PX`, `SEND_RELOAD_RECOVERY`
 - Playwright (`playwright.sync_api`) — the CDP session
 
 ### Used by

@@ -24,6 +24,7 @@ from playwright.sync_api import Locator, Page, sync_playwright
 
 from painter.config import (
     MIN_IMAGE_PX,
+    SEND_RELOAD_RECOVERY,
     SiteConfig,
     Timing,
     parse_quota_reset,
@@ -197,13 +198,11 @@ class SiteDriver:
             )
         )
 
-    def _paste_and_send(self, prompt: str) -> None:
+    def _type_into_box(self, prompt: str) -> None:
         """Click the prompt box, select-all + delete, paste ``prompt``
-        verbatim, click send — the paste+send tail shared by
-        ``submit_prompt`` (text only) and ``submit_fix`` (image
-        attach + follow-up prompt, GUI rework Phase 17). This is
-        ``submit_prompt``'s original body, extracted unchanged so both
-        entry points end the same human-paced way."""
+        verbatim — the typing half of ``_paste_and_send``, factored out
+        so the send-button reload recovery (below) can re-type after a
+        ``page.reload()`` wipes the composer's unsent text."""
         box = self._require(self.site.prompt_box, "the prompt box")
         self._hesitate()
         box.click()
@@ -214,15 +213,55 @@ class SiteDriver:
         self._hesitate()
         self.page.keyboard.insert_text(prompt)
         self._hesitate()
-        send = self._require(self.site.send_button, "the send button")
+
+    def _click_send(
+        self, prompt: str, log: Log, *, retrying: bool = False
+    ) -> None:
+        """Locate + click the send button.
+
+        Owner 2026-07-21 (a real run's exact failure): "no selector
+        for the send button matched within 10s ... site stopped" — a
+        manual page REFRESH fixed it. So on THIS specific miss (not
+        any other selector), do a ONE-TIME recovery instead of raising
+        straight away: reload the page, re-type the prompt (the reload
+        wipes it), and retry the send lookup exactly once. ``retrying``
+        guards the recursion to a single attempt — a second miss (or
+        ``SEND_RELOAD_RECOVERY`` off) raises ``SelectorRot`` same as
+        always.
+        """
+        try:
+            send = self._require(self.site.send_button, "the send button")
+        except SelectorRot:
+            if retrying or not SEND_RELOAD_RECOVERY:
+                raise
+            log(
+                f"    {self.site.name}: send button missing — reloading"
+                " the page and re-pasting once (recovery)"
+            )
+            self.page.reload()
+            self._type_into_box(prompt)
+            self._click_send(prompt, log, retrying=True)
+            return
         send.click()
 
-    def submit_prompt(self, prompt: str) -> None:
+    def _paste_and_send(self, prompt: str, log: Log = print) -> None:
+        """Type the prompt then click send — the paste+send tail
+        shared by ``submit_prompt`` (text only) and ``submit_fix``
+        (image attach + follow-up prompt, GUI rework Phase 17). This is
+        ``submit_prompt``'s original body, extracted unchanged (plus
+        the send-button reload recovery in ``_click_send``) so both
+        entry points end the same human-paced way."""
+        self._type_into_box(prompt)
+        self._click_send(prompt, log)
+
+    def submit_prompt(self, prompt: str, log: Log = print) -> None:
         """Paste the prompt byte-identical and press send — with a
         person's rhythm (click ... paste ... send), never instant."""
-        self._paste_and_send(prompt)
+        self._paste_and_send(prompt, log)
 
-    def submit_fix(self, image_path: str, prompt: str) -> None:
+    def submit_fix(
+        self, image_path: str, prompt: str, log: Log = print
+    ) -> None:
         """WEBSITE FIX (GUI rework Phase 17): re-attach a previously
         generated image into the SAME chat and paste+send a follow-up
         ``prompt`` asking the site to correct it — the AI Checker's
@@ -273,7 +312,7 @@ class SiteDriver:
         # is a follow-up config addition once the owner captures it
         # live.
         self._hesitate()
-        self._paste_and_send(prompt)
+        self._paste_and_send(prompt, log)
 
     def await_done(self, log: Log = print) -> None:
         """Watch the done edge: the busy signal appears, then goes.

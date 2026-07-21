@@ -226,6 +226,7 @@ from .sites import (
     MIN_IMAGE_PX,
     NEW_CHAT_CHOICES,
     PAUSE_POLL_INTERVAL_S,
+    SEND_RELOAD_RECOVERY,
     SITES,
     TIMING,
     SiteConfig,
@@ -310,6 +311,6 @@ __all__ = [
     "SHEETS_DIR", "SITE_PROMPT_RULES", "STYLE_CHOICES", "STYLE_DEFAULT",
     "STYLES", "parse_quota_reset", "prompt_suffix",
     # sites
-    "MIN_IMAGE_PX", "NEW_CHAT_CHOICES", "PAUSE_POLL_INTERVAL_S", "SITES",
-    "TIMING", "SiteConfig", "Timing",
+    "MIN_IMAGE_PX", "NEW_CHAT_CHOICES", "PAUSE_POLL_INTERVAL_S",
+    "SEND_RELOAD_RECOVERY", "SITES", "TIMING", "SiteConfig", "Timing",
 ]

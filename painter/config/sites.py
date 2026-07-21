@@ -55,6 +55,15 @@ PAUSE_POLL_INTERVAL_S = 0.5
 # An <img> narrower than this is a placeholder, not a generated image.
 MIN_IMAGE_PX = 64
 
+# Owner 2026-07-21 (a live run stopped dead: "no selector for the send
+# button matched within 10s ... site stopped" — a manual page REFRESH
+# fixed it): when the send button specifically cannot be found, the
+# driver reloads the page once, re-pastes the prompt (reload always
+# loses the composer's unsent text) and retries the send lookup exactly
+# once before giving up. Never triggered by any OTHER selector miss
+# (prompt box, busy signal, response image, ...) — only the send button.
+SEND_RELOAD_RECOVERY = True
+
 
 # --- Site DOM states (ONE config block, with fallbacks) --------------
 

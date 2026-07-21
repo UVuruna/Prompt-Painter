@@ -27,18 +27,28 @@ report keeps every finished line. The loop writes ONLY under
 ### Used by
 - [Main (Entry Point)](../main.md) and [GUI](../gui.md)
 
-## Resume model (owner 2026-07-19)
+## Resume model (owner 2026-07-19, revised 2026-07-21)
 
-"Done" is the SAVED FILE itself — there is NO progress sidecar. An
-unattended rerun (`only=None`) skips every item whose dest file
+"Done" is the SAVED FILE itself — there is NO progress sidecar. The
+folder is ALWAYS the source of truth: an unattended rerun
+(`only=None`) skips every item whose dest file
 `out_base / dest_for(drop, site)` already exists and generates the
-rest (sheet-advised items sit out). A ticked `only` set OVERRIDES
-this: it generates EXACTLY those drop paths, OVERWRITING any that
-already exist — the regenerate path, so a bad image can be redone by
-re-ticking it in the GUI's Select window. This replaces the old
-`.progress.json` reading, which could disagree with the real files
-on disk (an item recorded done whose file was never at the output
-location showed as done yet could not be regenerated).
+rest (sheet-advised items sit out). A ticked `only` set NARROWS the
+candidates to those drop paths but NEVER overwrites a dest file
+already on disk — a ticked item that is already saved is skipped
+exactly like the unattended path, logged (`RESUME: N/M already saved
+on disk under <site>/`) and added to the report as a skip. To redo a
+bad image the owner deletes the file first, then reruns (ticked or
+not) — ticking alone can never force a regenerate.
+
+(Owner 2026-07-21: a real run hit this precisely — 18 finished
+images got regenerated after a restart because the old `only` branch
+built its queue straight from the ticks, never checking the disk.
+"The folder is the source of truth; the selection must check the
+folder" is now the hard rule.) This replaces the old `.progress.json`
+reading, which could disagree with the real files on disk (an item
+recorded done whose file was never at the output location showed as
+done yet could not be regenerated).
 
 ## Pause (owner 2026-07-21)
 
@@ -116,17 +126,20 @@ event) so the dashboard never stalls; the `item_done` event with
   (True when the SAFER RETRY produced the image) — the dashboard's
   per-image STATUS BADGES map them via `config.badge_keys_for`
   (owner 2026-07-20). Logs the
-  sheet's skipped entries, resumes by FILE EXISTENCE (or drives the
-  ticked `only` set, which overrides existence to regenerate),
+  sheet's skipped entries, resumes by FILE EXISTENCE (or narrows to
+  the ticked `only` set, which still never overwrites a file already
+  on disk),
   drives every pending item, appends `prompt_suffix` (the caller
   resolves the per-site rules), runs the `post_save` hook — the
   caller composes the postprocess steps by flags and returns the
   full action description; failures are loud, counted, never fatal
   — paces between prompts,
   honors `should_stop`, and feeds `RunReport` when `report` is on.
-  `only` narrows the queue to the owner's ticked drop paths,
-  generating EXACTLY those and OVERWRITING any that already exist
-  (the regenerate path). `extra_suffix` (owner 2026-07-20, the AI
+  `only` narrows the queue to the owner's ticked drop paths, but a
+  ticked item whose dest file already exists is SKIPPED just like the
+  unattended resume path (owner 2026-07-21 — the folder is always the
+  source of truth; redo = delete the file first). `extra_suffix`
+  (owner 2026-07-20, the AI
   checker's re-send) is an optional `{drop_path: text}` map — the
   mapped item gets its text appended AFTER the site suffix (the
   "previous attempt had these flaws" fix note), unmapped items get
