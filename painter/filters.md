@@ -17,9 +17,23 @@ edits a condition stack through this module's `FilterCondition` /
 Aspect-ratio tool (`AspectRatioDialog`) is its first caller — replacing
 the old scalar `ASPECT_FILTER_*` dialog fields one-for-one, with a
 one-time settings migration (`gui._migrate_legacy_aspect_filter`) for
-an owner who already had a scalar filter saved. Upscale's own gate and
-the BG/Crop tools stay on their pre-existing behaviour until a later
-phase migrates them too.
+an owner who already had a scalar filter saved.
+
+**GUI rework Phase 6:** Upscale's own four-field aspect/size gate
+migrated too — each `AgentPanel` and the standalone `UpscaleParamsDialog`
+now embed a `FilterEditor` (pre-seeded with one Aspect (range)
+condition) beside a single min-side number, resolved back into
+`upscale_if_small`'s unchanged kwargs by the pure `gui.
+_upscale_params_from_side_and_filter`; a stacked condition this
+resolution cannot express (a Width/Height/Any-side row, or a second/
+IF-NOT aspect row) is still honored — never silently dropped — via a
+direct `matches()` call at the two upscale call sites (`gui.
+_gate_and_upscale` per image on the site pipeline; `gui._filter_files`
+pre-filtering the standalone tool's file list). `gui.
+_migrate_legacy_upscale_gate` is the one-time settings migration for an
+owner who already had the old four scalar fields saved. The BG/Crop
+tools stay on their pre-existing behaviour until a later phase
+migrates them too.
 
 ## The Model — one shape, five kinds
 A `FilterCondition` is `(kind, polarity, lo, hi)`. `kind` (a
@@ -71,9 +85,10 @@ ratio" check.
 
 ### Used by
 - [GUI](../gui.md) — `FilterEditor` (the reusable stacked-condition
-  widget) and `AspectRatioDialog` (its first caller, GUI rework
-  Phase 4). Upscale's bespoke gate and the BG/Crop tools are still
-  unmigrated — later phases.
+  widget), `AspectRatioDialog` (its first caller, GUI rework Phase 4),
+  and — GUI rework Phase 6 — each `AgentPanel`'s upscale gate plus
+  `UpscaleParamsDialog`. The BG/Crop tools are still unmigrated — a
+  later phase.
 
 ## Classes
 

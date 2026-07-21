@@ -19,9 +19,18 @@ OR `H < min_height` (default 800 / 800). Both pass → upscaled so
 image is LANCZOS-scaled by the smallest factor keeping BOTH minimums,
 so the binding axis lands on its target), PNG in/out so transparency
 survives. Anything else → `"nothing"`, so callers count done vs
-skipped cleanly. The GUI passes PER-AGENT values (each site's own
-fine-tune block) and the standalone Upscale dialog's remembered four
-params; the config defaults are the shipped values.
+skipped cleanly. This signature and these four config defaults are
+UNCHANGED by the GUI rework (GUI-composition only, Phase 6): the GUI
+no longer exposes `min_width`/`min_height`/`aspect_min`/`aspect_max`
+as four separate typed fields — each site's own fine-tune block and
+the standalone Upscale dialog instead expose ONE min-side number plus
+an embedded [Shared Filter Framework](filters.md) `FilterEditor`, and
+`gui._upscale_params_from_side_and_filter` resolves those two into
+this function's same four kwargs before every call (`min_width ==
+min_height == min_side`; `aspect_min`/`aspect_max` off the filter's
+Aspect condition, or `(0, inf)` when there isn't one) — see
+[GUI](../gui.md)'s upscale-gate section for the full resolution and
+how a stacked NON-aspect condition is separately honored.
 
 **Model:** `-n UPSCALE_MODEL` picks the ncnn net (config data). Switched
 2026-07-21 (owner research) from the general-purpose `realesrgan-x4plus`

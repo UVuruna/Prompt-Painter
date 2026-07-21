@@ -89,9 +89,9 @@ the app. See [Settings](settings.md).
 GUI rework Phase 3 (owner decision 2026-07-21): the pure engine half
 of ONE stackable "what should this tool touch" gate — a
 `FilterCondition` dataclass (kind/polarity/lo/hi) and `matches()`
-ANDing a whole stack against one image's width/height. Meant to
-eventually replace the Aspect tool's scalar filter and Upscale's
-bespoke gate; not wired into any tool yet. See
+ANDing a whole stack against one image's width/height. Replaced the
+Aspect tool's scalar filter (Phase 4) and Upscale's bespoke four-field
+gate (Phase 6); the BG/Crop tools are still unmigrated. See
 [Shared Filter Framework](filters.md).
 
 ## Connections

@@ -110,22 +110,36 @@ match.
 - `TOOLS_DIR`, `UPSCALE_DIR`, `UPSCALE_EXE_NAME`,
   `UPSCALE_ZIP_URL`, `UPSCALE_MODEL`, `UPSCALE_MIN_WIDTH`,
   `UPSCALE_MIN_HEIGHT`, `UPSCALE_ASPECT_MIN`, `UPSCALE_ASPECT_MAX`,
-  `UPSCALE_MINDIM_STEP`, `UPSCALE_ASPECT_STEP`,
-  `UPSCALE_ASPECT_DECIMALS` — the Real-ESRGAN upscaler: where the
+  `UPSCALE_MINDIM_STEP` — the Real-ESRGAN upscaler: where the
   downloaded binary lives (`tools/`, gitignored), the official
   release zip, `UPSCALE_MODEL` (the ncnn net passed as `-n`;
   `realesrgan-x4plus-anime` since 2026-07-21 research — art-tuned for
   this project's flat-colour rondels/badges, A/B-verified visibly
   crisper than the general-purpose `realesrgan-x4plus` with no colour
   shift or banding regression, see [Upscale](upscale.md)), and the
-  FOUR editable gate DEFAULTS (owner 2026-07-19,
+  FOUR editable gate DEFAULTS at the ENGINE level (owner 2026-07-19,
   reproducing the old locked `min_px=800`/`aspect_tol=0.1` rule) —
-  an image qualifies when its aspect W/H is within
+  `upscale_if_small`'s own signature/defaults, UNCHANGED by the GUI
+  rework — an image qualifies when its aspect W/H is within
   `[UPSCALE_ASPECT_MIN, UPSCALE_ASPECT_MAX]` (0.9–1.1) AND
   `W < UPSCALE_MIN_WIDTH` OR `H < UPSCALE_MIN_HEIGHT` (800 / 800).
-  The GUI exposes all four PER AGENT and in the standalone Upscale
-  dialog (both persisted); the `*_STEP` / `*_DECIMALS` values drive
-  those spinner fields.
+  GUI rework Phase 6 simplified the GUI's OWN exposure of this gate
+  from four fields (PER AGENT and in the standalone Upscale dialog) to
+  ONE min-side Spinner (`UPSCALE_MINDIM_STEP` still drives it) plus an
+  embedded [Shared Filter Framework](filters.md) `FilterEditor` — see
+  `UPSCALE_MIN_SIDE_DEFAULT` next and [GUI](../gui.md)'s upscale-gate
+  section; `gui._upscale_params_from_side_and_filter` is the pure
+  resolution function, `gui._migrate_legacy_upscale_gate` the one-time
+  settings migration off these OLD four fields. The old `*_STEP` /
+  `*_DECIMALS` pair that drove the removed aspect-FROM/aspect-TO
+  spinner fields (`UPSCALE_ASPECT_STEP`, `UPSCALE_ASPECT_DECIMALS`) is
+  GONE — nothing renders those two fields any more (the aspect band is
+  now authored through the FilterEditor's own generic row formatting).
+- `UPSCALE_MIN_SIDE_DEFAULT` — GUI rework Phase 6: the seed default for
+  the upscale gate's single min-side Spinner (both per-agent and the
+  standalone dialog) — reuses `UPSCALE_MIN_WIDTH`'s value (`==
+  UPSCALE_MIN_HEIGHT` already, by design), so the shipped default
+  behaves byte-identically to the old four-field gate's own default.
 - `ASPECT_TOL`, `ASPECT_DEFAULT_W`, `ASPECT_DEFAULT_H` — the
   [Change Aspect Ratio](aspect.md) batch deform tool: `ASPECT_TOL`
   (0.001) is how close an image's W/H must be to the target ratio to
@@ -163,7 +177,11 @@ match.
   2026-07-21): the identifier strings behind the new stackable
   [Shared Filter Framework](filters.md), meant to eventually replace
   the `ASPECT_FILTER_*` scalar above and Upscale's bespoke gate with
-  ONE reusable `FilterCondition` shape. Five kinds — the aspect ratio
+  ONE reusable `FilterCondition` shape — DONE for Upscale as of Phase
+  6 (its old four-field min-W/min-H/aspect-FROM/aspect-TO gate is now
+  ONE min-side number + an embedded `FilterEditor`; `ASPECT_FILTER_*`
+  itself is still read once by the Phase 4 migration but no longer
+  written). Five kinds — the aspect ratio
   W/H (`ASPECT_EXACT` pins `lo == hi` to one point, `ASPECT_RANGE` is a
   typed band, identical comparison either way), `ANY_SIDE` (both W and
   H at once, orientation-agnostic: `lo <= min(w,h)` AND

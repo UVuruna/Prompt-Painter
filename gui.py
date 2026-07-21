@@ -129,12 +129,9 @@ from painter.config import (
     TIMING,
     TRANSITION_FADE_MS,
     TRANSITION_FADE_STEPS,
-    UPSCALE_ASPECT_DECIMALS,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
-    UPSCALE_ASPECT_STEP,
-    UPSCALE_MIN_HEIGHT,
-    UPSCALE_MIN_WIDTH,
+    UPSCALE_MIN_SIDE_DEFAULT,
     UPSCALE_MINDIM_STEP,
     dest_for,
     fmt_duration,
@@ -1784,18 +1781,36 @@ class AgentPanel(ttk.Labelframe):
         "background", "style", "bg_removal", "crop", "upscale", "report",
         "safer_retry", "continue_nudge", "new_chat", "pause_min", "pause_max",
         "act_min", "act_max",
-        # per-agent upscale-gate fine-tune (owner 2026-07-19)
-        "up_minw", "up_minh", "up_aspmin", "up_aspmax",
+        # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
+        # Phase 6: the old up_minw/up_minh/up_aspmin/up_aspmax four-field
+        # gate collapsed into ONE min-side spinner — the embedded
+        # FilterEditor's condition stack persists SEPARATELY, as
+        # 'up_filter_conditions' (not a plain tk.Variable, so it is
+        # handled explicitly in get_settings/apply_settings below, not
+        # through this tuple)
+        "up_minside",
         # this agent's own Settings-gear collapse state (owner 2026-07-19)
         "settings_collapsed",
     )
 
-    def __init__(self, master, site_key: str, on_start, on_stop, on_pause):
+    def __init__(
+        self, master, site_key: str, on_start, on_stop, on_pause,
+        filter_presets: dict[str, list[dict]] | None = None,
+        on_filter_presets_changed: Callable[[], None] | None = None,
+    ):
         super().__init__(master)
         self.site_key = site_key
         self._on_start = on_start
         self._on_stop = on_stop
         self._on_pause = on_pause
+        # the SHARED filter-preset library (GUI rework Phase 6) — the
+        # same dict/callback PainterGui hands every FilterEditor
+        # instance (see filters.py's module docstring: one preset
+        # library, every FilterEditor reads/writes the same names).
+        # Optional so a headless AgentPanel (no PainterGui) still works,
+        # falling back to FilterEditor's own private in-memory dict.
+        self._filter_presets = filter_presets
+        self._on_filter_presets_changed = on_filter_presets_changed
         site = SITES[site_key]
 
         # the labelframe title: the site's logo + name
@@ -1829,17 +1844,23 @@ class AgentPanel(ttk.Labelframe):
         self.act_max_var = tk.StringVar(
             value=f"{TIMING.action_delay_max_s:.1f}"
         )
-        # per-agent upscale-gate fine-tune (owner 2026-07-19): min W /
-        # min H / aspect from / aspect to. Defaults reproduce the old
-        # locked rule; shown only when the Settings collapse is expanded.
-        self.up_minw_var = tk.StringVar(value=str(UPSCALE_MIN_WIDTH))
-        self.up_minh_var = tk.StringVar(value=str(UPSCALE_MIN_HEIGHT))
-        self.up_aspmin_var = tk.StringVar(
-            value=f"{UPSCALE_ASPECT_MIN:.{UPSCALE_ASPECT_DECIMALS}f}"
-        )
-        self.up_aspmax_var = tk.StringVar(
-            value=f"{UPSCALE_ASPECT_MAX:.{UPSCALE_ASPECT_DECIMALS}f}"
-        )
+        # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
+        # Phase 6: ONE min-SIDE spinner — the shipped default reproduces
+        # the old locked rule (800px) — plus an embedded FilterEditor
+        # (built in _build_finetune, seeded with today's aspect gate as
+        # a single Aspect (range) condition) deciding WHICH images
+        # qualify. Shown only when the Settings collapse is expanded.
+        self.up_minside_var = tk.StringVar(value=str(UPSCALE_MIN_SIDE_DEFAULT))
+        # the upscale FilterEditor's SEED conditions — built once here so
+        # _build_finetune (called at the end of __init__) and a future
+        # re-seed both read the SAME default; not itself persisted (the
+        # widget's live get_conditions() is what get_settings() reads).
+        self._default_upscale_conditions = [
+            filters.FilterCondition(
+                kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
+                lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
+            )
+        ]
         # this agent's OWN Settings-gear collapse state (owner 2026-07-19):
         # True = fine-tune hidden (default). A BooleanVar so it persists and
         # auto-saves through the same per-agent trace as every other field.
@@ -1927,9 +1948,16 @@ class AgentPanel(ttk.Labelframe):
     def _build_finetune(self) -> None:
         """This agent's collapsible FINE-TUNE area (owner 2026-07-19),
         hidden behind its Settings gear: the PAUSE range, the ACTION-DELAY
-        range, and the UPSCALE-GATE fields (min W / min H / aspect from /
-        aspect to). Built into ``self._finetune_box`` and left UNPACKED —
-        ``_apply_finetune_visibility`` packs it in when the gear expands."""
+        range, and the UPSCALE GATE. Built into ``self._finetune_box`` and
+        left UNPACKED — ``_apply_finetune_visibility`` packs it in when
+        the gear expands.
+
+        The upscale gate (GUI rework Phase 6) is ONE min-SIDE spinner —
+        the smaller side's target minimum in px, replacing the old
+        separate min-W/min-H fields — plus an embedded ``FilterEditor``
+        deciding WHICH images qualify, pre-seeded with today's aspect
+        gate as a single Aspect (range) condition. ``upscale_params()``
+        resolves the two into ``upscale_if_small``'s kwargs."""
         box = ttk.Frame(self)
         self._finetune_box = box
 
@@ -1955,29 +1983,22 @@ class AgentPanel(ttk.Labelframe):
 
         row = ttk.Frame(box)
         row.pack(fill="x", pady=2)
-        ttk.Label(row, text="min W", width=6).pack(side="left")
-        Spinner(row, self.up_minw_var, step=UPSCALE_MINDIM_STEP).pack(
+        ttk.Label(row, text="min side", width=8).pack(side="left")
+        Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
             side="left"
         )
-        ttk.Label(row, text="min H", width=6).pack(side="left", padx=(8, 0))
-        Spinner(row, self.up_minh_var, step=UPSCALE_MINDIM_STEP).pack(
-            side="left"
-        )
-        ttk.Label(row, text="px").pack(side="left", padx=(2, 0))
+        ttk.Label(
+            row, text="px (the smaller side reaches this)"
+        ).pack(side="left", padx=(4, 0))
 
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="aspect", width=6).pack(side="left")
-        Spinner(
-            row, self.up_aspmin_var, step=UPSCALE_ASPECT_STEP,
-            decimals=UPSCALE_ASPECT_DECIMALS,
-        ).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(
-            row, self.up_aspmax_var, step=UPSCALE_ASPECT_STEP,
-            decimals=UPSCALE_ASPECT_DECIMALS,
-        ).pack(side="left")
-        ttk.Label(row, text="W/H").pack(side="left", padx=(2, 0))
+        # WHICH images qualify — a stacked FilterEditor (Phase 4) sharing
+        # the app-wide preset library, seeded with today's aspect gate
+        self.upscale_filter = FilterEditor(
+            box, conditions=self._default_upscale_conditions,
+            presets=self._filter_presets,
+            on_presets_changed=self._on_filter_presets_changed,
+        )
+        self.upscale_filter.pack(fill="x", pady=(2, 0))
 
     def _apply_finetune_visibility(self) -> None:
         """Reflect ``settings_collapsed_var``: pack or unpack this agent's
@@ -2006,14 +2027,27 @@ class AgentPanel(ttk.Labelframe):
         )
 
     def upscale_params(self) -> dict:
-        """The four upscale-gate numbers as engine kwargs — ValueError
-        propagates to the caller's Start validation."""
-        return {
-            "min_width": int(float(self.up_minw_var.get())),
-            "min_height": int(float(self.up_minh_var.get())),
-            "aspect_min": float(self.up_aspmin_var.get()),
-            "aspect_max": float(self.up_aspmax_var.get()),
-        }
+        """The upscale gate's engine kwargs (GUI rework Phase 6):
+        ``_upscale_params_from_side_and_filter`` over the min-side
+        spinner + the embedded FilterEditor's aspect condition.
+        ValueError propagates to the caller's Start validation — from
+        EITHER the spinner (not a number) or the FilterEditor (an
+        unparsable row, see ``FilterEditor.get_conditions``). Non-aspect
+        conditions in the same filter are NOT reflected in this dict —
+        see ``upscale_conditions()`` and ``_gate_and_upscale``."""
+        min_side = int(float(self.up_minside_var.get()))
+        return _upscale_params_from_side_and_filter(
+            min_side, self.upscale_filter.get_conditions()
+        )
+
+    def upscale_conditions(self) -> list[filters.FilterCondition]:
+        """The upscale gate's FULL stacked filter, exactly as currently
+        edited (root Rule #1: the caller uses this — not just
+        ``upscale_params()``'s narrower kwargs — to honor stacked non-
+        aspect conditions via ``filters.matches()``, see
+        ``_gate_and_upscale``). ValueError propagates like
+        ``upscale_params()``."""
+        return self.upscale_filter.get_conditions()
 
     def set_run_state(
         self, running: bool, pending_restart: bool = False
@@ -2091,26 +2125,56 @@ class AgentPanel(ttk.Labelframe):
             "pause_max": self.pause_max_var,
             "act_min": self.act_min_var,
             "act_max": self.act_max_var,
-            "up_minw": self.up_minw_var,
-            "up_minh": self.up_minh_var,
-            "up_aspmin": self.up_aspmin_var,
-            "up_aspmax": self.up_aspmax_var,
+            "up_minside": self.up_minside_var,
             "settings_collapsed": self.settings_collapsed_var,
         }
 
     def persist_vars(self) -> list[tk.Variable]:
+        """Every tk.Variable this panel auto-saves on write (see
+        ``PainterGui._wire_persistence``). The upscale FilterEditor's
+        condition stack is NOT a tk.Variable — it has no per-keystroke
+        trace — so an edit there alone waits for the NEXT debounced
+        save (triggered by any other field) or the app's close-time
+        save (``PainterGui._on_close`` always calls ``_save_now()``,
+        which reads ``get_settings()`` fresh); it is never silently
+        lost, just not INSTANTLY scheduled like the fields below."""
         return list(self._vars().values())
 
     def get_settings(self) -> dict:
-        return {key: var.get() for key, var in self._vars().items()}
+        data = {key: var.get() for key, var in self._vars().items()}
+        # the upscale gate's FilterEditor (GUI rework Phase 6) — read
+        # fresh every call, same as every other "live widget state"
+        # persisted field; see persist_vars()'s docstring for why this
+        # one has no per-keystroke save trace
+        data["up_filter_conditions"] = [
+            filters.condition_to_dict(c)
+            for c in self.upscale_filter.get_conditions()
+        ]
+        return data
 
-    def apply_settings(self, stored: dict) -> None:
+    def apply_settings(
+        self, stored: dict,
+        upscale_conditions: list[filters.FilterCondition] | None = None,
+    ) -> None:
         """Missing keys keep the current defaults; the restored collapse
-        state is reflected into the panel."""
+        state is reflected into the panel.
+
+        ``upscale_conditions`` (GUI rework Phase 6) is the ALREADY-
+        PARSED replacement for the upscale FilterEditor's seeded
+        default — ``None`` (a fresh settings.json, or a pre-Phase-6 one
+        with nothing usable to migrate) leaves the widget's own
+        construction-time default untouched, exactly matching every
+        other field's "missing key = keep default" contract. The
+        CALLER (``PainterGui._apply_settings``) owns parsing/migrating
+        the raw JSON — see ``_migrate_legacy_upscale_gate`` and
+        ``_parse_condition_dicts`` — because that needs a log sink this
+        widget does not carry."""
         variables = self._vars()
         for key in self._PERSIST:
             if key in stored:
                 variables[key].set(stored[key])
+        if upscale_conditions is not None:
+            self.upscale_filter.set_conditions(upscale_conditions)
         self._apply_finetune_visibility()
 
 
@@ -3519,6 +3583,136 @@ def _migrate_legacy_aspect_filter(stored: dict) -> list[dict]:
     ))]
 
 
+def _upscale_params_from_side_and_filter(
+    min_side: int, conditions: list[filters.FilterCondition],
+) -> dict:
+    """The upscale gate's min-SIDE spinner + its embedded FilterEditor's
+    condition stack -> ``upscale_if_small``'s four kwargs (GUI rework
+    Phase 6, replacing the old four-field ``up_minw``/``up_minh``/
+    ``up_aspmin``/``up_aspmax`` gate). ``min_side`` becomes BOTH
+    ``min_width`` and ``min_height`` — the gate no longer distinguishes
+    the two axes (owner decision); the shipped default already had them
+    equal at 800px, so the default case behaves byte-identically.
+
+    ``aspect_min``/``aspect_max`` are read off the FIRST Aspect (exact
+    or range — ``filters.py`` treats the two identically, see its own
+    docstring) condition in the stack whose polarity is IF: an exact
+    algebraic match for what ``upscale_if_small`` already means by
+    "qualifies" (``aspect_min <= W/H <= aspect_max``). NO such
+    condition — the owner deleted the aspect row, or set it to IF NOT,
+    a shape ``upscale_if_small``'s plain ``[lo, hi]`` pair cannot
+    express — widens to ``(0, inf)``: every aspect ratio qualifies for
+    the size gate alone.
+
+    IMPORTANT — this is a deliberately PARTIAL translation, never the
+    full story (root Rule #1: never silently drop a condition).
+    ``upscale_if_small`` has no kwarg for a Width/Height/Any-side
+    condition, a SECOND aspect condition, or an IF-NOT aspect condition
+    — anything in ``conditions`` beyond the one this function folds in
+    is the CALLER's responsibility to enforce separately via
+    ``filters.matches()`` against the FULL, unmodified ``conditions``
+    list before ever invoking ``upscale_if_small`` with this function's
+    output. See ``_gate_and_upscale`` (the per-image site-pipeline
+    gate) and ``PainterGui._start_tool``'s upscale branch (the
+    standalone tool's pre-filtered file list, via ``_filter_files``) —
+    both call sites apply that gate; this function alone would silently
+    ignore every non-aspect condition, so it is never used alone.
+    """
+    aspect_min, aspect_max = 0.0, float("inf")
+    for c in conditions:
+        if (
+            c.kind in (FILTER_KIND_ASPECT_EXACT, FILTER_KIND_ASPECT_RANGE)
+            and c.polarity == FILTER_POLARITY_IF
+        ):
+            aspect_min, aspect_max = c.lo, c.hi
+            break
+    return {
+        "min_width": min_side,
+        "min_height": min_side,
+        "aspect_min": aspect_min,
+        "aspect_max": aspect_max,
+    }
+
+
+def _gate_and_upscale(
+    path: Path, log: Callable[[str], None],
+    conditions: list[filters.FilterCondition], params: dict,
+) -> str:
+    """``upscale_if_small`` for ONE already-saved image, gated on the
+    FULL stacked filter FIRST (GUI rework Phase 6, root Rule #1): any
+    condition beyond the single aspect row ``_upscale_params_from_
+    side_and_filter`` already folded into ``params`` — a stacked Width/
+    Height/Any-side row, a second aspect row, or an IF-NOT aspect row —
+    must still gate the image, losslessly. Used by the PER-SITE
+    pipeline (``PainterGui._compose_post_save``), which has no upfront
+    file list to pre-filter (each image is gated as it is saved); the
+    STANDALONE Upscale tool instead pre-filters its whole file list
+    once via ``_filter_files`` (same ``conditions``, same
+    ``filters.matches()`` engine, applied to a list instead of one
+    path).
+
+    An empty ``conditions`` list — the FilterEditor's own "no filter,
+    process everything" contract — skips the extra ``Image.open`` and
+    goes straight to ``upscale_if_small``; the common seeded-default
+    gate (one Aspect condition) DOES open the image here as well as
+    inside ``upscale_if_small`` itself — a harmless redundant re-check
+    (both read the SAME aspect band), not a bug: correctness over a
+    micro-optimisation on a path that already waits multiple seconds
+    per image for the site's own generation (root Priority A is about
+    hot paths; this is not one)."""
+    if conditions:
+        with Image.open(path) as im:
+            width, height = im.size
+        if not filters.matches(width, height, conditions):
+            return "nothing"
+    from painter.upscale import upscale_if_small
+
+    return upscale_if_small(path, log, **params)
+
+
+def _migrate_legacy_upscale_gate(min_width, aspect_min, aspect_max) -> dict:
+    """One-time migration (GUI rework Phase 6, owner decision
+    2026-07-21): the OLD three upscale-gate numbers — a min WIDTH (min
+    HEIGHT is DROPPED; the two axes collapse into ONE min-SIDE spinner,
+    and every shipped default and every real settings.json seen so far
+    already had width == height, so nothing observable is lost in
+    practice) and an aspect ``[from, to]`` band — into the NEW neutral
+    shape ``{"min_side": int, "conditions": [ONE Aspect (range)
+    condition dict, IF polarity, the SAME band]}``.
+
+    Shared by BOTH migration call sites — the per-agent ``up_minw``/
+    ``up_aspmin``/``up_aspmax`` fields AND the standalone tool's
+    ``upscale_tool`` dict's ``min_width``/``aspect_min``/``aspect_max``
+    — same numbers, same target shape, only the SOURCE key names
+    differ; each caller extracts its own three values (defaulting a
+    missing key to today's shipped default) and hands them here. The
+    returned dict's field names are neutral (not tied to either
+    caller's own persisted-JSON key names — the per-agent caller writes
+    them into ``up_minside``/``up_filter_conditions`` as STRINGS/lists,
+    the standalone caller keeps ``min_side`` as a plain int matching
+    ``UpscaleParamsDialog.result``'s own shape).
+
+    Raises ``ValueError``/``TypeError`` loudly (root Rule #1) when a
+    value will not convert to a number — mirrors ``_migrate_legacy_
+    aspect_filter``'s own precedent exactly (missing key -> the caller
+    already substituted a default before calling this; PRESENT but
+    unparsable -> loud, the caller catches and falls back to the
+    shipped default gate, never crashes the app on a hand-corrupted
+    settings.json)."""
+    min_side = int(float(min_width))
+    lo = float(aspect_min)
+    hi = float(aspect_max)
+    return {
+        "min_side": min_side,
+        "conditions": [
+            filters.condition_to_dict(filters.FilterCondition(
+                kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
+                lo=lo, hi=hi,
+            ))
+        ],
+    }
+
+
 class PainterGui:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -3586,15 +3780,21 @@ class PainterGui:
         self._pending_events: list[tuple] = []  # buffered __event__ msgs
 
         # remembered dialog values (owner 2026-07-19): the standalone
-        # Upscale dialog's last-used four params and the last aspect W:H —
+        # Upscale dialog's last-used gate and the last aspect W:H —
         # restored in _apply_settings and re-saved on change. Each agent's
         # own Settings-gear collapse state is persisted by the AgentPanel.
-        self._upscale_tool_params: dict = {
-            "min_width": UPSCALE_MIN_WIDTH,
-            "min_height": UPSCALE_MIN_HEIGHT,
-            "aspect_min": UPSCALE_ASPECT_MIN,
-            "aspect_max": UPSCALE_ASPECT_MAX,
-        }
+        # GUI rework Phase 6: the old four scalar params collapsed into a
+        # min-SIDE number + a FilterEditor condition stack (mirrors each
+        # AgentPanel's own upscale gate) — see
+        # _upscale_params_from_side_and_filter for how these resolve into
+        # upscale_if_small's kwargs.
+        self._upscale_tool_minside: int = UPSCALE_MIN_SIDE_DEFAULT
+        self._upscale_tool_conditions: list[filters.FilterCondition] = [
+            filters.FilterCondition(
+                kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
+                lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
+            )
+        ]
         self._aspect_ratio: tuple[int, int] = (
             ASPECT_DEFAULT_W, ASPECT_DEFAULT_H
         )
@@ -3902,6 +4102,8 @@ class PainterGui:
                 agents, key,
                 on_start=self._start_site, on_stop=self._stop_site,
                 on_pause=self._toggle_pause_job,
+                filter_presets=self._filter_presets,
+                on_filter_presets_changed=self._on_filter_presets_changed,
             )
             panel.grid(row=0, column=i, sticky="nsew", padx=4)
             agents.columnconfigure(i, weight=1)
@@ -4391,10 +4593,14 @@ class PainterGui:
         never a merge — see ``_save_now``)."""
         self._schedule_save()
 
-    def _remember_upscale_params(self, params: dict) -> None:
-        """Persist the standalone Upscale dialog's last-used four params
-        so it pre-fills them next run (owner 2026-07-19)."""
-        self._upscale_tool_params = dict(params)
+    def _remember_upscale_tool_params(self, choice: dict) -> None:
+        """Persist the standalone Upscale dialog's last-used min-side +
+        filter so it pre-fills them next run (owner 2026-07-19; GUI
+        rework Phase 6: ``choice`` is ``UpscaleParamsDialog.result`` —
+        ``{"min_side": int, "conditions": list[FilterCondition]}``,
+        replacing the old four-scalar-dict shape)."""
+        self._upscale_tool_minside = choice["min_side"]
+        self._upscale_tool_conditions = list(choice["conditions"])
         self._schedule_save()
 
     def _start_tool(self, slot: str) -> None:
@@ -4479,24 +4685,42 @@ class PainterGui:
                 f" already at {ratio_w}:{ratio_h} are skipped untouched."
             )
         else:
+            # only the upscale branch below ever populates this; BG/Crop
+            # leave it empty, making the shared _filter_files() call a
+            # no-op for them (mirrors the Aspect branch's own unconditional
+            # call above)
+            upscale_conditions: list[filters.FilterCondition] = []
             if slot == "upscale":
-                # Upscale asks its FOUR gate params first (owner
-                # 2026-07-19), PRE-FILLED with the last-used values; then
-                # runs folder-based like BG/Crop with those params bound.
-                params = UpscaleParamsDialog(
-                    self.root, self._upscale_tool_params
+                # Upscale asks its min-side + FilterEditor gate first
+                # (owner 2026-07-19; GUI rework Phase 6 replaced the old
+                # four scalar fields with ONE min-side spinner + a
+                # stacked FilterEditor), PRE-FILLED with the last-used
+                # values; then runs folder-based like BG/Crop with that
+                # gate bound.
+                choice = UpscaleParamsDialog(
+                    self.root,
+                    {
+                        "min_side": self._upscale_tool_minside,
+                        "conditions": self._upscale_tool_conditions,
+                    },
+                    presets=self._filter_presets,
+                    on_presets_changed=self._on_filter_presets_changed,
                 ).result
-                if params is None:
+                if choice is None:
                     return
-                self._remember_upscale_params(params)
+                self._remember_upscale_tool_params(choice)
+                upscale_conditions = choice["conditions"]
+                up_params = _upscale_params_from_side_and_filter(
+                    choice["min_side"], upscale_conditions
+                )
                 from painter.upscale import upscale_if_small
 
                 func = (
-                    lambda path, log: upscale_if_small(path, log, **params)
+                    lambda path, log: upscale_if_small(
+                        path, log, **up_params
+                    )
                 )
-                label = (
-                    f"Upscale ≥{params['min_width']}x{params['min_height']}"
-                )
+                label = f"Upscale ≥{up_params['min_width']}px min side"
             else:
                 func = self._tool_func(slot)
             folder = filedialog.askdirectory(
@@ -4506,8 +4730,23 @@ class PainterGui:
                 return
             folder_path = Path(folder)
             files = self._iter_images(folder_path)
+            # the standalone Upscale tool pre-filters its candidate file
+            # list the SAME way Aspect does above (root Rule #1: this is
+            # how a stacked Width/Height/Any-side condition — or a SECOND
+            # aspect condition — gets honored, since the simple upscale
+            # kwargs above can only express ONE aspect band; see
+            # _upscale_params_from_side_and_filter's docstring). A no-op
+            # for BG/Crop (upscale_conditions is always [] for them).
+            total_before = len(files)
+            files = _filter_files(files, upscale_conditions, self._log)
+            filt_note = (
+                f"\nFilter: {len(upscale_conditions)} condition(s) —"
+                f" {len(files)} of {total_before} image(s) match"
+                if upscale_conditions else ""
+            )
             message = (
-                f"{label} IN PLACE for every image under:\n{folder}?\n\n"
+                f"{label} IN PLACE for every image under:\n{folder}?"
+                f"{filt_note}\n\n"
                 "(the originals are backed up so you can Restore; files"
                 " with nothing to do are skipped untouched)"
             )
@@ -4860,9 +5099,15 @@ class PainterGui:
         if problem:
             return problem
 
-        # this agent's four upscale-gate params, read ONCE at Start (like
-        # the pace values) — validated by the caller before we get here
+        # this agent's upscale-gate kwargs AND its full filter stack, read
+        # ONCE at Start (like the pace values) — validated by the caller
+        # before we get here. Both are needed: up_params is the simple
+        # min-side/aspect kwargs upscale_if_small takes; up_conditions is
+        # the FULL stack (aspect AND any stacked Width/Height/Any-side
+        # rows), checked via _gate_and_upscale so nothing is silently
+        # dropped (root Rule #1 — see _upscale_params_from_side_and_filter).
         up_params = panel.upscale_params() if do_upscale else {}
+        up_conditions = panel.upscale_conditions() if do_upscale else []
         log = lambda msg: self._q.put(f"[{key}]     {msg}")
 
         def post_save(path: Path) -> str:
@@ -4877,10 +5122,9 @@ class PainterGui:
             if do_crop:
                 parts.append(f"CROP: {crop_transparent(path, log)}")
             if do_upscale:
-                from painter.upscale import upscale_if_small
-
                 parts.append(
-                    f"UPSCALE: {upscale_if_small(path, log, **up_params)}"
+                    "UPSCALE:"
+                    f" {_gate_and_upscale(path, log, up_conditions, up_params)}"
                 )
             return ", ".join(parts)
 
@@ -4962,24 +5206,27 @@ class PainterGui:
             except ValueError:
                 messagebox.showerror(
                     "PromptPainter",
-                    f"{SITES[key].name}: Upscale-gate values must be numbers.",
+                    f"{SITES[key].name}: Upscale-gate min side must be a"
+                    " number, and every filter row must be a valid"
+                    " number (FROM <= TO).",
                 )
                 return
-            if up["min_width"] <= 0 or up["min_height"] <= 0 or (
-                up["aspect_min"] <= 0 or up["aspect_max"] <= 0
-            ):
+            if up["min_width"] <= 0:
                 messagebox.showerror(
                     "PromptPainter",
-                    f"{SITES[key].name}: Upscale-gate min W/H and aspect"
-                    " bounds must all be positive.",
+                    f"{SITES[key].name}: Upscale-gate min side must be"
+                    " positive.",
                 )
                 return
-            if up["aspect_min"] > up["aspect_max"]:
-                messagebox.showerror(
-                    "PromptPainter",
-                    f"{SITES[key].name}: Upscale aspect FROM must be <= TO.",
-                )
-                return
+            # NOTE: no aspect_min/aspect_max positivity/ordering check
+            # here (GUI rework Phase 6) — aspect_min=0/aspect_max=inf is
+            # now a VALID "no aspect condition" state (see
+            # _upscale_params_from_side_and_filter), and lo <= hi is
+            # already guaranteed by FilterEditor's own row validation
+            # (_FilterConditionRow.to_condition raises before a row with
+            # FROM > TO can ever reach get_conditions()) — the old
+            # ordering check is unreachable dead code once that upstream
+            # guarantee holds, so it is intentionally not reproduced here.
         timing = replace(
             TIMING,
             pause_min_s=pause_min,
@@ -5333,7 +5580,16 @@ class PainterGui:
             # the GUI so the whole-dict save round-trips it; painter.ai
             # reads it back from settings.json per call
             GEMINI_KEY_SETTING: self._gemini_key,
-            "upscale_tool": dict(self._upscale_tool_params),
+            # GUI rework Phase 6: min-side + a FilterEditor condition
+            # stack, replacing the old four-scalar shape (see
+            # _migrate_legacy_upscale_gate for the one-time inverse)
+            "upscale_tool": {
+                "min_side": self._upscale_tool_minside,
+                "conditions": [
+                    filters.condition_to_dict(c)
+                    for c in self._upscale_tool_conditions
+                ],
+            },
             "aspect_ratio": list(self._aspect_ratio),
             "aspect_filter_conditions": [
                 filters.condition_to_dict(c)
@@ -5368,17 +5624,105 @@ class PainterGui:
                 f" default: {DEFAULT_OUT_DIR}"
             )
         for key, panel in self.agents.items():
-            panel.apply_settings(stored.get("agents", {}).get(key, {}))
+            agent_stored = dict(stored.get("agents", {}).get(key, {}))
+            # per-agent upscale gate (GUI rework Phase 6): the NEW
+            # 'up_minside' key wins when present; otherwise a ONE-TIME
+            # LOUD migration reads the OLD four scalar fields
+            # (up_minw/up_minh/up_aspmin/up_aspmax) exactly once — never
+            # written back (up_minh is DROPPED: the two axes collapse
+            # into one min-side spinner, and up_minw is used for it —
+            # every shipped default and every real settings.json seen so
+            # far already had up_minw == up_minh, so nothing observable
+            # is lost in practice).
+            if "up_minside" not in agent_stored and (
+                "up_minw" in agent_stored or "up_minh" in agent_stored
+                or "up_aspmin" in agent_stored or "up_aspmax" in agent_stored
+            ):
+                try:
+                    migrated = _migrate_legacy_upscale_gate(
+                        agent_stored.get("up_minw", UPSCALE_MIN_SIDE_DEFAULT),
+                        agent_stored.get("up_aspmin", UPSCALE_ASPECT_MIN),
+                        agent_stored.get("up_aspmax", UPSCALE_ASPECT_MAX),
+                    )
+                except (TypeError, ValueError) as exc:
+                    self._log(
+                        f"MIGRATION: {SITES[key].name} legacy upscale gate"
+                        f" is unreadable ({exc}) — using the shipped"
+                        " default upscale gate"
+                    )
+                else:
+                    self._log(
+                        f"MIGRATION: {SITES[key].name} legacy upscale gate"
+                        " (up_minw/up_minh/up_aspmin/up_aspmax) ->"
+                        f" up_minside={migrated['min_side']} + 1 filter"
+                        " condition, now under 'up_minside'/"
+                        "'up_filter_conditions' (one-time; the old keys"
+                        " stay on disk unread from now on)"
+                    )
+                    agent_stored["up_minside"] = str(migrated["min_side"])
+                    agent_stored["up_filter_conditions"] = migrated[
+                        "conditions"
+                    ]
+
+            upscale_conditions = None
+            saved_up_conditions = agent_stored.get("up_filter_conditions")
+            if isinstance(saved_up_conditions, list):
+                upscale_conditions = _parse_condition_dicts(
+                    saved_up_conditions, self._log
+                )
+            panel.apply_settings(
+                agent_stored, upscale_conditions=upscale_conditions
+            )
 
         # remembered dialog values (owner 2026-07-19): the standalone
-        # Upscale params and the last aspect W:H (each agent's own
+        # Upscale gate and the last aspect W:H (each agent's own
         # Settings-gear collapse state is restored in panel.apply_settings
         # above). Each falls back to the current default on a missing key.
+        #
+        # GUI rework Phase 6: the NEW {"min_side", "conditions"} shape
+        # wins when present; otherwise a ONE-TIME LOUD migration reads
+        # the OLD {"min_width", "min_height", "aspect_min", "aspect_max"}
+        # shape exactly once (same up_minh-dropped rationale as the
+        # per-agent migration above) — never written back, see
+        # _collect_settings, which no longer emits the old field names.
         saved_up = stored.get("upscale_tool")
-        if isinstance(saved_up, dict):
-            for k in self._upscale_tool_params:
-                if k in saved_up:
-                    self._upscale_tool_params[k] = saved_up[k]
+        if isinstance(saved_up, dict) and "min_side" in saved_up:
+            try:
+                self._upscale_tool_minside = int(saved_up["min_side"])
+            except (TypeError, ValueError):
+                self._log(
+                    f"SETTINGS: upscale_tool.min_side {saved_up['min_side']!r}"
+                    " is not a number — keeping the shipped default"
+                )
+            raw_conditions = saved_up.get("conditions")
+            if isinstance(raw_conditions, list):
+                self._upscale_tool_conditions = _parse_condition_dicts(
+                    raw_conditions, self._log
+                )
+        elif isinstance(saved_up, dict) and "min_width" in saved_up:
+            try:
+                migrated = _migrate_legacy_upscale_gate(
+                    saved_up.get("min_width", UPSCALE_MIN_SIDE_DEFAULT),
+                    saved_up.get("aspect_min", UPSCALE_ASPECT_MIN),
+                    saved_up.get("aspect_max", UPSCALE_ASPECT_MAX),
+                )
+            except (TypeError, ValueError) as exc:
+                self._log(
+                    f"MIGRATION: legacy 'upscale_tool' dict is unreadable"
+                    f" ({exc}) — using the shipped default upscale gate"
+                )
+            else:
+                self._log(
+                    "MIGRATION: legacy standalone 'upscale_tool'"
+                    " (min_width/min_height/aspect_min/aspect_max) ->"
+                    f" min_side={migrated['min_side']} + 1 filter"
+                    " condition (one-time; the old keys stay on disk"
+                    " unread from now on)"
+                )
+                self._upscale_tool_minside = migrated["min_side"]
+                self._upscale_tool_conditions = _parse_condition_dicts(
+                    migrated["conditions"], self._log
+                )
         saved_ratio = stored.get("aspect_ratio")
         if (
             isinstance(saved_ratio, (list, tuple)) and len(saved_ratio) == 2
@@ -6479,67 +6823,68 @@ class AspectRatioDialog(_ModalToolDialog):
 
 
 class UpscaleParamsDialog(_ModalToolDialog):
-    """The MODAL prompt for the standalone Upscale tool's four gate
-    params — min WIDTH, min HEIGHT, aspect FROM, aspect TO — PRE-FILLED
-    with the last-used values the caller remembers (first run = config
-    defaults 800/800/0.9/1.1). ``result`` is the engine-kwargs dict
-    ``{"min_width", "min_height", "aspect_min", "aspect_max"}`` on Run,
-    or ``None`` on Cancel / Escape. Themed like the app (skinned Toplevel
+    """The MODAL prompt for the standalone Upscale tool's gate (GUI
+    rework Phase 6, replacing the old four-field min-W/min-H/aspect-
+    FROM/aspect-TO layout): ONE min-SIDE spinner — the smaller side's
+    target minimum, in px — plus an embedded stacked ``FilterEditor``
+    deciding WHICH images qualify, PRE-FILLED with the last-used values
+    the caller remembers (first run = today's aspect gate, a single
+    Aspect (range) 0.9-1.1 condition, config default 800px min side).
+
+    ``result`` is ``{"min_side": int, "conditions":
+    list[FilterCondition]}`` on Run, or ``None`` on Cancel / Escape —
+    the caller (``PainterGui._start_tool``) resolves this into
+    ``upscale_if_small``'s kwargs via
+    ``_upscale_params_from_side_and_filter`` AND separately pre-filters
+    the candidate file list via the SAME conditions (root Rule #1: a
+    stacked Width/Height/Any-side condition — or a second/IF-NOT aspect
+    condition the simple kwargs cannot express — must still gate the
+    run, never silently dropped). Themed like the app (skinned Toplevel
     + rounded fields / buttons)."""
 
-    def __init__(self, master, defaults: dict):
+    def __init__(
+        self, master, defaults: dict,
+        presets: dict[str, list[dict]] | None = None,
+        on_presets_changed: Callable[[], None] | None = None,
+    ):
         super().__init__(master)
         self.title("Upscale settings")
         self.resizable(False, False)
         skin_toplevel(self)  # bg registered so a flip re-tints the window
         self.result: dict | None = None
-        self._minw_var = tk.StringVar(value=str(defaults["min_width"]))
-        self._minh_var = tk.StringVar(value=str(defaults["min_height"]))
-        self._aspmin_var = tk.StringVar(
-            value=f"{defaults['aspect_min']:.{UPSCALE_ASPECT_DECIMALS}f}"
-        )
-        self._aspmax_var = tk.StringVar(
-            value=f"{defaults['aspect_max']:.{UPSCALE_ASPECT_DECIMALS}f}"
-        )
+        self._minside_var = tk.StringVar(value=str(defaults["min_side"]))
 
         body = ttk.Frame(self, padding=ASPECT_DIALOG_PAD_PX)
         body.pack(fill="both", expand=True)
         ttk.Label(
             body,
             text=(
-                "Upscale gate — an image is enlarged only when its\n"
-                "aspect W/H is in range AND it is under a minimum:"
+                "Upscale gate — an image is enlarged so its smaller\n"
+                "side reaches this minimum, but only when it also\n"
+                "matches the filter below:"
             ),
         ).pack(anchor="w", pady=(0, 10))
 
         dims = ttk.Frame(body)
         dims.pack(anchor="w")
-        ttk.Label(dims, text="min W", width=6).pack(side="left")
-        self._minw_entry = rounded_entry(
-            dims, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._minw_var,
-            justify="center",
+        ttk.Label(dims, text="min side", width=8).pack(side="left")
+        Spinner(dims, self._minside_var, step=UPSCALE_MINDIM_STEP).pack(
+            side="left"
         )
-        self._minw_entry.pack(side="left")
-        ttk.Label(dims, text="min H", width=6).pack(side="left", padx=(10, 0))
-        rounded_entry(
-            dims, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._minh_var,
-            justify="center",
-        ).pack(side="left")
         ttk.Label(dims, text="px").pack(side="left", padx=(4, 0))
 
-        asp = ttk.Frame(body)
-        asp.pack(anchor="w", pady=(8, 0))
-        ttk.Label(asp, text="aspect", width=6).pack(side="left")
-        rounded_entry(
-            asp, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._aspmin_var,
-            justify="center",
-        ).pack(side="left")
-        ttk.Label(asp, text="–").pack(side="left", padx=8)
-        rounded_entry(
-            asp, width=ASPECT_DIALOG_ENTRY_W, textvariable=self._aspmax_var,
-            justify="center",
-        ).pack(side="left")
-        ttk.Label(asp, text="W/H").pack(side="left", padx=(4, 0))
+        ttk.Label(
+            body,
+            text=(
+                "Optional filter on each image's CURRENT size/ratio\n"
+                "— no conditions = process every image:"
+            ),
+        ).pack(anchor="w", pady=(14, 6))
+        self._filter_editor = FilterEditor(
+            body, conditions=defaults["conditions"], presets=presets,
+            on_presets_changed=on_presets_changed,
+        )
+        self._filter_editor.pack(fill="x")
 
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(14, 0))
@@ -6556,41 +6901,33 @@ class UpscaleParamsDialog(_ModalToolDialog):
         self._center_on(master)
         self.transient(master)
         self.grab_set()
-        self._minw_entry.focus_set()
+        self.focus_set()
         self.wait_window(self)
 
     def _run(self) -> None:
-        """Validate the four fields as positive numbers (min W/H whole,
-        aspect real) with FROM <= TO, then close with ``result`` set as
-        engine kwargs; a bad value stays open with a loud message."""
+        """Validate the min-side spinner (a positive number) and the
+        filter editor's rows, then close with ``result`` set; a bad
+        value stays open with a loud message."""
         try:
-            min_width = int(float(self._minw_var.get().strip()))
-            min_height = int(float(self._minh_var.get().strip()))
-            aspect_min = float(self._aspmin_var.get().strip())
-            aspect_max = float(self._aspmax_var.get().strip())
+            min_side = int(float(self._minside_var.get().strip()))
         except ValueError:
             messagebox.showerror(
                 "PromptPainter",
-                "All four fields must be numbers.", parent=self,
+                "Min side must be a number.", parent=self,
             )
             return
-        if min(min_width, min_height, aspect_min, aspect_max) <= 0:
+        if min_side <= 0:
             messagebox.showerror(
                 "PromptPainter",
-                "Min W/H and aspect bounds must all be positive.",
-                parent=self,
+                "Min side must be positive.", parent=self,
             )
             return
-        if aspect_min > aspect_max:
-            messagebox.showerror(
-                "PromptPainter",
-                "Aspect FROM must be <= aspect TO.", parent=self,
-            )
+        try:
+            conditions = self._filter_editor.get_conditions()
+        except ValueError as exc:
+            messagebox.showerror("PromptPainter", str(exc), parent=self)
             return
-        self.result = {
-            "min_width": min_width, "min_height": min_height,
-            "aspect_min": aspect_min, "aspect_max": aspect_max,
-        }
+        self.result = {"min_side": min_side, "conditions": conditions}
         self.destroy()
 
 

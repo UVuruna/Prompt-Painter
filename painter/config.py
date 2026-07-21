@@ -207,23 +207,38 @@ UPSCALE_ZIP_URL = (
 # Flip back to "realesrgan-x4plus" if a future asset style suits the
 # smoother general-purpose net better.
 UPSCALE_MODEL = "realesrgan-x4plus-anime"
-# Gating (owner 2026-07-19: now FOUR editable params, defaults reproduce
-# the old locked 2026-07-18 rule). An image qualifies ONLY if its aspect
-# ratio W/H is within [UPSCALE_ASPECT_MIN, UPSCALE_ASPECT_MAX] (the
-# circular/badge class) AND (W < UPSCALE_MIN_WIDTH OR H <
-# UPSCALE_MIN_HEIGHT); then it is upscaled (native 4x + LANCZOS, aspect
-# preserved) so W >= UPSCALE_MIN_WIDTH and H >= UPSCALE_MIN_HEIGHT. The
-# defaults (800 / 800 / 0.9 / 1.1) are the old min_px=800 + aspect_tol=0.1
-# behaviour. The GUI exposes all four PER AGENT and in the standalone
-# Upscale dialog (both persisted); these are just the shipped defaults.
+# Gating (owner 2026-07-19, four editable params at the ENGINE level —
+# painter/upscale.py's upscale_if_small signature/defaults are UNCHANGED
+# by the GUI rework). An image qualifies ONLY if its aspect ratio W/H is
+# within [UPSCALE_ASPECT_MIN, UPSCALE_ASPECT_MAX] (the circular/badge
+# class) AND (W < UPSCALE_MIN_WIDTH OR H < UPSCALE_MIN_HEIGHT); then it
+# is upscaled (native 4x + LANCZOS, aspect preserved) so W >=
+# UPSCALE_MIN_WIDTH and H >= UPSCALE_MIN_HEIGHT. The defaults (800 / 800
+# / 0.9 / 1.1) are the old min_px=800 + aspect_tol=0.1 behaviour.
+#
+# GUI rework Phase 6: the GUI no longer exposes min_width/min_height as
+# TWO separate fields — a single min-SIDE spinner drives both (see
+# UPSCALE_MIN_SIDE_DEFAULT below), and the aspect band is authored via
+# an embedded FilterEditor condition instead of dedicated aspect-from/
+# aspect-to fields (gui.py's AgentPanel/UpscaleParamsDialog and
+# gui._upscale_params_from_side_and_filter). These four stay the
+# ENGINE's own defaults, read by upscale_if_small's signature, main.py's
+# CLI, and the GUI's migration of an owner's pre-Phase-6 settings.json.
 UPSCALE_MIN_WIDTH = 800
 UPSCALE_MIN_HEIGHT = 800
 UPSCALE_ASPECT_MIN = 0.9
 UPSCALE_ASPECT_MAX = 1.1
-# GUI spinner steps for the four upscale-gate fields (Rule #4).
-UPSCALE_MINDIM_STEP = 50    # min W / min H spinner step (px)
-UPSCALE_ASPECT_STEP = 0.05  # aspect from / to spinner step
-UPSCALE_ASPECT_DECIMALS = 2  # aspect fields show 2 decimals (0.90 / 1.10)
+# GUI spinner step for the upscale gate's min-side field (Rule #4).
+UPSCALE_MINDIM_STEP = 50  # min-side spinner step (px)
+# GUI rework Phase 6: the per-agent AND standalone upscale gate collapse
+# min WIDTH + min HEIGHT into ONE min-SIDE spinner (both axes must reach
+# the same minimum now, gated separately by an embedded FilterEditor —
+# see gui.py's AgentPanel/UpscaleParamsDialog and
+# gui._upscale_params_from_side_and_filter). This is that spinner's seed
+# default; reuses UPSCALE_MIN_WIDTH's value (== UPSCALE_MIN_HEIGHT
+# already, by design) so the shipped default behaves byte-identically
+# to the old four-field gate.
+UPSCALE_MIN_SIDE_DEFAULT = UPSCALE_MIN_WIDTH
 
 
 # --- Change aspect ratio (owner's batch deform tool, 2026-07-19) -----

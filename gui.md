@@ -170,8 +170,10 @@ reachability fixes:
   owns its OWN `⚙ Settings` gear button (`assets/icons/settings.png`, on
   the Start/Stop row) that shows/hides THAT agent's collapsible
   **fine-tune** area — its **pause** range, its **action-delay** range,
-  AND its **Upscale gate (this site)** block (min W / min H / aspect FROM
-  / aspect TO) — independently of the other site. HIDDEN by DEFAULT so
+  AND its **Upscale gate (this site)** block (GUI rework Phase 6: ONE
+  min-side Spinner + an embedded `FilterEditor`, replacing the old min
+  W / min H / aspect FROM / aspect TO four-field layout) — independently
+  of the other site. HIDDEN by DEFAULT so
   the panel stays compact; `_toggle_settings` flips the panel's own
   `settings_collapsed_var` and `_apply_finetune_visibility` packs ↔
   `pack_forget`s the panel's `_finetune_box` (built at the panel's bottom)
@@ -275,14 +277,34 @@ reachability fixes:
   (owner 2026-07-19). The gear reveals THIS agent's collapsible
   **fine-tune** area (`_finetune_box`, hidden by default): the **pause**
   Spinner range, the **action delay** Spinner range, and the **Upscale
-  gate (this site)** block — four Spinner fields (min W, min H, aspect
-  FROM, aspect TO) that `panel.upscale_params()` feeds into THAT site's
-  pipeline `upscale_if_small` when its Upscale switch is on. All three
-  moved UNDER the gear (they were formerly always-visible / global);
-  `_toggle_settings` + `_apply_finetune_visibility` show/hide them per
-  agent, and Start still validates the four gate values (positive,
-  FROM ≤ TO) before spawning. Defaults 800 / 800 / 0.90 / 1.10
-  reproduce the old locked gate. A site "participates" in a run by
+  gate (this site)** block. GUI rework Phase 6 simplified the gate from
+  four scalar fields to ONE **min-side** Spinner (the smaller side's
+  target minimum, px) plus an embedded stacked **`FilterEditor`**
+  (deciding WHICH images qualify, pre-seeded with a single Aspect
+  (range) condition at the old default 0.9–1.1 band) — `panel.
+  upscale_params()` resolves the two via the pure module-level
+  `_upscale_params_from_side_and_filter(min_side, conditions)` into
+  `upscale_if_small`'s UNCHANGED `min_width`/`min_height`/`aspect_min`/
+  `aspect_max` kwargs (`min_width = min_height = min_side`; the aspect
+  band comes from the filter's first IF-polarity Aspect condition, or
+  widens to `(0, inf)` — "every ratio qualifies" — when the owner
+  removed it or set it to IF NOT, a shape the plain kwargs cannot
+  express). Any OTHER stacked condition in the same filter (a Width /
+  Height / Any-side row, a second aspect row) is NOT silently dropped
+  (root Rule #1): `panel.upscale_conditions()` exposes the FULL stack,
+  and the site's post-save pipeline (`_compose_post_save`) runs every
+  image through the pure `_gate_and_upscale(path, log, conditions,
+  params)` helper, which checks `painter.filters.matches()` against
+  the WHOLE stack BEFORE calling `upscale_if_small` — a match failure
+  short-circuits to `"nothing"` without ever reaching the engine. Both
+  fields moved UNDER the gear (they were formerly always-visible /
+  global); `_toggle_settings` + `_apply_finetune_visibility` show/hide
+  them per agent, and Start still validates (min side positive; a
+  filter row's own FROM ≤ TO is already enforced by `FilterEditor`
+  itself, so no separate aspect-ordering check is needed here) before
+  spawning. The shipped default (min side 800, Aspect (range) 0.90–1.10
+  IF) reproduces the OLD locked/four-field gate byte-identically. A
+  site "participates" in a run by
   being STARTED — there are no site on/off switches any more, and
   one site running never blocks starting the other. Start/Stop
   availability is STYLED (`style_action_button`): an available
@@ -370,12 +392,23 @@ reachability fixes:
   (`remove_background` / `crop_transparent` / `upscale_if_small` /
   `change_aspect`) runs over the picked images, in order.
   **BG removal / Crop** pick a FOLDER (`askdirectory`) and run over
-  every image under it. **Upscale** (owner 2026-07-19) is folder-based
-  too, but first pops `UpscaleParamsDialog` — a modal asking the FOUR
-  gate params (min W, min H, aspect FROM, aspect TO), PRE-FILLED with the
-  last-used values (`self._upscale_tool_params`, remembered/persisted,
-  positive-number + FROM≤TO validation), then runs `upscale_if_small`
-  with those params bound. **Aspect ratio** pops the `AspectRatioDialog`
+  every image under it. **Upscale** (owner 2026-07-19; simplified GUI
+  rework Phase 6) is folder-based too, but first pops
+  `UpscaleParamsDialog` — a modal asking ONE min-side Spinner (px) plus
+  an embedded stacked `FilterEditor` (deciding WHICH images qualify —
+  same widget/engine as Aspect's own filter below), PRE-FILLED with the
+  last-used values (`self._upscale_tool_minside` /
+  `self._upscale_tool_conditions`, remembered/persisted, min-side-
+  positive + per-row validation from `FilterEditor` itself). `.result`
+  is `{min_side, conditions}`; `_upscale_params_from_side_and_filter`
+  resolves it into `upscale_if_small`'s kwargs (identical resolution
+  and "unmapped conditions matter too" guarantee as the per-agent gate
+  above), and — mirroring Aspect's OWN pre-filter immediately below —
+  the picked file list is pre-filtered via `_filter_files` against the
+  FULL condition stack (not just the one aspect condition the kwargs
+  capture) before the confirm dialog, so a stacked Width/Height/Any-
+  side row is honored even though `upscale_if_small` itself never sees
+  it. **Aspect ratio** pops the `AspectRatioDialog`
   first — a modal with two positive-integer fields **W** and **H**
   (PRE-FILLED with the last-used ratio `self._aspect_ratio`; first run
   16 : 9) beside a visual **`AspectRatioCanvas`** (GUI rework Phase 5 —
@@ -403,9 +436,10 @@ reachability fixes:
   restore**), so `done` = the file was changed (its backup kept,
   before→after measured and shown), REFUSED = the engine said
   "nothing"/"unclear" — nothing to do, its no-op backup dropped (for
-  Upscale: failed the gate — aspect outside the chosen FROM–TO or both
-  sides already ≥ the chosen min W/H; for Aspect: already at the target
-  ratio OR filtered out by the input filter, left byte-unchanged).
+  Upscale: failed the FULL filter stack, or the resolved aspect band,
+  or both sides already ≥ the chosen min side; for Aspect: already at
+  the target ratio OR filtered out by the input filter, left
+  byte-unchanged).
   The op is also TIMED (per-image seconds; skipped items add no time).
   "Changed" keys ONLY on the engine ACTUALLY REWRITING the file (a
   "done"), never on the metric size (owner 2026-07-19) — a 3px crop or a
@@ -431,6 +465,20 @@ reachability fixes:
   (naming the offending kind) on an unparsable or inverted row rather
   than returning a partial list; the embedding dialog/panel catches it
   and shows a messagebox (`AspectRatioDialog._run` does exactly this).
+  Callers as of GUI rework Phase 6: `AspectRatioDialog` (a MODAL
+  dialog's optional input filter — reads `get_conditions()` once, on
+  Files…/Folder…), each `AgentPanel`'s upscale-gate block AND
+  `UpscaleParamsDialog` (BOTH now embed a FilterEditor the same way,
+  pre-seeded with one Aspect (range) condition — see **The two AGENT
+  PANELS** and the Upscale tool description above). The two EMBEDDED,
+  always-visible callers (AgentPanel, unlike the modal dialogs) have no
+  "Run"/"OK" moment to read `get_conditions()` at, so their conditions
+  are captured FRESH every settings save (`AgentPanel.get_settings`)
+  rather than through a per-keystroke `tk.Variable` trace like every
+  other persisted field — never silently lost (the debounced autosave
+  any OTHER field edit schedules, or the app's close-time save, both
+  pick up the current widget state), just not INSTANTLY scheduled by
+  a filter-only edit the way e.g. the min-side spinner is.
   **Exact-aspect tolerance** (fixes Phase 3's flagged caveat): a pinned
   "Aspect (exact)" `lo == hi` is a razor-thin float equality a REAL
   decoded image's W/H division almost never lands on, so ITS row shows
@@ -611,20 +659,30 @@ reachability fixes:
   whole-dict save round-trips it; the wizard's Save persists
   IMMEDIATELY via `set_gemini_key` → `_save_now`, since `painter.ai`
   reads the key back from disk per call), `upscale_tool`
-  (the standalone Upscale dialog's last-used `min_width`/`min_height`/
-  `aspect_min`/`aspect_max`), `aspect_ratio` (the last `[W, H]` from
+  (the standalone Upscale dialog's last-used gate — GUI rework Phase 6:
+  `{"min_side": int, "conditions": [condition-dict, ...]}`, REPLACING
+  the old `min_width`/`min_height`/`aspect_min`/`aspect_max` scalar
+  shape), `aspect_ratio` (the last `[W, H]` from
   the Aspect dialog), `aspect_filter_conditions` (GUI rework Phase 4 —
   `self._aspect_filter_conditions`, a list of
   `painter.filters.condition_to_dict` dicts; REPLACES the old scalar
   `aspect_filter` from/to/mode dict), `filter_presets`
   (`config.FILTER_PRESETS_SETTING` — the shared `FilterEditor` preset
-  library, `{name: [condition-dict, ...]}`), and `agents.<site>` with
+  library, `{name: [condition-dict, ...]}` — shared by EVERY
+  `FilterEditor` instance in the app, including each agent's own
+  upscale-gate filter and the standalone Upscale dialog's), and
+  `agents.<site>` with
   `background`, `style`
   (the rendering-style dropdown), `bg_removal`, `crop`, `upscale`,
   `report`, `safer_retry`, `continue_nudge`, `new_chat`,
   `pause_min/max`, `act_min/max`,
-  the per-agent upscale-gate `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax`,
-  and that agent's `settings_collapsed`.
+  the per-agent upscale-gate `up_minside` (GUI rework Phase 6, REPLACING
+  the old `up_minw`/`up_minh`/`up_aspmin`/`up_aspmax` four scalars) plus
+  `up_filter_conditions` (that agent's embedded `FilterEditor` stack —
+  NOT a plain `tk.Variable`, so `AgentPanel.get_settings`/
+  `apply_settings` handle it explicitly, outside the `_PERSIST`-tuple
+  loop every other field goes through), and that agent's
+  `settings_collapsed`.
 
   **The `aspect_filter` -> `aspect_filter_conditions` migration** (GUI
   rework Phase 4, owner decision 2026-07-21): `_apply_settings` prefers
@@ -646,6 +704,29 @@ reachability fixes:
   migration call) — the same "a corrupt file loses the remembered
   choice, never the app" precedent `painter.settings.load_settings`
   already sets.
+
+  **The upscale-gate migration** (GUI rework Phase 6, same additive
+  pattern): both upscale gates — each agent's `up_minw`/`up_minh`/
+  `up_aspmin`/`up_aspmax` AND the standalone dialog's `upscale_tool`
+  `min_width`/`min_height`/`aspect_min`/`aspect_max` — migrate to the
+  NEW `up_minside`+`up_filter_conditions` / `upscale_tool.{min_side,
+  conditions}` shapes via the shared pure `gui._migrate_legacy_
+  upscale_gate(min_width, aspect_min, aspect_max) -> {"min_side",
+  "conditions"}` (Tk-free, unit-tested against the owner's real saved
+  numbers in `test_gui_upscale.py`). `min_height` is intentionally
+  DROPPED — the two axes collapse into ONE min-side spinner, and
+  `min_width`/`up_minw` is kept for it (every shipped default and every
+  real settings.json seen so far already had width == height, so
+  nothing observable is lost in practice); the aspect `[from, to]`
+  becomes ONE `FILTER_KIND_ASPECT_RANGE` IF condition, the SAME numbers.
+  Each of the two call sites (`_apply_settings`'s per-agent loop and its
+  standalone-tool block) triggers migration only when the OLD keys are
+  present AND the NEW `up_minside` / `min_side` key is ABSENT, logs
+  loudly via `self._log` on success (and separately on a genuinely
+  unparsable legacy value, falling back to the shipped default gate
+  rather than crashing startup), and never rewrites the old keys —
+  they naturally drop off disk on the next save, same as every other
+  migration in this file.
 
 ## The Dashboard — per-JOB panels (owner 2026-07-19)
 The dashboard shows one panel PER RUNNING JOB, up to SEVEN in parallel:

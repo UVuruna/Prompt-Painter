@@ -17,10 +17,9 @@ The dict SHAPE lives with the GUI (`_collect_settings` /
 `_apply_settings`, documented in [GUI](../gui.md)); as of owner
 2026-07-19 it also carries `settings_collapsed` (the per-agent
 fine-tune collapse), `upscale_tool` (the standalone Upscale dialog's
-last-used four gate params), `aspect_ratio` (the last W:H entered in
-the Aspect dialog), a per-agent `style` (the rendering-style
-dropdown, under `agents.<site>`), and per-agent `up_minw`/`up_minh`/
-`up_aspmin`/`up_aspmax` under `agents.<site>` — all plain JSON scalars
+last-used gate), `aspect_ratio` (the last W:H entered in
+the Aspect dialog), and a per-agent `style` (the rendering-style
+dropdown, under `agents.<site>`) — all plain JSON scalars
 and small dicts, so this module round-trips them with zero special
 handling. Since owner 2026-07-20 it also carries `gemini_api_key` —
 the AI features' free AI Studio key, written by the GUI's guided
@@ -37,6 +36,19 @@ and never written back — like any key the GUI stops emitting, it
 simply drops off disk on the next save (this module always writes
 the WHOLE dict it is given, never a merge — see `save_settings`
 below).
+
+GUI rework Phase 6 (2026-07-21) applied the SAME additive-migration
+pattern to the upscale gate: the per-agent `up_minw`/`up_minh`/
+`up_aspmin`/`up_aspmax` four scalars (under `agents.<site>`) became
+ONE `up_minside` string plus `up_filter_conditions` (a [Shared Filter
+Framework](filters.md) condition list, mirroring
+`aspect_filter_conditions`'s own shape); `upscale_tool`'s old
+`min_width`/`min_height`/`aspect_min`/`aspect_max` scalars became
+`{"min_side": int, "conditions": [condition-dict, ...]}`. Both OLD
+shapes are read ONCE each (`gui._migrate_legacy_upscale_gate`, only
+when the corresponding NEW key is absent) and never written back —
+same drop-off-disk-on-next-save behaviour as every other migrated key
+here.
 
 ## Connections
 
