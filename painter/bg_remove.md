@@ -38,7 +38,7 @@ returns `"unclear"`.
 
 ### Uses
 - numpy, scipy (`ndimage`), Pillow
-- [Config](config.md) — `CROP_INK_ALPHA`, `CROP_MIN_INK_PX`,
+- [Config (subfolder)](config/___config.md) — `CROP_INK_ALPHA`, `CROP_MIN_INK_PX`,
   `CLEAN_EDGE_ALPHA` (the ink-crop / edge-cleanup thresholds),
   `BLACK_VOID_MAX` (the black-void brightness ceiling), and the two
   SAFETY guards `SAFETY_MAX_REMOVE_FRAC` /

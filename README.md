@@ -30,7 +30,7 @@ consumer: DOMY Watch prompt sheets.
     🖼️ logo.svg
   📁 painter/           ← config, parser, driver, loop, chrome,
     📝 ___painter.md       bg remover, postprocess
-    🐍 config.py
+    📁 config/             ← every tunable, split by domain
     🐍 sheet_parser.py
     🐍 driver.py
     🐍 runner.py
@@ -51,7 +51,7 @@ consumer: DOMY Watch prompt sheets.
   sheet author (person or agent) follows; also behind the GUI's
   **Instructions** button
 - [Painter (folder)](painter/___painter.md) — the engine package:
-  [Config](painter/config.md), [Sheet Parser](painter/sheet_parser.md),
+  [Config (subfolder)](painter/config/___config.md), [Sheet Parser](painter/sheet_parser.md),
   [CDP Driver](painter/driver.md), [Run Loop](painter/runner.md),
   [Chrome Launcher](painter/chrome.md),
   [Background Remover](painter/bg_remove.md),

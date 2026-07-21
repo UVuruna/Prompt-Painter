@@ -50,7 +50,7 @@ rondel, x4plus) to corrupt the output — tile misalignment, lost detail.
 ## Connections
 
 ### Uses
-- [Config](config.md) — the `UPSCALE_*` block, `fmt_size`
+- [Config (subfolder)](config/___config.md) — the `UPSCALE_*` block, `fmt_size`
 - Pillow (LANCZOS correction), `urllib`/`zipfile` (the one-time
   download), `subprocess` (the binary)
 

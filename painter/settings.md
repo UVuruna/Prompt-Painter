@@ -53,7 +53,7 @@ here.
 ## Connections
 
 ### Uses
-- [Config](config.md) — `SETTINGS_PATH`
+- [Config (subfolder)](config/___config.md) — `SETTINGS_PATH`
 
 ### Used by
 - [GUI](../gui.md) — load on start, save on change/exit

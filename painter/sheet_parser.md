@@ -50,7 +50,7 @@ of reported, so old sheets never block a batch:
 ## Connections
 
 ### Uses
-- [Config](config.md) — `IMAGE_EXTENSIONS`, `SKIP_MARKER_PATTERN`
+- [Config (subfolder)](config/___config.md) — `IMAGE_EXTENSIONS`, `SKIP_MARKER_PATTERN`
 
 ### Used by
 - [Run Loop](runner.md) — consumes `Sheet`

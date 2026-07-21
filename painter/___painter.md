@@ -7,12 +7,15 @@ the driver touches a browser.
 
 ## Files
 
-### `config.py` — Configuration
-Every tunable value: CDP endpoint, Chrome launch settings and the
-dedicated profile folder, output layout, sheet-contract constants,
-background-tool settings, all timing/pacing knobs, and the per-site
-DOM config blocks (selector fallbacks, background prompt suffixes,
-refusal markers). See [Config](config.md).
+### `config/` — Configuration
+Every tunable value, split by domain into a package (paths,
+formatters, sheet contract, postprocess, upscale, aspect + shared
+filter framework, theme, jobs, jobtemp, ai, sites): CDP endpoint,
+Chrome launch settings and the dedicated profile folder, output
+layout, sheet-contract constants, background-tool settings, all
+timing/pacing knobs, and the per-site DOM config blocks (selector
+fallbacks, background prompt suffixes, refusal markers). See
+[Config (subfolder)](config/___config.md).
 
 ### `sheet_parser.py` — Sheet Parser
 Parses one prompt-sheet `.md` into items to generate, entries the

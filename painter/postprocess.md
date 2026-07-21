@@ -66,7 +66,7 @@ for every run that doesn't explicitly override them.
 ## Connections
 
 ### Uses
-- [Config](config.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
+- [Config (subfolder)](config/___config.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
   `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`,
   `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`
 - [Background Remover](bg_remove.md) — `detect`,

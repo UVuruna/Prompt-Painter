@@ -46,7 +46,7 @@ is written back as PNG. Verified by hand (must reproduce exactly):
 ## Connections
 
 ### Uses
-- [Config](config.md) — `ASPECT_TOL` (the already-at-ratio tolerance),
+- [Config (subfolder)](config/___config.md) — `ASPECT_TOL` (the already-at-ratio tolerance),
   `ASPECT_FILTER_OFF` / `ASPECT_FILTER_IF` / `ASPECT_FILTER_IF_NOT`
   (the input-filter modes), and `ASPECT_LABEL_DECIMALS` (the visual
   editor's live-label rounding, GUI rework Phase 5)

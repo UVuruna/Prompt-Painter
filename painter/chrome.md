@@ -18,7 +18,7 @@ session cookies — treat it as a credential store.
 ## Connections
 
 ### Uses
-- [Config](config.md) — `CDP_PORT`, `CDP_URL`, `CHROME_CANDIDATES`,
+- [Config (subfolder)](config/___config.md) — `CDP_PORT`, `CDP_URL`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 
 ### Used by

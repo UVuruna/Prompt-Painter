@@ -37,7 +37,7 @@ PIL/numpy load lazily inside `measure`, so dry runs stay stdlib-only.
 ## Connections
 
 ### Uses
-- [Config](config.md) — `PROJECT_ROOT`, `JOBTEMP_DIRNAME`,
+- [Config (subfolder)](config/___config.md) — `PROJECT_ROOT`, `JOBTEMP_DIRNAME`,
   `JOBTEMP_REMOVED_ALPHA`, `JOB_METRIC`, and (Phase 7)
   `JOBTEMP_STEPS_SUBDIR`, `JOBTEMP_STEP_NAMES`, `JOBTEMP_MAX_BYTES`.
 

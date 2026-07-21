@@ -61,4 +61,4 @@ report) before the next starts, so a quota stop costs nothing.
   [Upscale](painter/upscale.md) — imported lazily, so `--dry-run`
   works without playwright
 - [Run Loop](painter/runner.md)
-- [Config](painter/config.md)
+- [Config (subfolder)](painter/config/___config.md)

@@ -41,7 +41,7 @@ numeric HTTP status, which the client attaches to the raised
 ## Connections
 
 ### Uses
-- [Config](config.md) — the whole `GEMINI_*` / `AI_*` block,
+- [Config (subfolder)](config/___config.md) — the whole `GEMINI_*` / `AI_*` block,
   `SITES`, `STATE_DIRNAME`, `PROJECT_ROOT`
 - [Settings](settings.md) — `load_settings` (the key lives in
   `settings.json` under `gemini_api_key`)

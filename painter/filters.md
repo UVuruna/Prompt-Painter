@@ -78,7 +78,7 @@ ratio" check.
 ## Connections
 
 ### Uses
-- [Config](config.md) — `FILTER_KIND_ASPECT_EXACT`,
+- [Config (subfolder)](config/___config.md) — `FILTER_KIND_ASPECT_EXACT`,
   `FILTER_KIND_ASPECT_RANGE`, `FILTER_KIND_ANY_SIDE`,
   `FILTER_KIND_WIDTH`, `FILTER_KIND_HEIGHT`, `FILTER_POLARITY_IF`,
   `FILTER_POLARITY_IF_NOT`

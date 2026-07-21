@@ -20,7 +20,7 @@ report keeps every finished line. The loop writes ONLY under
 - [Sheet Parser](sheet_parser.md) — consumes `Sheet`
 - [CDP Driver](driver.md) — the per-item protocol, `sniff_format`,
   the `NoImage` exception (the stuck-response case the nudge catches)
-- [Config](config.md) — `Timing`, `REPORT_SUFFIX`,
+- [Config (subfolder)](config/___config.md) — `Timing`, `REPORT_SUFFIX`,
   `SAFER_PREAMBLE`, `CONTINUE_NUDGE`, `dest_for`, `fmt_duration`,
   `fmt_size`
 
@@ -50,7 +50,7 @@ at the SAME item boundary as `should_stop` (between items, never
 mid-generation — an in-flight image always finishes, exactly like
 Stop's graceful semantics). While `should_pause()` is True the loop
 blocks in `wait_while_paused` — a poll-wait (`PAUSE_POLL_INTERVAL_S`,
-[Config](config.md)), no busy spin — until it flips False (Resume) or
+[Config (subfolder)](config/___config.md)), no busy spin — until it flips False (Resume) or
 `should_stop` fires (Stop always wins over a pending or active
 pause). `sheet_paused` / `sheet_resumed` fire on `on_event` exactly
 ONCE per transition, never once per poll; `sheet_resumed` is skipped

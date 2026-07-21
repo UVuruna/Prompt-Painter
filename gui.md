@@ -747,7 +747,7 @@ pre-running spots.
   narrower wraplength for a caption/note now living in ONE column
   instead of the panel's old full width), live in **gui.py's own**
   Rule #4 block (beside `SETTINGS_GLYPH_*`) — NOT `painter/config.py`:
-  this project's established split (see [Config](painter/config.md)'s
+  this project's established split (see [Config (subfolder)](painter/config/___config.md)'s
   own note on `FILTER_ASPECT_EXACT_TOL`) already assigns pure Tk
   pixel-geometry constants with no engine relevance to gui.py's own
   blocks, and painter/config.py only pure/engine-relevant or
@@ -1334,7 +1334,7 @@ pre-running spots.
     the first `_drive_site`-driven key that is not one of
     `self.agents`.
 
-  * **JOB_ORDER wiring** (`painter/config.py`, [Config](painter/config.md)
+  * **JOB_ORDER wiring** (`painter/config.py`, [Config (subfolder)](painter/config/___config.md)
     has the full field list) — `"api_image"` threaded consistently
     through `JOB_ORDER`/`JOB_LABEL`/`JOB_LOGO` (reuses the Gemini
     logo)/`JOB_COLORS` (its own orange pair, the SAME tuple
@@ -1935,7 +1935,7 @@ Per-step backups, when a `JobTemp` is attached:
   `steps_for()` filmstrip for an image whose first enabled step was BG
   therefore lists `["original", "crop", ...]`, never `["original",
   "bg", "crop", ...]`. See the `JOBTEMP_STEP_NAMES` ordering-contract
-  comment in [Config](painter/config.md).
+  comment in [Config (subfolder)](painter/config/___config.md).
 - every LATER enabled step's pre-state gets its OWN named backup
   (`"bg"`/`"crop"`/`"aspect"`/`"upscale"`) — but only when the
   per-agent **Keep every pipeline step** switch (`keep_all_steps_var`,
@@ -2382,7 +2382,7 @@ Two coordinated palettes — **night** (the built-in `darkly`, kept
 byte-for-byte: the owner is happy with the dark look) and **day** (a
 custom light theme, the owner's warm-gold website palette) — flipped
 as ONE by the top-right `DayNightSwitch`. The single source of truth
-is `THEMES` in [Config](painter/config.md): each entry
+is `THEMES` in [Config (subfolder)](painter/config/___config.md): each entry
 carries its ttkbootstrap theme name, the customtkinter appearance
 mode, the switch knob side, the 16 ttkbootstrap colour keys and a
 `status` block (the semantic colours set PER WIDGET at construction).
@@ -2750,7 +2750,7 @@ without a panel to reveal any more; the check is a no-op only outside
   [Change Aspect Ratio](painter/aspect.md), [Job Temp](painter/jobtemp.md),
   [AI Client & Flows](painter/ai.md),
   [Shared Filter Framework](painter/filters.md),
-  [Settings](painter/settings.md), [Config](painter/config.md)
+  [Settings](painter/settings.md), [Config (subfolder)](painter/config/___config.md)
 
 ### Used by
 - The owner (`python main.py` with no arguments).

@@ -97,7 +97,7 @@ image timeout.
 ## Connections
 
 ### Uses
-- [Config](config.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
+- [Config (subfolder)](config/___config.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
 - Playwright (`playwright.sync_api`) — the CDP session
 
 ### Used by
