@@ -44,9 +44,11 @@ STATE_DIRNAME = "_state"
 REPORT_SUFFIX = "_report.txt"
 
 # site key -> the DOMY filename suffix (source ALWAYS last in the
-# stem). "api_image" is the Gemini image API job (owner 2026-07-22);
-# if MORE API generators ever join, each gets its OWN suffix here —
-# the suffix names the generator, the dict stays the one authority.
+# stem). THE one authority — every image generator MUST register its
+# suffix here before generating (binding rule + registry table:
+# CLAUDE.md "The Generator Suffix Registry"). "api_image" is the
+# Gemini image API job; future API generators each get their OWN
+# suffix — the suffix names the generator, never a model version.
 SITE_FILE_SUFFIX = {"chatgpt": "_gpt", "gemini": "_gem", "api_image": "_api"}
 
 

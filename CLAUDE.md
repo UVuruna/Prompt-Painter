@@ -116,6 +116,35 @@ is the binding spec.
    the owner's private material — gitignored, never committed, read
    only when he points at it.
 
+## The Generator Suffix Registry (owner 2026-07-22 — binding)
+
+**Every image-generation tool/AI this project drives MUST have its
+own filename suffix, registered BEFORE it generates a single image.**
+The suffix is how a saved file names its generator (DOMY RESTRUCTURE
+convention: `<Figure>[_vN]_<sfx>.png`, suffix ALWAYS terminal in the
+stem) — an unregistered generator has nowhere valid to save to.
+
+- **The ONE authority in code is `SITE_FILE_SUFFIX`** in
+  `painter/config/paths.py` — `dest_for` (save path) and
+  `ai.drop_and_site_for` (the reverse) both read it; no other place
+  may define or hardcode a suffix.
+- Adding a generator = one new `key: "_sfx"` entry there + a row in
+  the table below. Suffixes are unique, short, lowercase,
+  underscore-prefixed, and name the generator (not the model
+  version).
+- `dest_for` fails LOUDLY (KeyError) for a key with no suffix —
+  that is the guard, never soften it.
+
+| Generator (site key) | Suffix | Meaning |
+|----------------------|--------|---------|
+| `chatgpt` | `_gpt` | ChatGPT browser tab |
+| `gemini` | `_gem` | Gemini browser tab |
+| `api_image` | `_api` | Gemini image API (paid) |
+
+Future API generators (e.g. Imagen, DALL·E as separate tools) each
+get their OWN suffix (e.g. `_imgn`, `_dalle`) — `_api` stays with
+the current single API job and is never shared.
+
 ## The Sheet Contract (the input format)
 
 Per theme `.md` file:
