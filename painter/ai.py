@@ -885,12 +885,25 @@ def drop_and_site_for(rel: str) -> tuple[str, str] | None:
     """Reverse ``config.dest_for``: the (drop_path, site) one
     out-relative save path came from.
 
-    Assets mirror ``<category>/<site>/<rest>`` ->
-    ``('assets/<category>/<rest>', site)``; legacy ``<site>/<drop>`` ->
-    ``(drop, site)``. ``None`` when no segment names a site (an
-    absolute flag key, or a folder that was never a generator output).
+    Assets mirror ``<rest>/<File>_<sfx>.png`` ->
+    ``('assets/<rest>/<File>.png', site)`` (the DOMY RESTRUCTURE
+    filename-suffix convention, 2026-07-22); the pre-RESTRUCTURE
+    ``<category>/<site>/<rest>`` folder layout and legacy
+    ``<site>/<drop>`` still reverse for old out/ trees. ``None`` when
+    nothing names a site (an absolute flag key, or a folder that was
+    never a generator output).
     """
+    from painter.config import SITE_FILE_SUFFIX
+
     parts = PurePosixPath(rel).parts
+    if parts:
+        name = parts[-1]
+        stem, dot, ext = name.rpartition(".")
+        core = stem if dot else name
+        for site, sfx in SITE_FILE_SUFFIX.items():
+            if core.endswith(sfx) and len(core) > len(sfx):
+                bare = core[: -len(sfx)] + (f".{ext}" if dot else "")
+                return "assets/" + "/".join((*parts[:-1], bare)), site
     if len(parts) >= 3 and parts[1] in SITES:
         return "assets/" + "/".join((parts[0], *parts[2:])), parts[1]
     if len(parts) >= 2 and parts[0] in SITES:

@@ -24,6 +24,7 @@ from .paths import (
     REPORT_SUFFIX,
     SETTINGS_PATH,
     STATE_DIRNAME,
+    SITE_FILE_SUFFIX,
     dest_for,
 )
 from .formatters import (

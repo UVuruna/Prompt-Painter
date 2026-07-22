@@ -72,14 +72,16 @@ def state(out_base: Path, site: str, name: str) -> Path:
 
 
 def test_dest_for_mirrors_the_assets_tree():
-    # full assets paths: the site slots in after the category
+    # full assets paths: the site lands as the terminal filename
+    # suffix (DOMY RESTRUCTURE 2026-07-22) — out/ mirrors assets/
+    # byte-for-byte, ready to copy straight in
     assert (
-        dest_for("assets/emblem/mood/Glory.png", "gemini")
-        == "emblem/gemini/mood/Glory.png"
+        dest_for("assets/weeks/inner_wheel/mood/Glory.png", "gemini")
+        == "weeks/inner_wheel/mood/Glory_gem.png"
     )
     assert (
-        dest_for("assets/weekday/bible/primary/dual/x.png", "chatgpt")
-        == "weekday/chatgpt/bible/primary/dual/x.png"
+        dest_for("assets/weeks/faith/bible/primary/dual/x.png", "chatgpt")
+        == "weeks/faith/bible/primary/dual/x_gpt.png"
     )
     # legacy relative drops keep the old <site>/<drop> layout
     assert dest_for("fake/img_0.png", "gemini") == "gemini/fake/img_0.png"
@@ -200,8 +202,9 @@ def test_assets_paths_save_into_the_mirrored_tree(tmp_path):
     )
     out = tmp_path / "out"
     run_sheet(sheet, FakeDriver(SITES["chatgpt"]), out, "chatgpt", FAST)
-    # assets/emblem/mood/Glory.png -> out/emblem/chatgpt/mood/Glory.png
-    assert (out / "emblem" / "chatgpt" / "mood" / "Glory.png").exists()
+    # assets/emblem/mood/Glory.png -> out/emblem/mood/Glory_gpt.png
+    # (the site is the terminal filename suffix, RESTRUCTURE 2026-07-22)
+    assert (out / "emblem" / "mood" / "Glory_gpt.png").exists()
     # no progress sidecar — resume is by the saved file's existence
     assert not state(out, "chatgpt", "mood_prompts.progress.json").exists()
 
