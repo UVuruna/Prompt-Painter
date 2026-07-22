@@ -908,6 +908,11 @@ def test_drop_and_site_for_reverses_dest_for():
     assert ai.drop_and_site_for(rel) == (
         "assets/emblem/mood/Glory.png", "gemini",
     )
+    # the API generator reverses through its _api suffix the same way
+    rel = dest_for("assets/emblem/mood/Glory.png", "api_image")
+    assert ai.drop_and_site_for(rel) == (
+        "assets/emblem/mood/Glory.png", "api_image",
+    )
     # the legacy layout: <site>/<drop>
     rel = dest_for("fake/img_0.png", "chatgpt")
     assert ai.drop_and_site_for(rel) == ("fake/img_0.png", "chatgpt")

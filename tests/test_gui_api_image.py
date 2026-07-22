@@ -260,7 +260,7 @@ def test_drive_site_with_a_real_api_image_adapter_saves_the_generated_bytes(
     )
 
     dest = out_base / dest_for("assets/badge/rune/Glory.png", "api_image")
-    assert dest == out_base / "badge" / "api_image" / "rune" / "Glory.png"
+    assert dest == out_base / "badge" / "rune" / "Glory_api.png"
     assert dest.read_bytes() == PNG_1PX
     report = out_base / "_state" / "api_image" / "fake_api_image_report.txt"
     assert report.is_file()

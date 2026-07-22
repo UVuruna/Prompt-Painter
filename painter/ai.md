@@ -212,9 +212,12 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   AND the GUI viewer, so the flag key and the image it opens can never
   drift apart.
 - `drop_and_site_for(rel) -> (drop_path, site) | None` — the
-  `config.dest_for` REVERSE: `<category>/<site>/<rest>` →
-  `('assets/<category>/<rest>', site)`; legacy `<site>/<drop>` →
-  `(drop, site)`; `None` when no segment names a site.
+  `config.dest_for` REVERSE: `<rest>/<File>_gem|_gpt|_api.png` →
+  `('assets/<rest>/<File>.png', site)` (the filename-suffix
+  convention, DOMY RESTRUCTURE 2026-07-22); the pre-RESTRUCTURE
+  `<category>/<site>/<rest>` folder layout and legacy
+  `<site>/<drop>` still reverse for old out/ trees; `None` when
+  nothing names a generator.
 - `plan_resend(flagged, drop_to_source) -> (plans, notes,
   unmatched)` — the whole re-send plan, pure and GUI-free:
   `plans[site][sheet-source]` is the drop set that site runs

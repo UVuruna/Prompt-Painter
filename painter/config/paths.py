@@ -33,33 +33,32 @@ CHROME_LAUNCH_TIMEOUT_S = 30.0
 # carry site-agnostic FULL drop paths ("assets/calendars/emotions/
 # Love.png"); the site lands as the TERMINAL FILENAME SUFFIX (DOMY
 # RESTRUCTURE 2026-07-22 — source folders are dead, `<Figure>[_vN]_
-# <src>.png` with src ∈ {gem, gpt}):
+# <src>.png` with src ∈ {gem, gpt, api}):
 #     assets/<rest>/<File>.png  ->  <out>/<rest>/<File>_<sfx>.png
-# so the out/ tree is byte-for-byte the shape assets/ expects. A
-# site_key with no suffix mapping (api_image) and legacy relative
-# drops keep the old folder layouts. Run state and reports live OUT
-# of the copyable tree, under <out>/_state/<site>/; backup variants
-# land under <out>/EXTRA/.
+# so the out/ tree is byte-for-byte the shape assets/ expects. Only
+# legacy relative drops keep the old folder layouts. Run state and
+# reports live OUT of the copyable tree, under <out>/_state/<site>/;
+# backup variants land under <out>/EXTRA/.
 DEFAULT_OUT_DIR = PROJECT_ROOT / "out"
 STATE_DIRNAME = "_state"
 REPORT_SUFFIX = "_report.txt"
 
-# site key -> the DOMY filename suffix (source ALWAYS last in the stem)
-SITE_FILE_SUFFIX = {"chatgpt": "_gpt", "gemini": "_gem"}
+# site key -> the DOMY filename suffix (source ALWAYS last in the
+# stem). "api_image" is the Gemini image API job (owner 2026-07-22);
+# if MORE API generators ever join, each gets its OWN suffix here —
+# the suffix names the generator, the dict stays the one authority.
+SITE_FILE_SUFFIX = {"chatgpt": "_gpt", "gemini": "_gem", "api_image": "_api"}
 
 
 def dest_for(drop_path: str, site_key: str) -> str:
     """The save path (relative to the out base) for one drop path."""
     parts = drop_path.split("/")
-    suffix = SITE_FILE_SUFFIX.get(site_key)
+    suffix = SITE_FILE_SUFFIX[site_key]
     if parts[0] == "assets" and len(parts) >= 3:
-        if suffix:
-            name = parts[-1]
-            stem, dot, ext = name.rpartition(".")
-            name = f"{stem}{suffix}.{ext}" if dot else f"{name}{suffix}"
-            return "/".join([*parts[1:-1], name])
-        category, rest = parts[1], parts[2:]
-        return "/".join([category, site_key, *rest])
+        name = parts[-1]
+        stem, dot, ext = name.rpartition(".")
+        name = f"{stem}{suffix}.{ext}" if dot else f"{name}{suffix}"
+        return "/".join([*parts[1:-1], name])
     return "/".join([site_key, drop_path])
 
 

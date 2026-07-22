@@ -87,15 +87,15 @@ def test_dest_for_mirrors_the_assets_tree():
     assert dest_for("fake/img_0.png", "gemini") == "gemini/fake/img_0.png"
 
 
-def test_dest_for_api_image_injects_the_same_way_a_real_site_does():
-    """GUI rework Phase 19: "api_image" is just another site_key to
-    dest_for (it never validates against SITES) — images land at
-    <cat>/api_image/<rest>, exactly mirroring how chatgpt/gemini slot
-    in, so a finished API-generated collection copies into the SAME
-    assets/ tree as a website-generated one."""
+def test_dest_for_api_image_suffixes_the_same_way_a_real_site_does():
+    """"api_image" is just another site_key to dest_for (it never
+    validates against SITES) — the _api filename suffix (owner
+    2026-07-22) slots in exactly like _gem/_gpt, so a finished
+    API-generated collection copies into the SAME assets/ tree as a
+    website-generated one."""
     assert (
         dest_for("assets/emblem/mood/Glory.png", "api_image")
-        == "emblem/api_image/mood/Glory.png"
+        == "emblem/mood/Glory_api.png"
     )
     assert (
         dest_for("fake/img_0.png", "api_image") == "api_image/fake/img_0.png"

@@ -24,6 +24,7 @@ from painter.config import (
     AI_CHECK_INSTRUCTIONS,
     GEMINI_VISION_MODEL,
     JOB_LABEL,
+    SITES,
 )
 from .logic import _filter_files
 
@@ -399,6 +400,16 @@ class ToolJobsMixin:
             )
             return
         for site in sorted(plans):
+            if site not in SITES:
+                # an _api-suffixed image reverses to "api_image" —
+                # there is no browser tab to re-send into; regenerate
+                # it from the API Image GEN panel instead
+                count = sum(len(drops) for drops in plans[site].values())
+                self._log(
+                    f"[{site}] {count} flagged image(s) skipped — not a"
+                    " browser site; regenerate via API Image GEN"
+                )
+                continue
             if site in self._running:
                 self._log(
                     f"[{site}] already running — flagged re-send skipped"

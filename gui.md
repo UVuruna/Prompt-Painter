@@ -1364,10 +1364,13 @@ pre-running spots.
     shape 7 already had); `config.dest_for` needed NO change at all —
     it already injects ANY `site_key` string generically
     (`dest_for("assets/badge/rune/Glory.png", "api_image")` ==
-    `"badge/api_image/rune/Glory.png"`), so API-generated images land
-    in the SAME assets-mirroring tree a finished collection copies
-    into DOMY's `assets/` from, just under an `api_image/` folder
-    instead of `chatgpt/`/`gemini/`. `MENU_TILES`'s `api_image_gen`
+    `"badge/api_image/rune/Glory.png"` at the time), so API-generated
+    images land in the SAME assets-mirroring tree a finished
+    collection copies into DOMY's `assets/` from, just under an
+    `api_image/` folder instead of `chatgpt/`/`gemini/`. *(DOMY
+    RESTRUCTURE 2026-07-22 superseded the folder layout:
+    `SITE_FILE_SUFFIX` now maps `api_image` to `_api`, so API images
+    land as `<rest>/<File>_api.png` beside `_gem`/`_gpt`.)* `MENU_TILES`'s `api_image_gen`
     tile flips `enabled=False` → `True` (the description drops
     "— coming soon") and `TILE_JOB_KINDS["api_image_gen"]` widens from
     `()` to `("api_image",)` — see **Main Menu**/**Running view**

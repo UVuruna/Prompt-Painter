@@ -21,9 +21,12 @@ UNCHANGED across the split.
 `PROJECT_ROOT`; the CDP/Chrome launch block (`CDP_PORT`, `CDP_URL`,
 `CHROME_CANDIDATES`, `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`);
 the output layout (`DEFAULT_OUT_DIR`, `STATE_DIRNAME`,
-`REPORT_SUFFIX`, `dest_for(drop, site)` — the out/ tree MIRRORS
-DOMY's assets/: sheets carry site-agnostic `assets/<category>/<rest>`
-paths and `dest_for` injects the site after the category); and
+`REPORT_SUFFIX`, `SITE_FILE_SUFFIX`, `dest_for(drop, site)` — the
+out/ tree MIRRORS DOMY's assets/: sheets carry site-agnostic
+`assets/<rest>/<File>.png` paths and `dest_for` lands the generator
+as the terminal filename suffix, `<rest>/<File>_gem|_gpt|_api.png`
+(DOMY RESTRUCTURE 2026-07-22 — one hierarchy, no per-site folders));
+and
 `SETTINGS_PATH` (the GUI's `settings.json`, gitignored). A leaf module
 — every other submodule that needs a project-relative path imports
 `PROJECT_ROOT` from here.

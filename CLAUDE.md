@@ -88,10 +88,12 @@ is the binding spec.
    run.
 7. Images save **DIRECTLY** into a tree that MIRRORS DOMY's
    `assets/` (owner 2026-07-18): sheets carry FULL site-agnostic
-   paths (`assets/emblem/mood/Glory.png`) and the tool injects the
-   site after the category —
-   `assets/<category>/<rest>` → `<out>/<category>/<site>/<rest>`
-   (e.g. `out/emblem/gemini/mood/Glory.png`) — so a finished
+   paths (`assets/emblem/mood/Glory.png`) and the generator lands
+   as the TERMINAL FILENAME SUFFIX (DOMY RESTRUCTURE, owner
+   2026-07-22 — no per-site folders; `SITE_FILE_SUFFIX`: chatgpt
+   `_gpt`, gemini `_gem`, api_image `_api`) —
+   `assets/<rest>/<File>.png` → `<out>/<rest>/<File>_<sfx>.png`
+   (e.g. `out/emblem/mood/Glory_gem.png`) — so a finished
    collection COPIES STRAIGHT into `DOMY Watch/assets/`. No
    approval step (owner 2026-07-17: saving IS the end of the
    tool's job). Run state + reports live under `<out>/_state/<site>/`
@@ -195,7 +197,9 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
 
 `parse(sheet) → queue` → per pending item: paste (+ suffix) →
 submit → await the done-edge (hard timeout) → extract bytes → save
-`<out>/<category>/<site>/<rest>` (the assets mirror) → background
+`<out>/<rest>/<File>_gem|_gpt|_api.png` (the assets mirror — DOMY
+RESTRUCTURE 2026-07-22: the generator is a terminal FILENAME suffix
+per `SITE_FILE_SUFFIX`, no per-site folders) → background
 fix → pause → next. Progress logging per item (elapsed, done/total —
 root Rule #10). **DONE = the FILE EXISTS at its output path**
 (`<out>/dest_for(...)`), checked on disk — not a sidecar record
