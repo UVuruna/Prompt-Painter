@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import replace
-from functools import partial
 from pathlib import Path
 
 from painter.config import (
@@ -261,7 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         timing = replace(TIMING, pause_min_s=low, pause_max_s=high)
     site = SITES[args.site]
     background = args.background or site.default_background
-    suffix = partial(prompt_suffix, args.site, background)
+    suffix = prompt_suffix(args.site, background)
 
     # imported lazily so --dry-run works without playwright installed
     from painter.chrome import ChromeError, ensure_chrome

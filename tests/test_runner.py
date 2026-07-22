@@ -104,14 +104,18 @@ def test_dest_for_api_image_suffixes_the_same_way_a_real_site_does():
 
 def test_prompt_suffix_rules():
     gemini_white = prompt_suffix("gemini", "white")
-    # the owner's three laws for Gemini, forced into every prompt
+    # Gemini's remaining laws, forced into every prompt
     assert "PURE WHITE" in gemini_white
-    assert "1:1" in gemini_white
     assert "NO reflections" in gemini_white
+    # the aspect inference is GONE (owner 2026-07-22) — the sheet
+    # prompt states its own aspect ratio, the tool never guesses
+    assert "ASPECT RATIO" not in gemini_white
 
     chatgpt_default = prompt_suffix("chatgpt", "transparent")
     assert "TRANSPARENT" in chatgpt_default
     assert prompt_suffix("gemini", "none") != ""  # Gemini keeps its laws
+    # chatgpt with no background rule and no style has NO suffix at all
+    assert prompt_suffix("chatgpt", "none") == ""
 
 
 def test_style_clause_appended_at_the_end():
@@ -135,21 +139,19 @@ def test_style_none_appends_nothing():
     assert "STYLE:" not in base
 
 
-def test_gemini_aspect_depends_on_the_prompt():
-    lancet = prompt_suffix(
-        "gemini",
-        "white",
-        "TALL pointed-arch lancet stained-glass window, night-window"
-        " register ...",
-    )
-    assert "PORTRAIT" in lancet
-    assert "1:1" not in lancet
+def test_suffix_is_constant_per_site_background_style():
+    """The suffix NEVER depends on the prompt text (owner 2026-07-22 —
+    the old TALL/lancet inference misfired on 'a tall lotus-tipped
+    sceptre' in a ROUND-medallion prompt; the sheet author now states
+    the aspect ratio explicitly in the prompt itself)."""
+    import inspect
 
-    rondel = prompt_suffix(
-        "gemini", "white", "SMALL round stained-glass rondel ..."
-    )
-    assert "1:1" in rondel
-    assert "PORTRAIT" not in rondel
+    from painter.config.ai import prompt_suffix as ps
+
+    assert "prompt_text" not in inspect.signature(ps).parameters
+    # style with an otherwise-empty suffix still arrives, on its own
+    styled_only = prompt_suffix("chatgpt", "none", style="Oil painting")
+    assert styled_only.strip() == STYLES["Oil painting"]
 
 
 def test_suffix_layout_report_and_resume(tmp_path):

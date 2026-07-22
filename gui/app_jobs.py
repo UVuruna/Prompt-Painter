@@ -469,7 +469,7 @@ class SiteJobsMixin:
                 timing,
                 driver,
                 post_save,
-                partial(prompt_suffix, key, background, style=style),
+                prompt_suffix(key, background, style=style),
                 extra_suffix,
                 panel.report_var.get(),
                 selection,
@@ -652,7 +652,7 @@ class SiteJobsMixin:
                 timing,
                 driver,
                 post_save,
-                partial(prompt_suffix, "api_image", background, style=style),
+                prompt_suffix("api_image", background, style=style),
                 None,  # extra_suffix — no AI-checker re-send wiring yet
                 panel.report_var.get(),
                 selection,

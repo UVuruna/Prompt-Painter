@@ -65,12 +65,15 @@ is the binding spec.
    has a background dropdown PER SITE (`transparent` / `white` /
    `none`), preselected to the site's default — ChatGPT
    transparent, Gemini white. **Gemini additionally gets the
-   owner's three laws in EVERY prompt** (2026-07-17, after the
-   rondel_Dawn/rondel_Shield drift): the ASPECT RATIO law — picked
-   from the prompt itself: badges/rondels/medallions = exactly
-   1:1, TALL/lancet window prompts = tall portrait (config
-   keyword rules) — the background rule, and absolutely NO
-   reflections.
+   NO-reflections law in EVERY prompt** (2026-07-17, after the
+   rondel_Dawn/rondel_Shield drift). The old ASPECT RATIO law —
+   inferred from prompt keywords (TALL/lancet → portrait, else
+   1:1) — was REMOVED (owner 2026-07-22, after "a tall
+   lotus-tipped sceptre" flipped a ROUND medallion to portrait):
+   the tool NEVER infers the aspect from the text; the sheet
+   author states it explicitly in every prompt
+   (instructions.md rule 3b lists what a prompt must declare —
+   aspect ratio, shape/framing, unusual background).
 6. After every save, the **postprocess hook** runs — THREE
    composable steps (owner's #7, 2026-07-18), each toggleable per
    run, all defaulting ON: `remove_background`

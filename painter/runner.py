@@ -218,7 +218,7 @@ def run_sheet(
     should_stop: ShouldStop | None = None,
     should_pause: ShouldPause | None = None,
     post_save: PostSave | None = None,
-    prompt_suffix: str | Callable[[str], str] = "",
+    prompt_suffix: str = "",
     extra_suffix: dict[str, str] | None = None,
     report: bool = True,
     only: set[str] | None = None,
@@ -396,13 +396,7 @@ def run_sheet(
                 }
             )
 
-            # the suffix may depend on the prompt itself (Gemini's
-            # aspect law: lancets portrait, badges square)
-            suffix = (
-                prompt_suffix(item.prompt)
-                if callable(prompt_suffix)
-                else prompt_suffix
-            )
+            suffix = prompt_suffix
             # a PER-ITEM extra (the AI re-send fix note) rides at the
             # very end, after every site rule — and survives a safer
             # retry, which prepends its preamble to this same base

@@ -45,30 +45,15 @@ SITE_PROMPT_RULES = {
     "api_image": (),
 }
 
-# The aspect-ratio law DEPENDS ON THE IMAGE (owner 2026-07-17; since
-# 2026-07-18 sent to BOTH sites — ChatGPT drifts too): most plates
-# are badges/rondels/medallions -> a perfect square, but the
-# church-window lancets are clearly taller than wide. The rule is
-# picked from the PROMPT TEXT itself — first pattern that matches
-# wins; the default is the square.
-ASPECT_RULES = (
-    (
-        re.compile(r"\bTALL\b|\blancet\b", re.IGNORECASE),
-        "ASPECT RATIO tall PORTRAIT — the image must be clearly"
-        " TALLER than it is wide (around 2:3), matching the tall"
-        " window shape described; never landscape, never square",
-    ),
-)
-ASPECT_DEFAULT = (
-    "ASPECT RATIO exactly 1:1 — a perfect square image"
-)
-
-
-def _aspect_rule(prompt_text: str) -> str:
-    for pattern, rule in ASPECT_RULES:
-        if pattern.search(prompt_text):
-            return rule
-    return ASPECT_DEFAULT
+# The aspect-ratio INFERENCE is GONE (owner 2026-07-22). It used to
+# be guessed from the prompt text (TALL/lancet -> portrait, else 1:1)
+# — killed after "a tall lotus-tipped sceptre" in a ROUND-medallion
+# prompt triggered the portrait law: element descriptions (a tall
+# sceptre, wide wings) collide with whole-image inference by nature.
+# The ASPECT RATIO is now the SHEET AUTHOR'S duty, written explicitly
+# in every prompt — see instructions.md "What every prompt must state
+# explicitly". The tool appends only the background rule and the
+# per-site laws below.
 
 
 # --- Per-agent STYLE clause (owner 2026-07-19) -----------------------
@@ -116,20 +101,26 @@ STYLE_DEFAULT = "None"
 def prompt_suffix(
     site_key: str,
     background: str,
-    prompt_text: str = "",
     style: str | None = None,
 ) -> str:
-    """The rule block appended to one prompt of one site.
+    """The rule block appended to one prompt of one site — a CONSTANT
+    per (site, background, style) since the aspect inference was
+    removed (owner 2026-07-22; the sheet prompt states its own aspect
+    ratio explicitly).
 
     ``style`` (a STYLES key, "None"/None = no style) appends that style's
-    clause at the very END, after the aspect/background/site rules.
+    clause at the very END, after the background/site rules. With no
+    background rule, no site law and no style the suffix is "" — the
+    prompt is sent bare.
     """
-    rules = [_aspect_rule(prompt_text)]
+    rules: list[str] = []
     bg_rule = _BACKGROUND_RULE[background]
     if bg_rule:
         rules.append(bg_rule)
     rules.extend(SITE_PROMPT_RULES[site_key])
-    if len(rules) == 1:
+    if not rules:
+        suffix = ""
+    elif len(rules) == 1:
         suffix = f"\n\nIMPORTANT: {rules[0]}."
     else:
         numbered = " ".join(
@@ -138,7 +129,7 @@ def prompt_suffix(
         suffix = f"\n\nIMPORTANT — follow ALL rules strictly: {numbered}"
     clause = STYLES.get(style) if style else None
     if clause:  # "None" -> "" -> falsy -> nothing appended
-        suffix += f" {clause}"
+        suffix += f" {clause}" if suffix else f"\n\n{clause}"
     return suffix
 
 
@@ -296,8 +287,9 @@ AI_QUESTIONS_SYSTEM = (
     " line, no other text before or after. Ask only what the request"
     " leaves unknown of: theme and visual style, image count, the drop"
     " folder (assets/<category>/<rest>), file naming, background"
-    " (transparent / white), shape (rondel / lancet / plate), any"
-    " special laws."
+    " (transparent / white), shape (rondel / lancet / plate), the"
+    " ASPECT RATIO of the whole image (every prompt must state it"
+    " explicitly — the tool never infers it), any special laws."
 )
 # SECOND call system prompt: the contract + "the raw .md only".
 AI_SHEET_SYSTEM = (

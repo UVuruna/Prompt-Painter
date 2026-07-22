@@ -131,9 +131,11 @@ four real pipeline stages reuse it rather than duplicating a label).
 
 ### `ai.py` — Prompt Rules + AI Features
 The per-site prompt suffix machinery (`BACKGROUND_CHOICES`,
-`SITE_PROMPT_RULES`, `ASPECT_RULES`/`ASPECT_DEFAULT`/`prompt_suffix`
-— the aspect-ratio law picked from the prompt text itself, Gemini's
-extra "no reflections" law); the per-agent STYLE clause (`STYLES`,
+`SITE_PROMPT_RULES`, `prompt_suffix` — a CONSTANT per
+(site, background, style): the background rule plus Gemini's extra
+"no reflections" law; the old keyword-inferred aspect-ratio law was
+REMOVED, owner 2026-07-22 — the sheet prompt states its own aspect
+explicitly, see instructions.md rule 3b); the per-agent STYLE clause (`STYLES`,
 `STYLE_CHOICES`, `STYLE_DEFAULT`); `SAFER_PREAMBLE` (the safety-refusal
 one-shot retry preamble), `CONTINUE_NUDGE` (the ChatGPT stall
 nudge), and `IMAGE_RETRY_NUDGE`/`IMAGE_FAILED_RETRY_MAX` (BUG 3,
