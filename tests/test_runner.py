@@ -64,11 +64,18 @@ class FakeDriver:
     def __init__(self, site):
         self.site = site
         self.submitted: list[str] = []
+        self.attached: list[tuple[str, str]] = []  # (image_path, prompt)
         self.retry_clicks = 0
         self.refreshes = 0
         self.new_chats = 0
 
     def submit_prompt(self, prompt, log=print):
+        self.submitted.append(prompt)
+
+    def submit_with_image(self, image_path, prompt, log=print):
+        # records the attach AND the prompt (so prompt-based test logic
+        # keeps working whether an item attached an image or not)
+        self.attached.append((image_path, prompt))
         self.submitted.append(prompt)
 
     def await_done(self, log=print):
@@ -336,6 +343,106 @@ def test_no_safer_retry_by_default(tmp_path):
     assert generated == 1
     # no retry: item 0 submitted once, item 1 once
     assert len(driver.submitted) == 2
+
+
+# --- input-image items (← `ref`), owner 2026-07-23 -------------------
+
+def _sheet_with_input(
+    tmp_path: Path, ref: str = "refs/hero.png", make_ref: bool = True
+) -> Sheet:
+    source = tmp_path / "sheet.md"
+    source.write_text("# T\n", encoding="utf-8")
+    if make_ref:
+        ref_path = tmp_path / ref
+        ref_path.parent.mkdir(parents=True, exist_ok=True)
+        ref_path.write_bytes(PNG_1PX)
+    item = PromptItem("Hero", "fake/hero.png", "prompt 0", 1, None, ref)
+    return Sheet("T", source, (item,), (), ())
+
+
+def test_input_image_item_attaches_via_submit_with_image(tmp_path):
+    sheet = _sheet_with_input(tmp_path)
+    out = tmp_path / "out"
+    driver = FakeDriver(SITES["chatgpt"])
+
+    generated = run_sheet(sheet, driver, out, "chatgpt", FAST)
+
+    assert generated == 1
+    assert (out / "chatgpt" / "fake" / "hero.png").exists()
+    # attached (not plain-submitted), resolved RELATIVE TO THE SHEET FOLDER
+    assert len(driver.attached) == 1
+    attached_path, prompt = driver.attached[0]
+    assert attached_path == str(tmp_path / "refs" / "hero.png")
+    assert "prompt 0" in prompt
+
+
+def test_input_image_missing_is_skipped_loudly(tmp_path):
+    source = tmp_path / "sheet.md"
+    source.write_text("# T\n", encoding="utf-8")
+    items = (
+        PromptItem("Hero", "fake/hero.png", "prompt 0", 1, None,
+                   "refs/missing.png"),
+        PromptItem("Plain", "fake/plain.png", "prompt 1", 2),
+    )
+    sheet = Sheet("T", source, items, (), ())
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = FakeDriver(SITES["chatgpt"])
+
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, log=logs.append,
+    )
+
+    # the missing-input item is skipped; the plain one still runs
+    assert generated == 1
+    assert not (out / "chatgpt" / "fake" / "hero.png").exists()
+    assert (out / "chatgpt" / "fake" / "plain.png").exists()
+    assert any("INPUT IMAGE MISSING" in line for line in logs)
+    # the missing item never reached the driver — nothing attached
+    assert driver.attached == []
+
+
+def test_plain_item_never_attaches_an_image(tmp_path):
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    driver = FakeDriver(SITES["chatgpt"])
+
+    run_sheet(sheet, driver, out, "chatgpt", FAST)
+
+    assert driver.attached == []
+    assert len(driver.submitted) == 1
+
+
+def test_input_image_reattached_on_escalation_new_session(tmp_path):
+    """The image-failed ladder's escalation rung opens a NEW session with
+    no history — an input-image item MUST re-attach its reference there
+    (the text-only rungs stay in the same chat where the image already
+    sits). Else the fresh chat would generate WITHOUT the reference."""
+    class FailsUntilReattach(FakeDriver):
+        def extract_image(self):
+            # succeeds only once the image has been attached a SECOND
+            # time — i.e. in the fresh escalation session
+            if len(self.attached) >= 2:
+                return PNG_1PX
+            raise ImageGenFailed(
+                "ChatGPT: image generation failed (matched '...'): ..."
+            )
+
+    sheet = _sheet_with_input(tmp_path)
+    out = tmp_path / "out"
+    driver = FailsUntilReattach(SITES["chatgpt"])
+
+    generated = run_sheet(sheet, driver, out, "chatgpt", FAST)
+
+    assert generated == 1
+    # attached twice: the first send + the escalation re-attach (never a
+    # bare "retry" in the fresh session)
+    assert len(driver.attached) == 2
+    for path, _prompt in driver.attached:
+        assert path == str(tmp_path / "refs" / "hero.png")
+    # the escalation refreshed the page and opened a new session first
+    assert driver.refreshes >= 1
+    assert driver.new_chats >= 1
 
 
 def test_continue_nudge_recovers_a_stuck_response(tmp_path):

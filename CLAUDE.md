@@ -167,6 +167,17 @@ Per theme `.md` file:
 3. The FIRST fenced code block after that heading is the prompt —
    copied byte-identical into the chat box, plus the site's
    background suffix.
+3b. An entry may ALSO carry an OPTIONAL **input image** (owner
+   2026-07-23): a `← \`refs/photo.png\`` line under the arrow (mirror
+   of the `→` output arrow). It is a READ-ONLY source photo, resolved
+   RELATIVE TO THE SHEET'S OWN FOLDER at run time, that the tool
+   ATTACHES into the composer before the prompt (`submit_with_image`,
+   acting like a person: expand the "+" menu → pick the add-image
+   option → set the file → wait for the preview → send) — for "put
+   THIS character into that scene" prompts. Any of
+   `TOOL_IMAGE_EXTENSIONS` (png/jpg/jpeg/webp). A missing file is a
+   loud per-item SKIP; the rest of the batch runs. See
+   [instructions.md](instructions.md) rule 3c.
 4. *(italic notes)* are skipped. Skip markers (REUSE / SUPERSEDED /
    DO-NOT-GENERATE, only inside `**bold**` spans; per entry, per
    section note, or per marked section heading) are **ADVICE, not

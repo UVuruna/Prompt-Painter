@@ -142,11 +142,12 @@ def wait_while_paused(
 def _recover_image_failed(
     exc: ImageGenFailed,
     driver: SiteDriver,
-    generate_one: Callable[[str], tuple[bytes, float]],
+    generate_one: Callable[..., tuple[bytes, float]],
     base: str,
     should_stop: ShouldStop | None,
     log: Log,
     emit: OnEvent,
+    input_image_path: str | None = None,
 ) -> tuple[bytes, float]:
     """Walk the image-failure recovery ladder (owner 2026-07-23).
 
@@ -167,7 +168,10 @@ def _recover_image_failed(
          entry: wait a random duration in that entry's range, then
          REFRESH the page, open a NEW SESSION, and resend the WHOLE
          original prompt (a fresh chat has no context, so "retry" alone
-         would mean nothing).
+         would mean nothing) — RE-ATTACHING ``input_image_path`` when
+         the item carried a "← `ref`" input image (owner 2026-07-23; the
+         earlier rungs stay in the same chat where the image already
+         sits, so only this new-session rung re-attaches).
 
     Returns ``(image bytes, send timestamp)`` from the first rung that
     yields an image. When every rung is spent the ladder re-raises
@@ -210,7 +214,9 @@ def _recover_image_failed(
             reason = str(again)
 
     # rung 3 — escalation rounds: wait -> refresh -> new session ->
-    # resend the whole original prompt
+    # resend the whole original prompt. The new session has NO history,
+    # so an input-image item must RE-ATTACH its reference here (the
+    # earlier rungs stayed in the same chat where the image already sat).
     rounds = len(IMAGE_FAILED_ESCALATION_DELAYS_S)
     for rnd, (lo, hi) in enumerate(IMAGE_FAILED_ESCALATION_DELAYS_S, start=1):
         wait = random.uniform(lo, hi)
@@ -225,7 +231,7 @@ def _recover_image_failed(
         driver.refresh(log)
         driver.new_chat(log)
         try:
-            data, t_send = generate_one(base)
+            data, t_send = generate_one(base, attach=input_image_path)
             log(f"    escalation round {rnd} RECOVERED (fresh session)")
             return data, t_send
         except ImageGenFailed as again:
@@ -375,6 +381,14 @@ def run_sheet(
     counted, added to the report) — never silently. With it off, the
     first ``ImageGenFailed`` propagates and stops the site immediately,
     same shape as ``continue_nudge=False``.
+
+    An item carrying an INPUT IMAGE (``PromptItem.input_image``, owner
+    2026-07-23 — the sheet's "← `ref`" line) has that reference resolved
+    RELATIVE TO THE SHEET'S OWN FOLDER (``sheet.source.parent``, read
+    only) and attached into the composer before the prompt via
+    ``driver.submit_with_image``; a plain item still goes through
+    ``submit_prompt``. A missing reference file is a loud per-item SKIP
+    (logged, counted, reported) so the rest of the batch still runs.
     """
     state_dir = out_base / STATE_DIRNAME / site_key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -450,14 +464,28 @@ def run_sheet(
         if on_event is not None:
             on_event(event)
 
-    def generate_one(text: str) -> tuple[bytes, float]:
+    def generate_one(
+        text: str, attach: str | None = None
+    ) -> tuple[bytes, float]:
         """Submit one prompt and return (image bytes, send timestamp).
+
+        ``attach`` (owner 2026-07-23) is a resolved input-image path: when
+        given, the image is attached into the composer BEFORE the text
+        (``submit_with_image`` — "put THIS character into that scene");
+        otherwise it is a plain text submit. Callers pass ``attach`` only
+        where a fresh chat needs the image: the FIRST send and a safer
+        retry (same item, reframed) and the image-failed escalation
+        (which opens a NEW session); the same-chat nudges/retries stay
+        text-only (the image is already attached there).
 
         The send timestamp marks when SEND was pressed, so the caller
         can time the pure generation (send -> image) apart from the
-        input hesitation inside submit_prompt.
+        input hesitation inside the submit.
         """
-        driver.submit_prompt(text)
+        if attach is not None:
+            driver.submit_with_image(attach, text)
+        else:
+            driver.submit_prompt(text)
         t_send = time.monotonic()
         driver.await_done(log)
         return driver.extract_image(), t_send
@@ -517,9 +545,41 @@ def run_sheet(
             if extra:
                 suffix += "\n\n" + extra
             base = item.prompt + suffix
+
+            # OPTIONAL input image (owner 2026-07-23): resolve the
+            # "← `ref`" reference RELATIVE TO THE SHEET'S OWN FOLDER and
+            # attach it into the composer before the prompt. Sources are
+            # READ ONLY (never under out_base). A missing file is a loud
+            # per-item SKIP — the rest of the batch still runs; the fix
+            # is in the sheet or on disk, not here.
+            input_path: str | None = None
+            if item.input_image:
+                ref = sheet.source.parent / item.input_image
+                if not ref.exists():
+                    refused += 1
+                    reason = f"input image missing: {ref}"
+                    log(f"    INPUT IMAGE MISSING — {ref}")
+                    log(
+                        "    skipping this item; add the file (or fix the"
+                        " '← path' in the sheet) and rerun"
+                    )
+                    if run_report is not None:
+                        run_report.refused(item.drop_path, reason)
+                    emit(
+                        {
+                            "type": "item_refused",
+                            "drop_path": item.drop_path,
+                        }
+                    )
+                    if idx < total:
+                        _pause(timing, should_stop, log)
+                    continue
+                input_path = str(ref)
+                log(f"    input image: {ref.name}")
+
             retried = False  # True when the SAFER RETRY produced the image
             try:
-                data, t_send = generate_one(base)
+                data, t_send = generate_one(base, attach=input_path)
             except ItemRefused as exc:
                 reason = str(exc)
                 data = None
@@ -536,7 +596,9 @@ def run_sheet(
                     )
                     emit({"type": "item_retry"})
                     try:
-                        data, t_send = generate_one(preamble + base)
+                        data, t_send = generate_one(
+                            preamble + base, attach=input_path
+                        )
                         retried = True
                         log("    safer retry SUCCEEDED")
                     except ItemRefused as exc2:
@@ -588,7 +650,8 @@ def run_sheet(
                 if not image_failed_retry:
                     raise
                 data, t_send = _recover_image_failed(
-                    exc, driver, generate_one, base, should_stop, log, emit
+                    exc, driver, generate_one, base, should_stop, log,
+                    emit, input_path,
                 )
                 retried = True
             t_image = time.monotonic()

@@ -14,6 +14,16 @@ an unattended rerun resumes past every image already on disk and the
 report keeps every finished line. The loop writes ONLY under
 `out_base`; sheets are READ ONLY by construction.
 
+An item that carries an INPUT IMAGE (`PromptItem.input_image` — the
+sheet's `← \`ref\`` line, owner 2026-07-23) has that reference
+resolved RELATIVE TO THE SHEET'S OWN FOLDER (`sheet.source.parent`,
+read only) and attached into the composer BEFORE the prompt via
+`driver.submit_with_image` ("put THIS character into that scene");
+plain items still go through `submit_prompt`. A missing reference
+file is a loud per-item SKIP (logged, counted, reported) so the rest
+of the batch still runs. The image-failed escalation re-attaches the
+reference in its fresh session (the earlier same-chat rungs do not).
+
 ## Connections
 
 ### Uses
