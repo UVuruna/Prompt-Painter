@@ -37,7 +37,7 @@ panels`, `self._job_temps`, `self._q`, `self._running`, `self._log`,
   `ai` (`check_one_image`/`edit_image`/`build_fix_prompt`/`flag_file`/
   `flag_key`/`drop_and_site_for`/the `AiError`/`PaidFeatureRequired`
   taxonomy) and `driver` (`SiteDriver`/`DriverError`/
-  `FixNotConfigured`, for the manual WEBSITE FIX worker) — both
+  `AttachNotConfigured`, for the manual WEBSITE FIX worker) — both
   imported LOCALLY inside the methods that use them, never at module
   level, matching the original file's own lazy-import shape
 - [Pure Logic (script)](logic.md) — `_fixer_decision`

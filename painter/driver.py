@@ -102,15 +102,15 @@ class ImageGenFailed(DriverError):
     on the item."""
 
 
-class FixNotConfigured(DriverError):
-    """WEBSITE FIX (``submit_fix``, GUI rework Phase 17) is disabled
-    for this site — its ``attach_button``/``file_input`` selectors are
-    empty in ``SITES`` (the shipped default for BOTH chatgpt and
-    gemini). The owner must capture the live selectors first, the same
-    way every other selector in this file was captured, and paste them
-    into the site's config block. Raised immediately, before
-    ``submit_fix`` touches the page at all — never a guessed
-    selector."""
+class AttachNotConfigured(DriverError):
+    """Image attach (``submit_with_image``) is disabled for this site —
+    its ``attach_menu_path`` is empty in ``SITES``. Used by BOTH the
+    input-image sheet entries (the ``← `ref``` reference photo) and
+    WEBSITE FIX (re-attaching a flagged output). The owner captures the
+    live "+" menu selectors first, the same way every other selector in
+    this file was captured, and pastes them into the site's config
+    block. Raised immediately, before ``submit_with_image`` touches the
+    page at all — never a guessed selector."""
 
 
 # Runs on the <img> element inside the page. Canvas first: site CSP
@@ -273,11 +273,11 @@ class SiteDriver:
 
     def _paste_and_send(self, prompt: str, log: Log = print) -> None:
         """Type the prompt then click send — the paste+send tail
-        shared by ``submit_prompt`` (text only) and ``submit_fix``
-        (image attach + follow-up prompt, GUI rework Phase 17). This is
-        ``submit_prompt``'s original body, extracted unchanged (plus
-        the send-button reload recovery in ``_click_send``) so both
-        entry points end the same human-paced way."""
+        shared by ``submit_prompt`` (text only) and ``submit_with_image``
+        (image attach + prompt). This is ``submit_prompt``'s original
+        body, extracted unchanged (plus the send-button reload recovery
+        in ``_click_send``) so both entry points end the same
+        human-paced way."""
         self._type_into_box(prompt)
         self._click_send(prompt, log)
 
@@ -286,58 +286,86 @@ class SiteDriver:
         person's rhythm (click ... paste ... send), never instant."""
         self._paste_and_send(prompt, log)
 
-    def submit_fix(
+    def submit_with_image(
         self, image_path: str, prompt: str, log: Log = print
     ) -> None:
-        """WEBSITE FIX (GUI rework Phase 17): re-attach a previously
-        generated image into the SAME chat and paste+send a follow-up
-        ``prompt`` asking the site to correct it — the AI Checker's
-        flagged defects turned into a focused fix note instead of a
-        blind full regeneration.
+        """Attach an image into the composer, then paste+send ``prompt``.
 
-        GATED: raises ``FixNotConfigured`` immediately — before
-        touching the page at all — while this site's
-        ``attach_button``/``file_input`` are empty (the shipped
-        default for both chatgpt and gemini). Real selectors are the
-        OWNER's job: capture them from the live DOM, exactly like
-        every other selector in ``SITES``, and paste them into the
-        site's config block; this method never guesses them.
+        The shared "image + text" submit, used BOTH by input-image sheet
+        entries (the ``← `ref``` reference photo — "put THIS character
+        into that scene", owner 2026-07-23) and by WEBSITE FIX
+        (re-attaching a flagged output for a focused correction). The
+        prompt text carries the intent; the mechanics are identical.
 
-        Only SUBMITS the fix (attaches the image, pastes+sends the
-        prompt). Awaiting the done edge and reading the corrected
-        image back reuse the EXISTING ``await_done``/``extract_image``
-        unchanged — the caller invokes them next, exactly as after
-        ``submit_prompt``.
+        Acts like a PERSON (owner 2026-07-23): EXPAND the composer's "+"
+        menu, THEN pick the add-image option — never click a hidden
+        upload item directly. Every step is paced by the same
+        human-rhythm ``_hesitate`` used across this driver (honouring the
+        owner's configured action-delay range). Then:
+        - if the site exposes the hidden ``file_input`` (ChatGPT's
+          ``#upload-photos``), set files on it directly — robust, no OS
+          dialog;
+        - else (Gemini) the last menu click opens the OS file dialog,
+          caught with Playwright's file-chooser interception.
+        Once the file is set the driver WAITS for the composer's
+        attachment ``attach_preview`` (up to ``image_ready_timeout_s``)
+        before sending, so the prompt never goes out ahead of the image.
+
+        GATED: raises ``AttachNotConfigured`` immediately — before
+        touching the page at all — while this site's ``attach_menu_path``
+        is empty. Real selectors are the OWNER's job (see the SiteConfig
+        field comment); this method never guesses them.
+
+        Only SUBMITS. Awaiting the done edge and reading the image back
+        reuse the EXISTING ``await_done``/``extract_image`` unchanged —
+        the caller invokes them next, exactly as after ``submit_prompt``.
         """
-        if not self.site.attach_button or not self.site.file_input:
-            raise FixNotConfigured(
-                f"{self.site.name}: WEBSITE FIX is not configured —"
-                " attach_button/file_input are empty in SITES; the"
-                " owner must capture the live selectors first (see"
-                " config.py's SiteConfig comment) before this feature"
-                " can run"
+        if not self.site.attach_menu_path:
+            raise AttachNotConfigured(
+                f"{self.site.name}: image attach is not configured —"
+                " attach_menu_path is empty in SITES; the owner must"
+                " capture the live '+' menu selectors first (see"
+                " config.py's SiteConfig comment) before this can run"
             )
-        attach = self._require(
-            self.site.attach_button, "the attach/upload control"
-        )
-        self._hesitate()
-        attach.click()
-        self._hesitate()
-        # File inputs are routinely hidden by design (a styled attach
-        # button drives them via JS) — Playwright's set_input_files
-        # does not require visibility the way a real click does, so
-        # this lookup does not filter on is_visible() either.
-        file_input = self._require(
-            self.site.file_input, "the file input", require_visible=False
-        )
-        file_input.set_input_files(image_path)
-        # No dedicated "upload complete" selector is configured (only
-        # attach_button/file_input, per this phase's scope) — the same
-        # human-rhythm pause used everywhere else in this driver
-        # stands in for "let it settle". If a real site needs a
-        # stronger signal (e.g. a thumbnail preview appearing), that
-        # is a follow-up config addition once the owner captures it
-        # live.
+        steps = self.site.attach_menu_path
+        # walk the "+" menu like a person: expand, then every step but
+        # the last (the add-image option itself is handled below, since
+        # its click either reveals the input or opens the file dialog)
+        for selectors in steps[:-1]:
+            control = self._require(selectors, "an attach-menu control")
+            self._hesitate()
+            control.click()
+            self._hesitate()
+        option = self._require(steps[-1], "the add-image menu option")
+        if self.site.file_input:
+            # the option drives a hidden <input type=file> — click it
+            # (opens the submenu / reveals the input), then set files.
+            # File inputs are routinely hidden by design, so the lookup
+            # does not filter on is_visible().
+            self._hesitate()
+            option.click()
+            self._hesitate()
+            file_input = self._require(
+                self.site.file_input, "the file input",
+                require_visible=False,
+            )
+            file_input.set_input_files(image_path)
+        else:
+            # no exposed input — the option opens the OS file dialog;
+            # Playwright intercepts it and we set the file programmatically
+            self._hesitate()
+            with self.page.expect_file_chooser() as chooser:
+                option.click()
+            chooser.value.set_files(image_path)
+        # wait for the upload to FINISH (its preview appears) before send
+        # — a large reference photo can take a few seconds, so this uses
+        # the image-ready timeout, not the short selector timeout
+        if self.site.attach_preview:
+            self._require(
+                self.site.attach_preview,
+                "the attached-image preview",
+                timeout_s=self._timing.image_ready_timeout_s,
+            )
         self._hesitate()
         self._paste_and_send(prompt, log)
 
@@ -507,19 +535,27 @@ class SiteDriver:
         selectors: tuple[str, ...],
         what: str,
         require_visible: bool = True,
+        timeout_s: float | None = None,
     ) -> Locator:
         """Wait for any fallback selector to match; loud after timeout.
 
         Sites are async SPAs — elements morph a beat after input
         events (the ChatGPT composer button turns into its send
         state only once the pasted text lands), so a one-shot query
-        would fail on honest timing. ``require_visible=False`` (GUI
-        rework Phase 17's file input) waits for the selector to be
-        ATTACHED only, not visible — Playwright's ``set_input_files``
-        does not need a visible element, and file inputs are commonly
-        hidden by design.
+        would fail on honest timing. ``require_visible=False`` (the
+        attach file input) waits for the selector to be ATTACHED only,
+        not visible — Playwright's ``set_input_files`` does not need a
+        visible element, and file inputs are commonly hidden by design.
+        ``timeout_s`` overrides the default ``selector_timeout_s`` for
+        waits that legitimately take longer (the attach preview waits
+        out a real upload, up to ``image_ready_timeout_s``).
         """
-        deadline = time.monotonic() + self._timing.selector_timeout_s
+        limit = (
+            self._timing.selector_timeout_s
+            if timeout_s is None
+            else timeout_s
+        )
+        deadline = time.monotonic() + limit
         while True:
             loc = self._query(selectors, require_visible=require_visible)
             if loc is not None:
@@ -527,7 +563,7 @@ class SiteDriver:
             if time.monotonic() > deadline:
                 raise SelectorRot(
                     f"{self.site.name}: no selector for {what} matched"
-                    f" within {self._timing.selector_timeout_s:.0f}s —"
+                    f" within {limit:.0f}s —"
                     f" tried: {', '.join(selectors)}"
                 )
             time.sleep(self._timing.poll_interval_s)

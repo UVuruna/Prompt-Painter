@@ -405,11 +405,11 @@ AI_FIX_NOTE = (
 # gui.ai.build_fix_prompt(defects, raw) turns a checked image's defect
 # list (+ its verbatim raw response, for extra context the parsed
 # bullets can lose) into the instruction sent ALONGSIDE the flagged
-# image to ai.edit_image (IMAGE FIX) or driver.submit_fix (WEBSITE
-# FIX) — both the manual report-viewer buttons and the API-mode auto-
-# fixer share this ONE function. Two templates: WITH named defects (the
-# common case) and a graceful NO-defects fallback (never blank —
-# edit_image/submit_fix always need SOME instruction text; a checker
+# image to ai.edit_image (IMAGE FIX) or driver.submit_with_image
+# (WEBSITE FIX) — both the manual report-viewer buttons and the API-mode
+# auto-fixer share this ONE function. Two templates: WITH named defects
+# (the common case) and a graceful NO-defects fallback (never blank —
+# edit_image/submit_with_image always need SOME instruction text; a checker
 # that flags an image with an empty defects list is a malformed corner
 # case this function stays honest about regardless of what the caller
 # already gates on).
@@ -434,8 +434,8 @@ AI_FIX_PROMPT_RAW_SUFFIX = "\n\nFull quality-check report:\n{raw}"
 # the Fixer AI's dispatch MODE (AgentPanel.fixer_mode_var): "api"
 # (ai.edit_image, a REST call that runs on a background thread
 # genuinely IN PARALLEL with the site's own next-image generation — the
-# intended flow) or "website" (driver.submit_fix — QUEUED instead of
-# driven immediately, since the site's browser tab is busy generating
+# intended flow) or "website" (driver.submit_with_image — QUEUED instead
+# of driven immediately, since the site's browser tab is busy generating
 # the NEXT image the instant a checker result lands; see
 # gui.PainterGui._queue_website_fix's own docstring for exactly why).
 # The value strings double as the AgentPanel dropdown's own display

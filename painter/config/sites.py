@@ -131,22 +131,30 @@ class SiteConfig:
     # the sidebar "New chat" control (owner captures 2026-07-18) —
     # clicked between collections/folders when the option is on
     new_chat: tuple[str, ...] = ()
-    # GUI rework Phase 17 (WEBSITE FIX, HIGH RISK / owner-dependent):
-    # the attach/upload control that opens this site's file picker in
-    # the chat composer, and the (often hidden-by-design) <input
-    # type="file"> it drives. EMPTY BY DEFAULT = WEBSITE FIX DISABLED
-    # for this site — SiteDriver.submit_fix raises FixNotConfigured
-    # immediately instead of guessing. DO NOT INVENT THESE SELECTORS.
+    # Attaching an image into the composer (owner captures 2026-07-23,
+    # UV/Add Photo/) — used by BOTH input-image sheet entries (the
+    # "← `ref`" reference photo) and WEBSITE FIX (re-attaching a flagged
+    # output). SiteDriver.submit_with_image acts like a PERSON: expand
+    # the composer's "+" menu, THEN pick the add-image option (never a
+    # hidden upload item directly).
     #
-    # OWNER: to enable WEBSITE FIX for a site, open its chat in the
-    # automation Chrome profile, inspect the "+"/attach button and the
-    # file input it drives (DevTools -> Elements — same method used to
-    # capture every other selector in this file), and paste them here
-    # as tuples of fallback CSS selectors, e.g.:
-    #   attach_button=('button[aria-label="Attach files"]',),
-    #   file_input=('input[type="file"]',),
-    attach_button: tuple[str, ...] = ()
+    # attach_menu_path — the ORDERED clicks to reach the file picker,
+    # each a fallback tuple: [ the "+" button, the add-image menu item,
+    # ... ]. The LAST click reveals the file input / opens the OS dialog.
+    # EMPTY = image attach DISABLED for this site (submit_with_image
+    # raises AttachNotConfigured, never guesses). DO NOT INVENT THESE.
+    attach_menu_path: tuple[tuple[str, ...], ...] = ()
+    # the hidden <input type="file"> the menu drives. SET -> the driver
+    # calls set_input_files on it directly (no native dialog, robust —
+    # ChatGPT exposes #upload-photos). EMPTY -> the LAST attach_menu_path
+    # click is wrapped in Playwright's file-chooser interception instead
+    # (Gemini opens an OS dialog with no input we can target).
     file_input: tuple[str, ...] = ()
+    # the attached-image PREVIEW/thumbnail that appears in the composer
+    # once the upload FINISHES — the driver waits for it (up to the
+    # image-ready timeout) before sending, so the prompt never goes out
+    # ahead of the image. EMPTY = no wait (human-rhythm hesitation only).
+    attach_preview: tuple[str, ...] = ()
 
 
 SITES = {
@@ -276,11 +284,36 @@ SITES = {
             'a[data-testid="create-new-chat-button"]',
             'a[href="/"][data-sidebar-item="true"]',
         ),
-        # WEBSITE FIX (GUI rework Phase 17) — DISABLED for ChatGPT
-        # until the OWNER pastes real selectors here (see SiteConfig's
-        # field comment above for exactly what to capture and how).
-        attach_button=(),
-        file_input=(),
+        # Image attach (owner captures 2026-07-23, UV/Add Photo/chatGPT):
+        # the composer "+" is <button id="composer-plus-btn"
+        # data-testid="composer-plus-btn" aria-label="Add files and
+        # more">; clicking it opens the menu whose "Add photos & files"
+        # row (a submenu trigger) is targeted by role+text. That row
+        # drives the hidden <input type="file" id="upload-photos"
+        # data-testid="upload-photos-input" accept="image/*" multiple>,
+        # so the driver sets files on it directly (no OS dialog). Once
+        # uploaded, the composer shows the file as
+        # <button aria-label="Open image: User uploaded image"> wrapping
+        # an <img class="object-cover"> inside a role="group" file-tile —
+        # the preview the driver waits for before sending.
+        attach_menu_path=(
+            ('button[data-testid="composer-plus-btn"]', "#composer-plus-btn"),
+            (
+                '[role="menuitem"]:has-text("Add photos & files")',
+                '[role="menuitemradio"]:has-text("Add photos & files")',
+                'div:has-text("Add photos & files")',
+            ),
+        ),
+        file_input=(
+            'input[data-testid="upload-photos-input"]',
+            "#upload-photos",
+            'input[type="file"][accept*="image"]',
+        ),
+        attach_preview=(
+            'button[aria-label^="Open image" i]',
+            '[role="group"] img.object-cover',
+            'div[class*="file-tile"] img',
+        ),
     ),
     "gemini": SiteConfig(
         name="Gemini",
@@ -361,11 +394,35 @@ SITES = {
             'a[aria-label="New chat"]',
             'gem-icon-button a[href="/app"]',
         ),
-        # WEBSITE FIX (GUI rework Phase 17) — DISABLED for Gemini
-        # until the OWNER pastes real selectors here (see SiteConfig's
-        # field comment above for exactly what to capture and how).
-        attach_button=(),
+        # Image attach (owner captures 2026-07-23, UV/Add Photo/Gemini):
+        # the composer "+" is <button aria-label="Upload & tools"
+        # aria-haspopup="menu"> (inside <gem-icon-button>); its menu's
+        # "Upload files" row is <button data-test-id=
+        # "local-images-files-uploader-button" aria-label="Upload files
+        # ..." aria-haspopup="dialog"> — it opens the OS file dialog with
+        # NO exposed <input> we can target, so file_input is EMPTY and
+        # the driver catches the dialog via Playwright's file-chooser
+        # interception. Once uploaded, the composer shows
+        # <uploader-file-preview> holding <img class="gem-attachment-
+        # style-img" alt="attachment" src="blob:..."> — the preview the
+        # driver waits for before sending.
+        attach_menu_path=(
+            (
+                'button[aria-label="Upload & tools"]',
+                'gem-icon-button[aria-label*="Upload" i] button',
+            ),
+            (
+                'button[data-test-id="local-images-files-uploader-button"]',
+                'button[aria-label^="Upload files" i]',
+                'button:has-text("Upload files")',
+            ),
+        ),
         file_input=(),
+        attach_preview=(
+            "img.gem-attachment-style-img",
+            "uploader-file-preview img",
+            'img[alt="attachment" i]',
+        ),
     ),
 }
 

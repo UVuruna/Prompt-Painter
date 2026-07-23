@@ -178,12 +178,12 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   the Fixer AI, owner's UV/prompt.txt item 2: "u oba slucaja kreira
   PROMPT koji salje uz sliku") — the instruction sent ALONGSIDE a
   flagged image to `edit_image` (IMAGE FIX / the API-mode auto-fixer)
-  or [CDP Driver](driver.md)'s `submit_fix` (WEBSITE FIX). PURE — no
-  I/O, offline-testable. Named `defects` become a bulleted "fix ONLY
-  these, keep everything else as it is" instruction
+  or [CDP Driver](driver.md)'s `submit_with_image` (WEBSITE FIX). PURE
+  — no I/O, offline-testable. Named `defects` become a bulleted "fix
+  ONLY these, keep everything else as it is" instruction
   (`AI_FIX_PROMPT_WITH_DEFECTS`); an EMPTY list still returns a
   sensible, non-blank fallback (`AI_FIX_PROMPT_NO_DEFECTS`) rather than
-  raising or returning `""` — `edit_image`/`submit_fix` always need
+  raising or returning `""` — `edit_image`/`submit_with_image` always need
   SOME instruction text, and this function stays honest about ANY
   input regardless of whether the caller already gates on defects
   existing (root Rule #1). `raw` — when given and non-blank — is

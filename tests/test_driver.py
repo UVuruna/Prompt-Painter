@@ -5,14 +5,16 @@ supervised runs, never unit tests); these use minimal duck-typed fakes
 for playwright's ``Locator``/``Page`` to prove the parts that ARE
 agent-verifiable:
 
-- ``submit_fix`` raises ``FixNotConfigured`` LOUDLY and IMMEDIATELY
-  (before touching the page at all) while a site's
-  ``attach_button``/``file_input`` are empty — the shipped default
-  for both ``SITES`` entries today.
-- With fake non-empty selectors, ``submit_fix`` runs the expected
-  click-attach -> set_input_files -> paste -> send sequence.
+- ``submit_with_image`` raises ``AttachNotConfigured`` LOUDLY and
+  IMMEDIATELY (before touching the page at all) when a site's
+  ``attach_menu_path`` is empty.
+- With the real captured selectors, ``submit_with_image`` runs the
+  human path: expand the "+" menu, pick the add-image option, attach
+  the file (set_input_files for ChatGPT's hidden input; the file-chooser
+  interception for Gemini's OS dialog), WAIT for the composer preview,
+  then paste + send — and never sends when the preview never appears.
 - ``submit_prompt``'s existing text-only flow is byte-identical after
-  being routed through the new shared ``_paste_and_send`` helper.
+  being routed through the shared ``_paste_and_send`` helper.
 """
 
 import time
@@ -28,7 +30,7 @@ from painter.config import (
     Timing,
 )
 from painter.driver import (
-    FixNotConfigured,
+    AttachNotConfigured,
     ImageGenFailed,
     ItemRefused,
     SelectorRot,
@@ -105,21 +107,53 @@ class FakeKeyboard:
         self.page.calls.append(("insert_text", text))
 
 
+class _FakeFileChooser:
+    """Duck-typed playwright FileChooser: ``set_files(path)`` records the
+    programmatic file selection that replaces the native OS dialog."""
+
+    def __init__(self, page: "FakePage"):
+        self._page = page
+
+    def set_files(self, path):
+        self._page.chooser_files = path
+        self._page.calls.append(("file_chooser_set_files", path))
+
+
+class _FakeChooserCtx:
+    """Duck-typed result of ``page.expect_file_chooser()`` — a context
+    manager whose ``.value`` is the FileChooser, mirroring Playwright's
+    EventInfo (the click that opens the dialog runs inside the block)."""
+
+    def __init__(self, page: "FakePage"):
+        self.value = _FakeFileChooser(page)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 class FakePage:
     """Duck-typed playwright Page: resolves ``locator(selector)`` from
     a dict the test wires up, records every meaningful action (click /
-    set_input_files / keyboard press / insert_text) IN ORDER."""
+    set_input_files / keyboard press / insert_text / file-chooser) IN
+    ORDER."""
 
     def __init__(self):
         self.locators: dict[str, FakeLocator] = {}
         self.calls: list[tuple] = []
         self.keyboard = FakeKeyboard(self)
+        self.chooser_files = None  # set by _FakeFileChooser.set_files
 
     def locator(self, sel):
         return self.locators.get(sel, _MISSING)
 
     def reload(self):
         self.calls.append(("reload",))
+
+    def expect_file_chooser(self):
+        return _FakeChooserCtx(self)
 
 
 def _driver(site, page: FakePage) -> SiteDriver:
@@ -128,125 +162,149 @@ def _driver(site, page: FakePage) -> SiteDriver:
     return driver
 
 
-# --- (a) the gate: FixNotConfigured, loud + immediate ------------------
+# --- (a) the gate: AttachNotConfigured, loud + immediate --------------
 
 @pytest.mark.parametrize("site_key", ["chatgpt", "gemini"])
-def test_shipped_sites_ship_website_fix_disabled(site_key):
-    """Both real SITES entries are the shipped gated default — no
-    invented selectors snuck in."""
+def test_shipped_sites_have_image_attach_configured(site_key):
+    """The owner captured the '+' menu selectors (UV/Add Photo), so
+    image attach is ENABLED for both sites: a "+" step, an add-image
+    option step, and a preview to wait for."""
     site = SITES[site_key]
-    assert site.attach_button == ()
-    assert site.file_input == ()
+    assert len(site.attach_menu_path) >= 2
+    assert all(step for step in site.attach_menu_path)  # no empty step
+    assert site.attach_preview != ()
 
 
-@pytest.mark.parametrize("site_key", ["chatgpt", "gemini"])
-def test_submit_fix_raises_loudly_when_not_configured(site_key):
+def test_chatgpt_uses_a_hidden_input_gemini_uses_the_file_chooser():
+    """ChatGPT exposes #upload-photos (set_input_files, no OS dialog);
+    Gemini opens an OS dialog with no exposed input (file-chooser)."""
+    assert SITES["chatgpt"].file_input != ()
+    assert SITES["gemini"].file_input == ()
+
+
+def test_submit_with_image_raises_loudly_when_not_configured():
+    site = replace(SITES["chatgpt"], attach_menu_path=())
     page = FakePage()
-    driver = _driver(SITES[site_key], page)
+    driver = _driver(site, page)
 
-    with pytest.raises(FixNotConfigured):
-        driver.submit_fix("C:/out/img.png", "fix the halo")
+    with pytest.raises(AttachNotConfigured):
+        driver.submit_with_image("C:/out/img.png", "put the hero in")
 
     # IMMEDIATE: no selector was even queried before the raise.
     assert page.calls == []
 
 
-def test_submit_fix_raises_when_only_attach_button_set():
-    """Both selectors are required — one alone must not be enough."""
-    site = replace(
-        SITES["chatgpt"], attach_button=('button[aria-label="Attach"]',)
-    )
-    page = FakePage()
-    driver = _driver(site, page)
+# --- (b) configured: expand "+" -> pick add-image -> attach -> preview
+# -> paste -> send -----------------------------------------------------
 
-    with pytest.raises(FixNotConfigured):
-        driver.submit_fix("C:/out/img.png", "fix the halo")
-    assert page.calls == []
-
-
-def test_submit_fix_raises_when_only_file_input_set():
-    site = replace(SITES["chatgpt"], file_input=('input[type="file"]',))
-    page = FakePage()
-    driver = _driver(site, page)
-
-    with pytest.raises(FixNotConfigured):
-        driver.submit_fix("C:/out/img.png", "fix the halo")
-    assert page.calls == []
-
-
-# --- (b) configured: the click -> set_input_files -> paste -> send
-# sequence -------------------------------------------------------------
-
-def _fixable_site():
-    """A copy of the real chatgpt config with WEBSITE FIX selectors
-    filled in — exactly the shape the owner will paste in later."""
-    return replace(
-        SITES["chatgpt"],
-        attach_button=('button[aria-label="Attach"]',),
-        file_input=('input[type="file"]',),
-    )
-
-
-def test_submit_fix_sequence_when_configured():
-    site = _fixable_site()
-    page = FakePage()
-    attach = FakeLocator("attach", page)
-    # A real <input type=file> is routinely hidden by design — prove
-    # submit_fix still finds it (require_visible=False), unlike every
-    # other selector in the driver.
-    file_input = FakeLocator("file_input", page, visible=False)
+def _wire_attach(site, page, *, with_input: bool):
+    """Wire the '+' step, the add-image option, the preview, prompt box
+    and send onto ``page`` (and the hidden file input when the site uses
+    one). Returns the FakeLocator map for extra assertions."""
+    plus = FakeLocator("plus", page)
+    option = FakeLocator("option", page)
+    preview = FakeLocator("preview", page)
     prompt_box = FakeLocator("prompt_box", page)
     send = FakeLocator("send", page)
     page.locators = {
-        site.attach_button[0]: attach,
-        site.file_input[0]: file_input,
+        site.attach_menu_path[0][0]: plus,
+        site.attach_menu_path[1][0]: option,
+        site.attach_preview[0]: preview,
         site.prompt_box[0]: prompt_box,
         site.send_button[0]: send,
     }
+    loc = {"plus": plus, "option": option, "preview": preview}
+    if with_input:
+        # a real <input type=file> is routinely hidden by design — prove
+        # the driver still finds it (require_visible=False)
+        file_input = FakeLocator("file_input", page, visible=False)
+        page.locators[site.file_input[0]] = file_input
+        loc["file_input"] = file_input
+    return loc
+
+
+def test_submit_with_image_sequence_chatgpt_hidden_input():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    loc = _wire_attach(site, page, with_input=True)
     driver = _driver(site, page)
 
-    driver.submit_fix("C:/out/img.png", "fix the halo")
+    driver.submit_with_image("C:/out/hero.png", "put the hero in the scene")
 
-    assert file_input.set_files == "C:/out/img.png"
+    assert loc["file_input"].set_files == "C:/out/hero.png"
     calls = page.calls
-    # click attach -> set_input_files -> paste (insert_text) -> send
-    assert calls[0] == ("click", "attach")
-    assert calls[1] == ("set_input_files", "file_input", "C:/out/img.png")
-    i_attach = calls.index(("click", "attach"))
-    i_files = calls.index(("set_input_files", "file_input", "C:/out/img.png"))
-    i_text = calls.index(("insert_text", "fix the halo"))
+    i_plus = calls.index(("click", "plus"))
+    i_option = calls.index(("click", "option"))
+    i_files = calls.index(
+        ("set_input_files", "file_input", "C:/out/hero.png")
+    )
+    i_text = calls.index(("insert_text", "put the hero in the scene"))
     i_send = calls.index(("click", "send"))
-    assert i_attach < i_files < i_text < i_send
-    # the follow-up prompt reused the SAME paste path as submit_prompt:
-    # click prompt box, select-all, delete, insert_text, click send.
-    assert ("click", "prompt_box") in calls
+    # a person's path: expand "+", pick add-image, attach, THEN paste+send
+    assert i_plus < i_option < i_files < i_text < i_send
+    # the follow-up prompt reused the SAME paste path as submit_prompt
     assert ("press", "Control+A") in calls
     assert ("press", "Delete") in calls
 
 
-def test_submit_fix_never_touches_prompt_box_before_upload():
-    """The image must be attached before the fix note is typed — a
-    stricter ordering check than the interleaved index asserts above."""
-    site = _fixable_site()
+def test_submit_with_image_sequence_gemini_file_chooser():
+    site = SITES["gemini"]
     page = FakePage()
-    page.locators = {
-        site.attach_button[0]: FakeLocator("attach", page),
-        site.file_input[0]: FakeLocator("file_input", page, visible=False),
-        site.prompt_box[0]: FakeLocator("prompt_box", page),
-        site.send_button[0]: FakeLocator("send", page),
-    }
+    _wire_attach(site, page, with_input=False)
     driver = _driver(site, page)
 
-    driver.submit_fix("C:/out/img.png", "fix the halo")
+    driver.submit_with_image("C:/out/hero.png", "put the hero in")
 
-    kinds_before_upload = []
+    # no exposed input -> the file went through the file-chooser
+    assert page.chooser_files == "C:/out/hero.png"
+    calls = page.calls
+    i_plus = calls.index(("click", "plus"))
+    i_option = calls.index(("click", "option"))
+    i_files = calls.index(("file_chooser_set_files", "C:/out/hero.png"))
+    i_text = calls.index(("insert_text", "put the hero in"))
+    i_send = calls.index(("click", "send"))
+    assert i_plus < i_option < i_files < i_text < i_send
+
+
+def test_submit_with_image_attaches_before_typing():
+    """The image must be attached before the prompt is typed — the
+    person expands the menu and attaches first, never types early."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    _wire_attach(site, page, with_input=True)
+    driver = _driver(site, page)
+
+    driver.submit_with_image("C:/out/hero.png", "put the hero in")
+
+    before_upload = []
     for call in page.calls:
-        if call[0] == "set_input_files":
+        if call[0] in ("set_input_files", "file_chooser_set_files"):
             break
-        kinds_before_upload.append(call)
-    # only the attach click happens before the upload — no prompt-box
-    # interaction starts early
-    assert kinds_before_upload == [("click", "attach")]
+        before_upload.append(call)
+    # only the "+" expand and the add-image click happen before upload —
+    # no prompt-box interaction starts early
+    assert before_upload == [("click", "plus"), ("click", "option")]
+
+
+def test_submit_with_image_waits_for_the_preview_before_sending():
+    """When the upload preview never appears, the driver must NOT send —
+    it waits it out and fails loudly (the prompt never races the image)."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    loc = _wire_attach(site, page, with_input=True)
+    del page.locators[site.attach_preview[0]]  # preview never shows up
+    # shrink the preview wait so the loud failure is instant
+    fast_preview = replace(FAST, image_ready_timeout_s=0.05)
+    driver = SiteDriver(site, fast_preview, "http://unused")
+    driver.page = page
+
+    with pytest.raises(SelectorRot):
+        driver.submit_with_image("C:/out/hero.png", "put the hero in")
+
+    # the file WAS attached, but no prompt/send ever happened
+    assert loc["file_input"].set_files == "C:/out/hero.png"
+    assert not any(c[0] == "insert_text" for c in page.calls)
+    assert ("click", "send") not in page.calls
 
 
 # --- (c) submit_prompt unchanged through the shared helper -------------
@@ -277,10 +335,9 @@ def test_submit_prompt_unchanged_through_shared_helper():
 
 
 def test_submit_prompt_still_uses_only_prompt_box_and_send_selectors():
-    """submit_prompt must not accidentally start requiring the new
-    attach_button/file_input selectors — it stays text-only."""
+    """submit_prompt must not accidentally start requiring the image
+    attach selectors — it stays text-only."""
     site = SITES["gemini"]
-    assert site.attach_button == ()  # shipped default
     page = FakePage()
     page.locators = {
         site.prompt_box[0]: FakeLocator("prompt_box", page),
@@ -291,6 +348,11 @@ def test_submit_prompt_still_uses_only_prompt_box_and_send_selectors():
     driver.submit_prompt("hello gemini")  # must not raise / must not hang
 
     assert ("insert_text", "hello gemini") in page.calls
+    # no attach-menu / file interaction happened on a plain text submit
+    assert not any(
+        c[0] in ("set_input_files", "file_chooser_set_files")
+        for c in page.calls
+    )
 
 
 # --- (d) send-button reload recovery (owner 2026-07-21) ----------------

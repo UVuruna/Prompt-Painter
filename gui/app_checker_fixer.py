@@ -217,9 +217,9 @@ class CheckerFixerMixin:
         an unambiguous choice**: the browser tab is BUSY generating this
         site's OWN next image the instant ``item_checked`` fires (the
         checker's background thread reports well before the run
-        finishes) — driving ``driver.submit_fix`` here would collide
-        with that in-flight ``submit_prompt``/``await_done`` (one tab,
-        one operation). So this method NEVER touches the browser.
+        finishes) — driving ``driver.submit_with_image`` here would
+        collide with that in-flight ``submit_prompt``/``await_done`` (one
+        tab, one operation). So this method NEVER touches the browser.
 
         Instead it folds the flagged item into ``AiCheckPanel``'s OWN
         ``_flagged``/``_raw`` bucket via its EXISTING
@@ -315,8 +315,8 @@ class CheckerFixerMixin:
         site_key: str, defects: list[str], raw: str,
     ) -> tuple[str, str]:
         """The manual WEBSITE FIX button's background-thread body —
-        drives a FRESH ``SiteDriver`` (attach -> submit_fix -> await_done
-        -> extract_image -> close), an OWNER-TRIGGERED one-off
+        drives a FRESH ``SiteDriver`` (attach -> submit_with_image ->
+        await_done -> extract_image -> close), an OWNER-TRIGGERED one-off
         automation — never the running site's own worker thread. This is
         why it stays safe despite the one-tab constraint: it is only
         ever reached by an explicit click, and refuses outright (a
@@ -331,7 +331,11 @@ class CheckerFixerMixin:
                 " it or wait until it finishes, then retry.",
             )
         from painter import ai
-        from painter.driver import DriverError, FixNotConfigured, SiteDriver
+        from painter.driver import (
+            AttachNotConfigured,
+            DriverError,
+            SiteDriver,
+        )
 
         live = ai.flag_file(rel, out_base)
         prompt = ai.build_fix_prompt(defects, raw)
@@ -339,10 +343,10 @@ class CheckerFixerMixin:
         driver = SiteDriver(SITES[site_key], TIMING, CDP_URL)
         try:
             driver.attach()
-            driver.submit_fix(str(live), prompt)
+            driver.submit_with_image(str(live), prompt)
             driver.await_done(log=log)
             fixed = driver.extract_image()
-        except FixNotConfigured as exc:
+        except AttachNotConfigured as exc:
             self._q.put(f"[fixer] WEBSITE FIX gated: {exc}")
             return ("gated", str(exc))
         except DriverError as exc:

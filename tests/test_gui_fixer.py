@@ -35,9 +35,9 @@ wiring gets a screenshot" split:
   ``ai.drop_and_site_for`` fallback for ``AiCheckPanel``), IMAGE FIX's
   gate/success paths, and WEBSITE FIX's "site currently running -> a
   transient error, the browser is NEVER touched" guard plus its
-  configured attach -> submit_fix -> await_done -> extract_image ->
-  close sequence (a duck-typed fake ``SiteDriver``, mirroring
-  test_driver.py's own fakes) and its ``FixNotConfigured`` gate.
+  configured attach -> submit_with_image -> await_done -> extract_image
+  -> close sequence (a duck-typed fake ``SiteDriver``, mirroring
+  test_driver.py's own fakes) and its ``AttachNotConfigured`` gate.
 * ``DocWindow``'s manual buttons + ``gui._fix_result_ui`` — the pure
   result-to-UI mapping behind ``_apply_fix_result`` (headless, Tk-free
   — no test in this suite constructs a real ``tk.Toplevel``; the real
@@ -731,10 +731,10 @@ def test_run_website_fix_refuses_while_the_site_is_running_never_touches_driver(
 
 
 class _FakeSiteDriverConfigured:
-    """Duck-typed SiteDriver stand-in — records the attach -> submit_fix
-    -> await_done -> extract_image -> close SEQUENCE, mirrors
-    test_driver.py's own FakeLocator/FakePage call-order proofs one
-    level up (at the SiteDriver interface, not the Playwright one)."""
+    """Duck-typed SiteDriver stand-in — records the attach ->
+    submit_with_image -> await_done -> extract_image -> close SEQUENCE,
+    mirrors test_driver.py's own FakeLocator/FakePage call-order proofs
+    one level up (at the SiteDriver interface, not the Playwright one)."""
 
     instances: list["_FakeSiteDriverConfigured"] = []
 
@@ -747,8 +747,8 @@ class _FakeSiteDriverConfigured:
         self.calls.append("attach")
         return "tab"
 
-    def submit_fix(self, image_path, prompt):
-        self.calls.append(("submit_fix", image_path, prompt))
+    def submit_with_image(self, image_path, prompt):
+        self.calls.append(("submit_with_image", image_path, prompt))
 
     def await_done(self, log=print):
         self.calls.append("await_done")
@@ -788,7 +788,7 @@ def test_run_website_fix_success_drives_the_configured_sequence(
 
     driver = _FakeSiteDriverConfigured.instances[0]
     assert driver.calls[0] == "attach"
-    assert driver.calls[1][0] == "submit_fix"
+    assert driver.calls[1][0] == "submit_with_image"
     assert driver.calls[1][1] == str(live)
     assert "halo off-centre" in driver.calls[1][2]
     assert driver.calls[2] == "await_done"
@@ -803,8 +803,8 @@ class _FakeSiteDriverNotConfigured:
     def attach(self):
         return "tab"
 
-    def submit_fix(self, image_path, prompt):
-        raise driver_module.FixNotConfigured("attach_button/file_input empty")
+    def submit_with_image(self, image_path, prompt):
+        raise driver_module.AttachNotConfigured("attach_menu_path empty")
 
     def close(self):
         pass
@@ -821,7 +821,7 @@ def test_run_website_fix_not_configured_is_gated(tmp_path, monkeypatch):
         fake, rel, out_base, "gemini", "gemini", ["x"], "raw",
     )
     assert kind == "gated"
-    assert "attach_button" in message or "not configured" in message.lower()
+    assert "attach_menu_path" in message or "not configured" in message.lower()
 
 
 def test_run_website_fix_closes_the_driver_even_on_failure(tmp_path, monkeypatch):
@@ -864,7 +864,7 @@ def test_fix_result_ui_gated_reenables_only_the_other_button():
     assert enable_website is True     # the OTHER path may still work
 
     status, enable_image, enable_website = gui._fix_result_ui(
-        "website", ("gated", "attach_button/file_input empty"),
+        "website", ("gated", "attach_menu_path empty"),
     )
     assert enable_website is None
     assert enable_image is True

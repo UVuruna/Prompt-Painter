@@ -360,7 +360,7 @@ class DocWindow(tk.Toplevel):
     # ("kind", "message") result onto a private queue, polled via
     # self.after(AI_POLL_MS, ...) so the network/browser call never
     # blocks the Tk event loop. ``kind`` is "ok" (the image was
-    # overwritten), "gated" (PaidFeatureRequired / FixNotConfigured —
+    # overwritten), "gated" (PaidFeatureRequired / AttachNotConfigured —
     # PERMANENT for this ONE path), or "error" (anything else —
     # transient, retry-able; e.g. the site is currently generating).
 

@@ -36,30 +36,35 @@ handed back for the runner to save under the sheet's own name.
    wipes the composer's unsent text, so the prompt MUST be re-pasted),
    and retries the send-button lookup exactly ONCE more. A second miss
    raises `SelectorRot` same as always — the recovery is a single
-   extra attempt, never a retry loop. `submit_fix`'s follow-up prompt
+   extra attempt, never a retry loop. `submit_with_image`'s prompt
    goes through the same `_paste_and_send`, so it gets the same
    recovery; note that a reload there would also drop the just-attached
-   image (no re-attach step exists) — an acceptable gap today since
-   WEBSITE FIX ships gated off (`FixNotConfigured`) until the owner
-   configures real selectors. `runner.py`'s `submit_prompt` call site
+   image (no re-attach step exists) — an acceptable edge gap.
+   `runner.py`'s `submit_prompt` call site
    does not pass its own `log` through (the shared `driver` duck-type
    is also `ApiImageAdapter` in `gui/__init__.py`, whose `submit_prompt`
    takes no `log` parameter and is out of scope to change here) — the
    recovery message falls back to `log`'s own default (`print`), same
    as every other driver method's default-logging pattern.
-1b. `submit_fix(image_path, prompt)` — **WEBSITE FIX** (GUI rework
-   Phase 17, **GATED**): click the site's attach/upload control,
-   `set_input_files(image_path)` on its file input (often
-   hidden-by-design — this lookup does not require visibility, unlike
-   every other selector here), a settle pause, then the SAME
-   `_paste_and_send(prompt)` `submit_prompt` uses. Raises
-   `FixNotConfigured` immediately — before touching the page at all —
-   while the site's `attach_button`/`file_input` are empty (`SITES`'
-   shipped default for BOTH chatgpt and gemini today; the OWNER must
-   capture the live selectors first, the same way every other
-   selector in this file was captured). Only SUBMITS the fix — the
-   caller awaits the done edge and reads the corrected image back
-   with the SAME `await_done`/`extract_image` below, unchanged.
+1b. `submit_with_image(image_path, prompt)` — **image + text submit**
+   (owner 2026-07-23), used BOTH by input-image sheet entries (the
+   `← \`ref\`` reference photo — "put THIS character into that scene")
+   and by WEBSITE FIX (re-attaching a flagged output for a focused
+   correction); the prompt text carries the intent, the mechanics are
+   one. Acts like a PERSON: walk `attach_menu_path` — EXPAND the "+"
+   menu, then click the add-image option (never a hidden upload item
+   directly) — each step `_hesitate()`-paced. Then attach the file: if
+   the site exposes `file_input` (ChatGPT's `#upload-photos`),
+   `set_input_files` on it directly (no OS dialog; the lookup does not
+   require visibility, unlike every other selector here); else (Gemini)
+   the option opens the OS dialog, caught with `page.expect_file_chooser()`.
+   Then WAIT for the composer's `attach_preview` (up to
+   `image_ready_timeout_s`) so the prompt never sends ahead of the
+   image, then the SAME `_paste_and_send(prompt)` `submit_prompt` uses.
+   Raises `AttachNotConfigured` immediately — before touching the page
+   at all — while the site's `attach_menu_path` is empty. Only SUBMITS
+   — the caller awaits the done edge and reads the image back with the
+   SAME `await_done`/`extract_image` below, unchanged.
 2. `await_done(log)` — the done edge: the busy signal (stop button)
    must appear, then disappear, under the hard generation timeout;
    long waits log progress at the configured cadence. **BUG 3 text
@@ -155,12 +160,12 @@ image timeout.
   (Retry button -> paced "retry" text -> escalation rounds of
   refresh + new session); the ladder re-raises only when every rung is
   spent, which stops the site.
-- `FixNotConfigured` — GUI rework Phase 17: `submit_fix` (WEBSITE
-  FIX) is disabled for this site because `attach_button`/`file_input`
-  are empty in `SITES` — the shipped default for BOTH chatgpt and
-  gemini until the owner captures the live selectors. Raised
-  immediately, before `submit_fix` touches the page at all — never a
-  guessed selector.
+- `AttachNotConfigured` — `submit_with_image` (image + text) is
+  disabled for this site because `attach_menu_path` is empty in
+  `SITES`. Used by both input-image entries and WEBSITE FIX. Raised
+  immediately, before `submit_with_image` touches the page at all —
+  never a guessed selector. (Both sites ship configured today, owner
+  captures 2026-07-23.)
 - `DriverError` — anything else the config block does not
   recognize, always with the response's opening text quoted. Both the
   CLI and the GUI catch `DriverError`, so `NoImage` (when a nudge does
@@ -181,9 +186,10 @@ image timeout.
 
 ### SiteDriver
 `attach()` (find the tab by URL fragment; several tabs → the last
-one), `submit_prompt()`, `submit_fix()` (GATED — see Failure
-taxonomy), `await_done()`, `extract_image()`, `close()` (detaches;
-never closes the owner's browser).
+one), `submit_prompt()`, `submit_with_image()` (image + text, GATED by
+`attach_menu_path` — see Failure taxonomy), `await_done()`,
+`extract_image()`, `close()` (detaches; never closes the owner's
+browser).
 
 ## Functions
 

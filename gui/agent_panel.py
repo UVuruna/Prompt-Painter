@@ -182,7 +182,7 @@ class AgentPanel(ttk.Labelframe):
         # checked image comes back flagged — a plain REST call, so it
         # genuinely runs IN PARALLEL with this site's own next-image
         # generation (see PainterGui._maybe_spawn_fixer/_run_fixer_api).
-        # "website" mode never drives driver.submit_fix from the auto
+        # "website" mode never drives driver.submit_with_image from the auto
         # path — the site's browser tab is busy generating the NEXT image
         # at that exact instant (one tab, one operation) — it QUEUES the
         # item instead (see PainterGui._queue_website_fix's own docstring

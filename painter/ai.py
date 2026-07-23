@@ -678,12 +678,12 @@ def build_fix_prompt(defects: list[str], raw: str | None = None) -> str:
     Shared by every fixer surface (Rule #5, one prompt-builder instead
     of several near-copies): the manual IMAGE FIX / WEBSITE FIX buttons
     in the checker's report viewer (both call ``ai.edit_image``/
-    ``driver.submit_fix`` with THIS text) and the API-mode auto-fixer
-    (``PainterGui._run_fixer_api``).
+    ``driver.submit_with_image`` with THIS text) and the API-mode
+    auto-fixer (``PainterGui._run_fixer_api``).
 
     An EMPTY ``defects`` list still returns a sensible, non-blank
     instruction (``AI_FIX_PROMPT_NO_DEFECTS``) rather than raising or
-    returning "" — ``edit_image``/``submit_fix`` always need SOME
+    returning "" — ``edit_image``/``submit_with_image`` always need SOME
     instruction text, and this function stays honest about ANY input
     regardless of whether the caller already gates on defects existing
     (root Rule #1: never assume an upstream gate held). ``raw`` — when

@@ -443,9 +443,10 @@ plus proving the queued item lands in `AiCheckPanel._flagged` and
 site resolution (an explicit `jobtemp_slot` vs the
 `ai.drop_and_site_for` fallback, `"api_image"` correctly getting no
 website worker) and `_run_image_fix`/`_run_website_fix`'s gate/success
-paths (a duck-typed fake `SiteDriver` proving the attach -> submit_fix
--> await_done -> extract_image -> close call SEQUENCE and that it is
-ALWAYS closed, even on `FixNotConfigured`; "site currently running"
+paths (a duck-typed fake `SiteDriver` proving the attach ->
+submit_with_image -> await_done -> extract_image -> close call SEQUENCE
+and that it is ALWAYS closed, even on `AttachNotConfigured`; "site
+currently running"
 refuses WITHOUT ever constructing a driver); and `gui._fix_result_ui`'s
 pure result-to-UI mapping behind `DocWindow._apply_fix_result`
 (Tk-free — no test in this suite constructs a real `tk.Toplevel`) plus

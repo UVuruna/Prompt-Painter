@@ -662,7 +662,7 @@ def test_build_fix_prompt_with_defects_lists_each_as_a_bullet():
 
 def test_build_fix_prompt_empty_defects_is_never_blank():
     """A caller that (against the gate) calls this with no defects still
-    gets a SENSIBLE, non-empty instruction — edit_image/submit_fix
+    gets a SENSIBLE, non-empty instruction — edit_image/submit_with_image
     always need SOME text; this function stays honest about ANY input
     regardless of whether an upstream gate held (root Rule #1)."""
     prompt = ai.build_fix_prompt([])

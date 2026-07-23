@@ -2245,7 +2245,7 @@ build_fix_prompt(defects, raw) -> str` is the ONE shared prompt-builder
 instruction (`config.AI_FIX_PROMPT_WITH_DEFECTS`), an empty list a
 graceful "use your own judgement" fallback
 (`AI_FIX_PROMPT_NO_DEFECTS` — never blank, since `edit_image`/
-`submit_fix` always need SOME text), and the checker's VERBATIM raw
+`submit_with_image` always need SOME text), and the checker's VERBATIM raw
 response — when given — is appended after, as extra grounding context
 the parsed bullets can lose (`AI_FIX_PROMPT_RAW_SUFFIX`).
 
@@ -2284,7 +2284,7 @@ NEXT checked image:
   changing it**: the site's browser tab is BUSY generating the NEXT
   image the instant `item_checked` fires (the checker's background
   thread reports well before the run finishes), so
-  `_queue_website_fix` NEVER drives `driver.submit_fix` from this
+  `_queue_website_fix` NEVER drives `driver.submit_with_image` from this
   path — doing so would collide with the in-flight
   `submit_prompt`/`await_done` (one tab, one operation). Instead it
   folds the flagged item into `AiCheckPanel`'s OWN `_flagged`/`_raw`
@@ -2332,7 +2332,7 @@ spawns (mirrors `ApiImageGenPanel._probe_access`'s own private-queue +
 "background network/browser call never blocks the Tk event loop"
 pattern), and returns a `("ok"/"gated"/"error", message)` pair.
 `_run_website_fix` — an OWNER-TRIGGERED one-off automation, driving a
-FRESH `SiteDriver` (attach -> `submit_fix` -> `await_done` ->
+FRESH `SiteDriver` (attach -> `submit_with_image` -> `await_done` ->
 `extract_image` -> `close`), never the running site's own worker
 thread — refuses with a transient `"error"` (not a permanent
 `"gated"`) while THIS site is `self._running`: the SAME one-tab
@@ -2384,16 +2384,16 @@ website mode monkeypatches BOTH `ai.edit_image` and
 site resolution (explicit `jobtemp_slot` vs the `drop_and_site_for`
 fallback, `"api_image"` correctly getting no website worker);
 `_run_image_fix`/`_run_website_fix`'s gate/success paths (a duck-typed
-fake `SiteDriver` proving the attach -> submit_fix -> await_done ->
-extract_image -> close call SEQUENCE, and that it is ALWAYS closed,
-even on `FixNotConfigured`); `_fix_result_ui`'s mapping; and
+fake `SiteDriver` proving the attach -> submit_with_image -> await_done
+-> extract_image -> close call SEQUENCE, and that it is ALWAYS closed,
+even on `AttachNotConfigured`); `_fix_result_ui`'s mapping; and
 `DashPanel`'s new `item_fixed` row handling. Real-window screenshots
 (Day theme, `settings.json` redirected to a scratch file, every
 ai.py/driver.py call MOCKED — no live quota, no live Chrome):
 (1) an isolated `AgentPanel` with AI checker ON and Settings expanded,
 showing the new Fixer AI switches; (2) the checker report `DocWindow`
 with WEBSITE FIX driven to its GATED/disabled state (the
-`FixNotConfigured`-shaped message) while IMAGE FIX stays available;
+`AttachNotConfigured`-shaped message) while IMAGE FIX stays available;
 (3) a `StepRestoreWindow` filmstrip — driven through the REAL
 `_run_fixer_api` with a mocked `ai.edit_image` — showing Original ->
 Fixer AI -> Current as three distinct stages.
