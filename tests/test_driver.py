@@ -388,6 +388,43 @@ def test_submit_prompt_recovers_via_reload_when_send_button_missing():
     assert any("reloading the page" in line for line in logs)
 
 
+def test_submit_with_image_reattaches_on_send_reload_recovery():
+    """Review finding (owner 2026-07-23): a send-button reload recovery
+    mid-``submit_with_image`` drops the attached image. The recovery must
+    RE-ATTACH (re-walk the menu, re-set the file) before re-typing —
+    otherwise it would silently send a TEXT-ONLY prompt under the
+    reference-image filename (a Rule #1 violation)."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    _wire_attach(site, page, with_input=True)
+    send = FakeLocator("send", page)
+    # send button ABSENT until the fake reload "fixes" the DOM
+    del page.locators[site.send_button[0]]
+    base_reload = page.reload
+
+    def reload_and_recover():
+        base_reload()
+        page.locators[site.send_button[0]] = send
+
+    page.reload = reload_and_recover
+    driver = _driver(site, page)
+
+    driver.submit_with_image("C:/out/hero.png", "put the hero in", lambda s: None)
+
+    assert page.calls.count(("reload",)) == 1
+    # the image was attached TWICE — initial + re-attach after the reload
+    assert page.calls.count(
+        ("set_input_files", "file_input", "C:/out/hero.png")
+    ) == 2
+    # and the prompt DID go out with the image (send clicked), never
+    # text-only-without-image
+    assert ("click", "send") in page.calls
+    assert ("insert_text", "put the hero in") in page.calls
+    # the prompt was re-typed after the reload (the failed first attempt,
+    # then the post-reload retry)
+    assert page.calls.count(("insert_text", "put the hero in")) == 2
+
+
 def test_submit_prompt_reload_recovery_gives_up_when_still_missing():
     """The send button is STILL missing after the reload -> the
     original SelectorRot propagates (stops the site), exactly as

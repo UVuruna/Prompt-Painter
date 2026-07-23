@@ -284,24 +284,28 @@ SITES = {
             'a[data-testid="create-new-chat-button"]',
             'a[href="/"][data-sidebar-item="true"]',
         ),
-        # Image attach (owner captures 2026-07-23, UV/Add Photo/chatGPT):
-        # the composer "+" is <button id="composer-plus-btn"
-        # data-testid="composer-plus-btn" aria-label="Add files and
-        # more">; clicking it opens the menu whose "Add photos & files"
-        # row (a submenu trigger) is targeted by role+text. That row
-        # drives the hidden <input type="file" id="upload-photos"
-        # data-testid="upload-photos-input" accept="image/*" multiple>,
-        # so the driver sets files on it directly (no OS dialog). Once
-        # uploaded, the composer shows the file as
-        # <button aria-label="Open image: User uploaded image"> wrapping
-        # an <img class="object-cover"> inside a role="group" file-tile —
-        # the preview the driver waits for before sending.
+        # Image attach (owner captures 2026-07-23, UV/Add Photo/chatGPT,
+        # incl. "hidden ADD PHOTO.png" — the full open-menu DOM): the
+        # composer "+" is <button id="composer-plus-btn" data-testid=
+        # "composer-plus-btn" aria-label="Add files and more">. Its menu
+        # rows are <div class="group __menu-item ..." role="group"> — the
+        # CLICKABLE row is div.__menu-item (it carries cursor:pointer;
+        # OpenAI gives NO per-row data-testid, so the ONLY stable anchor
+        # for the "Add photos & files" row is its label text scoped to
+        # .__menu-item; role is "group", NOT "menuitem"). That row drives
+        # the hidden <input type="file" id="upload-photos" data-testid=
+        # "upload-photos-input" accept="image/*" multiple>, so the driver
+        # sets files on it directly (no OS dialog) — the row click is only
+        # for the human flow. Once uploaded, the composer shows the file
+        # as <button aria-label="Open image: User uploaded image">
+        # wrapping <img class="object-cover"> in a role="group" file-tile
+        # — the preview the driver waits for before sending.
         attach_menu_path=(
             ('button[data-testid="composer-plus-btn"]', "#composer-plus-btn"),
             (
+                'div.__menu-item:has-text("Add photos & files")',
+                '[class*="menu-item"]:has-text("Add photos & files")',
                 '[role="menuitem"]:has-text("Add photos & files")',
-                '[role="menuitemradio"]:has-text("Add photos & files")',
-                'div:has-text("Add photos & files")',
             ),
         ),
         file_input=(

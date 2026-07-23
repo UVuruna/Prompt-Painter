@@ -242,7 +242,12 @@ class SiteDriver:
         self._hesitate()
 
     def _click_send(
-        self, prompt: str, log: Log, *, retrying: bool = False
+        self,
+        prompt: str,
+        log: Log,
+        *,
+        retrying: bool = False,
+        reattach: Callable[[], None] | None = None,
     ) -> None:
         """Locate + click the send button.
 
@@ -255,6 +260,13 @@ class SiteDriver:
         guards the recursion to a single attempt — a second miss (or
         ``SEND_RELOAD_RECOVERY`` off) raises ``SelectorRot`` same as
         always.
+
+        ``reattach`` (owner 2026-07-23 / review finding) RE-RUNS the
+        image attach after the reload: a ``reload()`` wipes not only the
+        composer text but any attached image, so for ``submit_with_image``
+        the recovery must re-attach BEFORE re-typing — otherwise it would
+        silently send a text-only prompt under the reference-image
+        filename (a Rule #1 violation). None for a plain text submit.
         """
         try:
             send = self._require(self.site.send_button, "the send button")
@@ -266,20 +278,27 @@ class SiteDriver:
                 " the page and re-pasting once (recovery)"
             )
             self.page.reload()
+            if reattach is not None:
+                log("    re-attaching the image the reload dropped")
+                reattach()
             self._type_into_box(prompt)
-            self._click_send(prompt, log, retrying=True)
+            self._click_send(prompt, log, retrying=True, reattach=reattach)
             return
         send.click()
 
-    def _paste_and_send(self, prompt: str, log: Log = print) -> None:
+    def _paste_and_send(
+        self,
+        prompt: str,
+        log: Log = print,
+        reattach: Callable[[], None] | None = None,
+    ) -> None:
         """Type the prompt then click send — the paste+send tail
         shared by ``submit_prompt`` (text only) and ``submit_with_image``
-        (image attach + prompt). This is ``submit_prompt``'s original
-        body, extracted unchanged (plus the send-button reload recovery
-        in ``_click_send``) so both entry points end the same
-        human-paced way."""
+        (image attach + prompt). ``reattach`` re-runs the image attach on
+        the send-button reload recovery (see ``_click_send``); None for a
+        plain text submit."""
         self._type_into_box(prompt)
-        self._click_send(prompt, log)
+        self._click_send(prompt, log, reattach=reattach)
 
     def submit_prompt(self, prompt: str, log: Log = print) -> None:
         """Paste the prompt byte-identical and press send — with a
@@ -319,6 +338,25 @@ class SiteDriver:
         Only SUBMITS. Awaiting the done edge and reading the image back
         reuse the EXISTING ``await_done``/``extract_image`` unchanged —
         the caller invokes them next, exactly as after ``submit_prompt``.
+        """
+        self._attach_image(image_path)
+        self._hesitate()
+        # reattach: a send-button reload recovery would drop the image, so
+        # re-run the whole attach before re-typing (review finding)
+        self._paste_and_send(
+            prompt, log, reattach=lambda: self._attach_image(image_path)
+        )
+
+    def _attach_image(self, image_path: str) -> None:
+        """Walk the "+" menu like a person and attach ``image_path``, then
+        wait for the composer preview — the attach half of
+        ``submit_with_image``, extracted so the send-button reload
+        recovery can RE-ATTACH after a ``reload()`` drops the image
+        (owner 2026-07-23 / review finding). Idempotent: re-opening the
+        menu and re-setting the file is exactly what the recovery needs.
+
+        GATED: raises ``AttachNotConfigured`` immediately while this
+        site's ``attach_menu_path`` is empty — never a guessed selector.
         """
         if not self.site.attach_menu_path:
             raise AttachNotConfigured(
@@ -366,8 +404,6 @@ class SiteDriver:
                 "the attached-image preview",
                 timeout_s=self._timing.image_ready_timeout_s,
             )
-        self._hesitate()
-        self._paste_and_send(prompt, log)
 
     def await_done(self, log: Log = print) -> None:
         """Watch the done edge: the busy signal appears, then goes.
