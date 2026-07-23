@@ -325,6 +325,56 @@ def sign_exe(exe_path: Path):
     sign_file(exe_path)
 
 
+def _powershell(script: str) -> str:
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip()
+
+
+def verify_build(exe_path: Path, installer_path: Path | None):
+    """Fail-closed verification gate — the build must not silently ship
+    broken metadata (missing CompanyName) or an unsigned installer.
+
+    Runs LAST, after the exe and (optional) installer are built and
+    signed, and exits 1 on any problem so a broken artifact can never
+    be mistaken for a good one.
+    """
+    step("VERIFY  metadata + signatures (build fails if anything is missing)")
+    problems = []
+
+    info = _powershell(
+        f"$v=(Get-Item '{exe_path}').VersionInfo; \"$($v.CompanyName)|$($v.FileVersion)\""
+    )
+    company, _, file_version = info.partition("|")
+    expected_company = COMPANY["company_name"]
+    if company != expected_company:
+        problems.append(f"exe CompanyName is {company!r}, expected {expected_company!r}")
+
+    expected_version = APP_INFO["version"]
+    if expected_version not in file_version:
+        problems.append(
+            f"exe FileVersion is {file_version!r}, expected to contain {expected_version!r}"
+        )
+
+    if CERT_PATH.exists() and PASSWORD_PATH.exists():
+        targets = [("exe", exe_path)]
+        if installer_path is not None:
+            targets.append(("installer", installer_path))
+        for label, target in targets:
+            status = _powershell(f"(Get-AuthenticodeSignature '{target}').Status")
+            if status in ("", "NotSigned"):
+                problems.append(f"{label} is NOT signed (status {status or 'missing'!r})")
+
+    if problems:
+        for p in problems:
+            print(f"  FAIL: {p}")
+        sys.exit(1)
+
+    print(f"  OK: CompanyName={company!r}  FileVersion={file_version!r}; exe+installer signed")
+
+
 def _find_makensis() -> str | None:
     makensis = shutil.which("makensis")
     if makensis:
@@ -417,6 +467,8 @@ def main():
     else:
         print("  Installer:    (not built — see the NSIS warning above)")
     print()
+
+    verify_build(exe_path, installer_path)
 
 
 if __name__ == "__main__":
