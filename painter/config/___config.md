@@ -138,10 +138,14 @@ REMOVED, owner 2026-07-22 — the sheet prompt states its own aspect
 explicitly, see instructions.md rule 3b); the per-agent STYLE clause (`STYLES`,
 `STYLE_CHOICES`, `STYLE_DEFAULT`); `SAFER_PREAMBLE` (the safety-refusal
 one-shot retry preamble), `CONTINUE_NUDGE` (the ChatGPT stall
-nudge), and `IMAGE_RETRY_NUDGE`/`IMAGE_FAILED_RETRY_MAX` (BUG 3,
-owner 2026-07-21 — the "retry" word ChatGPT's own "Image generation
-failed" answer asks for, and how many times the runner resends it
-before giving up on the item); the free Gemini API block (`GEMINI_*` model names,
+nudge), and `IMAGE_RETRY_NUDGE`/`IMAGE_FAILED_RETRY_MAX`/
+`IMAGE_FAILED_RETRY_DELAY_RANGE_S`/`IMAGE_FAILED_ESCALATION_DELAYS_S`
+(BUG 3 recovery ladder, owner 2026-07-21 + escalation 2026-07-23 — the
+"retry" word ChatGPT's own "Image generation failed" answer asks for,
+how many times the runner resends it and the random wait before each,
+then the per-round wait ranges for the refresh + new-session escalation
+rounds; the list length is the number of rounds, and exhausting the
+last one stops the site); the free Gemini API block (`GEMINI_*` model names,
 `AI_CALL_PAUSE_S`/`AI_TIMEOUT_S`/`AI_TEST_PROMPT`, the transient-retry
 knobs, `AI_IMAGE_QUOTA_MARKERS`); the AI sheet generator's prompt
 templates (`AI_MAX_QUESTIONS`, `SHEETS_DIR`, `AI_QUESTIONS_SYSTEM`,
@@ -156,9 +160,11 @@ checker's copy (`AI_FLAGS_FILENAME`, `AI_CHECK_INSTRUCTIONS`,
 instance), `PAUSE_POLL_INTERVAL_S`, `MIN_IMAGE_PX`; `SiteConfig` (the
 per-site DOM hook dataclass — prompt box, send/busy/response/result
 selectors, refusal/quota text markers, `image_failed_text_markers`
-(BUG 3, owner 2026-07-21 — ChatGPT's own "Image generation failed"
-answer text, empty for sites with no such marker), the WEBSITE FIX
-attach selectors) and `SITES` (`chatgpt`/`gemini`, both shipping with
+(BUG 3, owner 2026-07-21 + second face 2026-07-23 — ChatGPT's "Image
+generation failed" AND "something seems to have gone wrong." answer
+text, empty for sites with no such marker), `image_error_retry_button`
+(the native Retry button of that "something went wrong" turn — ChatGPT
+only, empty elsewhere), the WEBSITE FIX attach selectors) and `SITES` (`chatgpt`/`gemini`, both shipping with
 WEBSITE FIX disabled until the owner captures real selectors);
 `NEW_CHAT_CHOICES`.
 

@@ -22,6 +22,8 @@ from typing import Callable
 
 from painter.config import (
     CONTINUE_NUDGE,
+    IMAGE_FAILED_ESCALATION_DELAYS_S,
+    IMAGE_FAILED_RETRY_DELAY_RANGE_S,
     IMAGE_FAILED_RETRY_MAX,
     IMAGE_RETRY_NUDGE,
     PAUSE_POLL_INTERVAL_S,
@@ -75,11 +77,25 @@ def _pause(timing: Timing, should_stop: ShouldStop | None, log: Log) -> None:
     """A random polite pause between prompts, interruptible by Stop."""
     wait = random.uniform(timing.pause_min_s, timing.pause_max_s)
     log(f"    pause {wait:.2f}s (paced run)")
-    pause_end = time.monotonic() + wait
-    while time.monotonic() < pause_end:
+    _sleep(wait, should_stop, log)
+
+
+def _sleep(
+    seconds: float, should_stop: ShouldStop | None, log: Log
+) -> bool:
+    """Sleep ``seconds``, waking every half-second to honour Stop.
+
+    Shared by ``_pause`` (short paced waits) and the image-failure
+    recovery ladder (its retries and escalation rounds wait MINUTES —
+    up to ~36 — so a Stop must never hang behind them). Returns True
+    when Stop cut the wait short, False when it ran to completion; the
+    ladder uses that to abandon the recovery immediately."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
         if should_stop is not None and should_stop():
-            break
+            return True
         time.sleep(0.5)
+    return False
 
 
 def wait_while_paused(
@@ -121,6 +137,103 @@ def wait_while_paused(
     emit({"type": "sheet_resumed"})
     log("    RESUMED")
     return False
+
+
+def _recover_image_failed(
+    exc: ImageGenFailed,
+    driver: SiteDriver,
+    generate_one: Callable[[str], tuple[bytes, float]],
+    base: str,
+    should_stop: ShouldStop | None,
+    log: Log,
+    emit: OnEvent,
+) -> tuple[bytes, float]:
+    """Walk the image-failure recovery ladder (owner 2026-07-23).
+
+    ChatGPT's image tool fails in two faces, both matched by
+    ``image_failed_text_markers`` and both arriving here as
+    ``ImageGenFailed``: its own "reply with 'retry'" text, and the
+    generic "Hmm...something seems to have gone wrong." error turn
+    (which also renders a native Retry BUTTON). One ladder serves
+    both, cheapest rung first:
+
+      1. click the site's native Retry button, if it has one for this
+         state and it is present — regenerates in place, no re-typing;
+      2. resend ``IMAGE_RETRY_NUDGE`` up to ``IMAGE_FAILED_RETRY_MAX``
+         times, each after a random ``IMAGE_FAILED_RETRY_DELAY_RANGE_S``
+         wait (server hiccups and soft rate-limits clear on their own —
+         hammering just re-fails);
+      3. one escalation ROUND per ``IMAGE_FAILED_ESCALATION_DELAYS_S``
+         entry: wait a random duration in that entry's range, then
+         REFRESH the page, open a NEW SESSION, and resend the WHOLE
+         original prompt (a fresh chat has no context, so "retry" alone
+         would mean nothing).
+
+    Returns ``(image bytes, send timestamp)`` from the first rung that
+    yields an image. When every rung is spent the ladder re-raises
+    ``ImageGenFailed`` — the worker STOPS (owner's "GASI"): finished
+    items are safe on disk, so a restart resumes past them. A Stop
+    request during any wait abandons the ladder the same way. Only
+    ``ImageGenFailed`` is caught per rung; a quota/refusal that surfaces
+    mid-recovery propagates loudly, exactly as on a first attempt."""
+    reason = str(exc)
+
+    # rung 1 — the site's own Retry button (same chat, no re-typing)
+    try:
+        if driver.click_error_retry(log):
+            emit({"type": "item_retry"})
+            t_send = time.monotonic()
+            driver.await_done(log)
+            data = driver.extract_image()
+            log("    site Retry button RECOVERED")
+            return data, t_send
+    except ImageGenFailed as again:
+        reason = str(again)
+
+    # rung 2 — resend the site's own "retry" word, paced
+    for attempt in range(1, IMAGE_FAILED_RETRY_MAX + 1):
+        wait = random.uniform(*IMAGE_FAILED_RETRY_DELAY_RANGE_S)
+        log(
+            "    IMAGE GENERATION FAILED — waiting"
+            f" {wait:.0f}s then sending '{IMAGE_RETRY_NUDGE}'"
+            f" ({attempt}/{IMAGE_FAILED_RETRY_MAX}) ..."
+        )
+        if _sleep(wait, should_stop, log):
+            log("    STOPPED on request during recovery")
+            raise ImageGenFailed(reason)
+        emit({"type": "item_retry"})
+        try:
+            data, t_send = generate_one(IMAGE_RETRY_NUDGE)
+            log("    retry RECOVERED")
+            return data, t_send
+        except ImageGenFailed as again:
+            reason = str(again)
+
+    # rung 3 — escalation rounds: wait -> refresh -> new session ->
+    # resend the whole original prompt
+    rounds = len(IMAGE_FAILED_ESCALATION_DELAYS_S)
+    for rnd, (lo, hi) in enumerate(IMAGE_FAILED_ESCALATION_DELAYS_S, start=1):
+        wait = random.uniform(lo, hi)
+        log(
+            f"    escalation round {rnd}/{rounds} — waiting"
+            f" {wait / 60:.0f} min, then refresh + new session ..."
+        )
+        if _sleep(wait, should_stop, log):
+            log("    STOPPED on request during recovery")
+            raise ImageGenFailed(reason)
+        emit({"type": "item_retry"})
+        driver.refresh(log)
+        driver.new_chat(log)
+        try:
+            data, t_send = generate_one(base)
+            log(f"    escalation round {rnd} RECOVERED (fresh session)")
+            return data, t_send
+        except ImageGenFailed as again:
+            reason = str(again)
+
+    # every rung spent — stop the worker (finished work is safe on disk)
+    log(f"    RECOVERY EXHAUSTED — stopping the site: {reason}")
+    raise ImageGenFailed(reason)
 
 
 class RunReport:
@@ -452,50 +565,23 @@ def run_sheet(
                 data, t_send = generate_one(CONTINUE_NUDGE)
                 log("    continue nudge RECOVERED")
             except ImageGenFailed as exc:
-                # BUG 3: ChatGPT's OWN text already named the failure
-                # ("Image generation failed ... reply with 'retry'")
-                # while the busy/stop signal was still stuck — the
-                # driver caught it WITHOUT burning the hard timeout.
-                # Its own instructions say how to recover: resend the
-                # word "retry" into the same chat, up to the configured
-                # number of attempts, same skip-and-continue shape as a
-                # safety refusal when it still won't budge.
+                # BUG 3, two faces (owner 2026-07-21 / 2026-07-23):
+                # ChatGPT's image tool failed — either its own "reply
+                # with 'retry'" text or the generic "Hmm...something
+                # seems to have gone wrong." error turn (both matched by
+                # image_failed_text_markers; the busy signal stays stuck
+                # so the driver raises WITHOUT burning the hard timeout).
+                # Both ride one recovery ladder: native Retry button ->
+                # paced text "retry" -> escalation rounds (wait, refresh,
+                # new session, whole prompt). On success we continue with
+                # the recovered image; when the ladder is spent it
+                # re-raises and the worker stops (files on disk resume).
                 if not image_failed_retry:
                     raise
-                reason = str(exc)
-                data = None
-                for attempt in range(1, IMAGE_FAILED_RETRY_MAX + 1):
-                    log(
-                        "    IMAGE GENERATION FAILED — sending"
-                        f" '{IMAGE_RETRY_NUDGE}' ({attempt}/"
-                        f"{IMAGE_FAILED_RETRY_MAX}) ..."
-                    )
-                    emit({"type": "item_retry"})
-                    try:
-                        data, t_send = generate_one(IMAGE_RETRY_NUDGE)
-                        log("    retry RECOVERED")
-                        break
-                    except ImageGenFailed as exc2:
-                        reason = str(exc2)
-                        data = None
-                if data is None:
-                    refused += 1
-                    log(f"    GENERATION FAILED — {reason}")
-                    log(
-                        "    continuing with the next item; rerun later"
-                        " to retry"
-                    )
-                    if run_report is not None:
-                        run_report.refused(item.drop_path, reason)
-                    emit(
-                        {
-                            "type": "item_refused",
-                            "drop_path": item.drop_path,
-                        }
-                    )
-                    if idx < total:
-                        _pause(timing, should_stop, log)
-                    continue
+                data, t_send = _recover_image_failed(
+                    exc, driver, generate_one, base, should_stop, log, emit
+                )
+                retried = True
             t_image = time.monotonic()
             gen_s = t_image - t_send
 

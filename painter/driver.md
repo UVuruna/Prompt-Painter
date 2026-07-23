@@ -71,7 +71,20 @@ handed back for the runner to save under the sheet's own name.
    whole `generation_timeout_s`. This exists because ChatGPT's "Image
    generation failed" answer leaves the busy/stop signal stuck
    forever — the done edge this loop is waiting for never comes on
-   its own.
+   its own. **Two faces** (owner 2026-07-23): the same markers also
+   cover the generic "Hmm...something seems to have gone wrong." /
+   "error on my side" error turn (no "reply retry" text but a native
+   Retry button) — both raise `ImageGenFailed` and ride one recovery
+   ladder in the runner.
+3. `click_error_retry(log) -> bool` — the first rung of that ladder:
+   click the site's native Retry button (`image_error_retry_button`,
+   ChatGPT's `regenerate-thread-error-button`) if it has one for this
+   state and it is present; True when clicked, False otherwise (no such
+   selector, or not on the page right now). Never loud — a missing
+   button is a normal branch.
+4. `refresh(log)` — reload the page and wait for the composer back (a
+   last-resort ladder rung): the login lives in the profile on disk, so
+   the reload keeps the session; only the wedged page state is dropped.
 2b. `new_chat(log)` — clicks the sidebar's New-chat control (config
    selectors, captured live 2026-07-18) and waits for the fresh
    composer; the callers use it between collections/folder groups
@@ -120,18 +133,20 @@ pasted text lands).
 While waiting for the result `<img>`, the response text is checked
 every poll, so refusals raise in seconds instead of burning the
 image timeout.
-- `ImageGenFailed` — BUG 3 (owner 2026-07-21): ChatGPT's image tool
-  failed outright and its OWN text already names the failure ("Image
-  generation failed" / "I wasn't able to generate the image ... reply
-  with 'retry'") while the busy/stop signal never clears. Distinct
-  from `NoImage` (matches NO known marker — an unknown DOM state) and
-  from `ItemRefused`/`TerminalState` (real refusal/quota markers);
-  raised by `_check_image_failed()`, called from `await_done`'s
-  "still generating" loop on every poll — a silent no-op wherever the
-  site's `image_failed_text_markers` is empty (Gemini today). The
-  runner catches it and resends the site's own suggested "retry" word
-  into the same chat, up to `IMAGE_FAILED_RETRY_MAX` attempts, before
-  giving up on the item exactly like a safety refusal.
+- `ImageGenFailed` — BUG 3 (owner 2026-07-21, second face 2026-07-23):
+  ChatGPT's image tool failed outright while the busy/stop signal never
+  clears, in one of two forms — its OWN "reply with 'retry'" text, or
+  the generic "Hmm...something seems to have gone wrong." / "error on my
+  side" error turn (which renders a native Retry button). Both match
+  `image_failed_text_markers`. Distinct from `NoImage` (matches NO known
+  marker — an unknown DOM state) and from `ItemRefused`/`TerminalState`
+  (real refusal/quota markers); raised by `_check_image_failed()`,
+  called from `await_done`'s "still generating" loop on every poll — a
+  silent no-op wherever the site's `image_failed_text_markers` is empty
+  (Gemini today). The runner catches it and walks a recovery LADDER
+  (Retry button -> paced "retry" text -> escalation rounds of
+  refresh + new session); the ladder re-raises only when every rung is
+  spent, which stops the site.
 - `FixNotConfigured` — GUI rework Phase 17: `submit_fix` (WEBSITE
   FIX) is disabled for this site because `attach_button`/`file_input`
   are empty in `SITES` — the shipped default for BOTH chatgpt and

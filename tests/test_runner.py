@@ -39,12 +39,31 @@ PNG_1PX = bytes.fromhex(
 )
 
 
+@pytest.fixture(autouse=True)
+def _fast_recovery(monkeypatch):
+    """Zero out the image-failure ladder's real-clock waits (1-3 min and
+    22-36 min in config) so the recovery tests run instantly. Two
+    escalation rounds are kept so their refresh/new-session path is
+    exercised; a test needing a different shape re-patches these."""
+    monkeypatch.setattr(
+        runner_module, "IMAGE_FAILED_RETRY_DELAY_RANGE_S", (0.0, 0.0)
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "IMAGE_FAILED_ESCALATION_DELAYS_S",
+        ((0.0, 0.0), (0.0, 0.0)),
+    )
+
+
 class FakeDriver:
     """Duck-typed SiteDriver: records prompts, returns PNG bytes."""
 
     def __init__(self, site):
         self.site = site
         self.submitted: list[str] = []
+        self.retry_clicks = 0
+        self.refreshes = 0
+        self.new_chats = 0
 
     def submit_prompt(self, prompt, log=print):
         self.submitted.append(prompt)
@@ -54,6 +73,17 @@ class FakeDriver:
 
     def extract_image(self):
         return PNG_1PX
+
+    # image-failure recovery ladder (owner 2026-07-23) — the base fake
+    # has NO native retry button and treats refresh/new-session as no-ops
+    def click_error_retry(self, log=print):
+        return False
+
+    def refresh(self, log=print):
+        self.refreshes += 1
+
+    def new_chat(self, log=print):
+        self.new_chats += 1
 
 
 def make_sheet(tmp_path: Path, n: int = 2) -> Sheet:
@@ -392,42 +422,127 @@ def test_image_gen_failed_recovers_on_a_later_retry(tmp_path):
     assert any(e["type"] == "item_retry" for e in events)
 
 
-def test_image_gen_failed_gives_up_after_retry_max(tmp_path):
-    """Still failing after IMAGE_FAILED_RETRY_MAX resends -> the item
-    is SKIPPED (never overwritten/silently dropped) and the run
-    continues with the next item, exactly like a safety refusal."""
-    class FailsItem0Only(FakeDriver):
+def test_image_gen_failed_exhausts_ladder_then_stops(tmp_path):
+    """Every rung of the recovery ladder fails (button, both text
+    retries, both escalation rounds) -> the ladder re-raises and the
+    WHOLE site STOPS (owner 2026-07-23, "GASI"). The item is NOT
+    silently skipped, and the next item never runs — a restart resumes
+    from disk. Between the text retries and the two escalation rounds
+    the page is refreshed and a new session opened."""
+    class AlwaysFails(FakeDriver):
         def extract_image(self):
-            if "prompt 1" in self.submitted[-1]:
-                return PNG_1PX
             raise ImageGenFailed("ChatGPT: image generation failed: ...")
 
     sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
     logs: list[str] = []
-    driver = FailsItem0Only(SITES["chatgpt"])
-    generated = run_sheet(
-        sheet, driver, out, "chatgpt", FAST, log=logs.append,
-    )
-    # item 0 exhausted its retries and was skipped; item 1 still ran
-    assert generated == 1
+    driver = AlwaysFails(SITES["chatgpt"])
+    with pytest.raises(ImageGenFailed):
+        run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append)
+
+    # neither item produced a file; the second item was never reached
     assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
-    assert any("GENERATION FAILED" in line for line in logs)
-    # original submit + IMAGE_FAILED_RETRY_MAX "retry" resends for item 0
-    assert driver.submitted[:1 + IMAGE_FAILED_RETRY_MAX] == [
+    assert not (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert any("RECOVERY EXHAUSTED" in line for line in logs)
+    # item 0: original submit + 2 text retries, then 2 escalation rounds
+    # each resend the WHOLE original prompt in a fresh session
+    assert driver.submitted[: 1 + IMAGE_FAILED_RETRY_MAX] == [
         "prompt 0"
     ] + [IMAGE_RETRY_NUDGE] * IMAGE_FAILED_RETRY_MAX
+    assert driver.refreshes == 2 and driver.new_chats == 2
     report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
-    assert "REFUSED" in report  # reuses the existing skip/report path
-    assert "Refused: 1" in report
+    assert "image generation failed" in report
 
-    # the rerun drives ONLY the failed item (file-existence resume)
+    # a rerun resumes ONLY the unfinished items (file-existence resume)
     driver2 = FakeDriver(SITES["chatgpt"])
-    assert run_sheet(sheet, driver2, out, "chatgpt", FAST) == 1
-    assert "prompt 0" in driver2.submitted[0]
+    assert run_sheet(sheet, driver2, out, "chatgpt", FAST) == 2
+
+
+def test_image_gen_failed_recovers_via_the_retry_button(tmp_path):
+    """Rung 1 of the ladder: the site's native Retry button clears the
+    error in place, no text is re-typed, no escalation needed."""
+    class ButtonRecovers(FakeDriver):
+        def __init__(self, site):
+            super().__init__(site)
+            self._clicked = False
+
+        def click_error_retry(self, log=print):
+            self._clicked = True
+            self.retry_clicks += 1
+            return True
+
+        def extract_image(self):
+            # fails until the Retry button has been clicked
+            if self._clicked:
+                return PNG_1PX
+            raise ImageGenFailed("ChatGPT: image generation failed: ...")
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = ButtonRecovers(SITES["chatgpt"])
+    assert run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append) == 1
+    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert driver.retry_clicks == 1
+    # recovered on the button alone — no "retry" text, no new session
+    assert driver.submitted == ["prompt 0"]
+    assert driver.new_chats == 0
+    assert any("Retry button RECOVERED" in line for line in logs)
+
+
+def test_image_gen_failed_recovers_in_a_fresh_session(tmp_path):
+    """Rungs 1-2 fail but escalation round 1 (refresh -> new session ->
+    whole prompt) succeeds — the run continues, no stop."""
+    class FreshSessionRecovers(FakeDriver):
+        def extract_image(self):
+            # succeeds only once a new session has been opened
+            if self.new_chats >= 1:
+                return PNG_1PX
+            raise ImageGenFailed("ChatGPT: image generation failed: ...")
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = FreshSessionRecovers(SITES["chatgpt"])
+    assert run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append) == 1
+    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
+    # button skipped, both text retries spent, then ONE escalation round
+    assert driver.refreshes == 1 and driver.new_chats == 1
+    # the escalation round resends the WHOLE original prompt (run_sheet
+    # here uses the default empty suffix, so base == the bare prompt)
+    assert driver.submitted[-1] == "prompt 0"
+    assert any("RECOVERED (fresh session)" in line for line in logs)
+
+
+def test_image_gen_failed_stop_during_recovery_aborts(tmp_path, monkeypatch):
+    """A Stop request while the ladder is waiting abandons recovery
+    immediately (it does not sit out the 1-3 / 22-36 min wait)."""
+    class AlwaysFails(FakeDriver):
+        def extract_image(self):
+            raise ImageGenFailed("ChatGPT: image generation failed: ...")
+
+    # a real (tiny) wait so _sleep actually enters its poll loop and
+    # sees the stop flag mid-wait (a 0s wait would never poll)
+    monkeypatch.setattr(
+        runner_module, "IMAGE_FAILED_RETRY_DELAY_RANGE_S", (0.6, 0.6)
+    )
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = AlwaysFails(SITES["chatgpt"])
+    # False at the loop's top-of-iteration check (submitted empty), True
+    # once prompt 0 has been sent and the ladder starts waiting
+    should_stop = lambda: bool(driver.submitted)  # noqa: E731
+    with pytest.raises(ImageGenFailed):
+        run_sheet(
+            sheet, driver, out, "chatgpt", FAST,
+            should_stop=should_stop, log=logs.append,
+        )
+    # stop won on the FIRST wait — no text retry ever sent
+    assert driver.submitted == ["prompt 0"]
+    assert any("STOPPED on request during recovery" in line for line in logs)
 
 
 def test_image_failed_retry_off_stops_the_site_immediately(tmp_path):

@@ -103,6 +103,13 @@ class SiteConfig:
     # EMPTY BY DEFAULT (Gemini has shown no such failure text) — the
     # check is a silent no-op wherever this tuple is empty.
     image_failed_text_markers: tuple[str, ...] = ()
+    # the NATIVE "Retry" button ChatGPT renders under its "Hmm...
+    # something seems to have gone wrong." error turn (owner capture
+    # 2026-07-23) — the first, cheapest rung of the image-failure
+    # ladder: click it before resending any text. EMPTY BY DEFAULT =
+    # the site offers no such button for this state, so the ladder just
+    # skips straight to the text-retry rung.
+    image_error_retry_button: tuple[str, ...] = ()
     # the sidebar "New chat" control (owner captures 2026-07-18) —
     # clicked between collections/folders when the option is on
     new_chat: tuple[str, ...] = ()
@@ -207,11 +214,30 @@ SITES = {
         # markers are scanned for DURING the "still generating" wait,
         # not just after it gives up. Distinctive substrings only —
         # never bare "retry" (would false-positive on ordinary text).
+        #
+        # SECOND face, live capture 2026-07-23 (a run stopped at 17/24):
+        # a generic red error turn — <p>Hmm...something seems to have
+        # gone wrong.</p> above "I wasn't able to generate the image due
+        # to an error on my side." — with NO "reply retry" text but a
+        # native Retry BUTTON (image_error_retry_button below). Same
+        # stuck-busy-signal shape, so it belongs in the SAME marker set
+        # and rides the SAME recovery ladder; "wasn't able to generate
+        # the image" already above also covers its body line.
         image_failed_text_markers=(
             "image generation failed",
             "wasn't able to generate the image",
             "image generation tool encountered an error",
             "can't retry it automatically after this kind of failure",
+            "something seems to have gone wrong",
+            "error on my side",
+        ),
+        # the Retry button of the "something went wrong" turn (verified
+        # against the live DOM by the owner 2026-07-23, UV/RETRY
+        # button.png): <button data-testid="regenerate-thread-error-
+        # button" ...> — clicking it regenerates in place and the whole
+        # error turn disappears.
+        image_error_retry_button=(
+            'button[data-testid="regenerate-thread-error-button"]',
         ),
         new_chat=(
             'a[data-testid="create-new-chat-button"]',

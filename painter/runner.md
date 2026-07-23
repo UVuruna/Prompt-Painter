@@ -24,7 +24,9 @@ report keeps every finished line. The loop writes ONLY under
   generation failed" answer, the retry-resend case)
 - [Config (subfolder)](config/___config.md) — `Timing`, `REPORT_SUFFIX`,
   `SAFER_PREAMBLE`, `CONTINUE_NUDGE`, `IMAGE_RETRY_NUDGE`,
-  `IMAGE_FAILED_RETRY_MAX`, `dest_for`, `fmt_duration`, `fmt_size`
+  `IMAGE_FAILED_RETRY_MAX`, `IMAGE_FAILED_RETRY_DELAY_RANGE_S`,
+  `IMAGE_FAILED_ESCALATION_DELAYS_S`, `dest_for`, `fmt_duration`,
+  `fmt_size`
 
 ### Used by
 - [Main (Entry Point)](../main.md) and [GUI](../gui.md)
@@ -118,8 +120,9 @@ event) so the dashboard never stalls; the `item_done` event with
   on_event, safer_retry, continue_nudge, image_failed_retry) -> int` —
   `on_event` receives structured progress
   dicts: `sheet_start` (sheet, pending, total), `item_start` (title,
-  idx, of), `item_retry` (safer retry AND the BUG 3 "retry" resend —
-  same event, both recoveries reuse it), `item_nudge` (continue nudge,
+  idx, of), `item_retry` (safer retry AND every rung of the BUG 3
+  recovery ladder — button click, "retry" resend, escalation round;
+  same event, all recoveries reuse it), `item_nudge` (continue nudge,
   drop_path), `sheet_paused` / `sheet_resumed` (the Pause toggle, see
   **Pause** above), `item_progress` (idx, of, gen_s — the live
   count), `item_done` (title, drop_path, gen_s, over_s, orig_res,
@@ -164,21 +167,32 @@ event) so the dashboard never stalls; the `item_done` event with
   `DriverError` — e.g. the nudge itself hits quota/refusal) it
   propagates and the site stops loudly, exactly as before. With
   `continue_nudge` off, the first `NoImage` stops the site immediately.
-  **BUG 3 recovery** (owner 2026-07-21): an `ImageGenFailed` (ChatGPT's
-  own "Image generation failed" answer, caught by the driver WITHOUT
-  burning the hard timeout — see [CDP Driver](driver.md)) is handled
-  the same skip-and-continue shape as a safety refusal: when
-  `image_failed_retry` is on (the default) the runner resends
-  `IMAGE_RETRY_NUDGE` ("retry", the site's own suggested word) into
-  the same chat, up to `IMAGE_FAILED_RETRY_MAX` attempts; the first
-  attempt that yields an image counts as a normal success. Still
-  failing after all attempts skips the item exactly like a REFUSED
-  one — logged, counted, added to the report (reusing
-  `RunReport.refused`) — and the run continues with the next item; the
-  skipped item's dest file never gets written, so a later rerun
-  retries it by the same file-existence resume as everything else.
-  With `image_failed_retry` off, the FIRST `ImageGenFailed` propagates
-  and stops the site immediately, same shape as `continue_nudge=False`.
+  **BUG 3 recovery LADDER** (owner 2026-07-21, escalation added
+  2026-07-23): an `ImageGenFailed` — ChatGPT's own "Image generation
+  failed" answer OR the generic "something seems to have gone wrong."
+  error turn, both caught by the driver WITHOUT burning the hard
+  timeout (see [CDP Driver](driver.md)) — is handled by
+  `_recover_image_failed`, which walks one ladder cheapest rung first
+  (only active when `image_failed_retry` is on, the default):
+  1. **native Retry button** — `driver.click_error_retry()`; when the
+     site has one for this state and it clears the error, done.
+  2. **paced text "retry"** — resend `IMAGE_RETRY_NUDGE` up to
+     `IMAGE_FAILED_RETRY_MAX` times, each after a random
+     `IMAGE_FAILED_RETRY_DELAY_RANGE_S` wait (1-3 min).
+  3. **escalation rounds** — one per `IMAGE_FAILED_ESCALATION_DELAYS_S`
+     entry (default two: 1-3 min, then 22-36 min): wait a random
+     duration in that entry's range, then `driver.refresh()` +
+     `driver.new_chat()` and resend the WHOLE original prompt (a fresh
+     chat has no context, so "retry" alone would mean nothing).
+  The first rung that yields an image counts as a normal success (the
+  image's `retried` badge is set). When EVERY rung is spent the ladder
+  re-raises `ImageGenFailed` and the whole site STOPS (owner's "GASI",
+  2026-07-23) — finished items are safe on disk, so a restart resumes
+  past them; there is no per-item skip for this failure any more. Every
+  wait polls `should_stop`, so a Stop never hangs behind the 22-36 min
+  round; a Stop mid-ladder abandons recovery at once. With
+  `image_failed_retry` off, the FIRST `ImageGenFailed` propagates and
+  stops the site immediately, same shape as `continue_nudge=False`.
   Terminal/driver errors propagate to the caller — the
   report stays saved (resume is by the files already on disk). A `TerminalState` is re-raised
   UNCHANGED, so callers read its `retry_after_s` (the quota reset

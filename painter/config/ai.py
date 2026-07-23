@@ -181,6 +181,28 @@ IMAGE_RETRY_NUDGE = "retry"
 # but this failure is flaky enough on the owner's runs to warrant more
 # than one attempt)
 IMAGE_FAILED_RETRY_MAX = 2
+# BUG 3 grew a SECOND failure face (owner 2026-07-23, live at 17/24):
+# "Hmm...something seems to have gone wrong." / "I wasn't able to
+# generate the image due to an error on my side." — no "reply retry"
+# text, but a native RETRY BUTTON (SiteConfig.image_error_retry_button).
+# Both faces now share ONE escalation ladder in the runner:
+#   1. click the DOM retry button (if the site has one for this state)
+#   2. resend IMAGE_RETRY_NUDGE up to IMAGE_FAILED_RETRY_MAX times,
+#      each preceded by a random wait in this range (server hiccups and
+#      soft rate-limits clear on their own — hammering just re-fails)
+IMAGE_FAILED_RETRY_DELAY_RANGE_S = (60.0, 180.0)  # 1-3 min, random
+#   3. escalation ROUNDS — one per entry below; each round waits a
+#      random duration in its (min, max) range, then REFRESHES the page
+#      and opens a NEW SESSION and resends the WHOLE original prompt
+#      (a fresh chat has no context, so "retry" alone would mean
+#      nothing). The list length IS the number of rounds; when the last
+#      round still yields no image the worker STOPS loudly (like quota
+#      — finished items are safe on disk, a restart resumes). Tune the
+#      ranges / add or drop rounds here; nothing else names them.
+IMAGE_FAILED_ESCALATION_DELAYS_S = (
+    (60.0, 180.0),      # round 1: 1-3 min
+    (1320.0, 2160.0),   # round 2: 22-36 min
+)
 
 
 # --- AI features: free Gemini API (owner 2026-07-20) ------------------

@@ -516,3 +516,81 @@ def test_await_done_normal_response_never_raises_image_gen_failed():
     driver.page = page
 
     driver.await_done(log=lambda s: None)  # must not raise
+
+
+# --- (f) BUG 3, second face — "something went wrong" + Retry button
+# (owner 2026-07-23) ----------------------------------------------------
+
+# The generic red error turn from the owner's 17/24 stop: no "reply
+# retry" text, a native Retry button instead.
+_CHATGPT_WENT_WRONG_TEXT = (
+    "I wasn't able to generate the image due to an error on my side."
+    " Hmm...something seems to have gone wrong."
+)
+
+
+def test_went_wrong_text_is_an_image_failed_marker():
+    """The second failure face rides the SAME ImageGenFailed path (its
+    markers were folded into image_failed_text_markers), so the driver
+    catches it during the wait instead of dropping to a hard-stop
+    NoImage as it did live at 17/24."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        [_CHATGPT_WENT_WRONG_TEXT]
+    )
+    driver = _driver(site, page)
+
+    with pytest.raises(ImageGenFailed):
+        driver._check_image_failed()
+
+
+def test_chatgpt_ships_the_error_retry_button_gemini_does_not():
+    """The native Retry button is ChatGPT-specific SITES data; Gemini
+    has none, so its ladder simply skips rung 1."""
+    assert SITES["chatgpt"].image_error_retry_button != ()
+    assert SITES["gemini"].image_error_retry_button == ()
+
+
+def test_click_error_retry_clicks_the_button_when_present():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    button = FakeLocator("error_retry", page)
+    page.locators[site.image_error_retry_button[0]] = button
+    driver = _driver(site, page)
+
+    assert driver.click_error_retry(log=lambda s: None) is True
+    assert ("click", "error_retry") in page.calls
+
+
+def test_click_error_retry_false_when_button_absent():
+    """ChatGPT has the selector but the button is not on the page right
+    now — a normal branch (fall through to the next rung), never loud."""
+    site = SITES["chatgpt"]
+    page = FakePage()  # nothing wired -> selector matches nothing
+    driver = _driver(site, page)
+
+    assert driver.click_error_retry(log=lambda s: None) is False
+    assert page.calls == []
+
+
+def test_click_error_retry_false_when_site_has_no_button():
+    """Gemini defines no such selector — the method returns False without
+    even querying the DOM."""
+    site = SITES["gemini"]
+    page = FakePage()
+    driver = _driver(site, page)
+
+    assert driver.click_error_retry(log=lambda s: None) is False
+    assert page.calls == []
+
+
+def test_refresh_reloads_then_waits_for_the_composer():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.prompt_box[0]] = FakeLocator("prompt_box", page)
+    driver = _driver(site, page)
+
+    driver.refresh(log=lambda s: None)
+
+    assert ("reload",) in page.calls

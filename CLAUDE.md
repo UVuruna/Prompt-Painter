@@ -202,6 +202,17 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
   `backend-api/estuary/content` signed URL (fetched in-page, with
   session cookies). Refusal/quota banner: not yet captured — the
   driver reports the response text loudly when no image appears.
+  IMAGE-FAILURE states have TWO faces, both matched by
+  `image_failed_text_markers` and both riding one recovery ladder
+  (owner 2026-07-21 + 2026-07-23): (a) "Image generation failed / …
+  reply with 'retry'" — its own suggested word; (b) the generic red
+  error turn `<p>Hmm...something seems to have gone wrong.</p>` /
+  "error on my side", which carries a native Retry BUTTON
+  `button[data-testid="regenerate-thread-error-button"]`
+  (`image_error_retry_button`) that regenerates in place. The ladder:
+  click that button → paced "retry" text (random 1–3 min apart) →
+  escalation rounds (wait → page REFRESH → NEW SESSION → whole
+  prompt); every round exhausted STOPS the site.
 - **Gemini** (verified against the live DOM by the owner,
   2026-07-17): prompt box `rich-textarea` >
   `div.ql-editor[contenteditable]` ("Ask Gemini"). Send and stop
@@ -232,8 +243,15 @@ submit → await the done-edge (hard timeout) → extract bytes → save
 `<out>/<rest>/<File>_gem|_gpt|_api.png` (the assets mirror — DOMY
 RESTRUCTURE 2026-07-22: the generator is a terminal FILENAME suffix
 per `SITE_FILE_SUFFIX`, no per-site folders) → background
-fix → pause → next. Progress logging per item (elapsed, done/total —
-root Rule #10). **DONE = the FILE EXISTS at its output path**
+fix → pause → next. An `ImageGenFailed` (either ChatGPT face) triggers
+the RECOVERY LADDER (owner 2026-07-23): native Retry button → paced
+"retry" text (random 1–3 min apart, `IMAGE_FAILED_RETRY_MAX` times) →
+escalation rounds (`IMAGE_FAILED_ESCALATION_DELAYS_S`, default 1–3 min
+then 22–36 min: wait → REFRESH → NEW SESSION → whole prompt). Every
+wait polls Stop. The first rung that yields an image continues the run;
+exhausting all rungs STOPS the site (no per-item skip for this failure)
+— resume is by the files already on disk. Progress logging per item
+(elapsed, done/total — root Rule #10). **DONE = the FILE EXISTS at its output path**
 (`<out>/dest_for(...)`), checked on disk — not a sidecar record
 (the `.progress.json` state file was removed 2026-07-19). RESUMABLE
 for free: the folder is ALWAYS the source of truth (owner 2026-07-21)

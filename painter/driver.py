@@ -420,6 +420,40 @@ class SiteDriver:
         self._require(self.site.prompt_box, "the prompt box (new chat)")
         log("    new chat opened")
 
+    def click_error_retry(self, log: Log = print) -> bool:
+        """Click the site's native "Retry" button on an image-error turn.
+
+        The first, cheapest rung of the image-failure ladder (owner
+        2026-07-23): ChatGPT's "Hmm...something seems to have gone
+        wrong." turn carries a Retry button that regenerates in place.
+        Returns True when a button was found AND clicked (the caller
+        then waits for the regenerated image); False when the site
+        defines no such button, or none is present right now — the
+        caller falls through to the next rung. Never loud: a missing
+        button is a normal branch, not selector rot."""
+        if not self.site.image_error_retry_button:
+            return False
+        button = self._query(self.site.image_error_retry_button)
+        if button is None:
+            return False
+        self._hesitate()
+        button.click()
+        self._hesitate()
+        log("    clicked the site's Retry button")
+        return True
+
+    def refresh(self, log: Log = print) -> None:
+        """Reload the page, then wait for the composer to come back.
+
+        A last-resort rung of the image-failure ladder (owner
+        2026-07-23): the session cookies live in the profile on disk,
+        so the reload keeps the login; only the (possibly wedged) page
+        state is thrown away. The fresh composer must be present before
+        the caller pastes the next prompt — loud if it never returns."""
+        self.page.reload()
+        self._require(self.site.prompt_box, "the prompt box (after refresh)")
+        log("    page refreshed")
+
     def _retry_send(self) -> None:
         """Second chance for a submit that did not take: click the send
         button again if present, then Enter in the prompt box (both
