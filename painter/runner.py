@@ -28,7 +28,7 @@ from painter.config import (
     IMAGE_RETRY_NUDGE,
     PAUSE_POLL_INTERVAL_S,
     REPORT_SUFFIX,
-    SAFER_PREAMBLE,
+    RETRY_PREAMBLES,
     STATE_DIRNAME,
     Timing,
     dest_for,
@@ -523,11 +523,20 @@ def run_sheet(
             except ItemRefused as exc:
                 reason = str(exc)
                 data = None
-                if safer_retry:
-                    log("    REFUSED — one safer retry (allegory note) ...")
+                # the reframing depends on WHY it refused (owner
+                # 2026-07-23): a safety block gets the allegory preamble,
+                # a copyright block the homage preamble. A category with
+                # no preamble (or an unclassified refusal) is reported
+                # without a retry.
+                preamble = RETRY_PREAMBLES.get(exc.category)
+                if safer_retry and preamble is not None:
+                    log(
+                        f"    REFUSED [{exc.category}] — one safer retry"
+                        f" ({exc.category} reframing) ..."
+                    )
                     emit({"type": "item_retry"})
                     try:
-                        data, t_send = generate_one(SAFER_PREAMBLE + base)
+                        data, t_send = generate_one(preamble + base)
                         retried = True
                         log("    safer retry SUCCEEDED")
                     except ItemRefused as exc2:

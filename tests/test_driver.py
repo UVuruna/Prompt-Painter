@@ -20,10 +20,17 @@ from dataclasses import replace
 
 import pytest
 
-from painter.config import SITES, TIMING, Timing
+from painter.config import (
+    REFUSAL_COPYRIGHT,
+    REFUSAL_SAFETY,
+    SITES,
+    TIMING,
+    Timing,
+)
 from painter.driver import (
     FixNotConfigured,
     ImageGenFailed,
+    ItemRefused,
     SelectorRot,
     SiteDriver,
 )
@@ -462,6 +469,61 @@ def test_check_image_failed_is_a_noop_on_a_normal_response():
     driver = _driver(site, page)
 
     driver._check_image_failed()  # must not raise
+
+
+# --- refusal scenario classification (owner 2026-07-23) --------------
+
+# The live COPYRIGHT block from the Star Wars run (UV/prompt.txt): note
+# it ALSO carries generic safety substrings ("may violate", "retry or
+# edit your prompt"), so it proves the most-specific-first ordering — a
+# naive scan would misclassify it as safety and pick the wrong preamble.
+_CHATGPT_COPYRIGHT_TEXT = (
+    "We're so sorry, but the image we created may violate our guardrails"
+    " concerning similarity to third-party content. If you think we got"
+    " it wrong, please retry or edit your prompt."
+)
+_CHATGPT_SAFETY_TEXT = (
+    "We're so sorry, but the prompt may violate our content policies. If"
+    " you think we got it wrong, please retry or edit your prompt."
+)
+
+
+def test_check_markers_classifies_copyright_before_safety():
+    """The copyright message must classify as REFUSAL_COPYRIGHT even
+    though it also contains the generic safety substrings — categories
+    are checked most-specific-first."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        [_CHATGPT_COPYRIGHT_TEXT]
+    )
+    driver = _driver(site, page)
+
+    with pytest.raises(ItemRefused) as exc:
+        driver._check_markers()
+    assert exc.value.category == REFUSAL_COPYRIGHT
+
+
+def test_check_markers_classifies_a_plain_safety_refusal():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        [_CHATGPT_SAFETY_TEXT]
+    )
+    driver = _driver(site, page)
+
+    with pytest.raises(ItemRefused) as exc:
+        driver._check_markers()
+    assert exc.value.category == REFUSAL_SAFETY
+
+
+def test_chatgpt_ships_a_copyright_category_gemini_does_not():
+    """Copyright markers are ChatGPT SITES data (only ChatGPT has shown
+    the third-party-content block); Gemini stays safety-only until a
+    live Gemini copyright refusal is captured."""
+    assert REFUSAL_COPYRIGHT in SITES["chatgpt"].refusal_markers
+    assert REFUSAL_COPYRIGHT not in SITES["gemini"].refusal_markers
+    assert REFUSAL_SAFETY in SITES["gemini"].refusal_markers
 
 
 def test_await_done_raises_image_gen_failed_without_burning_timeout():

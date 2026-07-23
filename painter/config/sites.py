@@ -65,6 +65,17 @@ MIN_IMAGE_PX = 64
 SEND_RELOAD_RECOVERY = True
 
 
+# --- Refusal scenario categories (owner 2026-07-23) ------------------
+#
+# A refusal is CLASSIFIED into a scenario so the runner can pick the
+# right safer-retry preamble (RETRY_PREAMBLES in config.ai): a
+# violence/unsafe block and a copyright "third-party content" block need
+# opposite reframings. These strings are the keys of both
+# SiteConfig.refusal_markers and RETRY_PREAMBLES — keep the two in sync.
+REFUSAL_SAFETY = "safety"
+REFUSAL_COPYRIGHT = "copyright"
+
+
 # --- Site DOM states (ONE config block, with fallbacks) --------------
 
 @dataclass(frozen=True)
@@ -88,9 +99,16 @@ class SiteConfig:
     response_container: tuple[str, ...]
     # generated <img> nodes inside the last response container
     result_image: tuple[str, ...]
-    # substrings marking a SAFETY refusal of ONE prompt — the item
-    # is reported and skipped, the run continues (owner 2026-07-17)
-    refusal_text_markers: tuple[str, ...]
+    # substrings marking a refusal of ONE prompt — the item is reported
+    # and skipped (or safer-retried), the run continues (owner
+    # 2026-07-17). Keyed BY SCENARIO (REFUSAL_SAFETY / REFUSAL_COPYRIGHT,
+    # owner 2026-07-23) so the runner picks the matching retry preamble.
+    # The driver checks categories IN INSERTION ORDER, MOST SPECIFIC
+    # FIRST: the copyright message ("may violate our guardrails ...
+    # similarity to third-party content ... retry or edit your prompt")
+    # also contains generic safety substrings, so copyright must be
+    # listed and matched before safety or it would misclassify.
+    refusal_markers: dict[str, tuple[str, ...]]
     # substrings marking a quota/rate limit — TERMINAL for the whole
     # site: report and stop, never blind-retry
     quota_text_markers: tuple[str, ...]
@@ -174,22 +192,37 @@ SITES = {
             'img[src^="blob:"]',
             'img[src^="data:image"]',
         ),
-        refusal_text_markers=(
-            "can't create",
-            "cannot create",
-            "can't generate",
-            "cannot generate",
-            # live capture 2026-07-17: "We're so sorry, but the prompt
-            # may violate our content policies. If you think we got it
-            # wrong, please retry or edit your prompt." — "content
-            # polic" catches both policy and policies
-            "content polic",
-            "may violate",
-            "violate our",
-            "retry or edit your prompt",
-            "unable to create",
-            "not able to create",
-        ),
+        refusal_markers={
+            # COPYRIGHT first (owner 2026-07-23, the Star Wars run): live
+            # capture "We're so sorry, but the image we created may
+            # violate our guardrails concerning similarity to third-party
+            # content. If you think we got it wrong, please retry or edit
+            # your prompt." It ALSO carries the generic safety substrings
+            # ("may violate", "retry or edit your prompt"), so its OWN
+            # distinctive substrings must be checked before safety.
+            REFUSAL_COPYRIGHT: (
+                "third-party content",
+                "third party content",
+                "similarity to third",
+                "guardrails concerning similarity",
+            ),
+            REFUSAL_SAFETY: (
+                "can't create",
+                "cannot create",
+                "can't generate",
+                "cannot generate",
+                # live capture 2026-07-17: "We're so sorry, but the
+                # prompt may violate our content policies. If you think
+                # we got it wrong, please retry or edit your prompt." —
+                # "content polic" catches both policy and policies
+                "content polic",
+                "may violate",
+                "violate our",
+                "retry or edit your prompt",
+                "unable to create",
+                "not able to create",
+            ),
+        },
         quota_text_markers=(
             "reached your limit",
             "too many requests",
@@ -293,18 +326,23 @@ SITES = {
             'img[src^="blob:"]',
             'img[src^="data:image"]',
         ),
-        refusal_text_markers=(
-            "can't create",
-            "cannot create",
-            "can't generate",
-            "cannot generate",
-            "unable to generate",
-            "unsafe",
-            # Gemini answers in the account's language — Serbian too
-            "ne mogu da generi",
-            "ne mogu da kreiram",
-            "bezbednosn",
-        ),
+        refusal_markers={
+            # Only SAFETY captured for Gemini so far; add a
+            # REFUSAL_COPYRIGHT group here if it ever blocks a prompt for
+            # third-party-content resemblance the way ChatGPT does.
+            REFUSAL_SAFETY: (
+                "can't create",
+                "cannot create",
+                "can't generate",
+                "cannot generate",
+                "unable to generate",
+                "unsafe",
+                # Gemini answers in the account's language — Serbian too
+                "ne mogu da generi",
+                "ne mogu da kreiram",
+                "bezbednosn",
+            ),
+        },
         quota_text_markers=(
             "quota",
             "limit reached",

@@ -16,8 +16,11 @@ import pytest
 from painter import runner as runner_module
 from painter.config import (
     CONTINUE_NUDGE,
+    COPYRIGHT_PREAMBLE,
     IMAGE_FAILED_RETRY_MAX,
     IMAGE_RETRY_NUDGE,
+    REFUSAL_COPYRIGHT,
+    REFUSAL_SAFETY,
     SAFER_PREAMBLE,
     SITES,
     STYLES,
@@ -271,9 +274,9 @@ def test_safer_retry_recovers_then_gives_up(tmp_path):
         def extract_image(self):
             last = self.submitted[-1]
             if "prompt 0" in last and SAFER_PREAMBLE not in last:
-                raise ItemRefused("refused: unsafe")
+                raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)
             if "prompt 1" in last:
-                raise ItemRefused("refused: unsafe")  # never recovers
+                raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)  # never recovers
             return PNG_1PX
 
     sheet = make_sheet(tmp_path, n=2)
@@ -293,11 +296,37 @@ def test_safer_retry_recovers_then_gives_up(tmp_path):
     assert len(driver.submitted) == 4
 
 
+def test_copyright_refusal_uses_the_copyright_preamble(tmp_path):
+    """A copyright-category refusal is safer-retried with the HOMAGE
+    preamble (COPYRIGHT_PREAMBLE), never the safety allegory one — the
+    runner picks the reframing by the refusal's category."""
+    class CopyrightPicky(FakeDriver):
+        def extract_image(self):
+            last = self.submitted[-1]
+            if "prompt 0" in last and COPYRIGHT_PREAMBLE not in last:
+                raise ItemRefused(
+                    "refused: third-party content",
+                    category=REFUSAL_COPYRIGHT,
+                )
+            return PNG_1PX
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    driver = CopyrightPicky(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, safer_retry=True,
+    )
+    assert generated == 1
+    # the retry carried the copyright reframing, NOT the safety one
+    assert driver.submitted[1].startswith(COPYRIGHT_PREAMBLE)
+    assert SAFER_PREAMBLE not in driver.submitted[1]
+
+
 def test_no_safer_retry_by_default(tmp_path):
     class RefuseFirst(FakeDriver):
         def extract_image(self):
             if "prompt 0" in self.submitted[-1]:
-                raise ItemRefused("refused: unsafe")
+                raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)
             return PNG_1PX
 
     sheet = make_sheet(tmp_path, n=2)
@@ -600,7 +629,10 @@ def test_refusal_skips_the_item_and_the_run_continues(tmp_path):
     class RefusingDriver(FakeDriver):
         def extract_image(self):
             if "prompt 1" in self.submitted[-1]:
-                raise ItemRefused("Gemini: prompt refused ('unsafe')")
+                raise ItemRefused(
+                    "Gemini: prompt refused ('unsafe')",
+                    category=REFUSAL_SAFETY,
+                )
             return PNG_1PX
 
     driver = RefusingDriver(SITES["gemini"])
@@ -774,7 +806,7 @@ def test_extra_suffix_survives_the_safer_retry(tmp_path):
     class RefuseOnce(FakeDriver):
         def extract_image(self):
             if SAFER_PREAMBLE not in self.submitted[-1]:
-                raise ItemRefused("refused: unsafe")
+                raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)
             return PNG_1PX
 
     sheet = make_sheet(tmp_path, n=1)

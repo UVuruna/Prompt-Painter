@@ -56,8 +56,18 @@ class TerminalState(DriverError):
 
 
 class ItemRefused(DriverError):
-    """The site refused THIS prompt (safety) — the runner reports it,
-    skips the item and continues with the rest."""
+    """The site refused THIS prompt — the runner reports it, then either
+    skips the item or SAFER-RETRIES it once, and continues with the rest.
+
+    ``category`` names the refusal SCENARIO it was classified into
+    (``REFUSAL_SAFETY`` / ``REFUSAL_COPYRIGHT``, the keys of the site's
+    ``refusal_markers``) so the runner can pick the matching retry
+    preamble from ``RETRY_PREAMBLES`` — a violence block and a
+    copyright block need opposite reframings (owner 2026-07-23)."""
+
+    def __init__(self, message: str, category: str):
+        super().__init__(message)
+        self.category = category
 
 
 class GenerationTimeout(DriverError):
@@ -565,12 +575,17 @@ class SiteDriver:
                     f" (matched '{marker}'): {text[:300]}",
                     retry_after_s=parse_quota_reset(text),
                 )
-        for marker in self.site.refusal_text_markers:
-            if marker in lowered:
-                raise ItemRefused(
-                    f"{self.site.name}: prompt refused"
-                    f" (matched '{marker}'): {text[:200]}"
-                )
+        # categories are checked IN ORDER, most specific first (the
+        # copyright message also contains generic safety substrings) —
+        # the first matching category wins and names the scenario
+        for category, markers in self.site.refusal_markers.items():
+            for marker in markers:
+                if marker in lowered:
+                    raise ItemRefused(
+                        f"{self.site.name}: prompt refused [{category}]"
+                        f" (matched '{marker}'): {text[:200]}",
+                        category=category,
+                    )
 
     def _check_image_failed(self) -> None:
         """Raise ``ImageGenFailed`` when the CURRENT response text

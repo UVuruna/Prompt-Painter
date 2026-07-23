@@ -107,8 +107,16 @@ pasted text lands).
   specifically is not immediately loud — `_click_send` first tries
   the one-time reload recovery above (`SEND_RELOAD_RECOVERY`); only a
   SECOND miss (post-reload) raises it for real.
-- `ItemRefused` — the response matches a SAFETY-refusal marker: the
-  runner reports the item and continues with the rest.
+- `ItemRefused` — the response matches a refusal marker: the runner
+  reports the item and continues with the rest. Carries a `category`
+  naming the refusal SCENARIO it matched (owner 2026-07-23) — the keys
+  of the site's `refusal_markers` (`REFUSAL_SAFETY` / `REFUSAL_COPYRIGHT`)
+  — so the runner picks the matching safer-retry preamble
+  (`RETRY_PREAMBLES`): the allegory reframing for a safety block, the
+  homage reframing for a copyright "third-party content" block. Marker
+  categories are checked MOST-SPECIFIC-FIRST (the copyright message also
+  contains generic safety substrings, so copyright is matched before
+  safety).
 - `TerminalState` — the response matches a quota/rate-limit marker:
   the whole site stops, never blind-retried. Carries
   `retry_after_s: float | None` — the wait the site itself named

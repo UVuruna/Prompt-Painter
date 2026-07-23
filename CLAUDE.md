@@ -108,10 +108,17 @@ is the binding spec.
    resolution, file size, extra actions (REMOVE BG), the per-image
    averages and the collection total. The GUI Dashboard shows the
    same numbers live, per collection AND per whole run, with a
-   collapsible history of finished collections. On a SAFETY refusal
-   the "safer retry" (ON by default) re-sends the item ONCE with an
-   allegory-framing preamble (config `SAFER_PREAMBLE`) before giving
-   up, then moves on. (A prompt-sheet file is called a COLLECTION in
+   collapsible history of finished collections. On a refusal the
+   "safer retry" (ON by default) re-sends the item ONCE with a preamble
+   chosen BY REFUSAL SCENARIO (owner 2026-07-23): the driver classifies
+   the refusal into a category (`SiteConfig.refusal_markers` —
+   `REFUSAL_SAFETY` / `REFUSAL_COPYRIGHT`, checked most-specific-first)
+   and the runner prepends the matching `RETRY_PREAMBLES` entry — the
+   allegory reframing (`SAFER_PREAMBLE`) for a safety block, the homage /
+   editorial reframing (`COPYRIGHT_PREAMBLE`) for a copyright
+   "third-party content" block (the Star Wars run — Yoda / Grand Moff
+   Tarkin). A category with no preamble is reported without a retry.
+   Then it moves on. (A prompt-sheet file is called a COLLECTION in
    the UI — a set of images, not always a theme.)
 8. **Sources are READ ONLY.** The tool writes ONLY under the chosen
    output folder (images, progress sidecars, reports, background

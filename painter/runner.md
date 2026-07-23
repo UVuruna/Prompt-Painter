@@ -23,7 +23,9 @@ report keeps every finished line. The loop writes ONLY under
   the `ImageGenFailed` exception (BUG 3 — ChatGPT's own "image
   generation failed" answer, the retry-resend case)
 - [Config (subfolder)](config/___config.md) — `Timing`, `REPORT_SUFFIX`,
-  `SAFER_PREAMBLE`, `CONTINUE_NUDGE`, `IMAGE_RETRY_NUDGE`,
+  `RETRY_PREAMBLES` (the per-category safer-retry preambles:
+  `SAFER_PREAMBLE` / `COPYRIGHT_PREAMBLE`), `CONTINUE_NUDGE`,
+  `IMAGE_RETRY_NUDGE`,
   `IMAGE_FAILED_RETRY_MAX`, `IMAGE_FAILED_RETRY_DELAY_RANGE_S`,
   `IMAGE_FAILED_ESCALATION_DELAYS_S`, `dest_for`, `fmt_duration`,
   `fmt_size`
@@ -153,10 +155,13 @@ event) so the dashboard never stalls; the `item_done` event with
   nothing, and the note also rides a safer retry (the preamble is
   prepended to the same base); default `None` keeps every existing
   caller unchanged. A
-  SAFETY refusal (`ItemRefused`) skips just that item and the run
-  continues; when `safer_retry` is on the item is re-sent ONCE with
-  `SAFER_PREAMBLE` first, and only a second refusal counts as
-  REFUSED. A **stuck `NoImage`** (the done edge fired but no image and
+  refusal (`ItemRefused`) skips just that item and the run
+  continues; when `safer_retry` is on the item is re-sent ONCE with the
+  preamble that matches the refusal's `category` (owner 2026-07-23) —
+  `RETRY_PREAMBLES[exc.category]`: `SAFER_PREAMBLE` (allegory) for a
+  safety block, `COPYRIGHT_PREAMBLE` (homage) for a copyright block — and
+  only a second refusal counts as REFUSED. A category with no preamble
+  (or an unclassified refusal) is reported with no retry. A **stuck `NoImage`** (the done edge fired but no image and
   no marker — ChatGPT's recurring stall) is handled the same shape as
   the safer retry but for the OTHER failure: when `continue_nudge` is
   on (the default) the runner sends `CONTINUE_NUDGE` ONCE into the same

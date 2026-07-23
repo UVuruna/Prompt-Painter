@@ -136,8 +136,11 @@ The per-site prompt suffix machinery (`BACKGROUND_CHOICES`,
 "no reflections" law; the old keyword-inferred aspect-ratio law was
 REMOVED, owner 2026-07-22 — the sheet prompt states its own aspect
 explicitly, see instructions.md rule 3b); the per-agent STYLE clause (`STYLES`,
-`STYLE_CHOICES`, `STYLE_DEFAULT`); `SAFER_PREAMBLE` (the safety-refusal
-one-shot retry preamble), `CONTINUE_NUDGE` (the ChatGPT stall
+`STYLE_CHOICES`, `STYLE_DEFAULT`); `RETRY_PREAMBLES` (the per-scenario
+one-shot safer-retry preambles keyed by refusal category —
+`SAFER_PREAMBLE` for a safety block, `COPYRIGHT_PREAMBLE` for a
+copyright "third-party content" block, owner 2026-07-23),
+`CONTINUE_NUDGE` (the ChatGPT stall
 nudge), and `IMAGE_RETRY_NUDGE`/`IMAGE_FAILED_RETRY_MAX`/
 `IMAGE_FAILED_RETRY_DELAY_RANGE_S`/`IMAGE_FAILED_ESCALATION_DELAYS_S`
 (BUG 3 recovery ladder, owner 2026-07-21 + escalation 2026-07-23 — the
@@ -179,7 +182,7 @@ WEBSITE FIX disabled until the owner captures real selectors);
   `SKIP_MARKER_PATTERN`
 - [CDP Driver](../driver.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
 - [Run Loop](../runner.md) — `Timing`, `STATE_DIRNAME`,
-  `REPORT_SUFFIX`, `SAFER_PREAMBLE`, `dest_for`, `PAUSE_POLL_INTERVAL_S`
+  `REPORT_SUFFIX`, `RETRY_PREAMBLES`, `dest_for`, `PAUSE_POLL_INTERVAL_S`
 - [Chrome Launcher](../chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 - [Postprocess](../postprocess.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
