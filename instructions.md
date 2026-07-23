@@ -88,6 +88,37 @@ image. So every prompt states, in its own text, unambiguously:
   symmetry...) — if it matters, write it; the tool adds nothing
   beyond the background/site rules above.
 
+### 3c. Optional: attach an INPUT IMAGE (`← path`)
+
+An entry may ALSO carry a source photo the tool attaches into the chat
+BEFORE the prompt text — for "put THIS character into that scene" work.
+Add a `←` ("comes from") line directly under the `→` output line (no
+blank line between them):
+
+````markdown
+**Obi-Wan medallion** → `assets/emblem/hero/ObiWan.png`
+← `refs/obiwan.png`
+
+```
+Place the attached figure at the center of a ROUND bronze medallion.
+ASPECT RATIO exactly 1:1 — a perfect square image. ...
+```
+````
+
+- The `←` path is a READ-ONLY source image, resolved **relative to the
+  sheet's own folder** (`refs/obiwan.png` sits beside the sheet). A
+  `../shared/...` sibling location is fine — the tool only ever READS
+  it, never writes there.
+- It may be a `.png`, `.jpg`, `.jpeg` or `.webp` (a reference photo) —
+  unlike the OUTPUT path, which is always `.png`.
+- The tool behaves like a real user: it opens the composer's "+" menu,
+  picks the add-image option, attaches the file, WAITS for its preview
+  to appear, then pastes your prompt and sends. So write the prompt as
+  an INSTRUCTION about the attached image ("Place the attached
+  character into ...").
+- Optional — most entries have no `←` line. A `←` that does not name an
+  image file is reported loudly (fix the sheet).
+
 ### 4. Notes and prose
 *(Italic paragraphs)* and any paragraph that does not carry an
 entry's path are ignored — write as much context as you like.
@@ -129,6 +160,8 @@ arrow form — it is the only one with loud error checking.
 - [ ] every path unique, `.png`, full `assets/` form (site-agnostic)
 - [ ] every prompt states its ASPECT RATIO and SHAPE explicitly
       (rule 3b — the tool never infers them)
+- [ ] any input-image entries use `← \`refs/...\`` right under the
+      arrow line (rule 3c — relative to the sheet, read-only)
 - [ ] REUSE / not-approved entries marked in bold
 - [ ] run `python main.py "your_sheet.md" --dry-run` (or the GUI's
       "Check sheets") — zero problems reported

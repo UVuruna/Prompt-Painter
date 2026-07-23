@@ -30,10 +30,20 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from painter.config import IMAGE_EXTENSIONS, SKIP_MARKER_PATTERN
+from painter.config import (
+    IMAGE_EXTENSIONS,
+    SKIP_MARKER_PATTERN,
+    TOOL_IMAGE_EXTENSIONS,
+)
 
 _BOLD_SPAN = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 _ARROW_PATH = re.compile(r"→\s*`([^`\n]+)`")
+# an OPTIONAL input-image reference on an entry (owner 2026-07-23): a
+# "comes-from" arrow, mirror of the "→" output arrow. The backticked
+# path is a READ-ONLY source photo, resolved at RUN time relative to the
+# sheet's own folder (never validated on disk here — the parser is pure
+# and offline). E.g. **Title** → `assets/.../Out.png`  ← `refs/hero.png`
+_INPUT_ARROW = re.compile(r"←\s*`([^`\n]+)`")
 _BACKTICK_TOKEN = re.compile(r"`([^`\n]+)`")
 # the whole paragraph is "**Name** — `file.png`" (dash optional)
 _STRICT_BOLD_TOKEN = re.compile(
@@ -60,6 +70,12 @@ class PromptItem:
     # DO NOT GENERATE ...) — ADVICE, not law (owner 2026-07-17): the
     # item still loads, but runs only when explicitly ticked
     advice: str | None = None
+    # an OPTIONAL input-image reference (owner 2026-07-23): the RAW
+    # relative path from the entry's "← `...`" line — a read-only source
+    # photo the runner attaches into the chat BEFORE the prompt text
+    # ("put this character into that scene"). Resolved relative to the
+    # sheet's own folder at run time; None when the entry has no input.
+    input_image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,11 +119,13 @@ def parse_sheet(path: Path) -> Sheet:
     problems: list[Problem] = []
 
     # entry awaiting its prompt block:
-    # (title, drop_path, line, advice, legacy)
+    # (title, drop_path, line, advice, legacy, input_image)
     # legacy entries (heading/bold-token forms) are best-effort: they
     # pair only with an IMMEDIATELY following fence and never raise
     # problems — the strict arrow contract keeps the loud failures
-    pending: tuple[str, str, int, str | None, bool] | None = None
+    pending: (
+        tuple[str, str, int, str | None, bool, str | None] | None
+    ) = None
     # active advice from a marked section heading or note;
     # cleared by the next heading
     poison: str | None = None
@@ -119,7 +137,7 @@ def parse_sheet(path: Path) -> Sheet:
     def flush_pending(why: str) -> None:
         nonlocal pending
         if pending is not None:
-            title, _, at, advice, legacy = pending
+            title, _, at, advice, legacy, _input = pending
             if advice is not None:
                 # a marked entry with no prompt block — retired; listed,
                 # never a contract violation
@@ -134,12 +152,19 @@ def parse_sheet(path: Path) -> Sheet:
             pending = None
 
     def register_entry(
-        title: str, drop: str, at: int, advice: str | None, legacy: bool
+        title: str,
+        drop: str,
+        at: int,
+        advice: str | None,
+        legacy: bool,
+        input_image: str | None = None,
     ) -> None:
         """Validate a drop path and set the entry pending.
 
         Legacy-form entries never raise problems: an invalid or
         duplicate path there is a reuse pointer, not an entry.
+        ``input_image`` (the raw "← `...`" reference, already validated
+        by the caller) rides along to the PromptItem built at the fence.
         """
         nonlocal pending
         drop_parts = PurePosixPath(drop)
@@ -173,7 +198,7 @@ def parse_sheet(path: Path) -> Sheet:
                     )
                 )
             return
-        pending = (title, drop, at, advice, legacy)
+        pending = (title, drop, at, advice, legacy, input_image)
 
     def png_tokens_of(text: str) -> list[str]:
         return [
@@ -199,9 +224,12 @@ def parse_sheet(path: Path) -> Sheet:
                 )
             i += 1
             if pending is not None:
-                title, drop, at, advice, _legacy = pending
+                title, drop, at, advice, _legacy, input_image = pending
                 items.append(
-                    PromptItem(title, drop, "\n".join(block), at, advice)
+                    PromptItem(
+                        title, drop, "\n".join(block), at, advice,
+                        input_image,
+                    )
                 )
                 pending = None
             continue
@@ -327,9 +355,32 @@ def parse_sheet(path: Path) -> Sheet:
 
         flush_pending("the next entry starts")
 
+        # OPTIONAL input-image reference (owner 2026-07-23): a read-only
+        # source photo attached BEFORE the prompt ("put this character
+        # into that scene"). Validated for an image extension here (any
+        # of TOOL_IMAGE_EXTENSIONS — a reference photo may be a jpg);
+        # resolved on disk by the runner, relative to the sheet's folder.
+        # A malformed "← `...`" on a real entry is a loud author error.
+        input_image: str | None = None
+        input_arrow = _INPUT_ARROW.search(para)
+        if input_arrow is not None:
+            ref = input_arrow.group(1).strip()
+            if PurePosixPath(ref).suffix.lower() in TOOL_IMAGE_EXTENSIONS:
+                input_image = ref
+            elif not legacy:
+                problems.append(
+                    Problem(
+                        f'entry "{title}": input image "← `{ref}`" is not'
+                        " an image file",
+                        start,
+                    )
+                )
+
         # the entry's own marker outranks the section's advice; either
         # way the prompt LOADS — advice only unticks it by default
-        register_entry(title, drop, start, reason or poison, legacy)
+        register_entry(
+            title, drop, start, reason or poison, legacy, input_image
+        )
 
     flush_pending("the sheet ends")
 

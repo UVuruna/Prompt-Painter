@@ -237,3 +237,88 @@ def test_legacy_forms_parse():
     assert sheet.items[0].prompt == "heading-form prompt"
     assert sheet.items[1].prompt == "bold-token prompt"
     assert sheet.items[2].prompt == "bare-bold prompt"
+
+
+# --- input-image reference (← `...`), owner 2026-07-23 ---------------
+
+def _parse_text(tmp_path, text: str):
+    p = tmp_path / "sheet.md"
+    p.write_text(text, encoding="utf-8")
+    return parse_sheet(p)
+
+
+def test_input_image_reference_parsed(tmp_path):
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n"
+        "**Hero** → `assets/x/Hero.png`\n"
+        "← `refs/hero.png`\n\n"
+        "```\nA hero prompt. ASPECT RATIO 1:1. Rondel.\n```\n",
+    )
+    assert [p.message for p in sheet.problems] == []
+    assert len(sheet.items) == 1
+    item = sheet.items[0]
+    assert item.drop_path == "assets/x/Hero.png"
+    assert item.input_image == "refs/hero.png"
+
+
+def test_entry_without_input_image_is_none(tmp_path):
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n**Hero** → `assets/x/Hero.png`\n\n```\nprompt\n```\n",
+    )
+    assert sheet.items[0].input_image is None
+
+
+def test_input_image_may_be_a_jpg_reference(tmp_path):
+    """A reference PHOTO may be a jpg/webp (TOOL_IMAGE_EXTENSIONS), even
+    though the OUTPUT path is always .png."""
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n"
+        "**Hero** → `assets/x/Hero.png`\n"
+        "← `refs/hero.jpg`\n\n"
+        "```\nprompt\n```\n",
+    )
+    assert [p.message for p in sheet.problems] == []
+    assert sheet.items[0].input_image == "refs/hero.jpg"
+
+
+def test_input_image_accepts_a_relative_parent_path(tmp_path):
+    """The ref is READ-ONLY, so a '../' sibling location is allowed (it
+    never escapes an OUTPUT folder — the runner only reads it)."""
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n"
+        "**Hero** → `assets/x/Hero.png`\n"
+        "← `../shared/hero.png`\n\n"
+        "```\nprompt\n```\n",
+    )
+    assert [p.message for p in sheet.problems] == []
+    assert sheet.items[0].input_image == "../shared/hero.png"
+
+
+def test_inline_input_arrow_on_the_same_line(tmp_path):
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n"
+        "**Hero** → `assets/x/Hero.png` ← `refs/hero.png`\n\n"
+        "```\nprompt\n```\n",
+    )
+    assert [p.message for p in sheet.problems] == []
+    assert sheet.items[0].drop_path == "assets/x/Hero.png"
+    assert sheet.items[0].input_image == "refs/hero.png"
+
+
+def test_non_image_input_reference_reported(tmp_path):
+    """A malformed '← `...`' on a real entry is a loud author error; the
+    entry still loads (its output is valid), just with no input."""
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n"
+        "**Hero** → `assets/x/Hero.png`\n"
+        "← `notes.txt`\n\n"
+        "```\nprompt\n```\n",
+    )
+    assert any("input image" in p.message for p in sheet.problems)
+    assert sheet.items[0].input_image is None
