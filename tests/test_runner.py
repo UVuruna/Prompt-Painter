@@ -153,9 +153,14 @@ def test_prompt_suffix_rules():
 
     chatgpt_default = prompt_suffix("chatgpt", "transparent")
     assert "TRANSPARENT" in chatgpt_default
+    # ChatGPT's anti-grain law (the Voljin_gpt case, owner 2026-07-27):
+    # forced into EVERY ChatGPT prompt, like Gemini's reflections law
+    assert "NO film grain" in chatgpt_default
+    assert "SOFT and CONTAINED" in chatgpt_default
     assert prompt_suffix("gemini", "none") != ""  # Gemini keeps its laws
-    # chatgpt with no background rule and no style has NO suffix at all
-    assert prompt_suffix("chatgpt", "none") == ""
+    assert "NO film grain" in prompt_suffix("chatgpt", "none")
+    # api_image has no site law: no background rule + no style = bare
+    assert prompt_suffix("api_image", "none") == ""
 
 
 def test_style_clause_appended_at_the_end():
@@ -190,7 +195,8 @@ def test_suffix_is_constant_per_site_background_style():
 
     assert "prompt_text" not in inspect.signature(ps).parameters
     # style with an otherwise-empty suffix still arrives, on its own
-    styled_only = prompt_suffix("chatgpt", "none", style="Oil painting")
+    # (api_image — the only site with no law of its own)
+    styled_only = prompt_suffix("api_image", "none", style="Oil painting")
     assert styled_only.strip() == STYLES["Oil painting"]
 
 

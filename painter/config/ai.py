@@ -31,8 +31,21 @@ _BACKGROUND_RULE = {
 # Extra laws forced into EVERY prompt of a site. Gemini's weaker
 # model drifts (wrong ratios, glossy reflections under the subject —
 # the rondel_Dawn / rondel_Shield case), so it gets hard rules.
+# ChatGPT drifts the OTHER way (the Voljin_gpt case, owner
+# 2026-07-27): photorealistic prompts carrying glow words ("glowing
+# totems", "overflowing with spirit-light") render the light as
+# clouds of bright speckles plus film grain — the whole scene
+# dissolves into high-frequency noise and the subject loses its
+# separation from the background (Gallywix, same run and suffix but
+# zero glow words, came out clean). Hence its anti-grain law.
 SITE_PROMPT_RULES = {
-    "chatgpt": (),
+    "chatgpt": (
+        "render CLEAN and SMOOTH — absolutely NO film grain, NO"
+        " speckle or noise texture, NO stippling; keep every glow and"
+        " light effect SOFT and CONTAINED around its source, never"
+        " dissolving into sparkle dust or washing over the scene, and"
+        " keep the subject clearly SEPARATED from the background",
+    ),
     "gemini": (
         "absolutely NO reflections — no mirror effect, no glossy"
         " floor, no reflective surface under or around the subject",

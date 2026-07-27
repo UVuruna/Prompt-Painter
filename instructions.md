@@ -84,6 +84,17 @@ image. So every prompt states, in its own text, unambiguously:
   the run's default (the tool appends the per-site background rule
   from the GUI dropdown; writing a conflicting one confuses the
   model).
+- **GLOW / LIGHT EFFECTS — soft and contained** (owner 2026-07-27,
+  the Voljin_gpt case): ChatGPT renders stacked glow words
+  ("glowing totems" + "overflowing with spirit-light" + "rainbow
+  glow") in a photorealistic prompt as clouds of bright speckles
+  that flood the scene and dissolve the subject into grain. Write
+  AT MOST ONE glow source per scene, phrase it contained ("a soft
+  contained glow around the totems"), and keep background light
+  sources explicitly "dim and matte". The tool already appends an
+  anti-grain law to every ChatGPT prompt — but a prompt stacking
+  three glow directives still pushes the model into noise; the law
+  is the net, not a license.
 - Anything else the image depends on (palette, lettering bans,
   symmetry...) — if it matters, write it; the tool adds nothing
   beyond the background/site rules above.
