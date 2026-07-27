@@ -4,6 +4,15 @@ The goldens run against the REAL archetype sheets in
 DOMY Watch research/prompts/archetype/ — the tool's first consumer.
 Expected values were read from the sheets by hand, never from the
 parser's own output.
+
+Expected paths follow the DOMY ONE-HIERARCHY structure (DOMY Watch
+RESTRUCTURE.md, owner-sealed 2026-07-22; goldens re-read from the
+rewritten sheets 2026-07-27): `assets/<category>/<family>/<register
+subfolders>/<Figure>.png` — e.g. `archetypes/trinity/primary/colored/`
+— with the generator NEVER in the path (PromptPainter adds it as the
+terminal filename suffix). That structure is final; if a golden ever
+fails again, the SHEET changed — re-read it by hand, per the rule
+above.
 """
 
 from pathlib import Path
@@ -74,13 +83,13 @@ def test_prompts_are_clean(name):
 # --- trinity: the full (title, path) tuple set ------------------------
 
 TRINITY_ENTRIES = [
-    ("Jesus — the Advocate (blue arm, 04h)", "assets/archetypes/trinity/Jesus_Advocate.png"),
-    ("The Devil — the Prosecutor (red arm, 20h)", "assets/archetypes/trinity/Devil_Prosecutor.png"),
-    ("The One — the Judge (gold arm, 12h)", "assets/archetypes/trinity/One_Judge.png"),
-    ("The Eye of Providence", "assets/archetypes/trinity/Providence_Eye.png"),
-    ("The Advocate rondel", "assets/archetypes/trinity/rondel_Advocate.png"),
-    ("The Prosecutor rondel", "assets/archetypes/trinity/rondel_Prosecutor.png"),
-    ("The Judge rondel", "assets/archetypes/trinity/rondel_Judge.png"),
+    ("Jesus — the Advocate (blue arm, 04h)", "assets/archetypes/trinity/primary/colored/Jesus_Advocate.png"),
+    ("The Devil — the Prosecutor (red arm, 20h)", "assets/archetypes/trinity/primary/colored/Devil_Prosecutor.png"),
+    ("The One — the Judge (gold arm, 12h)", "assets/archetypes/trinity/primary/colored/One_Judge.png"),
+    ("The Eye of Providence", "assets/archetypes/trinity/primary/colored/Providence_Eye.png"),
+    ("The Advocate rondel", "assets/archetypes/trinity/primary/colored/Rondel_Advocate.png"),
+    ("The Prosecutor rondel", "assets/archetypes/trinity/primary/colored/Rondel_Prosecutor.png"),
+    ("The Judge rondel", "assets/archetypes/trinity/primary/colored/Rondel_Judge.png"),
 ]
 
 
@@ -128,7 +137,9 @@ BELL_RONDEL_PROMPT = (
 def test_walks_bell_rondel_prompt_byte_identical():
     sheet = golden("walks_prompts.md")
     assert sheet.items[-1].title == "The Bell rondel"
-    assert sheet.items[-1].drop_path == "assets/archetypes/walks/rondel_Bell.png"
+    assert sheet.items[-1].drop_path == (
+        "assets/archetypes/walks/primary/colored/Rondel_Bell.png"
+    )
     assert sheet.items[-1].prompt == BELL_RONDEL_PROMPT
 
 
@@ -141,13 +152,13 @@ def test_persons_all_generate():
     assert sheet.skipped == ()
     generated = {i.drop_path for i in sheet.items}
     assert generated == {
-        "assets/archetypes/persons/One_Love.png",
-        "assets/archetypes/persons/Michael_Courage.png",
-        "assets/archetypes/persons/Devil_Hatred.png",
-        "assets/archetypes/persons/Jesus_Humility.png",
-        "assets/archetypes/persons/Lucifer_Pride.png",
-        "assets/archetypes/persons/Judas_Fear.png",
-        "assets/archetypes/persons/Seal.png",
+        "assets/archetypes/persons/primary/colored/One_Love.png",
+        "assets/archetypes/persons/primary/colored/Michael_Courage.png",
+        "assets/archetypes/persons/primary/colored/Devil_Hatred.png",
+        "assets/archetypes/persons/primary/colored/Jesus_Humility.png",
+        "assets/archetypes/persons/primary/colored/Lucifer_Pride.png",
+        "assets/archetypes/persons/primary/colored/Judas_Fear.png",
+        "assets/archetypes/persons/primary/colored/Seal.png",
     }
 
 
@@ -159,9 +170,9 @@ def test_temperaments_tetramorph_now_approved():
     sheet = golden("temperaments_prompts.md")
     assert all(i.advice is None for i in sheet.items)
     paths = [i.drop_path for i in sheet.items]
-    assert "assets/archetypes/tetramorph/Man.png" in paths
-    assert "assets/archetypes/tetramorph/Eagle.png" in paths
-    assert "assets/archetypes/temperaments/Throne.png" in paths
+    assert "assets/archetypes/tetramorph/primary/colored/Man.png" in paths
+    assert "assets/archetypes/tetramorph/primary/colored/Eagle.png" in paths
+    assert "assets/archetypes/temperaments/primary/colored/Throne.png" in paths
     # the sheet is BOM-prefixed since 0.14.322 — utf-8-sig must
     # still see the H1
     assert sheet.theme.startswith("Seasons Archetype Prompts")
@@ -172,14 +183,16 @@ def test_temperaments_tetramorph_now_approved():
 def test_calendar_wrapped_title_normalized():
     sheet = golden("calendar_prompts.md")
     november = next(
-        i for i in sheet.items if i.drop_path == "assets/calendars/almanac/November.png"
+        i for i in sheet.items
+        if i.drop_path
+        == "assets/calendars/almanac/primary/colored/November.png"
     )
     assert november.title == (
         "November (crimson-magenta `#FF0080`) — bare branches, "
         "the last harvest"
     )
     assert [i.drop_path for i in sheet.items] == [
-        f"assets/calendars/almanac/{m}.png"
+        f"assets/calendars/almanac/primary/colored/{m}.png"
         for m in (
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November",
@@ -193,8 +206,8 @@ def test_calendar_wrapped_title_normalized():
 def test_life_registers_do_not_collide():
     sheet = golden("life_prompts.md")
     paths = {i.drop_path for i in sheet.items}
-    assert "assets/archetypes/life/tree/Unborn.png" in paths
-    assert "assets/archetypes/life/animals/Unborn.png" in paths
+    assert "assets/archetypes/life/tree/colored/Unborn.png" in paths
+    assert "assets/archetypes/life/animals/colored/Unborn.png" in paths
     assert len(paths) == 16
 
 
