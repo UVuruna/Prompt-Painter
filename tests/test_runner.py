@@ -27,6 +27,7 @@ from painter.config import (
     TIMING,
     dest_for,
     prompt_suffix,
+    versioned_dest_for,
 )
 from painter.driver import ImageGenFailed, ItemRefused, NoImage, TerminalState
 from painter.runner import run_sheet
@@ -139,6 +140,48 @@ def test_dest_for_api_image_suffixes_the_same_way_a_real_site_does():
     )
     assert (
         dest_for("fake/img_0.png", "api_image") == "api_image/fake/img_0.png"
+    )
+
+
+def test_versioned_dest_for_counts_from_the_last_existing(tmp_path):
+    """The ticked-redo dest (owner 2026-07-27): the next ``_vN`` after
+    the LAST version on disk — canonical alone -> _v2; last _v4 -> _v5
+    (gaps never matter); the owner's irregular ``_v`` reads as v1."""
+    drop = "assets/emblem/mood/Glory.png"
+    folder = tmp_path / "emblem" / "mood"
+    folder.mkdir(parents=True)
+    (folder / "Glory_gem.png").write_bytes(b"x")
+
+    # only the canonical file -> the first redo is _v2
+    assert (
+        versioned_dest_for(drop, "gemini", tmp_path)
+        == "emblem/mood/Glory_v2_gem.png"
+    )
+    # last existing version wins, gaps ignored: v2 + v4 -> v5
+    (folder / "Glory_v2_gem.png").write_bytes(b"x")
+    (folder / "Glory_v4_gem.png").write_bytes(b"x")
+    assert (
+        versioned_dest_for(drop, "gemini", tmp_path)
+        == "emblem/mood/Glory_v5_gem.png"
+    )
+    # the irregular bare "_v" form reads as version 1 — never a crash,
+    # never lifting the max above a real _vN
+    (folder / "Glory_v_gem.png").write_bytes(b"x")
+    assert (
+        versioned_dest_for(drop, "gemini", tmp_path)
+        == "emblem/mood/Glory_v5_gem.png"
+    )
+    # another figure's versions in the same folder never leak in
+    (folder / "Glory_Shield_v9_gem.png").write_bytes(b"x")
+    assert (
+        versioned_dest_for(drop, "gemini", tmp_path)
+        == "emblem/mood/Glory_v5_gem.png"
+    )
+    # per-site independence: the same drop under chatgpt has no
+    # versions yet -> _v2
+    assert (
+        versioned_dest_for(drop, "chatgpt", tmp_path)
+        == "emblem/mood/Glory_v2_gpt.png"
     )
 
 
@@ -845,13 +888,14 @@ def test_file_existence_resume_skips_saved_and_runs_missing(tmp_path):
     assert any("RESUME: 1/3 already saved" in line for line in logs)
 
 
-def test_only_never_overwrites_an_existing_file(tmp_path):
-    """BUG 1 fix (owner 2026-07-21): the folder is the source of truth
-    even under a ticked `only` selection — a ticked item whose dest
-    file already exists is SKIPPED, never overwritten. This was the
-    exact bug from a real run: 18 already-saved images got regenerated
-    after a restart because the old `only` branch queued straight from
-    the ticks, never checking the disk."""
+def test_only_ticked_existing_redoes_as_a_new_version(tmp_path):
+    """A ticked item whose dest file already exists is a deliberate
+    REDO (owner 2026-07-27): it generates again and saves as the next
+    ``_vN`` sibling — the file already on disk is NEVER touched (the
+    BUG 1 no-overwrite guarantee of 2026-07-21 survives; what changed
+    is that the tick now produces a new version instead of a silent
+    skip). Legacy dests carry no generator suffix in the name, so the
+    version slots in before the extension: ``img_0_v2.png``."""
     sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
     # both dests already exist from a prior run, with stale bytes
@@ -862,20 +906,81 @@ def test_only_never_overwrites_an_existing_file(tmp_path):
 
     driver = FakeDriver(SITES["gemini"])
     logs: list[str] = []
-    # tick BOTH -> both already saved on disk -> neither regenerates
+    # tick BOTH -> both redo, each landing as its _v2 version file
     generated = run_sheet(
         sheet, driver, out, "gemini", FAST,
         only={"fake/img_0.png", "fake/img_1.png"}, log=logs.append,
     )
-    assert generated == 0
-    assert driver.submitted == []  # nothing was regenerated
+    assert generated == 2
+    assert len(driver.submitted) == 2
+    # the saved files are untouched; the redos landed beside them
     assert (out / dest_for("fake/img_0.png", "gemini")).read_bytes() == b"STALE"
     assert (out / dest_for("fake/img_1.png", "gemini")).read_bytes() == b"STALE"
-    assert any("RESUME: 2/2 already saved" in line for line in logs)
+    assert (out / "gemini" / "fake" / "img_0_v2.png").read_bytes() == PNG_1PX
+    assert (out / "gemini" / "fake" / "img_1_v2.png").read_bytes() == PNG_1PX
+    assert any("NEW VERSION: 2/2" in line for line in logs)
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
-    assert "already saved on disk" in report
+    assert "NEW VERSION: img_0_v2.png" in report
+
+
+def test_ticked_redo_saves_domy_form_and_events_carry_the_rel(tmp_path):
+    """The assets-mirroring redo: ``Glory_gem.png`` on disk + a tick ->
+    the redo saves as ``Glory_v2_gem.png`` (the DOMY ``<File>[_vN]_
+    <sfx>.png`` form, version BEFORE the generator suffix), and every
+    ``item_progress``/``item_done`` event carries ``rel`` — the ACTUAL
+    saved path — so the dashboard/checker follow the version file. A
+    ticked item NOT yet on disk still saves canonically."""
+    source = tmp_path / "assets_prompts.md"
+    source.write_text("# Assets Theme\n", encoding="utf-8")
+    sheet = Sheet(
+        "Assets Theme", source,
+        (
+            PromptItem("Glory", "assets/emblem/mood/Glory.png", "p1", 1),
+            PromptItem("Hope", "assets/emblem/mood/Hope.png", "p2", 2),
+        ),
+        (), (),
+    )
+    out = tmp_path / "out"
+    done = out / "emblem" / "mood" / "Glory_gem.png"
+    done.parent.mkdir(parents=True, exist_ok=True)
+    done.write_bytes(b"STALE")
+
+    driver = FakeDriver(SITES["gemini"])
+    events: list[dict] = []
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST,
+        only={"assets/emblem/mood/Glory.png", "assets/emblem/mood/Hope.png"},
+        on_event=events.append,
+    )
+    assert generated == 2
+    assert done.read_bytes() == b"STALE"  # the master is never touched
+    assert (out / "emblem/mood/Glory_v2_gem.png").read_bytes() == PNG_1PX
+    assert (out / "emblem/mood/Hope_gem.png").read_bytes() == PNG_1PX
+
+    rels = {
+        ev["drop_path"]: ev["rel"]
+        for ev in events
+        if ev["type"] == "item_progress"
+    }
+    assert rels["assets/emblem/mood/Glory.png"] == "emblem/mood/Glory_v2_gem.png"
+    assert rels["assets/emblem/mood/Hope.png"] == "emblem/mood/Hope_gem.png"
+    done_rels = {
+        ev["drop_path"]: ev["rel"]
+        for ev in events
+        if ev["type"] == "item_done"
+    }
+    assert done_rels == rels
+    # the version note rides the actions string (report + dashboard);
+    # the canonical save carries none
+    acts = {
+        ev["drop_path"]: ev["actions"]
+        for ev in events
+        if ev["type"] == "item_progress"
+    }
+    assert "NEW VERSION: Glory_v2_gem.png" in acts["assets/emblem/mood/Glory.png"]
+    assert "NEW VERSION" not in acts["assets/emblem/mood/Hope.png"]
 
 
 def test_only_still_queues_a_ticked_item_missing_on_disk(tmp_path):

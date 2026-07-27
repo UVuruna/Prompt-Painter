@@ -37,34 +37,43 @@ reference in its fresh session (the earlier same-chat rungs do not).
   `SAFER_PREAMBLE` / `COPYRIGHT_PREAMBLE`), `CONTINUE_NUDGE`,
   `IMAGE_RETRY_NUDGE`,
   `IMAGE_FAILED_RETRY_MAX`, `IMAGE_FAILED_RETRY_DELAY_RANGE_S`,
-  `IMAGE_FAILED_ESCALATION_DELAYS_S`, `dest_for`, `fmt_duration`,
+  `IMAGE_FAILED_ESCALATION_DELAYS_S`, `dest_for`,
+  `versioned_dest_for` (the ticked-redo `_vN` dest), `fmt_duration`,
   `fmt_size`
 
 ### Used by
 - [Main (Entry Point)](../main.md) and [GUI](../gui.md)
 
-## Resume model (owner 2026-07-19, revised 2026-07-21)
+## Resume model (owner 2026-07-19, revised 2026-07-21 / 2026-07-27)
 
 "Done" is the SAVED FILE itself — there is NO progress sidecar. The
 folder is ALWAYS the source of truth: an unattended rerun
 (`only=None`) skips every item whose dest file
 `out_base / dest_for(drop, site)` already exists and generates the
-rest (sheet-advised items sit out). A ticked `only` set NARROWS the
-candidates to those drop paths but NEVER overwrites a dest file
-already on disk — a ticked item that is already saved is skipped
-exactly like the unattended path, logged (`RESUME: N/M already saved
-on disk under <site>/`) and added to the report as a skip. To redo a
-bad image the owner deletes the file first, then reruns (ticked or
-not) — ticking alone can never force a regenerate.
+rest (sheet-advised items sit out), and NO file on disk is EVER
+overwritten. A ticked `only` set is the queue itself: a ticked item
+NOT yet on disk saves canonically, while a ticked item whose
+canonical file already exists is a deliberate REDO (owner
+2026-07-27) — it generates again and saves as the NEXT `_vN` sibling
+(`versioned_dest_for`: the DOMY `<File>[_vN]_<sfx>.png` rotation
+form, canonical = v1, first redo = `_v2`, last-on-disk + 1 after
+that), logged (`NEW VERSION: N/M ticked item(s) already saved ...`)
+and marked in the report's note column (`NEW VERSION: <file>`).
+Every `item_progress`/`item_done` event carries `rel` — the ACTUAL
+saved out-relative path — so the dashboard, the parallel checker and
+the fixer follow the version file instead of re-deriving the
+canonical `dest_for` guess.
 
 (Owner 2026-07-21: a real run hit this precisely — 18 finished
 images got regenerated after a restart because the old `only` branch
 built its queue straight from the ticks, never checking the disk.
 "The folder is the source of truth; the selection must check the
-folder" is now the hard rule.) This replaces the old `.progress.json`
-reading, which could disagree with the real files on disk (an item
-recorded done whose file was never at the output location showed as
-done yet could not be regenerated).
+folder" is now the hard rule — the 2026-07-27 version semantics KEEP
+that guarantee: a redo never touches the existing file, it lands
+beside it.) This replaces the old `.progress.json` reading, which
+could disagree with the real files on disk (an item recorded done
+whose file was never at the output location showed as done yet could
+not be regenerated).
 
 ## Pause (owner 2026-07-21)
 
@@ -140,24 +149,25 @@ event) so the dashboard never stalls; the `item_done` event with
   count), `item_done` (title, drop_path, gen_s, over_s, orig_res,
   final_res, size), `item_refused`, `sheet_done` (generated) — the
   GUI dashboard is built from these. `item_progress` AND `item_done`
-  also carry `actions` (the post_save description string, e.g.
-  `REMOVE BG: done, CROP: done, UPSCALE: nothing`) and `retried`
+  also carry `rel` (the ACTUAL saved out-relative path — a ticked
+  redo's `_vN` version file, owner 2026-07-27), `actions` (the
+  post_save description string, e.g.
+  `REMOVE BG: done, CROP: done, UPSCALE: nothing` — a version redo
+  prepends `NEW VERSION: <file>`) and `retried`
   (True when the SAFER RETRY produced the image) — the dashboard's
   per-image STATUS BADGES map them via `config.badge_keys_for`
   (owner 2026-07-20). Logs the
-  sheet's skipped entries, resumes by FILE EXISTENCE (or narrows to
-  the ticked `only` set, which still never overwrites a file already
-  on disk),
+  sheet's skipped entries, resumes by FILE EXISTENCE,
   drives every pending item, appends `prompt_suffix` (the caller
   resolves the per-site rules), runs the `post_save` hook — the
   caller composes the postprocess steps by flags and returns the
   full action description; failures are loud, counted, never fatal
   — paces between prompts,
   honors `should_stop`, and feeds `RunReport` when `report` is on.
-  `only` narrows the queue to the owner's ticked drop paths, but a
-  ticked item whose dest file already exists is SKIPPED just like the
-  unattended resume path (owner 2026-07-21 — the folder is always the
-  source of truth; redo = delete the file first). `extra_suffix`
+  `only` is the owner's ticked drop-path queue: an item not yet on
+  disk saves canonically, one already saved REDOES as its next `_vN`
+  version (see **Resume model** above — no file on disk is ever
+  overwritten). `extra_suffix`
   (owner 2026-07-20, the AI
   checker's re-send) is an optional `{drop_path: text}` map — the
   mapped item gets its text appended AFTER the site suffix (the

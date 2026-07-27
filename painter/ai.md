@@ -212,10 +212,13 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   AND the GUI viewer, so the flag key and the image it opens can never
   drift apart.
 - `drop_and_site_for(rel) -> (drop_path, site) | None` — the
-  `config.dest_for` REVERSE: `<rest>/<File>_gem|_gpt|_api.png` →
+  `config.dest_for` REVERSE: `<rest>/<File>[_vN]_gem|_gpt|_api.png` →
   `('assets/<rest>/<File>.png', site)` (the filename-suffix
-  convention, DOMY RESTRUCTURE 2026-07-22); the pre-RESTRUCTURE
-  `<category>/<site>/<rest>` folder layout and legacy
+  convention, DOMY RESTRUCTURE 2026-07-22; a `_vN` version sibling —
+  the ticked-redo output, owner 2026-07-27 — reverses to the SAME
+  canonical drop as its master, so a flagged version re-sends through
+  its own sheet entry and the redo lands as the NEXT version); the
+  pre-RESTRUCTURE `<category>/<site>/<rest>` folder layout and legacy
   `<site>/<drop>` still reverse for old out/ trees; `None` when
   nothing names a generator.
 - `plan_resend(flagged, drop_to_source) -> (plans, notes,

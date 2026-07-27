@@ -45,6 +45,14 @@ at runtime (`from __future__ import annotations` in this module, same
 as the original file), so no import of the still-monolithic
 `PainterGui` class is needed.
 
+Done items (their saved file exists — `gui._done_on_disk`) show green
+and stay RE-TICKABLE, unticked by default. Ticking one is a
+deliberate REDO (owner 2026-07-27): the runner generates it again and
+saves it as the next `_vN` version file beside the existing image,
+which is never overwritten (see [Run Loop](../painter/runner.md) —
+Resume model). All/none count-clicks still flip only the NON-done
+rows; a version redo is always an individual, explicit tick.
+
 ## Design Decisions
 See [GUI (folder)](___gui.md)'s own "Design Decisions" section for why
 the `DOC_*` sizing constants live in `gui.viewers` rather than

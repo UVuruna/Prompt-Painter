@@ -632,10 +632,12 @@ def test_dash_panel_over_cap_event_shows_a_loud_persistent_banner(root):
 
 def make_progress_event(drop: str, size: int) -> dict:
     """The minimal item_progress payload DashPanel.handle needs to add
-    one image row — mirrors runner.py's own emitted shape."""
+    one image row — mirrors runner.py's own emitted shape (``rel`` =
+    the actual saved path, owner 2026-07-27)."""
     return {
         "type": "item_progress", "idx": 1, "of": 1, "title": drop,
-        "drop_path": drop, "gen_s": 5.0, "orig_res": "10x10",
+        "drop_path": drop, "rel": gui.dest_for(drop, "gemini"),
+        "gen_s": 5.0, "orig_res": "10x10",
         "final_res": "10x10", "size": size, "actions": "", "retried": False,
     }
 

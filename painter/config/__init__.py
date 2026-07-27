@@ -26,6 +26,7 @@ from .paths import (
     STATE_DIRNAME,
     SITE_FILE_SUFFIX,
     dest_for,
+    versioned_dest_for,
 )
 from .formatters import (
     fmt_duration,
@@ -244,6 +245,7 @@ __all__ = [
     "CDP_PORT", "CDP_URL", "CHROME_CANDIDATES", "CHROME_LAUNCH_TIMEOUT_S",
     "CHROME_PROFILE_DIR", "DEFAULT_OUT_DIR", "PROJECT_ROOT",
     "REPORT_SUFFIX", "SETTINGS_PATH", "STATE_DIRNAME", "dest_for",
+    "versioned_dest_for",
     # formatters
     "fmt_duration", "fmt_op_duration", "fmt_pct", "fmt_size",
     # sheet

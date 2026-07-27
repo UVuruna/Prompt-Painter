@@ -35,7 +35,6 @@ from painter.config import (
     CDP_URL,
     SITES,
     TIMING,
-    dest_for,
 )
 from .logic import _fixer_decision
 
@@ -80,7 +79,10 @@ class CheckerFixerMixin:
             return  # panel closed, or somehow not started yet
         drop_path = event["drop_path"]
         dash.handle({"type": "item_checking", "drop_path": drop_path})
-        src = dash.out_base / dest_for(drop_path, key)
+        # the event's rel is the ACTUAL saved file (owner 2026-07-27:
+        # a ticked redo lands as a _vN version, not the canonical
+        # dest_for guess) — check exactly what was just written
+        src = dash.out_base / event["rel"]
         threading.Thread(
             target=self._run_checker_one,
             args=(key, drop_path, src, dash.out_base),
@@ -194,7 +196,10 @@ class CheckerFixerMixin:
 
         log = lambda msg: self._q.put(f"[{key} fixer] {msg}")
         emit = lambda ev: self._q.put(("__event__", key, ev))
-        live = out_base / dest_for(drop_path, key)
+        # rel came off the checker's own flag key — the file it really
+        # checked (a _vN version included), never re-derived from the
+        # drop path (owner 2026-07-27)
+        live = out_base / rel
         prompt = ai.build_fix_prompt(defects, raw)
         try:
             fixed = ai.edit_image(live, prompt, log=log)

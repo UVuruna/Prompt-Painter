@@ -918,6 +918,24 @@ def test_drop_and_site_for_reverses_dest_for():
     assert ai.drop_and_site_for(rel) == ("fake/img_0.png", "chatgpt")
 
 
+def test_drop_and_site_for_strips_the_version_sibling():
+    """A ``_vN`` version file (the ticked-redo output, owner
+    2026-07-27) reverses to the SAME canonical drop as its master, so
+    a flagged version still matches its sheet entry for a re-send —
+    the owner's irregular bare ``_v`` form included."""
+    assert ai.drop_and_site_for("emblem/mood/Glory_v3_gem.png") == (
+        "assets/emblem/mood/Glory.png", "gemini",
+    )
+    assert ai.drop_and_site_for("emblem/mood/Glory_v_gpt.png") == (
+        "assets/emblem/mood/Glory.png", "chatgpt",
+    )
+    # a name whose stem legitimately ends in letters+digits without
+    # the _v marker is untouched
+    assert ai.drop_and_site_for("emblem/mood/Glory2_gem.png") == (
+        "assets/emblem/mood/Glory2.png", "gemini",
+    )
+
+
 def test_drop_and_site_for_none_when_no_site_segment():
     assert ai.drop_and_site_for("random/folder/pic.png") is None
     assert ai.drop_and_site_for("pic.png") is None

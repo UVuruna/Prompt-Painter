@@ -50,7 +50,9 @@ is the binding spec.
    the next Start resumes the rest. The goal: queue 15 sheets,
    go ride a bike. **"Select images..."** opens the tick list —
    PER SITE (ChatGPT and Gemini each get their own selection);
-   already-done items show disabled. **"BG removal only..."**
+   already-done items show green and RE-TICKABLE — ticking one
+   REDOES it as the next `_vN` version file (owner 2026-07-27, see
+   The Run Loop). **"BG removal only..."**
    runs the background remover standalone, in place, over any
    existing folder of images.
 3. He picks the sites: **Gemini, ChatGPT, or BOTH IN PARALLEL** —
@@ -66,7 +68,12 @@ is the binding spec.
    `none`), preselected to the site's default — ChatGPT
    transparent, Gemini white. **Gemini additionally gets the
    NO-reflections law in EVERY prompt** (2026-07-17, after the
-   rondel_Dawn/rondel_Shield drift). The old ASPECT RATIO law —
+   rondel_Dawn/rondel_Shield drift). **ChatGPT gets the ANTI-GRAIN
+   law in EVERY prompt** (owner 2026-07-27, the Voljin_gpt case:
+   glow words + "photorealistic" render as clouds of bright
+   speckles that dissolve the subject into noise — no film grain,
+   glow soft and contained, subject separated; sheet authors also
+   cap glow per instructions.md rule 3b). The old ASPECT RATIO law —
    inferred from prompt keywords (TALL/lancet → portrait, else
    1:1) — was REMOVED (owner 2026-07-22, after "a tall
    lotus-tipped sceptre" flipped a ROUND medallion to portrait):
@@ -274,11 +281,19 @@ exhausting all rungs STOPS the site (no per-item skip for this failure)
 (the `.progress.json` state file was removed 2026-07-19). RESUMABLE
 for free: the folder is ALWAYS the source of truth (owner 2026-07-21)
 — an unattended run skips items whose dest file already exists, and
-an EXPLICIT tick list only NARROWS which items are candidates: a
-ticked item whose file already exists is still skipped, never
-overwritten. To redo a bad image, delete the file first, then rerun
-(ticked or not). Select shows done items green but re-tickable — for
-display/selection only, ticking alone never forces a regenerate. At
+NO file on disk is EVER overwritten. An EXPLICIT tick on a done item
+is a deliberate REDO (owner 2026-07-27): it generates again and
+saves as the NEXT `_vN` sibling per the DOMY rotation convention —
+`<File>[_vN]_<sfx>.png`, version BEFORE the terminal generator
+suffix, canonical file = v1, first redo = `_v2`, and with `_v4` on
+disk the next is `_v5` (`config.versioned_dest_for` scans the dest
+folder; the owner's irregular `_v`/`_v1` forms read as v1). Select
+shows done items green and re-tickable — tick = new version, the
+saved image stays. Every `item_progress`/`item_done` event carries
+`rel`, the ACTUAL saved path, so the dashboard, parallel checker and
+fixer follow the version file (and `ai.drop_and_site_for` strips
+`_vN`, so a flagged version re-sends through its own sheet entry —
+which then lands as the NEXT version). At
 the end the owner reviews
 quality; unsatisfying prompts get reworked in the sheet or re-ticked.
 

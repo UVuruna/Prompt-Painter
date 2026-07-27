@@ -26,6 +26,21 @@ out/ tree MIRRORS DOMY's assets/: sheets carry site-agnostic
 `assets/<rest>/<File>.png` paths and `dest_for` lands the generator
 as the terminal filename suffix, `<rest>/<File>_gem|_gpt|_api.png`
 (DOMY RESTRUCTURE 2026-07-22 — one hierarchy, no per-site folders));
+`versioned_dest_for(drop, site, out_base)` — the ticked-redo dest
+(owner 2026-07-27): the next `_vN` sibling per the DOMY rotation
+form `<File>[_vN]_<sfx>.png` (version BEFORE the generator suffix;
+canonical = v1, first redo = `_v2`, otherwise last-on-disk + 1 with
+gaps ignored and the owner's irregular `_v`/`_v1` read as v1; a
+legacy non-assets dest versions before the extension) — pseudocode:
+
+```
+rel = dest_for(drop, site)
+base = filename stem minus the site suffix
+FOR EACH file IN rel's folder matching <base>_v<digits><suffix>:
+    last = max(last, digits or 1)     # bare "_v" counts as 1
+RETURN folder / <base>_v(last+1)<suffix>.png
+```
+
 and
 `SETTINGS_PATH` (the GUI's `settings.json`, gitignored). A leaf module
 — every other submodule that needs a project-relative path imports
@@ -133,7 +148,11 @@ four real pipeline stages reuse it rather than duplicating a label).
 The per-site prompt suffix machinery (`BACKGROUND_CHOICES`,
 `SITE_PROMPT_RULES`, `prompt_suffix` — a CONSTANT per
 (site, background, style): the background rule plus Gemini's extra
-"no reflections" law; the old keyword-inferred aspect-ratio law was
+"no reflections" law and ChatGPT's ANTI-GRAIN law (owner 2026-07-27,
+the Voljin_gpt case — glow words + "photorealistic" render as
+speckle clouds that dissolve the subject; the law bans film grain /
+noise / stippling and demands glow SOFT and CONTAINED, subject
+separated); the old keyword-inferred aspect-ratio law was
 REMOVED, owner 2026-07-22 — the sheet prompt states its own aspect
 explicitly, see instructions.md rule 3b); the per-agent STYLE clause (`STYLES`,
 `STYLE_CHOICES`, `STYLE_DEFAULT`); `RETRY_PREAMBLES` (the per-scenario

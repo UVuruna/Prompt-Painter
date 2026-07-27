@@ -17,6 +17,13 @@ Average breakdown, the collections history tree (collection > folder
 > image), the per-step restore viewer ("Steps…") and the parallel
 Checker AI's per-row report ("Check…").
 
+Every image row remembers `rel` — the ACTUAL saved out-relative path
+off its `item_progress` event (owner 2026-07-27: a ticked redo lands
+as a `_vN` version file) — in `_node_info`; "Steps…" and
+`refresh_image_row` resolve the live file through it, falling back to
+the canonical `dest_for` only for rows that never saved (a REFUSED
+row). "Check…" already follows the checker's own `rel` result key.
+
 ## Connections
 
 ### Uses

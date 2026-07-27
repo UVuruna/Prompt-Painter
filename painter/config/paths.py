@@ -3,6 +3,7 @@
 Everything here is a leaf: no dependency on any other config submodule.
 """
 
+import re
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -62,6 +63,47 @@ def dest_for(drop_path: str, site_key: str) -> str:
         name = f"{stem}{suffix}.{ext}" if dot else f"{name}{suffix}"
         return "/".join([*parts[1:-1], name])
     return "/".join([site_key, drop_path])
+
+
+def versioned_dest_for(
+    drop_path: str, site_key: str, out_base: Path
+) -> str:
+    """The dest (same rel form as ``dest_for``) for a NEW VERSION of
+    an image whose canonical file already exists on disk.
+
+    Re-ticking a done item never overwrites it (owner 2026-07-27): the
+    redo lands as the next ``_vN`` sibling per the DOMY rotation
+    convention — ``<File>[_vN]_<sfx>.png``, the ``_vN`` slotted BEFORE
+    the terminal generator suffix; the canonical file IS version 1 and
+    the first redo is ``_v2``. Scans the dest folder for existing
+    version siblings and returns LAST + 1 ("ako je poslednja v4, on
+    pravi v5" — gaps never matter), tolerant of the owner's irregular
+    ``_v``/``_v1`` forms (both read as version 1, like DOMY's own
+    rotation discovery). A legacy (non-assets) dest, whose filename
+    carries no generator suffix, versions before the extension
+    instead.
+    """
+    rel = dest_for(drop_path, site_key)
+    folder, _, name = rel.rpartition("/")
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem = name
+    suffix = SITE_FILE_SUFFIX[site_key]
+    tail = suffix if stem.endswith(suffix) else ""
+    base = stem[: -len(tail)] if tail else stem
+    pattern = re.compile(
+        re.escape(base) + r"_v(\d*)" + re.escape(tail)
+        + (re.escape(f".{ext}") if dot else "") + r"$"
+    )
+    last = 1  # the canonical file is version 1
+    dest_dir = out_base / folder if folder else out_base
+    if dest_dir.is_dir():
+        for existing in dest_dir.iterdir():
+            match = pattern.fullmatch(existing.name)
+            if match:
+                last = max(last, int(match.group(1) or 1))
+    versioned = f"{base}_v{last + 1}{tail}" + (f".{ext}" if dot else "")
+    return f"{folder}/{versioned}" if folder else versioned
 
 
 # --- Settings persistence (owner's #9) -------------------------------

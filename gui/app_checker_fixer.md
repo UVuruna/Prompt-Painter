@@ -25,6 +25,14 @@ event this mixin itself posts back onto the shared GUI queue — both
 calls resolve through the shared `PainterGui` MRO (`self.`), exactly
 as when the two mixins' code lived in one file.
 
+Both halves follow the event's `rel` — the ACTUAL saved path the
+runner emits (owner 2026-07-27: a ticked redo lands as a `_vN`
+version file): the checker reads `event["rel"]` for the file it
+checks, and the API fixer overwrites the `rel` its `item_checked`
+carried (the checker's own flag key) — neither ever re-derives the
+canonical `dest_for` guess, which would point at the OLD image for a
+version redo.
+
 No `__init__` here — every attribute it reads (`self.agents`, `self.
 panels`, `self._job_temps`, `self._q`, `self._running`, `self._log`,
 `self._dashgrid`) is set by `BuildMixin.__init__`.
@@ -33,7 +41,8 @@ panels`, `self._job_temps`, `self._q`, `self._running`, `self._log`,
 
 ### Uses
 - [Painter (folder)](../painter/___painter.md) — `config`
-  (`AI_CHECK_INSTRUCTIONS`, `CDP_URL`, `SITES`, `TIMING`, `dest_for`);
+  (`AI_CHECK_INSTRUCTIONS`, `CDP_URL`, `SITES`, `TIMING` — `dest_for`
+  dropped 2026-07-27: both halves now follow the event's `rel`);
   `ai` (`check_one_image`/`edit_image`/`build_fix_prompt`/`flag_file`/
   `flag_key`/`drop_and_site_for`/the `AiError`/`PaidFeatureRequired`
   taxonomy) and `driver` (`SiteDriver`/`DriverError`/

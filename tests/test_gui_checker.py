@@ -86,10 +86,13 @@ def make_png(path: Path, width: int = 10, height: int = 10) -> None:
 def make_progress_event(drop: str, size: int) -> dict:
     """The minimal item_progress payload DashPanel.handle needs to add
     one image row — mirrors runner.py's own emitted shape (identical to
-    test_gui_pipeline.py's own helper of the same name)."""
+    test_gui_pipeline.py's own helper of the same name). ``rel`` is the
+    ACTUAL saved path the runner now always emits (owner 2026-07-27 —
+    a ticked redo lands as a _vN version file)."""
     return {
         "type": "item_progress", "idx": 1, "of": 1, "title": drop,
-        "drop_path": drop, "gen_s": 5.0, "orig_res": "10x10",
+        "drop_path": drop, "rel": gui.dest_for(drop, "gemini"),
+        "gen_s": 5.0, "orig_res": "10x10",
         "final_res": "10x10", "size": size, "actions": "", "retried": False,
     }
 
@@ -524,7 +527,8 @@ def test_maybe_spawn_checker_on_marks_checking_then_completes(
 
     fake = _FakeGuiForChecker({"gemini": agent}, {"gemini": dash})
     gui.PainterGui._maybe_spawn_checker(
-        fake, "gemini", {"type": "item_progress", "drop_path": drop},
+        fake, "gemini",
+        {"type": "item_progress", "drop_path": drop, "rel": rel},
     )
 
     # (a) synchronous — true the instant the call above returns
@@ -554,7 +558,8 @@ def test_maybe_spawn_checker_flagged_result_reaches_the_row(
 
     out_base = tmp_path / "out"
     drop = "assets/emblem/Glory.png"
-    live = out_base / gui.dest_for(drop, "gemini")
+    rel = gui.dest_for(drop, "gemini")
+    live = out_base / rel
     make_png(live)
 
     dash = gui.DashPanel(root, "gemini")
@@ -566,7 +571,8 @@ def test_maybe_spawn_checker_flagged_result_reaches_the_row(
     agent.checker_var.set(True)
     fake = _FakeGuiForChecker({"gemini": agent}, {"gemini": dash})
     gui.PainterGui._maybe_spawn_checker(
-        fake, "gemini", {"type": "item_progress", "drop_path": drop},
+        fake, "gemini",
+        {"type": "item_progress", "drop_path": drop, "rel": rel},
     )
 
     msg = fake._q.get(timeout=5)
@@ -589,7 +595,8 @@ def test_maybe_spawn_checker_error_result_is_non_fatal(
 
     out_base = tmp_path / "out"
     drop = "assets/emblem/Glory.png"
-    live = out_base / gui.dest_for(drop, "gemini")
+    rel = gui.dest_for(drop, "gemini")
+    live = out_base / rel
     make_png(live)
 
     dash = gui.DashPanel(root, "gemini")
@@ -601,7 +608,8 @@ def test_maybe_spawn_checker_error_result_is_non_fatal(
     agent.checker_var.set(True)
     fake = _FakeGuiForChecker({"gemini": agent}, {"gemini": dash})
     gui.PainterGui._maybe_spawn_checker(
-        fake, "gemini", {"type": "item_progress", "drop_path": drop},
+        fake, "gemini",
+        {"type": "item_progress", "drop_path": drop, "rel": rel},
     )
 
     msg = fake._q.get(timeout=5)

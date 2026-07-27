@@ -132,7 +132,8 @@ class SelectWindow(tk.Toplevel):
         bar.pack(fill="x")
         ttk.Label(
             bar,
-            text="Tick = generate.  Done = green (re-tick to redo)."
+            text="Tick = generate.  Done = green (re-tick → saves a new"
+            " _v2/_v3… file, the old one stays)."
             "  ⚠ advice off.  Click a count = all/none.",
             style="Muted.TLabel",
         ).pack(side="left")
@@ -258,8 +259,10 @@ class SelectWindow(tk.Toplevel):
                 )
                 is_done = drop in done[key][src]
                 if is_done:
-                    # done -> unticked by DEFAULT, but re-tickable so a
-                    # bad image can be regenerated (owner 2026-07-19)
+                    # done -> unticked by DEFAULT, but re-tickable: a
+                    # ticked done item REDOES as the next _vN version
+                    # file, never overwriting the saved one (owner
+                    # 2026-07-19 re-tick; 2026-07-27 version semantics)
                     var.set(False)
                 leaf["sites"][key] = {"var": var, "done": is_done}
             leaves.append(leaf)
@@ -396,8 +399,9 @@ class SelectWindow(tk.Toplevel):
             for i, key in enumerate(self._site_keys):
                 info = leaf["sites"][key]
                 # done items stay ENABLED and re-tickable (owner
-                # 2026-07-19) — coloured green/olive, unticked by default,
-                # but the owner can tick one to REGENERATE a bad image
+                # 2026-07-19) — coloured green/olive, unticked by default;
+                # ticking one REDOES it as the next _vN version file
+                # (owner 2026-07-27), the saved image stays untouched
                 cb = ttk.Checkbutton(row, variable=info["var"])
                 cb.grid(row=0, column=3 + i, sticky="n")
             text = leaf["name"]

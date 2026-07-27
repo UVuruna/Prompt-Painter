@@ -458,7 +458,10 @@ class DashPanel(JobPanel):
                 "PromptPainter", "No per-step history for this run yet.",
             )
             return
-        rel = dest_for(info["drop"], self.slot_key)
+        # the stored rel is the file that really got saved (a _vN
+        # version for a ticked redo — owner 2026-07-27); dest_for is
+        # only the fallback for rows without one (a REFUSED row)
+        rel = info.get("rel") or dest_for(info["drop"], self.slot_key)
         if not self.jobtemp.steps_for(rel):
             messagebox.showinfo(
                 "PromptPainter",
@@ -542,7 +545,9 @@ class DashPanel(JobPanel):
         child = self._child_ids.get(drop)
         if child is None or self.out_base is None:
             return
-        live_path = self.out_base / dest_for(drop, self.slot_key)
+        info = self._node_info.get(child) or {}
+        rel = info.get("rel") or dest_for(drop, self.slot_key)
+        live_path = self.out_base / rel
         try:
             with Image.open(live_path) as img:
                 res = f"{img.width}x{img.height}"
@@ -676,6 +681,10 @@ class DashPanel(JobPanel):
             self._child_ids[drop] = child
             self._node_info[child] = {
                 "level": "image", "sheet": self._theme_name, "drop": drop,
+                # the ACTUAL saved rel — a ticked redo lands as a _vN
+                # version file (owner 2026-07-27), so Show/Steps/refresh
+                # must follow this, never re-derive via dest_for
+                "rel": event["rel"],
             }
             self._update_folder(folder)
             self._update_parent()

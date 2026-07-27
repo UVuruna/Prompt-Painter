@@ -885,9 +885,12 @@ def drop_and_site_for(rel: str) -> tuple[str, str] | None:
     """Reverse ``config.dest_for``: the (drop_path, site) one
     out-relative save path came from.
 
-    Assets mirror ``<rest>/<File>_<sfx>.png`` ->
+    Assets mirror ``<rest>/<File>[_vN]_<sfx>.png`` ->
     ``('assets/<rest>/<File>.png', site)`` (the DOMY RESTRUCTURE
-    filename-suffix convention, 2026-07-22); the pre-RESTRUCTURE
+    filename-suffix convention, 2026-07-22; a ``_vN`` version sibling
+    — the ticked-redo output, owner 2026-07-27 — reverses to the SAME
+    canonical drop as its master, so a flagged version re-sends
+    through the sheet entry it came from); the pre-RESTRUCTURE
     ``<category>/<site>/<rest>`` folder layout and legacy
     ``<site>/<drop>`` still reverse for old out/ trees. ``None`` when
     nothing names a site (an absolute flag key, or a folder that was
@@ -902,7 +905,11 @@ def drop_and_site_for(rel: str) -> tuple[str, str] | None:
         core = stem if dot else name
         for site, sfx in SITE_FILE_SUFFIX.items():
             if core.endswith(sfx) and len(core) > len(sfx):
-                bare = core[: -len(sfx)] + (f".{ext}" if dot else "")
+                bare = core[: -len(sfx)]
+                version = re.fullmatch(r"(.+)_v\d*", bare)
+                if version is not None:
+                    bare = version.group(1)
+                bare += f".{ext}" if dot else ""
                 return "assets/" + "/".join((*parts[:-1], bare)), site
     if len(parts) >= 3 and parts[1] in SITES:
         return "assets/" + "/".join((parts[0], *parts[2:])), parts[1]

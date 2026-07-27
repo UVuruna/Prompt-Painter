@@ -512,7 +512,8 @@ def test_dispatch_does_not_spawn_fixer_for_item_checking(root, tmp_path):
 def make_progress_event(drop: str, size: int) -> dict:
     return {
         "type": "item_progress", "idx": 1, "of": 1, "title": drop,
-        "drop_path": drop, "gen_s": 5.0, "orig_res": "10x10",
+        "drop_path": drop, "rel": gui.dest_for(drop, "gemini"),
+        "gen_s": 5.0, "orig_res": "10x10",
         "final_res": "10x10", "size": size, "actions": "", "retried": False,
     }
 
