@@ -12,11 +12,18 @@ import pytest
 from PIL import Image
 
 from painter.bg_remove import (
+    apply_plan,
     clean_edge_halo,
     content_bbox,
-    remove_black_background,
+    parse_hex_color,
+    plan,
+    tolerance_to_distance,
 )
 from painter.config import (
+    BG_COLOR_TOLERANCE_PCT,
+    BG_MODE_BLACK,
+    BG_MODE_COLOR,
+    BG_MODE_WHITE,
     CLEAN_EDGE_ALPHA,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
@@ -94,7 +101,11 @@ def test_black_removal_keeps_enclosed_interior_dark_region():
     rgb = np.full((100, 100, 3), 180, dtype=np.uint8)  # bright subject fills frame
     rgb[:12, :12] = 0        # black corner void — CONNECTED to the border
     rgb[45:55, 45:55] = 0    # black interior detail — ENCLOSED by the subject
-    out, removed = remove_black_background(Image.fromarray(rgb, mode="RGB"))
+    # forced black: this plate's border is mostly BRIGHT, so auto would
+    # (correctly) call it ambiguous — the mode selector is what reaches
+    # the black recipe here
+    img = Image.fromarray(rgb, mode="RGB")
+    out, removed = apply_plan(img, plan(img, BG_MODE_BLACK))
     alpha = np.asarray(out)[:, :, 3]
 
     assert alpha[3, 3] == 0            # the corner void is cleared
@@ -115,7 +126,8 @@ def test_guard_aborts_black_over_removal_and_leaves_untouched(tmp_path):
 
     assert remove_background(img, logs.append) == "unclear"
     assert img.read_bytes() == before               # ORIGINAL untouched
-    assert any("too risky" in line for line in logs)
+    # the report NAMES the guard that fired and where to raise it
+    assert any("black safety guard" in line for line in logs)
 
 
 def test_white_guard_passes_legit_large_background(tmp_path):
@@ -148,7 +160,7 @@ def test_guard_aborts_white_over_removal_and_leaves_untouched(tmp_path):
 
     assert remove_background(img, logs.append) == "unclear"
     assert img.read_bytes() == before
-    assert any("too risky" in line for line in logs)
+    assert any("white safety guard" in line for line in logs)
 
 
 def test_black_removal_returns_removed_fraction():
@@ -157,7 +169,8 @@ def test_black_removal_returns_removed_fraction():
     clears ~the border ring, well under the guard."""
     rgb = np.zeros((100, 100, 3), dtype=np.uint8)
     rgb[10:90, 10:90] = 210                       # 80x80 subject, 20px frame gone
-    out, removed = remove_black_background(Image.fromarray(rgb, mode="RGB"))
+    img = Image.fromarray(rgb, mode="RGB")
+    out, removed = apply_plan(img, plan(img))
     assert isinstance(removed, float)
     assert abs(removed - 0.36) < 0.02             # (100^2 - 80^2)/100^2 = 0.36
     assert removed < SAFETY_MAX_REMOVE_FRAC        # so it would be saved
@@ -204,6 +217,189 @@ def test_safety_override_lets_a_larger_removal_through(tmp_path):
     assert remove_background(
         img2, print, safety_max_remove_frac=0.995,
     ) == "done"
+
+
+# --- background MODE + custom colour (owner 2026-07-28) ---------------
+
+
+def make_disc_on_black(path: Path, size: int = 100, radius: int = 43) -> None:
+    """A bright disc CENTRED on a pure-black plate — the owner's
+    'pointers' geometry in miniature.
+
+    A disc of radius 43 in a 100x100 frame leaves ~42 % background,
+    which is what the real plates measure (41.2–42.2 % over all 17
+    files in C:\\Users\\vurun\\Downloads\\pointers, 2026-07-28): the
+    subject is intact and the separation is perfectly clean (the mask
+    moves < 0.6 pp while the void threshold sweeps 2 -> 20), yet the
+    fraction sits just above black's 0.40 guard."""
+    yy, xx = np.mgrid[0:size, 0:size]
+    centre = (size - 1) / 2.0
+    disc = (xx - centre) ** 2 + (yy - centre) ** 2 <= radius ** 2
+    rgb = np.zeros((size, size, 3), dtype=np.uint8)
+    rgb[disc] = (210, 180, 90)
+    Image.fromarray(rgb, mode="RGB").save(path, "PNG")
+
+
+def test_hex_colour_parsing_accepts_the_owner_forms():
+    assert parse_hex_color("#FF0000") == (255, 0, 0)
+    assert parse_hex_color("ff0000") == (255, 0, 0)
+    assert parse_hex_color("#f00") == (255, 0, 0)
+    assert parse_hex_color("  #3A5F7D  ") == (58, 95, 125)
+
+
+def test_a_mistyped_hex_colour_is_loud():
+    """Rule #1 — a bad colour never silently becomes some other colour."""
+    for bad in ("", "#12345", "not-a-colour", "#GGGGGG"):
+        with pytest.raises(ValueError, match="background colour"):
+            parse_hex_color(bad)
+
+
+def test_tolerance_matches_the_owners_worked_example():
+    """'#FF0000 +- X%' spanning #EE0000..#FF1111 is +-0x11 = 17 levels."""
+    assert tolerance_to_distance(6.67) == 17
+    assert tolerance_to_distance(0) == 0
+    assert tolerance_to_distance(100) == 255
+    with pytest.raises(ValueError, match="background tolerance"):
+        tolerance_to_distance(101)
+
+
+def test_custom_colour_clears_a_background_neither_white_nor_black(tmp_path):
+    """The owner's question answered: ANY colour, not just black/white.
+    The SAME plate auto gives up on is cleared once he states the
+    colour."""
+    img = tmp_path / "red_bg.png"
+    rgb = np.full((100, 100, 3), (255, 0, 0), dtype=np.uint8)
+    rgb[20:80, 20:80] = (40, 90, 200)
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    shutil.copy(img, tmp_path / "same.png")
+
+    assert remove_background(tmp_path / "same.png", print) == "unclear"
+
+    assert remove_background(
+        img, print, mode=BG_MODE_COLOR, color="#FF0000",
+    ) == "done"
+    with Image.open(img) as out:
+        arr = np.asarray(out.convert("RGBA"))
+    assert arr[0, 0, 3] == 0      # the red background went transparent
+    assert arr[50, 50, 3] == 255  # the subject stayed opaque
+
+
+def test_custom_colour_tolerance_bounds_what_counts_as_background():
+    """+- X % is a per-channel box around the target: #EE0000 is inside
+    #FF0000 +- 6.67 % and outside +- 1 %."""
+    rgb = np.full((60, 60, 3), (238, 0, 0), dtype=np.uint8)  # #EE0000
+    rgb[20:40, 20:40] = (40, 90, 200)
+    img = Image.fromarray(rgb, mode="RGB")
+
+    wide = plan(img, BG_MODE_COLOR, color="#FF0000", tolerance_pct=6.67)
+    _, removed_wide = apply_plan(img, wide)
+    assert removed_wide > 0.5          # the #EE0000 plate IS background
+
+    tight = plan(img, BG_MODE_COLOR, color="#FF0000", tolerance_pct=1.0)
+    _, removed_tight = apply_plan(img, tight)
+    assert removed_tight == 0.0        # 17 levels away — out of the box
+
+
+def test_forced_mode_skips_the_border_sniff(tmp_path):
+    """Auto is a GUESS the owner can now overrule: a plate whose border
+    is mostly bright reads 'ambiguous' in auto, and clears in forced
+    black."""
+    rgb = np.full((100, 100, 3), 180, dtype=np.uint8)
+    rgb[:12, :12] = 0                      # a black corner only
+    img = Image.fromarray(rgb, mode="RGB")
+
+    assert plan(img).action == "skip-ambiguous"
+    assert plan(img, BG_MODE_BLACK).action == BG_MODE_BLACK
+    assert plan(img, BG_MODE_WHITE).action == BG_MODE_WHITE
+
+
+def test_already_transparent_is_skipped_in_every_mode(tmp_path):
+    """Re-running a folder stays safe even with a forced mode — an
+    existing alpha channel is never overwritten by a colour key."""
+    img = tmp_path / "done.png"
+    arr = np.zeros((50, 50, 4), dtype=np.uint8)
+    arr[10:40, 10:40] = (90, 120, 200, 255)
+    save_rgba(img, arr)
+    before = img.read_bytes()
+
+    for mode in (BG_MODE_BLACK, BG_MODE_WHITE, BG_MODE_COLOR):
+        assert remove_background(img, print, mode=mode) == "nothing"
+        assert img.read_bytes() == before
+
+
+def test_unclear_report_names_the_sniffed_border_colour(tmp_path):
+    """Rule #1 — the report must be ACTIONABLE: it names the colour to
+    paste into the custom-colour field, not just 'I gave up'."""
+    img = tmp_path / "teal.png"
+    rgb = np.full((60, 60, 3), (58, 95, 125), dtype=np.uint8)
+    rgb[20:40, 20:40] = (250, 250, 40)
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    logs: list[str] = []
+
+    assert remove_background(img, logs.append) == "unclear"
+    assert any("#3A5F7D" in line for line in logs)
+
+
+def test_a_mistyped_colour_stops_the_run_before_the_image_is_read(tmp_path):
+    missing = tmp_path / "not-even-there.png"
+    with pytest.raises(ValueError, match="background colour"):
+        remove_background(missing, print, mode=BG_MODE_COLOR, color="nope")
+
+
+def test_pointers_regression_black_guard_bails_custom_colour_succeeds(tmp_path):
+    """REGRESSION (owner 2026-07-28, the 'pointers' folder). A disc on a
+    pure-black plate whose LEGITIMATE background is ~42 %: black's 0.40
+    guard — tuned for medallions that FILL the frame — bails on it even
+    though the separation is perfect. Stating the colour is the way
+    through, and the abort message must say WHICH guard fired so the
+    owner can find the knob."""
+    img = tmp_path / "disc.png"
+    make_disc_on_black(img)
+    shutil.copy(img, tmp_path / "disc2.png")
+    before = img.read_bytes()
+    logs: list[str] = []
+
+    # auto -> black path -> ~42 % > 0.40 -> bail, ORIGINAL untouched
+    assert remove_background(img, logs.append) == "unclear"
+    assert img.read_bytes() == before
+    assert any("black safety guard" in line for line in logs)
+    assert any("40%" in line for line in logs)
+
+    # the owner states the colour: the custom guard (0.85) lets the
+    # SAME clean removal through
+    assert remove_background(
+        tmp_path / "disc2.png", print, mode=BG_MODE_COLOR, color="#000000",
+    ) == "done"
+    with Image.open(tmp_path / "disc2.png") as out:
+        arr = np.asarray(out.convert("RGBA"))
+    assert arr[0, 0, 3] == 0        # the black corner went transparent
+    assert arr[50, 50, 3] == 255    # the disc stayed opaque
+
+
+def test_black_default_tolerance_matches_the_black_recipe():
+    """A custom removal at #000000 IS a tunable black removal — which
+    is why the black path needs no tolerance knob of its own (Rule
+    #19). At the tolerance that reproduces BLACK_VOID_MAX they agree."""
+    rgb = np.zeros((80, 80, 3), dtype=np.uint8)
+    rgb[10:70, 10:70] = 200
+    img = Image.fromarray(rgb, mode="RGB")
+
+    black = plan(img, BG_MODE_BLACK)
+    same = plan(
+        img, BG_MODE_COLOR, color="#000000",
+        tolerance_pct=black.dist_edge / 255.0 * 100.0,
+    )
+    assert same.dist_edge == black.dist_edge
+    assert np.array_equal(
+        np.asarray(apply_plan(img, same)[0]),
+        np.asarray(apply_plan(img, black)[0]),
+    )
+
+
+def test_default_tolerance_is_a_usable_black_key():
+    """The shipped default (BG_COLOR_TOLERANCE_PCT) must actually key a
+    pure-black background, not sit below its anti-alias tail."""
+    assert tolerance_to_distance(BG_COLOR_TOLERANCE_PCT) >= 14
 
 
 def test_real_errors_are_loud(tmp_path):

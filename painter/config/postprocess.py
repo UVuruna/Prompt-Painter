@@ -83,3 +83,48 @@ CLEAN_EDGE_ENABLE = True  # run the border-connected cleanup before crop
 BLACK_VOID_MAX = 14                  # brightness <= this AND border-connected = void
 SAFETY_MAX_REMOVE_FRAC = 0.40        # BLACK path: clearing more than this -> abort
 SAFETY_MAX_REMOVE_FRAC_WHITE = 0.85  # WHITE path: legit backgrounds reach ~0.57
+
+# BACKGROUND MODE (owner 2026-07-28, the "pointers" case). Two gaps the
+# auto-only, black/white-only remover had:
+#
+#  - AUTO IS A GUESS, and the owner could not overrule it. detect()
+#    sniffs the border and picks white/black, or gives up
+#    ("skip-ambiguous"). BG_MODE_BLACK/BG_MODE_WHITE let him STATE the
+#    background instead, skipping the sniff entirely.
+#  - ONLY BLACK AND WHITE existed. The two removals were hard-wired to
+#    two scalar keys (max channel / min channel). BG_MODE_COLOR takes
+#    ANY target colour plus a per-channel tolerance — the owner's own
+#    formulation: "#FF0000 +- X%" spans #EE0000..#FF1111 at X = 6.67 %
+#    (17 of 255 per channel), i.e. a CHEBYSHEV box around the target.
+#
+# The three are ONE mechanism (root Rule #19 — define the rule, never
+# enumerate the cases): bg_remove.remove_color_background keys on the
+# per-channel distance from a target colour, and black (#000000) and
+# white (#FFFFFF) are just two targets. A custom removal at #000000 is
+# therefore a fully tunable black removal, which is why the black path
+# needs no tolerance knob of its own.
+BG_MODE_AUTO = "auto"    # sniff the border: white, black, or give up
+BG_MODE_BLACK = "black"  # forced — skip the sniff
+BG_MODE_WHITE = "white"  # forced — skip the sniff
+BG_MODE_COLOR = "color"  # forced — BG_COLOR target +- BG_COLOR_TOLERANCE_PCT
+BG_MODE_DEFAULT = BG_MODE_AUTO
+# GUI labels (the BG panel's mode dropdown), keyed by mode. The stored
+# settings key is the MODE, never the label, so relabelling the dropdown
+# never invalidates a saved settings.json.
+BG_MODE_LABEL = {
+    BG_MODE_AUTO: "Auto (detect)",
+    BG_MODE_BLACK: "Black",
+    BG_MODE_WHITE: "White",
+    BG_MODE_COLOR: "Custom colour",
+}
+
+BG_COLOR_DEFAULT = "#000000"    # custom-colour target, hex
+BG_COLOR_TOLERANCE_PCT = 6.0    # +- this % of 255 per channel (6 % = +-15)
+# CUSTOM-COLOUR path guard. Deliberately HIGH, like the white one and
+# unlike black's 0.40: black's tight guard is a fence around a GUESS
+# (auto keyed a dark subject as background), while a custom colour is
+# something the owner TYPED — he has already told the tool what the
+# background is, so the guard only needs to catch a catastrophic
+# "cleared the whole image". The "pointers" plates, whose legitimate
+# background is 42 %, are exactly the shape class black's 0.40 bails on.
+SAFETY_MAX_REMOVE_FRAC_COLOR = 0.85

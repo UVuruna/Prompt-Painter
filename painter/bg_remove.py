@@ -1,25 +1,36 @@
 #!/usr/bin/env python3
 """Background remover for the medallion / globe asset plates.
 
-Point it at a folder and it makes every image's background transparent,
-choosing the method PER FILE automatically:
+ONE ENGINE, several recipes (root Rule #19 — define the rule, never
+enumerate the cases). ``remove_color_background`` clears the BORDER-
+CONNECTED region within a per-channel distance of a TARGET COLOUR;
+white, black and any custom colour are just three targets:
 
-  * white plate   -> removes the white / off-white border, keeps interior
-                     bright detail (edge-connected flood fill + soft edge).
-  * globe render  -> clears the BORDER-CONNECTED black void around the
+  * white plate   -> target #FFFFFF, soft two-threshold edge: removes the
+                     white / off-white border, keeps interior bright
+                     detail.
+  * globe render  -> target #000000: clears the black void around the
                      subject, keeps dark interior regions ENCLOSED by the
-                     subject intact (same edge-connected flood as white,
-                     ~1px feather).
-  * already transparent, or an ambiguous background (gradient, mid-tone)
+                     subject intact (never border-connected), ~1px feather.
+  * custom colour -> any target the owner types plus a +- tolerance
+                     (owner 2026-07-28) — "#FF0000 +- 6.67 %" spans
+                     #EE0000..#FF1111, a Chebyshev box around the target.
+  * already transparent, or (in auto mode) an ambiguous background
                   -> SKIPPED, left untouched. Re-running a folder is safe.
 
-A SAFETY GUARD wraps both removals: if a removal would clear more than
-``SAFETY_MAX_REMOVE_FRAC`` of the image (it ate the subject, not just
+``plan()`` decides WHICH recipe one image gets: ``BG_MODE_AUTO`` sniffs
+the border (white / black / give up), while ``BG_MODE_BLACK``/``_WHITE``/
+``_COLOR`` are the owner STATING it and skip the sniff.
+
+A SAFETY GUARD wraps every removal: if it would clear more than the
+path's ``SAFETY_GUARD_DEFAULT`` fraction (it ate the subject, not just
 the background), it is ABORTED and the source is left untouched.
 
 Typical use (the launcher does exactly this):
 
     python bg_remove.py "greek" --in-place --crop --backup
+    python bg_remove.py "pointers" --in-place --mode color \\
+        --color "#000000" --tolerance 6
 
 Auto-detection means you normally pass nothing but the folder name.
 """
@@ -30,6 +41,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from PIL import Image
@@ -42,30 +54,46 @@ from scipy import ndimage
 # import forms. Both fail loudly if config.py is genuinely missing.
 try:
     from painter.config import (
+        BG_COLOR_DEFAULT,
+        BG_COLOR_TOLERANCE_PCT,
+        BG_MODE_AUTO,
+        BG_MODE_BLACK,
+        BG_MODE_COLOR,
+        BG_MODE_WHITE,
         BLACK_VOID_MAX,
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
         CROP_MIN_INK_PX,
         SAFETY_MAX_REMOVE_FRAC,
+        SAFETY_MAX_REMOVE_FRAC_COLOR,
         SAFETY_MAX_REMOVE_FRAC_WHITE,
     )
 except ImportError:  # standalone: script's own dir is on sys.path
     from config import (  # type: ignore[no-redef]
+        BG_COLOR_DEFAULT,
+        BG_COLOR_TOLERANCE_PCT,
+        BG_MODE_AUTO,
+        BG_MODE_BLACK,
+        BG_MODE_COLOR,
+        BG_MODE_WHITE,
         BLACK_VOID_MAX,
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
         CROP_MIN_INK_PX,
         SAFETY_MAX_REMOVE_FRAC,
+        SAFETY_MAX_REMOVE_FRAC_COLOR,
         SAFETY_MAX_REMOVE_FRAC_WHITE,
     )
 
-# --- white mode -------------------------------------------------------------
+# --- white recipe -----------------------------------------------------------
+WHITE_RGB = (255, 255, 255)
 WHITE_FULL = 250   # whiteness >= this  -> pure background   -> alpha 0
 WHITE_EDGE = 200   # whiteness  < this  -> definitely subject -> alpha 255
 
-# --- black mode -------------------------------------------------------------
+# --- black recipe -----------------------------------------------------------
 # BLACK_VOID_MAX (config) is the void brightness ceiling; the removal is
 # border-connected, so only the void that TOUCHES the frame is cleared.
+BLACK_RGB = (0, 0, 0)
 FEATHER_SIGMA = 0.8  # Gaussian sigma for the anti-aliased edge (~1px feather)
 
 # --- auto-detection ---------------------------------------------------------
@@ -73,15 +101,74 @@ WHITE_BG_MIN = 200   # border median min-channel >= this -> white background
 BLACK_BG_MAX = 24    # border median max-channel <= this -> black background
 TRANSPARENT_FRAC = 0.02  # already this fraction transparent -> treat as done
 
+# Which SAFETY guard fraction each recipe answers to. One mapping, read
+# by both callers (this script's process_file and postprocess.remove_
+# background) instead of two copies of the same if/else (Rule #5).
+SAFETY_GUARD_DEFAULT = {
+    BG_MODE_BLACK: SAFETY_MAX_REMOVE_FRAC,
+    BG_MODE_WHITE: SAFETY_MAX_REMOVE_FRAC_WHITE,
+    BG_MODE_COLOR: SAFETY_MAX_REMOVE_FRAC_COLOR,
+}
+
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 
 
 # --------------------------------------------------------------------------- #
-# white-background removal
+# colour parsing (the custom-colour recipe's owner-facing input)
 # --------------------------------------------------------------------------- #
-def whiteness(rgb: np.ndarray) -> np.ndarray:
-    """Per-pixel 'how white' score in 0..255 (high only if every channel high)."""
-    return rgb.min(axis=2)
+def parse_hex_color(text: str) -> tuple[int, int, int]:
+    """'#FF0000' / 'ff0000' / '#f00' -> (255, 0, 0).
+
+    Loud ``ValueError`` on anything else — a mistyped background colour
+    must never silently fall back to some other colour (Rule #1)."""
+    raw = text.strip().lstrip("#")
+    if len(raw) == 3:
+        raw = "".join(c * 2 for c in raw)
+    try:
+        if len(raw) != 6:
+            raise ValueError
+        value = int(raw, 16)
+    except ValueError:
+        raise ValueError(
+            f"background colour: {text!r} is not a hex colour like #FF0000."
+        ) from None
+    return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
+
+
+def format_hex_color(rgb) -> str:
+    """(58, 95, 125) -> '#3A5F7D' — how a sniffed border colour is
+    reported back to the owner so he can paste it into the custom
+    field."""
+    r, g, b = (int(round(float(c))) for c in rgb)
+    return f"#{r:02X}{g:02X}{b:02X}"
+
+
+def tolerance_to_distance(tolerance_pct: float) -> int:
+    """The owner's '+- X %' as a per-channel distance in 0..255.
+
+    His own worked example (2026-07-28): '#FF0000 +- X%' spanning
+    #EE0000..#FF1111 is +-0x11 = +-17 levels, i.e. X = 6.67 %."""
+    if not (0.0 <= tolerance_pct <= 100.0):
+        raise ValueError(
+            "background tolerance: must be between 0 and 100 %."
+        )
+    return int(round(tolerance_pct / 100.0 * 255.0))
+
+
+# --------------------------------------------------------------------------- #
+# the ONE removal engine — every recipe is this function's parameters
+# --------------------------------------------------------------------------- #
+def color_distance(rgb: np.ndarray, target) -> np.ndarray:
+    """Per-pixel CHEBYSHEV distance (0..255) from ``target``.
+
+    The LARGEST per-channel difference, so "within distance D" means
+    every channel is within +-D — exactly the owner's '#RRGGBB +- X%'
+    box. This one key subsumes both historical scalar keys: the
+    distance from black is ``max(r, g, b)`` (the old ``brightness``)
+    and the distance from white is ``255 - min(r, g, b)`` (255 minus
+    the old ``whiteness``), both EXACTLY, so black and white lost no
+    tuning when they became targets."""
+    return np.abs(rgb - np.asarray(target, dtype=np.float32)).max(axis=2)
 
 
 def edge_connected_background(candidate: np.ndarray) -> np.ndarray:
@@ -97,53 +184,60 @@ def edge_connected_background(candidate: np.ndarray) -> np.ndarray:
     return np.isin(labels, border_labels)
 
 
-def remove_white_border(img: Image.Image,
-                        white_full: int = WHITE_FULL,
-                        white_edge: int = WHITE_EDGE,
-                        ) -> tuple[Image.Image, float]:
-    """(RGBA copy, removed_frac) — edge-connected white made transparent.
-
-    ``removed_frac`` is the fraction of the image the removal clears
-    (the border-connected white mask); the caller's SAFETY guard aborts
-    when it is too high (a white/light subject the flood leaked into)."""
-    rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
-    w = whiteness(rgb)
-    background = edge_connected_background(w >= white_edge)
-    ramp = np.clip((white_full - w) / (white_full - white_edge), 0.0, 1.0)
-    alpha = np.where(background, 255.0 * ramp, 255.0)
-    out = np.dstack([rgb, alpha]).astype(np.uint8)
-    return Image.fromarray(out, mode="RGBA"), float(background.mean())
-
-
-# --------------------------------------------------------------------------- #
-# black-background removal (bright subject on a black void)
-# --------------------------------------------------------------------------- #
-def brightness(rgb: np.ndarray) -> np.ndarray:
-    """Per-pixel brightness (max channel: blue glow / city lights read as high)."""
-    return rgb.max(axis=2)
-
-
-def remove_black_background(img: Image.Image,
-                            void_max: int = BLACK_VOID_MAX,
-                            sigma: float = FEATHER_SIGMA,
+def remove_color_background(img: Image.Image,
+                            target: tuple[int, int, int],
+                            dist_full: int,
+                            dist_edge: int,
+                            sigma: float = 0.0,
                             ) -> tuple[Image.Image, float]:
-    """(RGBA copy, removed_frac) — the BORDER-CONNECTED black void cleared.
+    """(RGBA copy, removed_frac) — the BORDER-CONNECTED region within
+    ``dist_edge`` of ``target`` made transparent. THE engine: white,
+    black and custom colour are this function with different arguments.
 
-    Only near-black pixels (brightness <= ``void_max``) that CONNECT TO
-    THE IMAGE BORDER are removed — the corner void. Interior dark
-    regions ENCLOSED by the subject (the black leading between glass,
-    dark inner areas) are not border-connected and stay OPAQUE. This
-    replaces the old "biggest bright blob + fill holes" disc, which
-    could not tell a dark subject from a black background and ate dark
-    frames (the bible/dark rondels). ``removed_frac`` is the fraction
-    the removal clears; the caller's SAFETY guard aborts when the flood
-    leaked along a dark ring and over-removed."""
+    Only pixels that CONNECT TO THE IMAGE BORDER are cleared, so an
+    interior region ENCLOSED by the subject (the black leading between
+    glass, a dark inner area, Aurora's own black hour sector) is never
+    border-connected and stays fully OPAQUE. This is what replaced the
+    old "biggest bright blob + fill holes" disc, which could not tell a
+    dark subject from a black background and ate dark frames (the
+    bible/dark rondels).
+
+    Two EDGE treatments, chosen by the two distances:
+
+    * ``dist_edge > dist_full`` — a soft two-threshold ramp: alpha 0 at
+      or below ``dist_full``, linearly up to 255 at ``dist_edge``. The
+      WHITE recipe's own soft edge (its ``white_full``/``white_edge``
+      pair read as distances from #FFFFFF).
+    * ``dist_edge <= dist_full`` — a HARD cut at ``dist_edge``, which
+      ``sigma`` > 0 then feathers into a ~1px anti-aliased edge. The
+      BLACK and CUSTOM-COLOUR recipes.
+
+    ``removed_frac`` is the fraction the mask clears; the caller's
+    SAFETY guard aborts when it is too high (the flood leaked along a
+    dark ring and ate the subject)."""
     rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
-    background = edge_connected_background(brightness(rgb) <= void_max)
-    keep = (~background).astype(np.float32)
-    alpha = np.clip(ndimage.gaussian_filter(keep, sigma), 0.0, 1.0) * 255.0
-    out = np.dstack([rgb, alpha]).astype(np.uint8)
+    dist = color_distance(rgb, target)
+    background = edge_connected_background(dist <= dist_edge)
+    if dist_edge > dist_full:
+        ramp = np.clip(
+            (dist - dist_full) / (dist_edge - dist_full), 0.0, 1.0
+        )
+        alpha = np.where(background, ramp, 1.0).astype(np.float32)
+    else:
+        alpha = (~background).astype(np.float32)
+    if sigma > 0:
+        alpha = np.clip(ndimage.gaussian_filter(alpha, sigma), 0.0, 1.0)
+    out = np.dstack([rgb, alpha * 255.0]).astype(np.uint8)
     return Image.fromarray(out, mode="RGBA"), float(background.mean())
+
+
+def apply_plan(img: Image.Image,
+               removal: "RemovalPlan") -> tuple[Image.Image, float]:
+    """Run the engine with one ``plan()`` result's parameters."""
+    return remove_color_background(
+        img, removal.target, removal.dist_full, removal.dist_edge,
+        removal.sigma,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -209,62 +303,130 @@ def _border_pixels(rgb: np.ndarray) -> np.ndarray:
     return np.concatenate([p.reshape(-1, 3) for p in parts])
 
 
-def detect(img: Image.Image):
-    """Decide how to treat one image.
+class RemovalPlan(NamedTuple):
+    """How ONE image is to be treated — ``plan()``'s answer.
 
-    Returns (action, white_full, white_edge). action is one of
-    'white', 'black', 'skip-transparent', 'skip-ambiguous'.
-    """
+    ``action`` is 'white' / 'black' / 'color' (run the engine with the
+    fields below) or 'skip-transparent' / 'skip-ambiguous' (do nothing;
+    the colour fields are then placeholders). ``border_hex`` is ALWAYS
+    the sniffed border colour, so an ambiguous skip can tell the owner
+    WHICH colour to type into the custom-colour field instead of just
+    giving up (Rule #1 — a report he can act on)."""
+
+    action: str
+    target: tuple[int, int, int]
+    dist_full: int
+    dist_edge: int
+    sigma: float
+    border_hex: str
+
+
+SKIP_PLAN_COLOR = (BLACK_RGB, 0, 0, 0.0)  # placeholders for a skip plan
+
+
+def _white_plan(border: np.ndarray, border_hex: str) -> RemovalPlan:
+    """The white recipe, its thresholds ADAPTED to this plate's own
+    white level (an off-white plate keys at its own value, not at a
+    fixed 250), falling back to the module defaults when the border
+    holds no whiteish pixels at all — only reachable in FORCED white
+    mode, since auto only gets here past a whiteish border median."""
+    whiteish = border.min(axis=1)
+    bright = whiteish[whiteish >= WHITE_BG_MIN]
+    if bright.size:
+        level = int(np.median(bright))
+        white_full = int(np.clip(level - 4, 235, 252))
+        white_edge = int(np.clip(white_full - 45, 150, white_full - 10))
+    else:
+        white_full, white_edge = WHITE_FULL, WHITE_EDGE
+    # as DISTANCES from #FFFFFF: whiteness w maps to distance 255 - w,
+    # so the pair keeps its exact historical meaning and ramp
+    return RemovalPlan(
+        BG_MODE_WHITE, WHITE_RGB, 255 - white_full, 255 - white_edge,
+        0.0, border_hex,
+    )
+
+
+def _black_plan(border_hex: str) -> RemovalPlan:
+    return RemovalPlan(
+        BG_MODE_BLACK, BLACK_RGB, BLACK_VOID_MAX, BLACK_VOID_MAX,
+        FEATHER_SIGMA, border_hex,
+    )
+
+
+def plan(img: Image.Image,
+         mode: str = BG_MODE_AUTO,
+         *,
+         color: str = BG_COLOR_DEFAULT,
+         tolerance_pct: float = BG_COLOR_TOLERANCE_PCT,
+         ) -> RemovalPlan:
+    """Decide how to treat one image (see ``RemovalPlan``).
+
+    ``BG_MODE_AUTO`` sniffs the border and picks white or black, or
+    gives up ('skip-ambiguous'); ``BG_MODE_BLACK``/``BG_MODE_WHITE``/
+    ``BG_MODE_COLOR`` are the owner STATING the background and skip the
+    sniff entirely (owner 2026-07-28).
+
+    An ALREADY-TRANSPARENT image is skipped in EVERY mode, forced ones
+    included: it has a real alpha channel that a colour key knows
+    nothing about and would overwrite, and this is what makes re-running
+    a folder safe."""
     rgba = img.convert("RGBA")
     if (np.asarray(rgba)[:, :, 3] < 250).mean() > TRANSPARENT_FRAC:
-        return "skip-transparent", None, None
+        return RemovalPlan("skip-transparent", *SKIP_PLAN_COLOR, "")
 
     rgb = np.asarray(rgba.convert("RGB"))
     border = _border_pixels(rgb)
+    border_hex = format_hex_color(np.median(border, axis=0))
+
+    if mode == BG_MODE_COLOR:
+        distance = tolerance_to_distance(tolerance_pct)
+        return RemovalPlan(
+            BG_MODE_COLOR, parse_hex_color(color), distance, distance,
+            FEATHER_SIGMA, border_hex,
+        )
+    if mode == BG_MODE_BLACK:
+        return _black_plan(border_hex)
+    if mode == BG_MODE_WHITE:
+        return _white_plan(border, border_hex)
+
     if np.median(border.min(axis=1)) >= WHITE_BG_MIN:
-        whiteish = border.min(axis=1)
-        level = int(np.median(whiteish[whiteish >= WHITE_BG_MIN]))
-        white_full = int(np.clip(level - 4, 235, 252))
-        white_edge = int(np.clip(white_full - 45, 150, white_full - 10))
-        return "white", white_full, white_edge
+        return _white_plan(border, border_hex)
     if np.median(border.max(axis=1)) <= BLACK_BG_MAX:
-        return "black", None, None
-    return "skip-ambiguous", None, None
+        return _black_plan(border_hex)
+    return RemovalPlan("skip-ambiguous", *SKIP_PLAN_COLOR, border_hex)
 
 
 def process_file(src: Path, dst: Path, mode: str, crop: bool,
-                 force_full: int | None, force_edge: int | None) -> str:
+                 force_full: int | None, force_edge: int | None,
+                 color: str = BG_COLOR_DEFAULT,
+                 tolerance_pct: float = BG_COLOR_TOLERANCE_PCT) -> str:
     """Process one image; returns the action taken (or a 'skip-*' reason).
 
     'skip-risky' means the SAFETY guard fired: the removal would clear
-    more than the path's guard fraction (``SAFETY_MAX_REMOVE_FRAC`` for
-    black, ``SAFETY_MAX_REMOVE_FRAC_WHITE`` for white — white legit
-    backgrounds run large), i.e. it ate the subject, so the source is
-    LEFT UNTOUCHED — nothing is written."""
+    more than the path's ``SAFETY_GUARD_DEFAULT`` fraction (black is
+    tight at 0.40, white and custom colour run high because their legit
+    backgrounds are large), i.e. it ate the subject, so the source is
+    LEFT UNTOUCHED — nothing is written.
+
+    ``force_full``/``force_edge`` are the CLI's white-threshold
+    overrides, still expressed as WHITENESS levels (--white-full /
+    --white-edge) and converted to distances from #FFFFFF here."""
     with Image.open(src) as im:
-        if mode == "auto":
-            action, wf, we = detect(im)
-        else:
-            action, wf, we = mode, WHITE_FULL, WHITE_EDGE
+        removal = plan(im, mode, color=color, tolerance_pct=tolerance_pct)
+        if removal.action.startswith("skip"):
+            return removal.action
         if force_full is not None:
-            wf = force_full
+            removal = removal._replace(dist_full=255 - force_full)
         if force_edge is not None:
-            we = force_edge
-        if action.startswith("skip"):
-            return action
-        if action == "white":
-            out, removed = remove_white_border(im, wf, we)
-            guard = SAFETY_MAX_REMOVE_FRAC_WHITE
-        else:
-            out, removed = remove_black_background(im)
-            guard = SAFETY_MAX_REMOVE_FRAC
-    if removed > guard:
+            removal = removal._replace(dist_edge=255 - force_edge)
+        out, removed = apply_plan(im, removal)
+    if removed > SAFETY_GUARD_DEFAULT[removal.action]:
         return "skip-risky"  # ate the subject — leave the source untouched
     if crop:
         out = autocrop(out)
     dst.parent.mkdir(parents=True, exist_ok=True)
     out.save(dst, "PNG", optimize=True)
-    return action
+    return removal.action
 
 
 def iter_images(root: Path):
@@ -278,8 +440,18 @@ def main(argv=None) -> int:
     ap.add_argument("src", type=Path, help="input image file OR folder")
     ap.add_argument("-o", "--out", type=Path,
                     help="output file/folder (default: '<name>_clean')")
-    ap.add_argument("--mode", choices=("auto", "white", "black"), default="auto",
-                    help="auto (default) detects white vs black per file")
+    ap.add_argument("--mode",
+                    choices=(BG_MODE_AUTO, BG_MODE_WHITE, BG_MODE_BLACK,
+                             BG_MODE_COLOR),
+                    default=BG_MODE_AUTO,
+                    help="auto (default) detects white vs black per file;"
+                         " white/black force one; color keys on --color")
+    ap.add_argument("--color", default=BG_COLOR_DEFAULT,
+                    help="--mode color target, hex (default %(default)s)")
+    ap.add_argument("--tolerance", type=float,
+                    default=BG_COLOR_TOLERANCE_PCT,
+                    help="--mode color +- tolerance, %% of 255 per channel"
+                         " (default %(default)s)")
     ap.add_argument("--white-full", type=int, help="override white threshold")
     ap.add_argument("--white-edge", type=int, help="override white edge")
     ap.add_argument("--crop", action="store_true", help="autocrop to the subject")
@@ -315,7 +487,8 @@ def main(argv=None) -> int:
         for i, src in enumerate(files, 1):
             dst = src if args.in_place else out_root / src.relative_to(args.src).with_suffix(".png")
             action = process_file(src, dst, args.mode, args.crop,
-                                  args.white_full, args.white_edge)
+                                  args.white_full, args.white_edge,
+                                  args.color, args.tolerance)
             counts[action] = counts.get(action, 0) + 1
             elapsed = time.time() - start
             print(f"[{elapsed:5.1f}s] {i:>4}/{len(files)} | {action:16} | "
@@ -325,19 +498,24 @@ def main(argv=None) -> int:
             print(f"  {action:16} {n}")
         if counts.get("skip-ambiguous"):
             print("  NOTE: 'skip-ambiguous' files had a non-white/non-black "
-                  "background and were left untouched — tell me about those.")
+                  "background and were left untouched — re-run them with "
+                  "--mode color --color '#RRGGBB' to clear that colour.")
         if counts.get("skip-risky"):
+            guards = ", ".join(
+                f"{name} > {frac:.0%}"
+                for name, frac in SAFETY_GUARD_DEFAULT.items()
+            )
             print("  NOTE: 'skip-risky' files would have lost too much to "
-                  f"the removal (black > {SAFETY_MAX_REMOVE_FRAC:.0%}, white > "
-                  f"{SAFETY_MAX_REMOVE_FRAC_WHITE:.0%} — it ate the subject) "
-                  "and were LEFT UNTOUCHED — do those by hand.")
+                  f"the removal ({guards} — it ate the subject) and were "
+                  "LEFT UNTOUCHED — raise the guard, or do those by hand.")
     else:
         if args.in_place:
             dst = args.src
         else:
             dst = args.out or args.src.with_name(args.src.stem + "_clean.png")
         action = process_file(args.src, dst, args.mode, args.crop,
-                              args.white_full, args.white_edge)
+                              args.white_full, args.white_edge,
+                              args.color, args.tolerance)
         print(f"{action} -> {dst}")
     return 0
 

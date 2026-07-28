@@ -4,10 +4,11 @@ Owner workflow step 6, split in two (owner's #7): the pipeline
 callers (main.py's post_save, the GUI's own) compose the steps by
 flags instead of one fused fix:
 
-* ``remove_background`` — the in-house remover, auto-detected per
-  file: already-transparent images are untouched ("nothing"), white
-  (Gemini) and black backgrounds are cleared ("done"), ambiguous
-  ones are reported and left alone ("unclear").
+* ``remove_background`` — the in-house remover. Its ``mode`` (owner
+  2026-07-28) is auto-detect (white/black, ambiguous ones reported
+  and left alone — "unclear"), a FORCED white/black, or a CUSTOM
+  COLOUR plus tolerance that clears any background colour at all.
+  Already-transparent images are untouched ("nothing") in every mode.
 * ``crop_transparent`` — autocrop a transparent image to its content
   bounding box plus a small config safety margin ("done"), or leave
   it be when there is no transparency to crop against or it is
@@ -25,12 +26,19 @@ from pathlib import Path
 from typing import Callable
 
 from painter.config import (
+    BG_COLOR_DEFAULT,
+    BG_COLOR_TOLERANCE_PCT,
+    BG_MODE_BLACK,
+    BG_MODE_COLOR,
+    BG_MODE_DEFAULT,
+    BG_MODE_WHITE,
     CLEAN_EDGE_ALPHA,
     CLEAN_EDGE_ENABLE,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
     CROP_MIN_INK_PX,
     SAFETY_MAX_REMOVE_FRAC,
+    SAFETY_MAX_REMOVE_FRAC_COLOR,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
 )
 
@@ -60,60 +68,84 @@ def remove_background(
     path: Path,
     log: Log,
     *,
+    mode: str = BG_MODE_DEFAULT,
+    color: str = BG_COLOR_DEFAULT,
+    tolerance_pct: float = BG_COLOR_TOLERANCE_PCT,
     safety_max_remove_frac: float = SAFETY_MAX_REMOVE_FRAC,
     safety_max_remove_frac_white: float = SAFETY_MAX_REMOVE_FRAC_WHITE,
+    safety_max_remove_frac_color: float = SAFETY_MAX_REMOVE_FRAC_COLOR,
 ) -> str:
     """Clear one saved image's background in place.
 
-    Returns "done" (white/black background cleared), "nothing"
-    (already transparent — no-op) or "unclear" (ambiguous background,
-    OR the SAFETY guard fired: the removal would clear more than the
-    path's guard fraction — it ate the subject — so the ORIGINAL is
+    Returns "done" (the background was cleared), "nothing" (already
+    transparent — no-op) or "unclear" (an ambiguous background in auto
+    mode, OR the SAFETY guard fired: the removal would clear more than
+    the path's guard fraction — it ate the subject — so the ORIGINAL is
     left untouched and reported for manual handling). Raises
     ``PostprocessError`` on a real failure.
 
-    ``safety_max_remove_frac``/``safety_max_remove_frac_white``
-    (GUI rework Phase 13) are OPTIONAL per-call overrides of the two
-    SAFETY GUARD fractions below, defaulting to the config constants —
-    every existing caller that passes neither keeps today's exact
-    behaviour; ``BgSettingsPanel``'s Advanced collapsible is the one
-    caller that overrides them, per run.
+    ``mode`` (owner 2026-07-28) picks WHICH background is cleared:
+    ``BG_MODE_AUTO`` sniffs the border (white or black, else "unclear"),
+    ``BG_MODE_BLACK``/``BG_MODE_WHITE`` force one and skip the sniff,
+    and ``BG_MODE_COLOR`` clears ANY ``color`` (hex) within
+    ``tolerance_pct`` % of 255 per channel. The colour is parsed ONCE,
+    before the image is opened, so a mistyped hex is reported as the
+    configuration error it is rather than as a per-image failure.
+
+    The three ``safety_max_remove_frac*`` arguments (GUI rework Phase
+    13; the colour one 2026-07-28) are OPTIONAL per-call overrides of
+    the SAFETY GUARD fractions, defaulting to the config constants —
+    every caller that passes none keeps today's exact behaviour;
+    ``BgSettingsPanel`` is the one caller that overrides them, per run.
     """
     from PIL import Image
 
-    from painter.bg_remove import (
-        detect,
-        remove_black_background,
-        remove_white_border,
-    )
+    from painter.bg_remove import apply_plan, parse_hex_color, plan
+
+    if mode == BG_MODE_COLOR:
+        parse_hex_color(color)  # loud NOW, not once per image
+    guards = {
+        BG_MODE_BLACK: safety_max_remove_frac,
+        BG_MODE_WHITE: safety_max_remove_frac_white,
+        BG_MODE_COLOR: safety_max_remove_frac_color,
+    }
 
     try:
         with Image.open(path) as im:
-            action, white_full, white_edge = detect(im)
-            if action == "skip-transparent":
+            removal = plan(
+                im, mode, color=color, tolerance_pct=tolerance_pct
+            )
+            if removal.action == "skip-transparent":
                 return "nothing"
-            if action == "skip-ambiguous":
+            if removal.action == "skip-ambiguous":
+                # name the sniffed border colour: the owner can paste it
+                # straight into the BG panel's custom-colour field
+                # instead of being told only that we gave up (Rule #1)
                 log(
-                    f"    background UNCLEAR (not white/black) — left"
-                    f" untouched: {path.name}"
+                    f"    background UNCLEAR (border ≈ {removal.border_hex},"
+                    f" not white/black) — left untouched: {path.name};"
+                    f" set BG mode to Custom colour {removal.border_hex}"
+                    f" to clear it"
                 )
                 return "unclear"
-            if action == "white":
-                out, removed = remove_white_border(im, white_full, white_edge)
-                guard = safety_max_remove_frac_white
-            else:
-                out, removed = remove_black_background(im)
-                guard = safety_max_remove_frac
+            out, removed = apply_plan(im, removal)
         # SAFETY GUARD: never destroy an image. A removal that clears
         # more than the path's guard fraction ate the subject (a dark
         # subject keyed as black background, or a flood that leaked
         # along a dark ring) — abort, leave the ORIGINAL untouched,
-        # report loudly. The white guard runs high because legit white
-        # backgrounds are large; the black guard is tight (see config).
+        # report loudly. The white and custom-colour guards run high
+        # because their legit backgrounds are large; the black guard is
+        # tight (see config), which is why the message NAMES the guard
+        # that fired and where to raise it: a legitimate 42%-background
+        # plate bailing on black's 0.40 is the owner's "pointers" case,
+        # and the old message told him nothing he could act on.
+        guard = guards[removal.action]
         if removed > guard:
             log(
-                f"    background removal would clear {removed:.0%} —"
-                f" too risky, left untouched (do it manually): {path.name}"
+                f"    background removal would clear {removed:.0%} of"
+                f" {path.name} — over the {removal.action} safety guard"
+                f" ({guard:.0%}), left untouched; raise it in BG"
+                f" removal → Advanced, or do it manually"
             )
             return "unclear"
         out.save(path, "PNG", optimize=True)
