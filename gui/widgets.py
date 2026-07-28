@@ -507,3 +507,18 @@ def _parse_int_range(text: str, field_name: str, lo: int, hi: int) -> int:
         raise ValueError(f"{field_name}: must be between {lo} and {hi}.")
     return value
 
+
+def _parse_percent(text: str, field_name: str) -> float:
+    """Parse ONE 0-100 % field, FRACTIONAL allowed — the BG panel's
+    custom-colour tolerance (owner 2026-07-28), whose own worked
+    example ('#FF0000 +- X%' spanning #EE0000..#FF1111) lands on 6.67,
+    so rounding it to whole percent would quietly move the key by a
+    level. Same "which field failed" raise contract as its siblings."""
+    try:
+        value = float(text.strip())
+    except ValueError:
+        raise ValueError(f"{field_name}: must be a number.") from None
+    if not (0.0 <= value <= 100.0):
+        raise ValueError(f"{field_name}: must be between 0 and 100 %.")
+    return value
+

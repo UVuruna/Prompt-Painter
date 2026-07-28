@@ -28,6 +28,11 @@ from painter.config import (
     AI_CALL_PAUSE_S,
     ASPECT_DEFAULT_H,
     ASPECT_DEFAULT_W,
+    BG_COLOR_DEFAULT,
+    BG_COLOR_TOLERANCE_PCT,
+    BG_MODE_COLOR,
+    BG_MODE_DEFAULT,
+    BG_MODE_LABEL,
     CLEAN_EDGE_ENABLE,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
@@ -38,6 +43,7 @@ from painter.config import (
     JOB_LABEL,
     JOB_LOGO,
     SAFETY_MAX_REMOVE_FRAC,
+    SAFETY_MAX_REMOVE_FRAC_COLOR,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
     STATE_DIRNAME,
     UPSCALE_ASPECT_MAX,
@@ -58,12 +64,20 @@ from .widgets import (
     _parse_fraction,
     _parse_int_range,
     _parse_nonneg_int,
+    _parse_percent,
     rounded_button,
+    rounded_combo,
     rounded_entry,
     rounded_switch,
     style_action_button,
     tk_font,
 )
+
+# BG panel's mode dropdown: the SHOWN label back to the stored mode key
+# (settings.json always carries the KEY, so relabelling never
+# invalidates a saved run — see config's own BG_MODE_LABEL note).
+BG_MODE_BY_LABEL = {label: mode for mode, label in BG_MODE_LABEL.items()}
+BG_SWATCH_PX = 24  # the custom-colour live preview chip
 
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
 ASPECT_DIALOG_ENTRY_W = 64  # px width of each W / H field in the ratio dialog
@@ -523,14 +537,29 @@ class ToolSettingsPanel(ttk.Frame):
 
 
 class BgSettingsPanel(ToolSettingsPanel):
-    """BG removal's persistent settings panel (GUI rework Phase 13).
+    """BG removal's persistent settings panel (GUI rework Phase 13;
+    the mode + custom-colour block owner 2026-07-28).
 
-    Advanced exposes the SAFETY GUARD fractions ``remove_background``
-    aborts past (owner 2026-07-19's "never destroy an image" rule) —
-    NOT the border-halo-cleanup toggle the design's own phase notes
-    mention: that constant (``CLEAN_EDGE_ENABLE``) is only ever read by
-    ``crop_transparent`` (its docstring: "only serves to ENABLE a
-    tighter crop") — ``remove_background`` never calls
+    ``_build_extra`` — ALWAYS VISIBLE, the panel's PRIMARY control —
+    answers "which background is this?": Auto (sniff the border, white
+    or black only), forced Black, forced White, or **Custom colour**
+    plus a +- tolerance, which clears ANY background colour. The colour
+    and tolerance fields show only in Custom mode (a dead colour field
+    beside "Auto" would read as if it applied — Rule #1); a live swatch
+    previews the typed hex.
+
+    Advanced keeps the SAFETY GUARD fractions ``remove_background``
+    aborts past (owner 2026-07-19's "never destroy an image" rule), now
+    THREE — one per path, since custom colour has its own high guard.
+    They are the engine's fine-tune, and the abort message names the
+    guard that fired and points back here: the owner's "pointers" case
+    (a legitimate 42 %-background plate bailing on black's 0.40) was
+    unreadable precisely because the old message named neither.
+
+    Not here: the border-halo-cleanup toggle the design's own phase
+    notes mention. That constant (``CLEAN_EDGE_ENABLE``) is only ever
+    read by ``crop_transparent`` (its docstring: "only serves to ENABLE
+    a tighter crop") — ``remove_background`` never calls
     ``clean_edge_halo`` at all, so surfacing it here would silently do
     nothing (root Rule #1). It lives on ``CropSettingsPanel`` instead,
     where it actually affects behaviour; see that class's own
@@ -538,58 +567,163 @@ class BgSettingsPanel(ToolSettingsPanel):
 
     SLOT = "bg"
 
+    def _build_extra(self, box: ttk.Frame) -> None:
+        ttk.Label(
+            box, text="Background — which colour the removal clears:",
+        ).pack(anchor="w", pady=(0, 2))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        self.bg_mode_var = tk.StringVar(value=BG_MODE_LABEL[BG_MODE_DEFAULT])
+        rounded_combo(
+            row, list(BG_MODE_LABEL.values()), self.bg_mode_var, width=150,
+            command=lambda _label: self._apply_color_visibility(),
+        ).pack(side="left")
+        # worded to stay TRUE in every mode — it sits beside the
+        # dropdown, so a note describing only Auto would read as a
+        # claim about whatever is currently selected
+        ttk.Label(
+            row,
+            text="Auto sniffs the border (white or black only);"
+            " Custom clears any colour",
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(side="left", padx=(6, 0))
+
+        # colour + tolerance: Custom mode only (see _apply_color_visibility)
+        self._color_box = ttk.Frame(box)
+        crow = ttk.Frame(self._color_box)
+        crow.pack(fill="x", pady=2)
+        ttk.Label(crow, text="colour", width=8).pack(side="left")
+        self.bg_color_var = tk.StringVar(value=BG_COLOR_DEFAULT)
+        rounded_entry(
+            crow, width=90, textvariable=self.bg_color_var, justify="center",
+        ).pack(side="left")
+        self._color_swatch = ctk.CTkLabel(
+            crow, text="", width=BG_SWATCH_PX, height=BG_SWATCH_PX,
+            corner_radius=6, bg_color=theme_pair("bg"),
+        )
+        self._color_swatch.pack(side="left", padx=(6, 0))
+        self.bg_color_var.trace_add("write", self._sync_color_swatch)
+
+        trow = ttk.Frame(self._color_box)
+        trow.pack(fill="x", pady=2)
+        ttk.Label(trow, text="±", width=8).pack(side="left")
+        self.bg_tolerance_var = tk.StringVar(
+            value=f"{BG_COLOR_TOLERANCE_PCT:g}"
+        )
+        Spinner(trow, self.bg_tolerance_var, step=1.0).pack(side="left")
+        ttk.Label(
+            trow,
+            text="% per channel — 6.67 % makes #FF0000 span"
+            " #EE0000…#FF1111",
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(side="left", padx=(4, 0))
+
+        self._sync_color_swatch()
+        self._apply_color_visibility()
+
+    def _sync_color_swatch(self, *_args) -> None:
+        """Preview the typed hex. An unparsable colour greys the chip
+        rather than raising — the LOUD report is ``build_func``'s, at
+        Start, where a bad colour actually stops the run (Rule #1); a
+        live preview of half-typed text must not throw on every
+        keystroke."""
+        from painter.bg_remove import parse_hex_color
+
+        try:
+            rgb = parse_hex_color(self.bg_color_var.get())
+        except ValueError:
+            self._color_swatch.configure(fg_color=theme_pair("secondary"))
+            return
+        self._color_swatch.configure(fg_color="#%02X%02X%02X" % rgb)
+
+    def _apply_color_visibility(self) -> None:
+        """The colour/tolerance fields belong to Custom mode alone."""
+        if BG_MODE_BY_LABEL[self.bg_mode_var.get()] == BG_MODE_COLOR:
+            self._color_box.pack(fill="x", pady=(2, 0))
+        else:
+            self._color_box.pack_forget()
+        self._on_layout_change()
+
     def _build_advanced(self, box: ttk.Frame) -> None:
         ttk.Label(
             box,
             text="Safety guard — abort a removal that would clear more"
             " than:",
         ).pack(anchor="w", pady=(0, 2))
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="black bg", width=10).pack(side="left")
         self.safety_black_var = tk.StringVar(
             value=f"{SAFETY_MAX_REMOVE_FRAC:.2f}"
         )
-        rounded_entry(
-            row, width=60, textvariable=self.safety_black_var,
-            justify="center",
-        ).pack(side="left")
-        ttk.Label(row, text="(fraction, e.g. 0.40)").pack(
-            side="left", padx=(6, 0)
-        )
-        row2 = ttk.Frame(box)
-        row2.pack(fill="x", pady=2)
-        ttk.Label(row2, text="white bg", width=10).pack(side="left")
         self.safety_white_var = tk.StringVar(
             value=f"{SAFETY_MAX_REMOVE_FRAC_WHITE:.2f}"
         )
-        rounded_entry(
-            row2, width=60, textvariable=self.safety_white_var,
-            justify="center",
-        ).pack(side="left")
+        self.safety_color_var = tk.StringVar(
+            value=f"{SAFETY_MAX_REMOVE_FRAC_COLOR:.2f}"
+        )
+        for label, var, note in (
+            ("black bg", self.safety_black_var, "(fraction, e.g. 0.40)"),
+            ("white bg", self.safety_white_var, ""),
+            ("custom bg", self.safety_color_var, ""),
+        ):
+            row = ttk.Frame(box)
+            row.pack(fill="x", pady=2)
+            ttk.Label(row, text=label, width=10).pack(side="left")
+            rounded_entry(
+                row, width=60, textvariable=var, justify="center",
+            ).pack(side="left")
+            if note:
+                ttk.Label(row, text=note).pack(side="left", padx=(6, 0))
 
     def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
+        from painter.bg_remove import parse_hex_color
         from painter.postprocess import remove_background
 
+        mode = BG_MODE_BY_LABEL[self.bg_mode_var.get()]
+        color = self.bg_color_var.get()
+        tolerance = _parse_percent(
+            self.bg_tolerance_var.get(), "background tolerance"
+        )
+        if mode == BG_MODE_COLOR:
+            parse_hex_color(color)  # loud at Start, not per image
         black = _parse_fraction(self.safety_black_var.get(), "black bg safety")
         white = _parse_fraction(self.safety_white_var.get(), "white bg safety")
+        custom = _parse_fraction(
+            self.safety_color_var.get(), "custom bg safety"
+        )
         return lambda path, log: remove_background(
             path, log,
+            mode=mode, color=color, tolerance_pct=tolerance,
             safety_max_remove_frac=black,
             safety_max_remove_frac_white=white,
+            safety_max_remove_frac_color=custom,
         )
 
     def _advanced_settings(self) -> dict:
         return {
+            "bg_mode": BG_MODE_BY_LABEL[self.bg_mode_var.get()],
+            "bg_color": self.bg_color_var.get(),
+            "bg_tolerance": self.bg_tolerance_var.get(),
             "safety_black": self.safety_black_var.get(),
             "safety_white": self.safety_white_var.get(),
+            "safety_color": self.safety_color_var.get(),
         }
 
     def _apply_advanced_settings(self, stored: dict) -> None:
+        # an UNKNOWN stored mode (a settings.json from a build whose
+        # mode list differed) keeps the current default rather than
+        # putting a label the dropdown cannot resolve into the var
+        if stored.get("bg_mode") in BG_MODE_LABEL:
+            self.bg_mode_var.set(BG_MODE_LABEL[stored["bg_mode"]])
+        if "bg_color" in stored:
+            self.bg_color_var.set(stored["bg_color"])
+        if "bg_tolerance" in stored:
+            self.bg_tolerance_var.set(stored["bg_tolerance"])
         if "safety_black" in stored:
             self.safety_black_var.set(stored["safety_black"])
         if "safety_white" in stored:
             self.safety_white_var.set(stored["safety_white"])
+        if "safety_color" in stored:
+            self.safety_color_var.set(stored["safety_color"])
+        self._apply_color_visibility()
 
 
 class CropSettingsPanel(ToolSettingsPanel):

@@ -84,6 +84,12 @@ from painter import filters
 from painter.config import (
     ASPECT_DEFAULT_H,
     ASPECT_DEFAULT_W,
+    BG_COLOR_DEFAULT,
+    BG_COLOR_TOLERANCE_PCT,
+    BG_MODE_AUTO,
+    BG_MODE_BLACK,
+    BG_MODE_COLOR,
+    BG_MODE_LABEL,
     CLEAN_EDGE_ENABLE,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
@@ -92,6 +98,7 @@ from painter.config import (
     FILTER_KIND_WIDTH,
     FILTER_POLARITY_IF,
     SAFETY_MAX_REMOVE_FRAC,
+    SAFETY_MAX_REMOVE_FRAC_COLOR,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
@@ -262,6 +269,10 @@ def test_bg_panel_advanced_defaults_match_config(root):
     panel = make_panel(gui.BgSettingsPanel, root)
     assert panel.safety_black_var.get() == f"{SAFETY_MAX_REMOVE_FRAC:.2f}"
     assert panel.safety_white_var.get() == f"{SAFETY_MAX_REMOVE_FRAC_WHITE:.2f}"
+    assert panel.safety_color_var.get() == f"{SAFETY_MAX_REMOVE_FRAC_COLOR:.2f}"
+    assert panel.bg_mode_var.get() == BG_MODE_LABEL[BG_MODE_AUTO]
+    assert panel.bg_color_var.get() == BG_COLOR_DEFAULT
+    assert panel.bg_tolerance_var.get() == f"{BG_COLOR_TOLERANCE_PCT:g}"
 
 
 def test_crop_panel_advanced_defaults_match_config(root):
@@ -290,12 +301,18 @@ def test_bg_build_func_passes_the_overridden_safety_fractions(
     panel = make_panel(gui.BgSettingsPanel, root)
     panel.safety_black_var.set("0.10")
     panel.safety_white_var.set("0.20")
+    panel.safety_color_var.set("0.30")
     func = panel.build_func()
     func(tmp_path / "x.png", print)
 
-    assert calls == [
-        {"safety_max_remove_frac": 0.10, "safety_max_remove_frac_white": 0.20}
-    ]
+    assert calls == [{
+        "mode": BG_MODE_AUTO,
+        "color": BG_COLOR_DEFAULT,
+        "tolerance_pct": BG_COLOR_TOLERANCE_PCT,
+        "safety_max_remove_frac": 0.10,
+        "safety_max_remove_frac_white": 0.20,
+        "safety_max_remove_frac_color": 0.30,
+    }]
 
 
 def test_bg_build_func_raises_on_a_non_numeric_safety_field(root):
@@ -303,6 +320,98 @@ def test_bg_build_func_raises_on_a_non_numeric_safety_field(root):
     panel.safety_black_var.set("not-a-number")
     with pytest.raises(ValueError, match="black bg safety"):
         panel.build_func()
+
+
+# --- background mode + custom colour (owner 2026-07-28) ---------------
+
+
+def test_bg_build_func_passes_the_chosen_mode_and_custom_colour(
+    root, monkeypatch, tmp_path,
+):
+    """The owner's 'pointers' way through: state the colour, and the
+    mode/colour/tolerance really reach the engine call."""
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        postprocess_module, "remove_background",
+        lambda path, log, **kw: (calls.append(kw), "done")[1],
+    )
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_COLOR])
+    panel.bg_color_var.set("#FF0000")
+    panel.bg_tolerance_var.set("6.67")
+    panel.build_func()(tmp_path / "x.png", print)
+
+    assert calls[0]["mode"] == BG_MODE_COLOR
+    assert calls[0]["color"] == "#FF0000"
+    assert calls[0]["tolerance_pct"] == 6.67
+
+
+def test_bg_build_func_raises_on_a_mistyped_custom_colour(root):
+    """Rule #1 — a bad colour stops Start, it does not start a run that
+    silently clears the wrong thing."""
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_COLOR])
+    panel.bg_color_var.set("#GGGGGG")
+    with pytest.raises(ValueError, match="background colour"):
+        panel.build_func()
+
+
+def test_bg_a_bad_colour_is_ignored_while_the_mode_does_not_use_it(root):
+    """The same unparsable text is HARMLESS in Auto/Black/White — the
+    colour field is not part of those modes."""
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_color_var.set("#GGGGGG")
+    panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_BLACK])
+    assert panel.build_func() is not None
+
+
+def test_bg_build_func_raises_on_an_out_of_range_tolerance(root):
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_tolerance_var.set("150")
+    with pytest.raises(ValueError, match="background tolerance"):
+        panel.build_func()
+
+
+def test_bg_colour_fields_show_only_in_custom_mode(root):
+    """A colour field sitting live beside 'Auto' would read as if it
+    applied (Rule #1) — it is packed only in Custom mode."""
+    panel = make_panel(gui.BgSettingsPanel, root)
+    assert not panel._color_box.winfo_manager()
+
+    panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_COLOR])
+    panel._apply_color_visibility()
+    assert panel._color_box.winfo_manager()
+
+    panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_AUTO])
+    panel._apply_color_visibility()
+    assert not panel._color_box.winfo_manager()
+
+
+def test_bg_settings_round_trip_carries_mode_colour_and_guards(root):
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_COLOR])
+    panel.bg_color_var.set("#3A5F7D")
+    panel.bg_tolerance_var.set("8.5")
+    panel.safety_color_var.set("0.55")
+    stored = panel.get_settings()
+    assert stored["bg_mode"] == BG_MODE_COLOR  # the KEY, never the label
+
+    fresh = make_panel(gui.BgSettingsPanel, root)
+    fresh.apply_settings(stored)
+    assert fresh.bg_mode_var.get() == BG_MODE_LABEL[BG_MODE_COLOR]
+    assert fresh.bg_color_var.get() == "#3A5F7D"
+    assert fresh.bg_tolerance_var.get() == "8.5"
+    assert fresh.safety_color_var.get() == "0.55"
+    assert fresh._color_box.winfo_manager()  # visibility followed the mode
+
+
+def test_bg_settings_round_trip_ignores_an_unknown_stored_mode(root):
+    """A settings.json from a build whose mode list differed keeps the
+    current default instead of putting an unresolvable label in the
+    dropdown."""
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.apply_settings({"bg_mode": "no-such-mode"})
+    assert panel.bg_mode_var.get() == BG_MODE_LABEL[BG_MODE_AUTO]
 
 
 def test_crop_build_func_passes_every_overridden_field(root, monkeypatch, tmp_path):

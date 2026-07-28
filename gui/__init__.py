@@ -266,6 +266,7 @@ from .widgets import (
     _parse_fraction,
     _parse_int_range,
     _parse_nonneg_int,
+    _parse_percent,
     _style_icon_bar_button,
     _TK_FONTS,
     _untheme_inner_entry,
