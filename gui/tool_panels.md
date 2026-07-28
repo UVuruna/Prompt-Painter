@@ -55,9 +55,10 @@ import ...`) with no circular import back into the still-monolithic
   parsers (`_parse_fraction`/`_parse_nonneg_int`/`_parse_int_range`/
   `_parse_percent`), `rounded_button`/`rounded_combo`/`rounded_entry`/
   `rounded_switch`, `style_action_button`, `tk_font`
-- [Background Remover](../painter/bg_remove.md) — `parse_hex_color`
-  (`BgSettingsPanel` validates the typed colour at Start and drives
-  its live swatch with it)
+- [Background Remover](../painter/bg_remove.md) — `parse_hex_color`,
+  `format_hex_color`, `tolerance_to_distance` (`BgSettingsPanel`
+  validates the typed colour at Start and drives its live swatch and
+  tolerance hint with them)
 
 ### Used by
 - [GUI (folder)](___gui.md) — `__init__.py` re-exports
@@ -89,18 +90,34 @@ BG removal's/Crop's knobs. BG's PRIMARY control is always visible
 (`_build_extra`, owner 2026-07-28): a **Background** dropdown — Auto
 (detect), Black, White, or **Custom colour** — plus, in Custom mode
 only, the target hex (with a live swatch) and a `±X %` per-channel
-tolerance. Its Advanced collapsible keeps the three safety-guard
-fractions `remove_background` aborts past (black / white / custom).
-Crop's Advanced holds the border-halo-cleanup toggle, safety margin
-and ink-detection thresholds `crop_transparent` reads.
+tolerance spinner. Its Advanced collapsible keeps the three
+safety-guard ceilings `remove_background` aborts past (black / white /
+custom). Crop's Advanced holds the border-halo-cleanup toggle, safety
+margin and ink-detection thresholds `crop_transparent` reads.
+
+**Every number is shown in the unit the owner thinks in, and says what
+it means** (owner 2026-07-28 — *"sta znace ti brojevi 0.4, 0.85"*):
+
+- the guards are **percent of the image**, converted to the engine's
+  fraction in `build_func`, each with a one-line note saying why its
+  default is tight or high;
+- the tolerance carries a LIVE hint spelling `%` out in colour levels
+  and the span it covers (`± 15 levels · #2B506E…#496E8C`), because
+  "% of 255" means nothing at a glance. `0 %` is legal — exactly the
+  typed colour.
 
 The mode lives in the ALWAYS-VISIBLE block rather than behind the gear
 because the guard that hides there is exactly what silently blocked
-the owner's "pointers" run: a hidden 0.40 he never saw. The stored
-settings key is the MODE (`BG_MODE_COLOR`), never the shown label, so
-relabelling the dropdown cannot invalidate a saved `settings.json`; an
-unknown stored mode keeps the current default instead of putting an
-unresolvable label in the dropdown.
+the owner's "pointers" run: a hidden 0.40 he never saw.
+
+Stored keys: the MODE key (`BG_MODE_COLOR`), never the shown label, so
+relabelling the dropdown cannot invalidate a saved `settings.json` (an
+unknown stored mode keeps the current default). The guard keys carry a
+`_pct` SUFFIX (`safety_black_pct`) because their UNIT changed — a file
+written by the fraction build holds `"0.40"` under the old bare key,
+which read as percent would be a 0.4 % guard that refuses every image;
+the renamed key means such a file falls back to the correct defaults
+instead of being silently misread (Rule #6 — no translating shim).
 
 ### UpscaleSettingsPanel / AspectSettingsPanel
 No Advanced section — the min-side spinner (Upscale) / target-ratio

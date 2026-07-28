@@ -54,6 +54,8 @@ from scipy import ndimage
 # import forms. Both fail loudly if config.py is genuinely missing.
 try:
     from painter.config import (
+        AUTO_CORNER_AGREE_MAX,
+        AUTO_CORNER_PX,
         BG_COLOR_DEFAULT,
         BG_COLOR_TOLERANCE_PCT,
         BG_MODE_AUTO,
@@ -70,6 +72,8 @@ try:
     )
 except ImportError:  # standalone: script's own dir is on sys.path
     from config import (  # type: ignore[no-redef]
+        AUTO_CORNER_AGREE_MAX,
+        AUTO_CORNER_PX,
         BG_COLOR_DEFAULT,
         BG_COLOR_TOLERANCE_PCT,
         BG_MODE_AUTO,
@@ -353,6 +357,36 @@ def _black_plan(border_hex: str) -> RemovalPlan:
     )
 
 
+def corner_background_color(rgb: np.ndarray,
+                            corner_px: int = AUTO_CORNER_PX,
+                            agree_max: int = AUTO_CORNER_AGREE_MAX,
+                            ) -> tuple[int, int, int] | None:
+    """The background colour the FOUR CORNERS agree on, else ``None``.
+
+    The owner's own rule for auto-detecting a colour (2026-07-28):
+    sample each corner a few pixels deep, and if they all hold the same
+    colour, that IS the background. Each corner contributes its own
+    median; they AGREE when the spread across the four is within
+    ``agree_max`` on every channel.
+
+    The corners rather than the whole border band, because they are the
+    part of the frame least likely to hold the subject — a medallion
+    touching the top edge still leaves all four clear, while it would
+    drag the border median. Disagreeing corners (a gradient, a scene)
+    return ``None`` and the image stays 'ambiguous': the tool reports
+    rather than guesses."""
+    height, width = rgb.shape[:2]
+    side = max(1, min(corner_px, height, width))
+    corners = (rgb[:side, :side], rgb[:side, -side:],
+               rgb[-side:, :side], rgb[-side:, -side:])
+    medians = np.array(
+        [np.median(c.reshape(-1, 3), axis=0) for c in corners]
+    )
+    if (medians.max(axis=0) - medians.min(axis=0)).max() > agree_max:
+        return None
+    return tuple(int(round(v)) for v in np.median(medians, axis=0))
+
+
 def plan(img: Image.Image,
          mode: str = BG_MODE_AUTO,
          *,
@@ -361,10 +395,13 @@ def plan(img: Image.Image,
          ) -> RemovalPlan:
     """Decide how to treat one image (see ``RemovalPlan``).
 
-    ``BG_MODE_AUTO`` sniffs the border and picks white or black, or
-    gives up ('skip-ambiguous'); ``BG_MODE_BLACK``/``BG_MODE_WHITE``/
-    ``BG_MODE_COLOR`` are the owner STATING the background and skip the
-    sniff entirely (owner 2026-07-28).
+    ``BG_MODE_AUTO`` sniffs the border for white or black, then falls
+    back to the FOUR-CORNER colour vote (``corner_background_color``)
+    for any other uniform background, and only gives up
+    ('skip-ambiguous') when even the corners disagree.
+    ``BG_MODE_BLACK``/``BG_MODE_WHITE``/``BG_MODE_COLOR`` are the owner
+    STATING the background and skip the sniff entirely (owner
+    2026-07-28).
 
     An ALREADY-TRANSPARENT image is skipped in EVERY mode, forced ones
     included: it has a real alpha channel that a colour key knows
@@ -393,6 +430,16 @@ def plan(img: Image.Image,
         return _white_plan(border, border_hex)
     if np.median(border.max(axis=1)) <= BLACK_BG_MAX:
         return _black_plan(border_hex)
+    # neither white nor black — ask the FOUR CORNERS what colour the
+    # background is (owner 2026-07-28). Strictly a fallback: everything
+    # the white/black sniff already recognises is untouched by this.
+    agreed = corner_background_color(rgb)
+    if agreed is not None:
+        distance = tolerance_to_distance(tolerance_pct)
+        return RemovalPlan(
+            BG_MODE_COLOR, agreed, distance, distance, FEATHER_SIGMA,
+            format_hex_color(agreed),
+        )
     return RemovalPlan("skip-ambiguous", *SKIP_PLAN_COLOR, border_hex)
 
 

@@ -89,12 +89,13 @@ is the binding spec.
    owner 2026-07-17: no part of this program lives in another
    project; ONE colour-keyed engine clears the border-connected
    region around a target colour, and its MODE (owner 2026-07-28)
-   is AUTO-detect per file (already-transparent nothing, white/black
-   cleared, ambiguous reported with the sniffed border colour and
-   left untouched), a FORCED white/black, or a CUSTOM COLOUR ± X %
-   per channel that clears ANY background colour — the standalone
-   BG tool's own always-visible dropdown, with the three per-path
-   safety-guard fractions as its Advanced fine-tune),
+   is AUTO-detect per file (already-transparent nothing; white or
+   black cleared; else the colour the FOUR CORNERS agree on, logged;
+   only disagreeing corners are reported and left untouched), a
+   FORCED white/black, or a CUSTOM COLOUR ± X % per channel (0 % =
+   exactly that hex) that clears ANY background colour — the
+   standalone BG tool's own always-visible dropdown, with the three
+   per-path safety guards as its Advanced fine-tune, in PERCENT),
    `crop_transparent` (autocrop to the content box + a small config
    margin), and `upscale_if_small` (`painter/upscale.py`,
    Real-ESRGAN ncnn-vulkan binary auto-downloaded into `tools/`,

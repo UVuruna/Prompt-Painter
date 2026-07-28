@@ -119,12 +119,35 @@ BG_MODE_LABEL = {
 }
 
 BG_COLOR_DEFAULT = "#000000"    # custom-colour target, hex
+# DEFAULT ONLY — the BG panel's own "+-" field is the fine-tune, and
+# 0 is a legal value there (owner 2026-07-28: "MOZE i 0 TOLERANCE AKO
+# HOCE tj samo taj HEX" — tolerance 0 keys EXACTLY the typed colour).
 BG_COLOR_TOLERANCE_PCT = 6.0    # +- this % of 255 per channel (6 % = +-15)
+
+# AUTO COLOUR DETECTION (owner 2026-07-28). Auto used to give up on
+# anything that was not white or black. His rule for finding the
+# background colour: look at the FOUR CORNERS, a few pixels deep — if
+# they hold the same colour, THAT is the background.
+#
+# The corners, not the whole border band: a medallion that touches the
+# top edge still leaves all four corners clear, so a corner vote is far
+# harder to pollute than the border median the white/black sniff uses.
+# Disagreeing corners (a gradient, a scene) stay "ambiguous" — the tool
+# still never guesses.
+AUTO_CORNER_PX = 8         # side of each sampled corner square, px
+AUTO_CORNER_AGREE_MAX = 10 # the 4 corner medians agree within this,
+#                            per channel (0-255) -> that is the colour
 # CUSTOM-COLOUR path guard. Deliberately HIGH, like the white one and
 # unlike black's 0.40: black's tight guard is a fence around a GUESS
 # (auto keyed a dark subject as background), while a custom colour is
-# something the owner TYPED — he has already told the tool what the
-# background is, so the guard only needs to catch a catastrophic
-# "cleared the whole image". The "pointers" plates, whose legitimate
-# background is 42 %, are exactly the shape class black's 0.40 bails on.
+# something the owner TYPED, or one the four corners AGREED on — either
+# way the background is known, not inferred from one median, so the
+# guard only needs to catch a catastrophic "cleared the whole image".
+# The "pointers" plates, whose legitimate background is 42 %, are
+# exactly the shape class black's 0.40 bails on.
+#
+# All three guards are FRACTIONS here because the engine compares them
+# against a fraction; the GUI shows and takes them as PERCENT (owner
+# 2026-07-28 — "sta znace ti brojevi 0.4, 0.85": a bare 0.40 in a box
+# means nothing, 40 % does), converting at the panel edge.
 SAFETY_MAX_REMOVE_FRAC_COLOR = 0.85

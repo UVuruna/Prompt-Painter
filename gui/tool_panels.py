@@ -61,7 +61,6 @@ from .logic import _upscale_params_from_side_and_filter
 from .theme import THEME_TOPLEVELS, smooth_transition
 from .widgets import (
     Spinner,
-    _parse_fraction,
     _parse_int_range,
     _parse_nonneg_int,
     _parse_percent,
@@ -541,20 +540,26 @@ class BgSettingsPanel(ToolSettingsPanel):
     the mode + custom-colour block owner 2026-07-28).
 
     ``_build_extra`` — ALWAYS VISIBLE, the panel's PRIMARY control —
-    answers "which background is this?": Auto (sniff the border, white
-    or black only), forced Black, forced White, or **Custom colour**
-    plus a +- tolerance, which clears ANY background colour. The colour
-    and tolerance fields show only in Custom mode (a dead colour field
-    beside "Auto" would read as if it applied — Rule #1); a live swatch
-    previews the typed hex.
+    answers "which background is this?": Auto (white/black, then the
+    colour the four corners agree on), forced Black, forced White, or
+    **Custom colour** plus a ± tolerance, which clears ANY background
+    colour. The colour and tolerance fields show only in Custom mode (a
+    dead colour field beside "Auto" would read as if it applied — Rule
+    #1); a live swatch previews the typed hex and a live hint spells
+    the tolerance out in colour LEVELS and the actual span it covers,
+    because "% of 255" means nothing at a glance. Tolerance 0 is legal
+    and keys the typed colour exactly.
 
-    Advanced keeps the SAFETY GUARD fractions ``remove_background``
+    Advanced keeps the SAFETY GUARD ceilings ``remove_background``
     aborts past (owner 2026-07-19's "never destroy an image" rule), now
-    THREE — one per path, since custom colour has its own high guard.
-    They are the engine's fine-tune, and the abort message names the
-    guard that fired and points back here: the owner's "pointers" case
-    (a legitimate 42 %-background plate bailing on black's 0.40) was
-    unreadable precisely because the old message named neither.
+    THREE — one per path, since custom colour has its own high guard —
+    expressed as PERCENT of the image, not as the raw fraction the
+    engine compares against (owner 2026-07-28: a bare "0.40" in a box
+    tells the reader nothing). They are the engine's fine-tune, and the
+    abort message names the guard that fired and points back here: the
+    owner's "pointers" case (a legitimate 42 %-background plate bailing
+    on black's 40 %) was unreadable precisely because the old message
+    named neither.
 
     Not here: the border-halo-cleanup toggle the design's own phase
     notes mention. That constant (``CLEAN_EDGE_ENABLE``) is only ever
@@ -583,8 +588,8 @@ class BgSettingsPanel(ToolSettingsPanel):
         # claim about whatever is currently selected
         ttk.Label(
             row,
-            text="Auto sniffs the border (white or black only);"
-            " Custom clears any colour",
+            text="Auto reads white/black, then the colour the four"
+            " corners agree on",
             wraplength=DENSE_COL_WRAP_PX,
         ).pack(side="left", padx=(6, 0))
 
@@ -602,24 +607,65 @@ class BgSettingsPanel(ToolSettingsPanel):
             corner_radius=6, bg_color=theme_pair("bg"),
         )
         self._color_swatch.pack(side="left", padx=(6, 0))
-        self.bg_color_var.trace_add("write", self._sync_color_swatch)
 
         trow = ttk.Frame(self._color_box)
         trow.pack(fill="x", pady=2)
         ttk.Label(trow, text="±", width=8).pack(side="left")
         self.bg_tolerance_var = tk.StringVar(
-            value=f"{BG_COLOR_TOLERANCE_PCT:g}"
+            value=f"{BG_COLOR_TOLERANCE_PCT:.2f}"
         )
-        Spinner(trow, self.bg_tolerance_var, step=1.0).pack(side="left")
+        # decimals=2 (not the step-derived 0): the tolerance's own
+        # canonical value is 6.67, and a whole-number spinner would
+        # silently round a typed 6.67 to 7 on the first +/- click
+        Spinner(
+            trow, self.bg_tolerance_var, step=1.0, entry_width=52,
+            decimals=2,
+        ).pack(side="left")
+        # the % is meaningless on its own — show what it MEANS in the
+        # units the colour is written in (owner 2026-07-28)
+        self._tolerance_hint = tk.StringVar()
         ttk.Label(
-            trow,
-            text="% per channel — 6.67 % makes #FF0000 span"
-            " #EE0000…#FF1111",
+            trow, textvariable=self._tolerance_hint,
             wraplength=DENSE_COL_WRAP_PX,
         ).pack(side="left", padx=(4, 0))
 
-        self._sync_color_swatch()
+        # both traces LAST, once every widget and var they touch exists
+        # (the colour drives the swatch AND the tolerance hint's span)
+        self.bg_color_var.trace_add("write", self._sync_color_fields)
+        self.bg_tolerance_var.trace_add("write", self._sync_tolerance_hint)
+        self._sync_color_fields()
         self._apply_color_visibility()
+
+    def _sync_color_fields(self, *_args) -> None:
+        self._sync_color_swatch()
+        self._sync_tolerance_hint()
+
+    def _sync_tolerance_hint(self, *_args) -> None:
+        """Spell the tolerance out in colour levels: '% of 255' means
+        nothing at a glance, '± 17 levels · #EE0000…#FF1111' does."""
+        from painter.bg_remove import (
+            format_hex_color, parse_hex_color, tolerance_to_distance,
+        )
+
+        try:
+            levels = tolerance_to_distance(
+                float(self.bg_tolerance_var.get().strip())
+            )
+        except ValueError:
+            self._tolerance_hint.set("% per channel")
+            return
+        if levels == 0:
+            self._tolerance_hint.set("% — EXACTLY the colour above")
+            return
+        span = ""
+        try:
+            rgb = parse_hex_color(self.bg_color_var.get())
+            lo = tuple(max(0, c - levels) for c in rgb)
+            hi = tuple(min(255, c + levels) for c in rgb)
+            span = (f" · {format_hex_color(lo)}…{format_hex_color(hi)}")
+        except ValueError:
+            pass  # half-typed colour — the levels alone still inform
+        self._tolerance_hint.set(f"% — ± {levels} levels per channel{span}")
 
     def _sync_color_swatch(self, *_args) -> None:
         """Preview the typed hex. An unparsable colour greys the chip
@@ -645,33 +691,41 @@ class BgSettingsPanel(ToolSettingsPanel):
         self._on_layout_change()
 
     def _build_advanced(self, box: ttk.Frame) -> None:
+        # PERCENT, not the raw fraction the engine compares against
+        # (owner 2026-07-28: a bare "0.40" in a box says nothing; "40 %
+        # of the image" says exactly what it does). Converted back at
+        # build_func, so the engine contract is unchanged.
         ttk.Label(
             box,
-            text="Safety guard — abort a removal that would clear more"
-            " than:",
+            text="Safety guard — refuse the removal when it would clear"
+            " more than this much of the image:",
+            wraplength=DENSE_COL_WRAP_PX * 2,
         ).pack(anchor="w", pady=(0, 2))
         self.safety_black_var = tk.StringVar(
-            value=f"{SAFETY_MAX_REMOVE_FRAC:.2f}"
+            value=f"{SAFETY_MAX_REMOVE_FRAC * 100:g}"
         )
         self.safety_white_var = tk.StringVar(
-            value=f"{SAFETY_MAX_REMOVE_FRAC_WHITE:.2f}"
+            value=f"{SAFETY_MAX_REMOVE_FRAC_WHITE * 100:g}"
         )
         self.safety_color_var = tk.StringVar(
-            value=f"{SAFETY_MAX_REMOVE_FRAC_COLOR:.2f}"
+            value=f"{SAFETY_MAX_REMOVE_FRAC_COLOR * 100:g}"
         )
         for label, var, note in (
-            ("black bg", self.safety_black_var, "(fraction, e.g. 0.40)"),
-            ("white bg", self.safety_white_var, ""),
-            ("custom bg", self.safety_color_var, ""),
+            ("black bg", self.safety_black_var,
+             "% — tight: black is a GUESS, and a dark subject reads as"
+             " background"),
+            ("white bg", self.safety_white_var,
+             "% — high: real white plates legitimately clear ~57 %"),
+            ("custom bg", self.safety_color_var,
+             "% — high: the colour is known, not inferred"),
         ):
             row = ttk.Frame(box)
             row.pack(fill="x", pady=2)
             ttk.Label(row, text=label, width=10).pack(side="left")
-            rounded_entry(
-                row, width=60, textvariable=var, justify="center",
-            ).pack(side="left")
-            if note:
-                ttk.Label(row, text=note).pack(side="left", padx=(6, 0))
+            Spinner(row, var, step=5.0, entry_width=52).pack(side="left")
+            ttk.Label(
+                row, text=note, wraplength=DENSE_COL_WRAP_PX,
+            ).pack(side="left", padx=(6, 0))
 
     def build_func(self) -> Callable[[Path, Callable[[str], None]], str]:
         from painter.bg_remove import parse_hex_color
@@ -684,11 +738,16 @@ class BgSettingsPanel(ToolSettingsPanel):
         )
         if mode == BG_MODE_COLOR:
             parse_hex_color(color)  # loud at Start, not per image
-        black = _parse_fraction(self.safety_black_var.get(), "black bg safety")
-        white = _parse_fraction(self.safety_white_var.get(), "white bg safety")
-        custom = _parse_fraction(
+        # the fields are PERCENT; the engine takes the fraction
+        black = _parse_percent(
+            self.safety_black_var.get(), "black bg safety"
+        ) / 100.0
+        white = _parse_percent(
+            self.safety_white_var.get(), "white bg safety"
+        ) / 100.0
+        custom = _parse_percent(
             self.safety_color_var.get(), "custom bg safety"
-        )
+        ) / 100.0
         return lambda path, log: remove_background(
             path, log,
             mode=mode, color=color, tolerance_pct=tolerance,
@@ -698,13 +757,20 @@ class BgSettingsPanel(ToolSettingsPanel):
         )
 
     def _advanced_settings(self) -> dict:
+        # the guard keys carry the _pct SUFFIX because their UNIT
+        # changed (fraction -> percent, owner 2026-07-28). A settings
+        # file written by the fraction build stores "0.40" under the old
+        # bare key; read as percent that would be 0.4 % — a guard that
+        # refuses everything. The renamed key simply is not there, so
+        # such a file falls back to the correct defaults instead of
+        # being silently misread (Rule #6 — no translating shim).
         return {
             "bg_mode": BG_MODE_BY_LABEL[self.bg_mode_var.get()],
             "bg_color": self.bg_color_var.get(),
             "bg_tolerance": self.bg_tolerance_var.get(),
-            "safety_black": self.safety_black_var.get(),
-            "safety_white": self.safety_white_var.get(),
-            "safety_color": self.safety_color_var.get(),
+            "safety_black_pct": self.safety_black_var.get(),
+            "safety_white_pct": self.safety_white_var.get(),
+            "safety_color_pct": self.safety_color_var.get(),
         }
 
     def _apply_advanced_settings(self, stored: dict) -> None:
@@ -717,12 +783,12 @@ class BgSettingsPanel(ToolSettingsPanel):
             self.bg_color_var.set(stored["bg_color"])
         if "bg_tolerance" in stored:
             self.bg_tolerance_var.set(stored["bg_tolerance"])
-        if "safety_black" in stored:
-            self.safety_black_var.set(stored["safety_black"])
-        if "safety_white" in stored:
-            self.safety_white_var.set(stored["safety_white"])
-        if "safety_color" in stored:
-            self.safety_color_var.set(stored["safety_color"])
+        if "safety_black_pct" in stored:
+            self.safety_black_var.set(stored["safety_black_pct"])
+        if "safety_white_pct" in stored:
+            self.safety_white_var.set(stored["safety_white_pct"])
+        if "safety_color_pct" in stored:
+            self.safety_color_var.set(stored["safety_color_pct"])
         self._apply_color_visibility()
 
 

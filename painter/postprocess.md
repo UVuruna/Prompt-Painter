@@ -17,14 +17,16 @@ a no-op — only for real errors (`PostprocessError`, loud).
   left untouched). No cropping any more — that is the second step.
 
   Its **`mode`** (owner 2026-07-28) picks WHICH background is cleared:
-  `BG_MODE_AUTO` sniffs the border (white or black; an ambiguous
-  gradient / mid-tone is `"unclear"`, and the report NAMES the sniffed
-  border colour so the owner can state it), `BG_MODE_BLACK` /
-  `BG_MODE_WHITE` force one and skip the sniff, and `BG_MODE_COLOR`
-  clears ANY `color` (hex) within `tolerance_pct` % of 255 per channel.
-  A mistyped colour is parsed BEFORE the image is opened, so it is
-  reported as the configuration error it is rather than as a per-image
-  failure.
+  `BG_MODE_AUTO` sniffs the border for white or black and then asks the
+  FOUR CORNERS for any other uniform colour (logging which colour it
+  decided on — an auto decision is never silent); only disagreeing
+  corners give `"unclear"`, and that report names the colour it saw so
+  the owner can state it. `BG_MODE_BLACK` / `BG_MODE_WHITE` force one
+  and skip the sniff, and `BG_MODE_COLOR` clears ANY `color` (hex)
+  within `tolerance_pct` % of 255 per channel — `0 %` keys the typed
+  colour exactly. A mistyped colour is parsed BEFORE the image is
+  opened, so it is reported as the configuration error it is rather
+  than as a per-image failure.
 
   A **SAFETY GUARD** (owner 2026-07-19) also returns `"unclear"` when
   the removal would clear more than the path's guard fraction — it ate
@@ -35,11 +37,11 @@ a no-op — only for real errors (`PostprocessError`, loud).
   (`SAFETY_MAX_REMOVE_FRAC_WHITE`, 0.85) and custom colour
   (`SAFETY_MAX_REMOVE_FRAC_COLOR`, 0.85) run high because their legit
   backgrounds are large (real white plates reach ~0.57) and, for a
-  custom colour, the owner has already TOLD the tool what the
-  background is. The abort message NAMES the guard that fired and its
-  value — the owner's "pointers" case (a legitimate 42 %-background
-  plate bailing on black's 0.40) was unreadable precisely because the
-  old message named neither.
+  colour, the background is known rather than inferred. The abort
+  message NAMES the guard that fired and its value in PERCENT — the
+  owner's "pointers" case (a legitimate 42 %-background plate bailing
+  on black's 40 %) was unreadable precisely because the old message
+  named neither. All three are owner-editable per run, as percent.
 - **`crop_transparent`** — halo cleanup THEN autocrop in place (owner
   2026-07-18, the OldAge.png case): (1) `clean_edge_halo` zeroes the
   faint stray line / halo CONNECTED TO THE IMAGE BORDER

@@ -73,11 +73,19 @@ margin clamped at the edge).
 
 Also the BACKGROUND MODE block (owner 2026-07-28): hex parsing and
 its loud failures, the owner's own `± X %` worked example
-(`#FF0000 ± 6.67 %` = 17 levels), a colour that is neither white nor
-black cleared once STATED, the tolerance bounding what counts as
-background, forced modes overruling the border sniff, an
-already-transparent image skipped in EVERY mode, and the "unclear"
-report naming the sniffed border colour. Its REGRESSION pin (root
+(`#FF0000 ± 6.67 %` = 17 levels), `0 %` keying the colour EXACTLY, a
+colour that is neither white nor black cleared once STATED, the
+tolerance bounding what counts as background, forced modes overruling
+the border sniff, an already-transparent image skipped in EVERY mode,
+and the "unclear" report naming the colour it saw.
+
+The FOUR-CORNER auto-colour vote gets its own group: auto clearing a
+colour the corners agree on (and LOGGING which), the vote ignoring a
+subject that runs to an edge (the reason it is corners and not the
+border band), refusing when the corners disagree, tolerating corner
+noise up to `AUTO_CORNER_AGREE_MAX`, and — the important negative —
+never overriding the white/black sniff, so the pointers plates keep
+the black recipe and its own guard. Its REGRESSION pin (root
 Rule #25) is
 `test_pointers_regression_black_guard_bails_custom_colour_succeeds`:
 a disc on pure black whose LEGITIMATE background is ~42 % — black's
@@ -381,8 +389,12 @@ shape). BG's mode block (owner 2026-07-28) gets the same treatment:
 the chosen mode/colour/tolerance reaching the engine call, a mistyped
 colour raising at Start (and being HARMLESS in a mode that ignores
 it), an out-of-range tolerance, the colour fields packed only in
-Custom mode, and the round-trip storing the MODE KEY (an unknown
-stored mode falling back to the default). `PainterGui._start_tool_from_panel`'s pre-filter path end to
+Custom mode, the guards typed as PERCENT still reaching the engine as
+FRACTIONS, and the round-trip storing the MODE KEY (an unknown stored
+mode falling back to the default). One test pins the UNIT MIGRATION:
+a settings file from the fraction build (`safety_black: "0.40"`) must
+fall back to the 40 % default, never be misread as a 0.4 % guard that
+would refuse every image. `PainterGui._start_tool_from_panel`'s pre-filter path end to
 end through a duck-typed `FakeGuiForPanel` (`_run_tool_job` a
 RECORDING stand-in) for the four tools; `PainterGui._start_ai_check`'s
 OWN equivalent through a SEPARATE `FakeGuiForAiCheck`

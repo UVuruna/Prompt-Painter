@@ -15,11 +15,14 @@ from painter.bg_remove import (
     apply_plan,
     clean_edge_halo,
     content_bbox,
+    corner_background_color,
     parse_hex_color,
     plan,
     tolerance_to_distance,
 )
 from painter.config import (
+    AUTO_CORNER_AGREE_MAX,
+    AUTO_CORNER_PX,
     BG_COLOR_TOLERANCE_PCT,
     BG_MODE_BLACK,
     BG_MODE_COLOR,
@@ -187,17 +190,30 @@ def test_already_transparent_is_nothing(tmp_path):
     assert img.read_bytes() == before  # untouched
 
 
-def test_ambiguous_background_is_unclear_and_untouched(tmp_path):
-    img = tmp_path / "gradient.png"
-    rgb = np.full((60, 60, 3), 128, dtype=np.uint8)  # mid-gray border
+def make_corner_gradient(size: int = 60) -> np.ndarray:
+    """A frame whose four CORNERS hold four different colours — the
+    only thing auto still refuses (owner 2026-07-28)."""
+    yy, xx = np.mgrid[0:size, 0:size]
+    rgb = np.dstack([
+        (xx * 255 // (size - 1)).astype(np.uint8),
+        (yy * 255 // (size - 1)).astype(np.uint8),
+        np.full((size, size), 90, dtype=np.uint8),
+    ])
     rgb[20:40, 20:40] = (250, 250, 40)
-    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    return rgb
+
+
+def test_ambiguous_background_is_unclear_and_untouched(tmp_path):
+    """Auto gives up ONLY when even the corners disagree."""
+    img = tmp_path / "gradient.png"
+    Image.fromarray(make_corner_gradient(), mode="RGB").save(img, "PNG")
     before = img.read_bytes()
     logs: list[str] = []
 
     assert remove_background(img, logs.append) == "unclear"
     assert img.read_bytes() == before
     assert any("UNCLEAR" in line for line in logs)
+    assert any("corners disagree" in line for line in logs)
 
 
 def test_safety_override_lets_a_larger_removal_through(tmp_path):
@@ -264,16 +280,11 @@ def test_tolerance_matches_the_owners_worked_example():
 
 
 def test_custom_colour_clears_a_background_neither_white_nor_black(tmp_path):
-    """The owner's question answered: ANY colour, not just black/white.
-    The SAME plate auto gives up on is cleared once he states the
-    colour."""
+    """The owner's question answered: ANY colour, not just black/white."""
     img = tmp_path / "red_bg.png"
     rgb = np.full((100, 100, 3), (255, 0, 0), dtype=np.uint8)
     rgb[20:80, 20:80] = (40, 90, 200)
     Image.fromarray(rgb, mode="RGB").save(img, "PNG")
-    shutil.copy(img, tmp_path / "same.png")
-
-    assert remove_background(tmp_path / "same.png", print) == "unclear"
 
     assert remove_background(
         img, print, mode=BG_MODE_COLOR, color="#FF0000",
@@ -282,6 +293,83 @@ def test_custom_colour_clears_a_background_neither_white_nor_black(tmp_path):
         arr = np.asarray(out.convert("RGBA"))
     assert arr[0, 0, 3] == 0      # the red background went transparent
     assert arr[50, 50, 3] == 255  # the subject stayed opaque
+
+
+def test_zero_tolerance_keys_exactly_the_stated_colour():
+    """Owner 2026-07-28 — "MOZE i 0 TOLERANCE ... tj samo taj HEX".
+    At 0 %, a background one level off the target is NOT background."""
+    rgb = np.full((60, 60, 3), (255, 0, 0), dtype=np.uint8)
+    rgb[20:40, 20:40] = (40, 90, 200)
+    exact = Image.fromarray(rgb, mode="RGB")
+
+    _, removed = apply_plan(exact, plan(
+        exact, BG_MODE_COLOR, color="#FF0000", tolerance_pct=0.0,
+    ))
+    assert removed > 0.5                      # the exact colour clears
+
+    rgb_off = rgb.copy()
+    rgb_off[rgb_off[:, :, 0] == 255] = (254, 0, 0)   # ONE level off
+    off = Image.fromarray(rgb_off, mode="RGB")
+    _, removed_off = apply_plan(off, plan(
+        off, BG_MODE_COLOR, color="#FF0000", tolerance_pct=0.0,
+    ))
+    assert removed_off == 0.0                 # nothing matches exactly
+
+
+# --- AUTO colour: the four-corner vote (owner 2026-07-28) -------------
+
+
+def test_auto_detects_the_colour_the_four_corners_agree_on(tmp_path):
+    """The owner's own rule: if the four corners hold the same colour,
+    THAT is the background — no longer a give-up."""
+    img = tmp_path / "teal_bg.png"
+    rgb = np.full((100, 100, 3), (58, 95, 125), dtype=np.uint8)
+    rgb[20:80, 20:80] = (240, 200, 60)
+    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    logs: list[str] = []
+
+    assert remove_background(img, logs.append) == "done"
+    with Image.open(img) as out:
+        arr = np.asarray(out.convert("RGBA"))
+    assert arr[0, 0, 3] == 0
+    assert arr[50, 50, 3] == 255
+    # an auto-DECIDED colour is never silent — it says which (Rule #1)
+    assert any("auto-detected" in line and "#3A5F7D" in line
+               for line in logs)
+
+
+def test_corner_vote_ignores_a_subject_that_touches_an_edge():
+    """Why CORNERS and not the border band: a subject running to the
+    top edge drags the border median, but leaves all four corners on
+    the true background colour."""
+    rgb = np.full((100, 100, 3), (58, 95, 125), dtype=np.uint8)
+    rgb[0:60, 30:70] = (240, 200, 60)   # touches the TOP edge
+    assert corner_background_color(rgb) == (58, 95, 125)
+
+
+def test_corner_vote_refuses_when_the_corners_disagree():
+    assert corner_background_color(make_corner_gradient()) is None
+
+
+def test_corner_vote_tolerates_slight_corner_noise():
+    """Real plates are not mathematically flat — corners within
+    AUTO_CORNER_AGREE_MAX still count as agreeing."""
+    rgb = np.full((100, 100, 3), 120, dtype=np.uint8)
+    rgb[:AUTO_CORNER_PX, :AUTO_CORNER_PX] = 120 + AUTO_CORNER_AGREE_MAX - 1
+    assert corner_background_color(rgb) is not None
+
+    rgb[:AUTO_CORNER_PX, :AUTO_CORNER_PX] = 120 + AUTO_CORNER_AGREE_MAX + 1
+    assert corner_background_color(rgb) is None
+
+
+def test_auto_colour_never_overrides_the_white_or_black_sniff(tmp_path):
+    """The corner vote is strictly a FALLBACK — everything white/black
+    detection already recognised keeps its own recipe (and its own
+    guard), so the pointers plates still take the black path."""
+    img = tmp_path / "disc.png"
+    make_disc_on_black(img)
+    with Image.open(img) as im:
+        assert plan(im).action == BG_MODE_BLACK
 
 
 def test_custom_colour_tolerance_bounds_what_counts_as_background():
@@ -328,16 +416,14 @@ def test_already_transparent_is_skipped_in_every_mode(tmp_path):
 
 
 def test_unclear_report_names_the_sniffed_border_colour(tmp_path):
-    """Rule #1 — the report must be ACTIONABLE: it names the colour to
-    paste into the custom-colour field, not just 'I gave up'."""
-    img = tmp_path / "teal.png"
-    rgb = np.full((60, 60, 3), (58, 95, 125), dtype=np.uint8)
-    rgb[20:40, 20:40] = (250, 250, 40)
-    Image.fromarray(rgb, mode="RGB").save(img, "PNG")
+    """Rule #1 — the report must be ACTIONABLE: it names the colour it
+    saw, not just 'I gave up'."""
+    img = tmp_path / "gradient.png"
+    Image.fromarray(make_corner_gradient(), mode="RGB").save(img, "PNG")
     logs: list[str] = []
 
     assert remove_background(img, logs.append) == "unclear"
-    assert any("#3A5F7D" in line for line in logs)
+    assert any("border ≈ #" in line for line in logs)
 
 
 def test_a_mistyped_colour_stops_the_run_before_the_image_is_read(tmp_path):

@@ -43,6 +43,8 @@ from .sheet import (
     selection_base_and_rels,
 )
 from .postprocess import (
+    AUTO_CORNER_AGREE_MAX,
+    AUTO_CORNER_PX,
     BG_COLOR_DEFAULT,
     BG_COLOR_TOLERANCE_PCT,
     BG_MODE_AUTO,
@@ -261,6 +263,7 @@ __all__ = [
     "IMAGE_EXTENSIONS", "SKIP_MARKER_PATTERN", "TOOL_IMAGE_EXTENSIONS",
     "iter_images", "iter_md_files", "selection_base_and_rels",
     # postprocess
+    "AUTO_CORNER_AGREE_MAX", "AUTO_CORNER_PX",
     "BG_COLOR_DEFAULT", "BG_COLOR_TOLERANCE_PCT", "BG_MODE_AUTO",
     "BG_MODE_BLACK", "BG_MODE_COLOR", "BG_MODE_DEFAULT", "BG_MODE_LABEL",
     "BG_MODE_WHITE",

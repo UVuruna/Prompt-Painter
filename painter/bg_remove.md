@@ -42,16 +42,34 @@ background and ate the dark stone frame of the bible/dark rondels
 
 ### Which recipe an image gets — `plan(img, mode)`
 
-- **`BG_MODE_AUTO`** — sniffs the outer 1% frame: white / off-white
-  (thresholds ADAPTED to that plate's own white level), black void, or
-  **ambiguous** (gradient, mid-tone) → reported and left alone. The
-  report NAMES the sniffed border colour so it can be pasted into the
-  custom-colour field — skip, never guess, but never a dead end either.
+- **`BG_MODE_AUTO`** — three steps, in order:
+  1. sniff the outer 1% frame for white / off-white (thresholds
+     ADAPTED to that plate's own white level);
+  2. else sniff it for a black void;
+  3. else ask the **FOUR CORNERS** (owner 2026-07-28, his own rule —
+     *"da li recimo u 4 coska po recimo 5-10 piksela u dubinu ima isti
+     COLOR"*). Each corner contributes its median; if all four agree
+     within `AUTO_CORNER_AGREE_MAX` per channel, THAT is the
+     background colour and it is cleared with the configured
+     tolerance. The choice is logged — an auto-DECIDED colour is
+     never silent.
+
+  Only when even the corners disagree (a gradient, a scene) is the
+  image **ambiguous** → reported and left alone. The report names the
+  colour it saw, so it can be pasted into the custom-colour field —
+  skip, never guess, but never a dead end either.
+
+  Why the corners and not the whole border band: a medallion running
+  to the top edge drags the border median, but leaves all four
+  corners sitting on the true background.
 - **`BG_MODE_BLACK` / `BG_MODE_WHITE`** (owner 2026-07-28) — the owner
   STATING the background; the sniff is skipped entirely.
 - **`BG_MODE_COLOR`** (owner 2026-07-28) — any target colour plus a
-  `±X %` tolerance (percent of 255, per channel). His own worked
-  example: `#FF0000 ± 6.67 %` spans `#EE0000`…`#FF1111`.
+  `±X %` tolerance (percent of 255, per channel), BOTH owner-editable
+  fields, not fixed values. `BG_COLOR_TOLERANCE_PCT` is only the
+  starting value. His own worked example: `#FF0000 ± 6.67 %` spans
+  `#EE0000`…`#FF1111` (±17 levels). **`0 %` is legal** and keys the
+  typed colour EXACTLY.
 - **already transparent** → skipped untouched in EVERY mode, forced
   ones included (it has a real alpha channel a colour key knows nothing
   about) — this is what makes re-running a folder safe.
@@ -70,9 +88,14 @@ its message NAMING the guard that fired.
 
 | Path | Guard | Why |
 |------|-------|-----|
-| black | `SAFETY_MAX_REMOVE_FRAC` (0.40) | tight — a fence around a GUESS (auto may have keyed a dark subject as background) |
-| white | `SAFETY_MAX_REMOVE_FRAC_WHITE` (0.85) | legit white backgrounds run large, reaching ~0.57 |
-| custom | `SAFETY_MAX_REMOVE_FRAC_COLOR` (0.85) | the owner TYPED the colour — only a catastrophe needs catching |
+| black | `SAFETY_MAX_REMOVE_FRAC` (40 %) | tight — a fence around a GUESS (auto may have keyed a dark subject as background) |
+| white | `SAFETY_MAX_REMOVE_FRAC_WHITE` (85 %) | legit white backgrounds run large, reaching ~57 % |
+| custom | `SAFETY_MAX_REMOVE_FRAC_COLOR` (85 %) | the colour is known — typed, or agreed on by four corners |
+
+The constants are FRACTIONS because the engine compares them against a
+fraction; the GUI shows and takes them as PERCENT and converts at the
+panel edge (owner 2026-07-28 — a bare `0.40` in a box says nothing).
+All three are owner-editable per run.
 
 **Known limit (owner 2026-07-28, the "pointers" case).** The black
 guard measures AREA, which is only a proxy for "it ate the subject",
@@ -91,9 +114,10 @@ run is the other. Pinned by
 - numpy, scipy (`ndimage`), Pillow
 - [Config (subfolder)](config/___config.md) — `CROP_INK_ALPHA`, `CROP_MIN_INK_PX`,
   `CLEAN_EDGE_ALPHA` (the ink-crop / edge-cleanup thresholds),
-  `BLACK_VOID_MAX` (the black-void brightness ceiling), the four
+  `BLACK_VOID_MAX` (the black-void brightness ceiling), the
   background-mode constants (`BG_MODE_*`, `BG_COLOR_DEFAULT`,
-  `BG_COLOR_TOLERANCE_PCT`) and the three SAFETY guards
+  `BG_COLOR_TOLERANCE_PCT`, `AUTO_CORNER_PX`,
+  `AUTO_CORNER_AGREE_MAX`) and the three SAFETY guards
   `SAFETY_MAX_REMOVE_FRAC` / `_WHITE` / `_COLOR`. Imported
   package-first (`from painter.config`) with a bare `from config`
   fallback so the standalone script still runs.
@@ -119,8 +143,11 @@ run is the other. Pinned by
 - `plan(img, mode, *, color, tolerance_pct) -> RemovalPlan` — decides
   how ONE image is treated (see the modes above). The named tuple
   carries `action`, the `target` colour, `dist_full`/`dist_edge`,
-  `sigma`, and `border_hex` (always the sniffed border colour, so an
-  ambiguous skip can say WHICH colour to state instead).
+  `sigma`, and `border_hex` (always the colour it saw, so an ambiguous
+  skip can say WHICH colour to state instead).
+- `corner_background_color(rgb, corner_px, agree_max) -> (r,g,b) |
+  None` — the four-corner colour vote (see `BG_MODE_AUTO` above);
+  `None` when the corners disagree.
 - `apply_plan(img, removal) -> (rgba, removed_frac)` — run the engine
   with one plan's parameters.
 - `remove_color_background(img, target, dist_full, dist_edge, sigma)

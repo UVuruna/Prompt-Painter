@@ -267,12 +267,18 @@ def test_get_conditions_proxies_the_embedded_filter_editor(root):
 
 def test_bg_panel_advanced_defaults_match_config(root):
     panel = make_panel(gui.BgSettingsPanel, root)
-    assert panel.safety_black_var.get() == f"{SAFETY_MAX_REMOVE_FRAC:.2f}"
-    assert panel.safety_white_var.get() == f"{SAFETY_MAX_REMOVE_FRAC_WHITE:.2f}"
-    assert panel.safety_color_var.get() == f"{SAFETY_MAX_REMOVE_FRAC_COLOR:.2f}"
+    # the guards are shown as PERCENT, not the engine's raw fraction
+    assert panel.safety_black_var.get() == "40"
+    assert panel.safety_white_var.get() == "85"
+    assert panel.safety_color_var.get() == "85"
+    assert float(panel.safety_black_var.get()) / 100 == SAFETY_MAX_REMOVE_FRAC
+    assert (float(panel.safety_white_var.get()) / 100
+            == SAFETY_MAX_REMOVE_FRAC_WHITE)
+    assert (float(panel.safety_color_var.get()) / 100
+            == SAFETY_MAX_REMOVE_FRAC_COLOR)
     assert panel.bg_mode_var.get() == BG_MODE_LABEL[BG_MODE_AUTO]
     assert panel.bg_color_var.get() == BG_COLOR_DEFAULT
-    assert panel.bg_tolerance_var.get() == f"{BG_COLOR_TOLERANCE_PCT:g}"
+    assert panel.bg_tolerance_var.get() == f"{BG_COLOR_TOLERANCE_PCT:.2f}"
 
 
 def test_crop_panel_advanced_defaults_match_config(root):
@@ -299,9 +305,10 @@ def test_bg_build_func_passes_the_overridden_safety_fractions(
         postprocess_module, "remove_background", fake_remove_background
     )
     panel = make_panel(gui.BgSettingsPanel, root)
-    panel.safety_black_var.set("0.10")
-    panel.safety_white_var.set("0.20")
-    panel.safety_color_var.set("0.30")
+    # typed as PERCENT — the engine still receives the fraction
+    panel.safety_black_var.set("10")
+    panel.safety_white_var.set("20")
+    panel.safety_color_var.set("30")
     func = panel.build_func()
     func(tmp_path / "x.png", print)
 
@@ -320,6 +327,28 @@ def test_bg_build_func_raises_on_a_non_numeric_safety_field(root):
     panel.safety_black_var.set("not-a-number")
     with pytest.raises(ValueError, match="black bg safety"):
         panel.build_func()
+
+
+def test_bg_build_func_raises_on_an_out_of_range_safety_percent(root):
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.safety_black_var.set("140")
+    with pytest.raises(ValueError, match="black bg safety"):
+        panel.build_func()
+
+
+def test_bg_guard_settings_from_the_fraction_build_are_not_misread(root):
+    """The guard fields changed UNIT (fraction -> percent). A
+    settings.json written by the fraction build holds "0.40" under the
+    OLD bare key; read as percent that would be a 0.4 % guard that
+    refuses every image. The renamed _pct key means such a file falls
+    back to the correct defaults instead."""
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.apply_settings({
+        "safety_black": "0.40", "safety_white": "0.85",
+        "safety_color": "0.85",
+    })
+    assert panel.safety_black_var.get() == "40"
+    assert panel.safety_white_var.get() == "85"
 
 
 # --- background mode + custom colour (owner 2026-07-28) ---------------
@@ -392,7 +421,7 @@ def test_bg_settings_round_trip_carries_mode_colour_and_guards(root):
     panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_COLOR])
     panel.bg_color_var.set("#3A5F7D")
     panel.bg_tolerance_var.set("8.5")
-    panel.safety_color_var.set("0.55")
+    panel.safety_color_var.set("55")
     stored = panel.get_settings()
     assert stored["bg_mode"] == BG_MODE_COLOR  # the KEY, never the label
 
@@ -401,7 +430,7 @@ def test_bg_settings_round_trip_carries_mode_colour_and_guards(root):
     assert fresh.bg_mode_var.get() == BG_MODE_LABEL[BG_MODE_COLOR]
     assert fresh.bg_color_var.get() == "#3A5F7D"
     assert fresh.bg_tolerance_var.get() == "8.5"
-    assert fresh.safety_color_var.get() == "0.55"
+    assert fresh.safety_color_var.get() == "55"
     assert fresh._color_box.winfo_manager()  # visibility followed the mode
 
 
@@ -535,14 +564,14 @@ def test_bg_panel_settings_round_trip(root):
     panel.filter.set_conditions(
         [cond(FILTER_KIND_WIDTH, FILTER_POLARITY_IF, 10.0, 20.0)]
     )
-    panel.safety_black_var.set("0.55")
-    panel.safety_white_var.set("0.90")
+    panel.safety_black_var.set("55")
+    panel.safety_white_var.set("90")
     panel._advanced_collapsed_var.set(False)
     panel._apply_advanced_visibility()
 
     stored = panel.get_settings()
-    assert stored["safety_black"] == "0.55"
-    assert stored["safety_white"] == "0.90"
+    assert stored["safety_black_pct"] == "55"
+    assert stored["safety_white_pct"] == "90"
     assert stored["advanced_collapsed"] is False
     assert stored["conditions"] == [
         filters.condition_to_dict(cond(FILTER_KIND_WIDTH, FILTER_POLARITY_IF, 10.0, 20.0))
@@ -551,8 +580,8 @@ def test_bg_panel_settings_round_trip(root):
     fresh = make_panel(gui.BgSettingsPanel, root)
     conditions = gui._parse_condition_dicts(stored["conditions"], lambda _m: None)
     fresh.apply_settings(stored, conditions=conditions)
-    assert fresh.safety_black_var.get() == "0.55"
-    assert fresh.safety_white_var.get() == "0.90"
+    assert fresh.safety_black_var.get() == "55"
+    assert fresh.safety_white_var.get() == "90"
     assert fresh._advanced_collapsed_var.get() is False
     assert fresh._advanced_box.winfo_manager() == "pack"
     assert fresh.filter.get_conditions() == conditions

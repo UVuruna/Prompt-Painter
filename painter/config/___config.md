@@ -69,15 +69,19 @@ module.
 (`CROP_INK_ALPHA`, `CROP_MIN_INK_PX`), the border-connected edge-halo
 cleanup (`CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`), the BACKGROUND MODE
 block (owner 2026-07-28 — `BG_MODE_AUTO`/`_BLACK`/`_WHITE`/`_COLOR`,
-`BG_MODE_DEFAULT`, the GUI-facing `BG_MODE_LABEL`, plus the
-custom-colour `BG_COLOR_DEFAULT` and `BG_COLOR_TOLERANCE_PCT`), and the
+`BG_MODE_DEFAULT`, the GUI-facing `BG_MODE_LABEL`, the custom-colour
+STARTING values `BG_COLOR_DEFAULT` / `BG_COLOR_TOLERANCE_PCT` — both
+owner-editable per run, tolerance 0 legal — and the four-corner
+auto-colour vote `AUTO_CORNER_PX` / `AUTO_CORNER_AGREE_MAX`), and the
 black-void removal + PER-PATH safety guards (`BLACK_VOID_MAX`,
 `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`,
 `SAFETY_MAX_REMOVE_FRAC_COLOR` — BLACK guards at 0.40 since it fences a
 GUESS: legit bright-on-black clears ~0.24 vs. destroyed dark rondels at
 0.45+; WHITE and CUSTOM guard at 0.85 since legit white backgrounds
-routinely clear 0.33-0.57 and a custom colour was TYPED by the owner).
-A leaf module (pure numbers and mode names).
+routinely clear 0.33-0.57 and a colour background is known rather than
+inferred). The guards are FRACTIONS here because the engine compares
+them against a fraction; the GUI shows and takes PERCENT, converting at
+the panel edge. A leaf module (pure numbers and mode names).
 
 ### `upscale.py` — Real-ESRGAN Upscaler Config
 Where the downloaded `realesrgan-ncnn-vulkan` binary lives

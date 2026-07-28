@@ -28,6 +28,7 @@ from typing import Callable
 from painter.config import (
     BG_COLOR_DEFAULT,
     BG_COLOR_TOLERANCE_PCT,
+    BG_MODE_AUTO,
     BG_MODE_BLACK,
     BG_MODE_COLOR,
     BG_MODE_DEFAULT,
@@ -85,12 +86,14 @@ def remove_background(
     ``PostprocessError`` on a real failure.
 
     ``mode`` (owner 2026-07-28) picks WHICH background is cleared:
-    ``BG_MODE_AUTO`` sniffs the border (white or black, else "unclear"),
-    ``BG_MODE_BLACK``/``BG_MODE_WHITE`` force one and skip the sniff,
-    and ``BG_MODE_COLOR`` clears ANY ``color`` (hex) within
-    ``tolerance_pct`` % of 255 per channel. The colour is parsed ONCE,
-    before the image is opened, so a mistyped hex is reported as the
-    configuration error it is rather than as a per-image failure.
+    ``BG_MODE_AUTO`` sniffs the border for white or black and then asks
+    the FOUR CORNERS for any other uniform colour (only disagreeing
+    corners give "unclear"), ``BG_MODE_BLACK``/``BG_MODE_WHITE`` force
+    one and skip the sniff, and ``BG_MODE_COLOR`` clears ANY ``color``
+    (hex) within ``tolerance_pct`` % of 255 per channel — 0 % keys the
+    typed colour EXACTLY. The colour is parsed ONCE, before the image is
+    opened, so a mistyped hex is reported as the configuration error it
+    is rather than as a per-image failure.
 
     The three ``safety_max_remove_frac*`` arguments (GUI rework Phase
     13; the colour one 2026-07-28) are OPTIONAL per-call overrides of
@@ -122,12 +125,20 @@ def remove_background(
                 # straight into the BG panel's custom-colour field
                 # instead of being told only that we gave up (Rule #1)
                 log(
-                    f"    background UNCLEAR (border ≈ {removal.border_hex},"
-                    f" not white/black) — left untouched: {path.name};"
-                    f" set BG mode to Custom colour {removal.border_hex}"
-                    f" to clear it"
+                    f"    background UNCLEAR (not white/black, and the"
+                    f" four corners disagree; border ≈"
+                    f" {removal.border_hex}) — left untouched:"
+                    f" {path.name}; set BG mode to Custom colour to"
+                    f" clear it"
                 )
                 return "unclear"
+            if mode == BG_MODE_AUTO and removal.action == BG_MODE_COLOR:
+                # an AUTO-DETECTED colour is a decision the owner did not
+                # make — say which colour was cleared, never silently
+                log(
+                    f"    background colour auto-detected from the four"
+                    f" corners: {removal.border_hex} ({path.name})"
+                )
             out, removed = apply_plan(im, removal)
         # SAFETY GUARD: never destroy an image. A removal that clears
         # more than the path's guard fraction ate the subject (a dark
