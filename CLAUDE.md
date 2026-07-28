@@ -94,8 +94,12 @@ is the binding spec.
    only disagreeing corners are reported and left untouched), a
    FORCED white/black, or a CUSTOM COLOUR ± X % per channel (0 % =
    exactly that hex) that clears ANY background colour — the
-   standalone BG tool's own always-visible dropdown, with the three
-   per-path safety guards as its Advanced fine-tune, in PERCENT),
+   standalone BG tool's own always-visible dropdown, with a themed
+   colour picker on the swatch, the three per-path safety guards as
+   its Advanced fine-tune in PERCENT, and a REACH choice: the removal
+   is a FLOOD FILL from the frame by default, so a same-coloured
+   region ENCLOSED by the subject (the counters inside letters) stays,
+   while "everywhere" clears every matching pixel),
    `crop_transparent` (autocrop to the content box + a small config
    margin), and `upscale_if_small` (`painter/upscale.py`,
    Real-ESRGAN ncnn-vulkan binary auto-downloaded into `tools/`,

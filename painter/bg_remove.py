@@ -62,6 +62,9 @@ try:
         BG_MODE_BLACK,
         BG_MODE_COLOR,
         BG_MODE_WHITE,
+        BG_REACH_ALL,
+        BG_REACH_DEFAULT,
+        BG_REACH_EDGE,
         BLACK_VOID_MAX,
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
@@ -80,6 +83,9 @@ except ImportError:  # standalone: script's own dir is on sys.path
         BG_MODE_BLACK,
         BG_MODE_COLOR,
         BG_MODE_WHITE,
+        BG_REACH_ALL,
+        BG_REACH_DEFAULT,
+        BG_REACH_EDGE,
         BLACK_VOID_MAX,
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
@@ -134,7 +140,7 @@ def parse_hex_color(text: str) -> tuple[int, int, int]:
         value = int(raw, 16)
     except ValueError:
         raise ValueError(
-            f"background colour: {text!r} is not a hex colour like #FF0000."
+            f"background color: {text!r} is not a hex color like #FF0000."
         ) from None
     return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
 
@@ -193,18 +199,27 @@ def remove_color_background(img: Image.Image,
                             dist_full: int,
                             dist_edge: int,
                             sigma: float = 0.0,
+                            reach: str = BG_REACH_DEFAULT,
                             ) -> tuple[Image.Image, float]:
-    """(RGBA copy, removed_frac) — the BORDER-CONNECTED region within
-    ``dist_edge`` of ``target`` made transparent. THE engine: white,
-    black and custom colour are this function with different arguments.
+    """(RGBA copy, removed_frac) — the region within ``dist_edge`` of
+    ``target`` made transparent. THE engine: white, black and custom
+    colour are this function with different arguments.
 
-    Only pixels that CONNECT TO THE IMAGE BORDER are cleared, so an
-    interior region ENCLOSED by the subject (the black leading between
-    glass, a dark inner area, Aurora's own black hour sector) is never
-    border-connected and stays fully OPAQUE. This is what replaced the
-    old "biggest bright blob + fill holes" disc, which could not tell a
-    dark subject from a black background and ate dark frames (the
-    bible/dark rondels).
+    ``reach`` decides WHERE a matching pixel counts as background:
+
+    * ``BG_REACH_EDGE`` (default) — only pixels that CONNECT TO THE
+      IMAGE BORDER through other matching pixels, i.e. a flood fill
+      inward from the frame. A matching region ENCLOSED by the subject
+      (the black leading between glass, Aurora's own black hour sector,
+      the counters inside the letters of HOPE / SALVATION) is not
+      reachable from the frame and stays fully OPAQUE even though it is
+      the very same colour. This is what replaced the old "biggest
+      bright blob + fill holes" disc, which could not tell a dark
+      subject from a black background and ate dark frames (the
+      bible/dark rondels).
+    * ``BG_REACH_ALL`` (owner 2026-07-28) — no connectivity test at
+      all: EVERY pixel within tolerance goes, wherever it sits. The
+      enclosed counters become holes and the letters become outlines.
 
     Two EDGE treatments, chosen by the two distances:
 
@@ -221,7 +236,10 @@ def remove_color_background(img: Image.Image,
     dark ring and ate the subject)."""
     rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
     dist = color_distance(rgb, target)
-    background = edge_connected_background(dist <= dist_edge)
+    match = dist <= dist_edge
+    background = (
+        match if reach == BG_REACH_ALL else edge_connected_background(match)
+    )
     if dist_edge > dist_full:
         ramp = np.clip(
             (dist - dist_full) / (dist_edge - dist_full), 0.0, 1.0
@@ -236,11 +254,17 @@ def remove_color_background(img: Image.Image,
 
 
 def apply_plan(img: Image.Image,
-               removal: "RemovalPlan") -> tuple[Image.Image, float]:
-    """Run the engine with one ``plan()`` result's parameters."""
+               removal: "RemovalPlan",
+               reach: str = BG_REACH_DEFAULT) -> tuple[Image.Image, float]:
+    """Run the engine with one ``plan()`` result's parameters.
+
+    ``reach`` is NOT part of the plan: it is orthogonal to WHICH colour
+    is the background (every mode, detected or stated, can be run
+    either way), so it stays a caller's choice rather than something
+    detection decides."""
     return remove_color_background(
         img, removal.target, removal.dist_full, removal.dist_edge,
-        removal.sigma,
+        removal.sigma, reach,
     )
 
 
@@ -446,7 +470,8 @@ def plan(img: Image.Image,
 def process_file(src: Path, dst: Path, mode: str, crop: bool,
                  force_full: int | None, force_edge: int | None,
                  color: str = BG_COLOR_DEFAULT,
-                 tolerance_pct: float = BG_COLOR_TOLERANCE_PCT) -> str:
+                 tolerance_pct: float = BG_COLOR_TOLERANCE_PCT,
+                 reach: str = BG_REACH_DEFAULT) -> str:
     """Process one image; returns the action taken (or a 'skip-*' reason).
 
     'skip-risky' means the SAFETY guard fired: the removal would clear
@@ -466,7 +491,7 @@ def process_file(src: Path, dst: Path, mode: str, crop: bool,
             removal = removal._replace(dist_full=255 - force_full)
         if force_edge is not None:
             removal = removal._replace(dist_edge=255 - force_edge)
-        out, removed = apply_plan(im, removal)
+        out, removed = apply_plan(im, removal, reach)
     if removed > SAFETY_GUARD_DEFAULT[removal.action]:
         return "skip-risky"  # ate the subject — leave the source untouched
     if crop:
@@ -499,6 +524,12 @@ def main(argv=None) -> int:
                     default=BG_COLOR_TOLERANCE_PCT,
                     help="--mode color +- tolerance, %% of 255 per channel"
                          " (default %(default)s)")
+    ap.add_argument("--reach", choices=(BG_REACH_EDGE, BG_REACH_ALL),
+                    default=BG_REACH_DEFAULT,
+                    help="edge (default) clears only what connects to the"
+                         " frame, keeping enclosed same-coloured regions"
+                         " (letter counters); all clears every matching"
+                         " pixel wherever it sits")
     ap.add_argument("--white-full", type=int, help="override white threshold")
     ap.add_argument("--white-edge", type=int, help="override white edge")
     ap.add_argument("--crop", action="store_true", help="autocrop to the subject")
@@ -535,7 +566,7 @@ def main(argv=None) -> int:
             dst = src if args.in_place else out_root / src.relative_to(args.src).with_suffix(".png")
             action = process_file(src, dst, args.mode, args.crop,
                                   args.white_full, args.white_edge,
-                                  args.color, args.tolerance)
+                                  args.color, args.tolerance, args.reach)
             counts[action] = counts.get(action, 0) + 1
             elapsed = time.time() - start
             print(f"[{elapsed:5.1f}s] {i:>4}/{len(files)} | {action:16} | "
@@ -562,7 +593,7 @@ def main(argv=None) -> int:
             dst = args.out or args.src.with_name(args.src.stem + "_clean.png")
         action = process_file(args.src, dst, args.mode, args.crop,
                               args.white_full, args.white_edge,
-                              args.color, args.tolerance)
+                              args.color, args.tolerance, args.reach)
         print(f"{action} -> {dst}")
     return 0
 

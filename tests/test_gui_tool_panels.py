@@ -90,6 +90,9 @@ from painter.config import (
     BG_MODE_BLACK,
     BG_MODE_COLOR,
     BG_MODE_LABEL,
+    BG_REACH_ALL,
+    BG_REACH_EDGE,
+    BG_REACH_LABEL,
     CLEAN_EDGE_ENABLE,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
@@ -316,6 +319,7 @@ def test_bg_build_func_passes_the_overridden_safety_fractions(
         "mode": BG_MODE_AUTO,
         "color": BG_COLOR_DEFAULT,
         "tolerance_pct": BG_COLOR_TOLERANCE_PCT,
+        "reach": BG_REACH_EDGE,
         "safety_max_remove_frac": 0.10,
         "safety_max_remove_frac_white": 0.20,
         "safety_max_remove_frac_color": 0.30,
@@ -381,7 +385,7 @@ def test_bg_build_func_raises_on_a_mistyped_custom_colour(root):
     panel = make_panel(gui.BgSettingsPanel, root)
     panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_COLOR])
     panel.bg_color_var.set("#GGGGGG")
-    with pytest.raises(ValueError, match="background colour"):
+    with pytest.raises(ValueError, match="background color"):
         panel.build_func()
 
 
@@ -414,6 +418,81 @@ def test_bg_colour_fields_show_only_in_custom_mode(root):
     panel.bg_mode_var.set(BG_MODE_LABEL[BG_MODE_AUTO])
     panel._apply_color_visibility()
     assert not panel._color_box.winfo_manager()
+
+
+def test_bg_reach_choice_reaches_the_engine(root, monkeypatch, tmp_path):
+    """The owner's added option (2026-07-28) is a REAL parameter, not a
+    dropdown that does nothing."""
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        postprocess_module, "remove_background",
+        lambda path, log, **kw: (calls.append(kw), "done")[1],
+    )
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_reach_var.set(BG_REACH_LABEL[BG_REACH_ALL])
+    panel.build_func()(tmp_path / "x.png", print)
+    assert calls[0]["reach"] == BG_REACH_ALL
+
+
+def test_bg_reach_defaults_to_border_connected(root):
+    """The default must stay the flood fill — enclosed regions (the
+    counters inside letters, the black leading between glass) survive
+    unless the owner asks otherwise."""
+    panel = make_panel(gui.BgSettingsPanel, root)
+    assert panel.bg_reach_var.get() == BG_REACH_LABEL[BG_REACH_EDGE]
+
+
+def test_bg_reach_round_trips_and_keeps_its_hint_in_step(root):
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_reach_var.set(BG_REACH_LABEL[BG_REACH_ALL])
+    panel._sync_reach_hint()
+    assert "enclosed ones too" in panel._reach_hint.get()
+
+    fresh = make_panel(gui.BgSettingsPanel, root)
+    fresh.apply_settings(panel.get_settings())
+    assert fresh.bg_reach_var.get() == BG_REACH_LABEL[BG_REACH_ALL]
+    assert "enclosed ones too" in fresh._reach_hint.get()
+
+
+def test_bg_swatch_click_opens_the_picker_and_writes_the_hex_back(
+    root, monkeypatch,
+):
+    """Clicking the swatch opens a real color chooser (owner
+    2026-07-28); whatever it returns is normalised to #RRGGBB."""
+    import ttkbootstrap.dialogs.colorchooser as chooser
+
+    class FakeDialog:
+        def __init__(self, parent, title, initialcolor):
+            FakeDialog.initial = initialcolor
+            self.result = SimpleNamespace(hex="#3a5f7d")
+
+        def show(self):
+            pass
+
+    monkeypatch.setattr(chooser, "ColorChooserDialog", FakeDialog)
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_color_var.set("#f00")
+    panel._pick_color()
+
+    assert FakeDialog.initial == "#FF0000"   # opened on the current color
+    assert panel.bg_color_var.get() == "#3A5F7D"
+
+
+def test_bg_swatch_click_cancelled_leaves_the_colour_alone(root, monkeypatch):
+    import ttkbootstrap.dialogs.colorchooser as chooser
+
+    class CancelledDialog:
+        def __init__(self, *_a):
+            self.result = None
+
+        def show(self):
+            pass
+
+    monkeypatch.setattr(chooser, "ColorChooserDialog", CancelledDialog)
+    panel = make_panel(gui.BgSettingsPanel, root)
+    panel.bg_color_var.set("#123456")
+    panel._pick_color()
+    assert panel.bg_color_var.get() == "#123456"
 
 
 def test_bg_settings_round_trip_carries_mode_colour_and_guards(root):

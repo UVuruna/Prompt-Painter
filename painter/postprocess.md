@@ -28,6 +28,13 @@ a no-op — only for real errors (`PostprocessError`, loud).
   opened, so it is reported as the configuration error it is rather
   than as a per-image failure.
 
+  Its **`reach`** (owner 2026-07-28) decides WHERE a matching pixel
+  counts: `BG_REACH_EDGE` clears only what connects to the frame (so a
+  same-coloured region ENCLOSED by the subject — the counters inside
+  letters — stays), `BG_REACH_ALL` clears every matching pixel wherever
+  it sits. Orthogonal to the mode: any background, detected or stated,
+  runs either way.
+
   A **SAFETY GUARD** (owner 2026-07-19) also returns `"unclear"` when
   the removal would clear more than the path's guard fraction — it ate
   the subject rather than the background. The guard is PER PATH: black
@@ -103,6 +110,7 @@ for every run that doesn't explicitly override them.
   of failing on every item.
 - `remove_background(path, log, *, mode=BG_MODE_DEFAULT,
   color=BG_COLOR_DEFAULT, tolerance_pct=BG_COLOR_TOLERANCE_PCT,
+  reach=BG_REACH_DEFAULT,
   safety_max_remove_frac=SAFETY_MAX_REMOVE_FRAC,
   safety_max_remove_frac_white=SAFETY_MAX_REMOVE_FRAC_WHITE,
   safety_max_remove_frac_color=SAFETY_MAX_REMOVE_FRAC_COLOR) -> str` —

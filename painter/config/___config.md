@@ -71,8 +71,11 @@ cleanup (`CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`), the BACKGROUND MODE
 block (owner 2026-07-28 — `BG_MODE_AUTO`/`_BLACK`/`_WHITE`/`_COLOR`,
 `BG_MODE_DEFAULT`, the GUI-facing `BG_MODE_LABEL`, the custom-colour
 STARTING values `BG_COLOR_DEFAULT` / `BG_COLOR_TOLERANCE_PCT` — both
-owner-editable per run, tolerance 0 legal — and the four-corner
-auto-colour vote `AUTO_CORNER_PX` / `AUTO_CORNER_AGREE_MAX`), and the
+owner-editable per run, tolerance 0 legal — the four-corner
+auto-colour vote `AUTO_CORNER_PX` / `AUTO_CORNER_AGREE_MAX`, and the
+REACH choice `BG_REACH_EDGE` / `BG_REACH_ALL` deciding whether an
+ENCLOSED patch of the background colour survives the flood fill or goes
+with it), and the
 black-void removal + PER-PATH safety guards (`BLACK_VOID_MAX`,
 `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`,
 `SAFETY_MAX_REMOVE_FRAC_COLOR` — BLACK guards at 0.40 since it fences a

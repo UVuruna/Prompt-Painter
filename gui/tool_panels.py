@@ -33,6 +33,9 @@ from painter.config import (
     BG_MODE_COLOR,
     BG_MODE_DEFAULT,
     BG_MODE_LABEL,
+    BG_REACH_ALL,
+    BG_REACH_DEFAULT,
+    BG_REACH_LABEL,
     CLEAN_EDGE_ENABLE,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
@@ -76,6 +79,7 @@ from .widgets import (
 # (settings.json always carries the KEY, so relabelling never
 # invalidates a saved run — see config's own BG_MODE_LABEL note).
 BG_MODE_BY_LABEL = {label: mode for mode, label in BG_MODE_LABEL.items()}
+BG_REACH_BY_LABEL = {label: r for r, label in BG_REACH_LABEL.items()}
 BG_SWATCH_PX = 24  # the custom-colour live preview chip
 
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
@@ -574,7 +578,7 @@ class BgSettingsPanel(ToolSettingsPanel):
 
     def _build_extra(self, box: ttk.Frame) -> None:
         ttk.Label(
-            box, text="Background — which colour the removal clears:",
+            box, text="Background — which color the removal clears:",
         ).pack(anchor="w", pady=(0, 2))
         row = ttk.Frame(box)
         row.pack(fill="x", pady=2)
@@ -588,25 +592,32 @@ class BgSettingsPanel(ToolSettingsPanel):
         # claim about whatever is currently selected
         ttk.Label(
             row,
-            text="Auto reads white/black, then the colour the four"
+            text="Auto reads white/black, then the color the four"
             " corners agree on",
             wraplength=DENSE_COL_WRAP_PX,
         ).pack(side="left", padx=(6, 0))
 
-        # colour + tolerance: Custom mode only (see _apply_color_visibility)
+        # color + tolerance: Custom mode only (see _apply_color_visibility)
         self._color_box = ttk.Frame(box)
         crow = ttk.Frame(self._color_box)
         crow.pack(fill="x", pady=2)
-        ttk.Label(crow, text="colour", width=8).pack(side="left")
+        ttk.Label(crow, text="color", width=8).pack(side="left")
         self.bg_color_var = tk.StringVar(value=BG_COLOR_DEFAULT)
         rounded_entry(
             crow, width=90, textvariable=self.bg_color_var, justify="center",
         ).pack(side="left")
+        # the swatch is a BUTTON, not decoration (owner 2026-07-28):
+        # clicking it opens the color picker. hand2 + the note beside it
+        # say so, since a plain chip reads as a read-only preview.
         self._color_swatch = ctk.CTkLabel(
             crow, text="", width=BG_SWATCH_PX, height=BG_SWATCH_PX,
-            corner_radius=6, bg_color=theme_pair("bg"),
+            corner_radius=6, bg_color=theme_pair("bg"), cursor="hand2",
         )
         self._color_swatch.pack(side="left", padx=(6, 0))
+        self._color_swatch.bind("<Button-1>", self._pick_color)
+        ttk.Label(
+            crow, text="← click to pick", style="Muted.TLabel",
+        ).pack(side="left", padx=(6, 0))
 
         trow = ttk.Frame(self._color_box)
         trow.pack(fill="x", pady=2)
@@ -633,12 +644,77 @@ class BgSettingsPanel(ToolSettingsPanel):
         # (the colour drives the swatch AND the tolerance hint's span)
         self.bg_color_var.trace_add("write", self._sync_color_fields)
         self.bg_tolerance_var.trace_add("write", self._sync_tolerance_hint)
+        # REACH — orthogonal to the mode, so its own row, always shown
+        # (owner 2026-07-28). It answers a question the flood fill
+        # silently decided for him: does an ENCLOSED patch of the
+        # background colour — the counters inside HOPE's O and P — go
+        # too, or stay?
+        ttk.Label(
+            box, text="Remove matching pixels:",
+        ).pack(anchor="w", pady=(8, 2))
+        rrow = ttk.Frame(box)
+        rrow.pack(fill="x", pady=2)
+        self.bg_reach_var = tk.StringVar(
+            value=BG_REACH_LABEL[BG_REACH_DEFAULT]
+        )
+        rounded_combo(
+            rrow, list(BG_REACH_LABEL.values()), self.bg_reach_var,
+            width=190, command=lambda _label: self._sync_reach_hint(),
+        ).pack(side="left")
+        self._reach_hint = tk.StringVar()
+        ttk.Label(
+            rrow, textvariable=self._reach_hint,
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(side="left", padx=(6, 0))
+
         self._sync_color_fields()
+        self._sync_reach_hint()
         self._apply_color_visibility()
+
+    def _sync_reach_hint(self, *_args) -> None:
+        everywhere = (
+            BG_REACH_BY_LABEL[self.bg_reach_var.get()] == BG_REACH_ALL
+        )
+        self._reach_hint.set(
+            "every matching pixel — enclosed ones too (letters become"
+            " outlines)"
+            if everywhere else
+            "only what connects to the frame — enclosed patches stay"
+        )
 
     def _sync_color_fields(self, *_args) -> None:
         self._sync_color_swatch()
         self._sync_tolerance_hint()
+
+    def _pick_color(self, *_event) -> None:
+        """Open the color picker on the swatch (owner 2026-07-28).
+
+        ttkbootstrap's own ``ColorChooserDialog`` rather than tkinter's
+        bare OS dialog: it is THEMED like the rest of the app (Rule
+        #16), and it carries an EYEDROPPER — the fastest way to answer
+        "what colour is this background?" is to pick it off the image
+        on screen instead of reading a hex out of another tool.
+
+        Cancel leaves the field untouched. Whatever the dialog returns
+        is normalised through the same parser the run uses, so the
+        field only ever holds a form the engine accepts."""
+        from ttkbootstrap.dialogs.colorchooser import ColorChooserDialog
+
+        from painter.bg_remove import format_hex_color, parse_hex_color
+
+        try:
+            initial = format_hex_color(parse_hex_color(self.bg_color_var.get()))
+        except ValueError:
+            initial = BG_COLOR_DEFAULT  # half-typed field — start neutral
+        dialog = ColorChooserDialog(
+            self.winfo_toplevel(), "Background color", initial
+        )
+        dialog.show()
+        if dialog.result is None:
+            return  # cancelled
+        self.bg_color_var.set(
+            format_hex_color(parse_hex_color(dialog.result.hex))
+        )
 
     def _sync_tolerance_hint(self, *_args) -> None:
         """Spell the tolerance out in colour levels: '% of 255' means
@@ -655,7 +731,7 @@ class BgSettingsPanel(ToolSettingsPanel):
             self._tolerance_hint.set("% per channel")
             return
         if levels == 0:
-            self._tolerance_hint.set("% — EXACTLY the colour above")
+            self._tolerance_hint.set("% — EXACTLY the color above")
             return
         span = ""
         try:
@@ -717,7 +793,7 @@ class BgSettingsPanel(ToolSettingsPanel):
             ("white bg", self.safety_white_var,
              "% — high: real white plates legitimately clear ~57 %"),
             ("custom bg", self.safety_color_var,
-             "% — high: the colour is known, not inferred"),
+             "% — high: the color is known, not inferred"),
         ):
             row = ttk.Frame(box)
             row.pack(fill="x", pady=2)
@@ -748,9 +824,10 @@ class BgSettingsPanel(ToolSettingsPanel):
         custom = _parse_percent(
             self.safety_color_var.get(), "custom bg safety"
         ) / 100.0
+        reach = BG_REACH_BY_LABEL[self.bg_reach_var.get()]
         return lambda path, log: remove_background(
             path, log,
-            mode=mode, color=color, tolerance_pct=tolerance,
+            mode=mode, color=color, tolerance_pct=tolerance, reach=reach,
             safety_max_remove_frac=black,
             safety_max_remove_frac_white=white,
             safety_max_remove_frac_color=custom,
@@ -768,6 +845,7 @@ class BgSettingsPanel(ToolSettingsPanel):
             "bg_mode": BG_MODE_BY_LABEL[self.bg_mode_var.get()],
             "bg_color": self.bg_color_var.get(),
             "bg_tolerance": self.bg_tolerance_var.get(),
+            "bg_reach": BG_REACH_BY_LABEL[self.bg_reach_var.get()],
             "safety_black_pct": self.safety_black_var.get(),
             "safety_white_pct": self.safety_white_var.get(),
             "safety_color_pct": self.safety_color_var.get(),
@@ -783,6 +861,9 @@ class BgSettingsPanel(ToolSettingsPanel):
             self.bg_color_var.set(stored["bg_color"])
         if "bg_tolerance" in stored:
             self.bg_tolerance_var.set(stored["bg_tolerance"])
+        if stored.get("bg_reach") in BG_REACH_LABEL:
+            self.bg_reach_var.set(BG_REACH_LABEL[stored["bg_reach"]])
+        self._sync_reach_hint()
         if "safety_black_pct" in stored:
             self.safety_black_var.set(stored["safety_black_pct"])
         if "safety_white_pct" in stored:

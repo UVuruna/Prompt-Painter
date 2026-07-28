@@ -79,6 +79,15 @@ tolerance bounding what counts as background, forced modes overruling
 the border sniff, an already-transparent image skipped in EVERY mode,
 and the "unclear" report naming the colour it saw.
 
+The REACH choice gets a group built on a synthetic letter "O" (a ring
+whose COUNTER is pure `#000000`, exactly like the background): edge
+reach keeps that counter opaque while clearing the outer void — the
+flood fill cannot walk through the stroke — and `BG_REACH_ALL` clears
+it too, leaving an outline. Plus: everywhere always removes at least as
+much as edge, the choice really reaches the engine through
+`remove_background`, and meeting the SAFETY guard because of it is a
+NAMED report, never a silent no-op.
+
 The FOUR-CORNER auto-colour vote gets its own group: auto clearing a
 colour the corners agree on (and LOGGING which), the vote ignoring a
 subject that runs to an edge (the reason it is corners and not the
@@ -390,8 +399,12 @@ the chosen mode/colour/tolerance reaching the engine call, a mistyped
 colour raising at Start (and being HARMLESS in a mode that ignores
 it), an out-of-range tolerance, the colour fields packed only in
 Custom mode, the guards typed as PERCENT still reaching the engine as
-FRACTIONS, and the round-trip storing the MODE KEY (an unknown stored
-mode falling back to the default). One test pins the UNIT MIGRATION:
+FRACTIONS, the REACH dropdown reaching it too (and defaulting to the
+flood fill), the swatch click opening a color chooser — monkeypatched,
+never a real modal — opening it on the CURRENT color and writing the
+result back normalised, with Cancel leaving the field alone, and the
+round-trip storing the MODE and REACH KEYS (an unknown stored value
+falling back to the default). One test pins the UNIT MIGRATION:
 a settings file from the fraction build (`safety_black: "0.40"`) must
 fall back to the 40 % default, never be misread as a 0.4 % guard that
 would refuse every image. `PainterGui._start_tool_from_panel`'s pre-filter path end to

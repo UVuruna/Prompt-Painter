@@ -86,14 +86,27 @@ contribute `_build_advanced`/`build_func`/`_advanced_settings`/
 `_apply_advanced_settings`.
 
 ### BgSettingsPanel / CropSettingsPanel
-BG removal's/Crop's knobs. BG's PRIMARY control is always visible
-(`_build_extra`, owner 2026-07-28): a **Background** dropdown — Auto
-(detect), Black, White, or **Custom colour** — plus, in Custom mode
-only, the target hex (with a live swatch) and a `±X %` per-channel
-tolerance spinner. Its Advanced collapsible keeps the three
-safety-guard ceilings `remove_background` aborts past (black / white /
-custom). Crop's Advanced holds the border-halo-cleanup toggle, safety
-margin and ink-detection thresholds `crop_transparent` reads.
+BG removal's/Crop's knobs. BG's PRIMARY controls are always visible
+(`_build_extra`, owner 2026-07-28):
+
+- a **Background** dropdown — Auto (detect), Black, White, or **Custom
+  color** — plus, in Custom mode only, the target hex and a `±X %`
+  per-channel tolerance spinner. The swatch beside the hex is a
+  BUTTON, not decoration: clicking it opens ttkbootstrap's own themed
+  `ColorChooserDialog` (Rule #16 — not tkinter's bare OS dialog),
+  which also carries an EYEDROPPER, the fastest way to answer "what
+  color is this background?". Cancel leaves the field alone; whatever
+  the dialog returns is normalised through the run's own parser.
+- a **Remove matching pixels** dropdown — *Touching the edge* (the
+  flood fill: an ENCLOSED patch of the background color, like the
+  counters inside HOPE's O, survives) or *Everywhere in the image*
+  (every matching pixel goes; letters become outlines). Orthogonal to
+  the mode, so its own row, with a hint that follows the choice.
+
+Its Advanced collapsible keeps the three safety-guard ceilings
+`remove_background` aborts past (black / white / custom). Crop's
+Advanced holds the border-halo-cleanup toggle, safety margin and
+ink-detection thresholds `crop_transparent` reads.
 
 **Every number is shown in the unit the owner thinks in, and says what
 it means** (owner 2026-07-28 — *"sta znace ti brojevi 0.4, 0.85"*):
@@ -110,9 +123,10 @@ The mode lives in the ALWAYS-VISIBLE block rather than behind the gear
 because the guard that hides there is exactly what silently blocked
 the owner's "pointers" run: a hidden 0.40 he never saw.
 
-Stored keys: the MODE key (`BG_MODE_COLOR`), never the shown label, so
-relabelling the dropdown cannot invalidate a saved `settings.json` (an
-unknown stored mode keeps the current default). The guard keys carry a
+Stored keys: the MODE and REACH keys (`BG_MODE_COLOR`, `BG_REACH_ALL`),
+never the shown labels, so relabelling a dropdown cannot invalidate a
+saved `settings.json` (an unknown stored value keeps the current
+default). The guard keys carry a
 `_pct` SUFFIX (`safety_black_pct`) because their UNIT changed — a file
 written by the fraction build holds `"0.40"` under the old bare key,
 which read as percent would be a 0.4 % guard that refuses every image;

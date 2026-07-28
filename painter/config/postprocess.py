@@ -115,7 +115,28 @@ BG_MODE_LABEL = {
     BG_MODE_AUTO: "Auto (detect)",
     BG_MODE_BLACK: "Black",
     BG_MODE_WHITE: "White",
-    BG_MODE_COLOR: "Custom colour",
+    BG_MODE_COLOR: "Custom color",
+}
+
+# REACH — WHERE a matching pixel counts as background (owner
+# 2026-07-28). The removal has always been BORDER-CONNECTED: a pixel
+# only counts if it can be walked to from the image frame through other
+# matching pixels (a flood fill). That is why pure-#000000 pixels
+# ENCLOSED by a letter stroke — the counters of O, A, P in HOPE /
+# SALVATION — survive: they are the same colour as the background but
+# they are not reachable from the frame.
+#
+# That is the right default (it protects the black leading between
+# stained glass, Aurora's own black hour sector, every dark interior),
+# but it is not always what is wanted. BG_REACH_ALL drops the
+# connectivity test entirely: EVERY pixel within tolerance goes, wherever
+# it sits — the letters become outlines. His call, per run.
+BG_REACH_EDGE = "edge"  # border-connected only (flood fill) — default
+BG_REACH_ALL = "all"    # every matching pixel, enclosed ones included
+BG_REACH_DEFAULT = BG_REACH_EDGE
+BG_REACH_LABEL = {
+    BG_REACH_EDGE: "Touching the edge",
+    BG_REACH_ALL: "Everywhere in the image",
 }
 
 BG_COLOR_DEFAULT = "#000000"    # custom-colour target, hex

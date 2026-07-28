@@ -33,6 +33,7 @@ from painter.config import (
     BG_MODE_COLOR,
     BG_MODE_DEFAULT,
     BG_MODE_WHITE,
+    BG_REACH_DEFAULT,
     CLEAN_EDGE_ALPHA,
     CLEAN_EDGE_ENABLE,
     CROP_INK_ALPHA,
@@ -72,6 +73,7 @@ def remove_background(
     mode: str = BG_MODE_DEFAULT,
     color: str = BG_COLOR_DEFAULT,
     tolerance_pct: float = BG_COLOR_TOLERANCE_PCT,
+    reach: str = BG_REACH_DEFAULT,
     safety_max_remove_frac: float = SAFETY_MAX_REMOVE_FRAC,
     safety_max_remove_frac_white: float = SAFETY_MAX_REMOVE_FRAC_WHITE,
     safety_max_remove_frac_color: float = SAFETY_MAX_REMOVE_FRAC_COLOR,
@@ -94,6 +96,11 @@ def remove_background(
     typed colour EXACTLY. The colour is parsed ONCE, before the image is
     opened, so a mistyped hex is reported as the configuration error it
     is rather than as a per-image failure.
+
+    ``reach`` (owner 2026-07-28) decides WHERE a matching pixel counts:
+    ``BG_REACH_EDGE`` clears only what connects to the frame, so an
+    enclosed same-coloured region (the counters inside letters) stays;
+    ``BG_REACH_ALL`` clears every matching pixel wherever it sits.
 
     The three ``safety_max_remove_frac*`` arguments (GUI rework Phase
     13; the colour one 2026-07-28) are OPTIONAL per-call overrides of
@@ -128,7 +135,7 @@ def remove_background(
                     f"    background UNCLEAR (not white/black, and the"
                     f" four corners disagree; border ≈"
                     f" {removal.border_hex}) — left untouched:"
-                    f" {path.name}; set BG mode to Custom colour to"
+                    f" {path.name}; set BG mode to Custom color to"
                     f" clear it"
                 )
                 return "unclear"
@@ -136,10 +143,10 @@ def remove_background(
                 # an AUTO-DETECTED colour is a decision the owner did not
                 # make — say which colour was cleared, never silently
                 log(
-                    f"    background colour auto-detected from the four"
+                    f"    background color auto-detected from the four"
                     f" corners: {removal.border_hex} ({path.name})"
                 )
-            out, removed = apply_plan(im, removal)
+            out, removed = apply_plan(im, removal, reach)
         # SAFETY GUARD: never destroy an image. A removal that clears
         # more than the path's guard fraction ate the subject (a dark
         # subject keyed as black background, or a flood that leaked

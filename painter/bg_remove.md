@@ -18,13 +18,38 @@ to it, not three algorithms:
 
 ```
 distance(pixel, target) = MAX over channels of |pixel_channel - target_channel|
-background              = pixels with distance <= dist_edge
-                          THAT CONNECT TO THE IMAGE BORDER
+matching                = pixels with distance <= dist_edge
+
+IF reach is EDGE (default):
+    background = the matching pixels REACHABLE FROM THE IMAGE FRAME,
+                 walking only through other matching pixels
+                 (a flood fill inward from all four sides)
+ELSE (reach is ALL):
+    background = every matching pixel, wherever it sits
+
 alpha                   = 0        where distance <= dist_full
                           ramps    between dist_full and dist_edge
                           255      elsewhere
                           (then a Gaussian feather when sigma > 0)
 ```
+
+### Why enclosed regions of the background colour survive
+
+The default `reach` is a **flood fill from the frame**, not a colour
+test. A pixel is background only if you can walk to it from the edge of
+the image through other matching pixels. So the counters inside the
+letters of HOPE / SALVATION — pure `#000000`, identical to the
+background — stay OPAQUE: the letter stroke walls them off, and the
+fill never reaches them. The same rule is what protects the black
+leading between stained glass, a dark inner area, and Aurora's own
+black hour sector.
+
+`BG_REACH_ALL` (owner 2026-07-28) drops the connectivity test: every
+matching pixel goes, wherever it sits, and the letters are left as
+outlines. Measured on Compass-Ages: 42.14 % edge-reach vs 42.42 %
+everywhere — the difference IS the letter counters. Note that clearing
+more can push a plate over its SAFETY guard; that is reported, never
+silent.
 
 That single key subsumes both historical ones EXACTLY: distance from
 black `#000000` is `max(r,g,b)` (the old `brightness`) and distance
@@ -148,11 +173,14 @@ run is the other. Pinned by
 - `corner_background_color(rgb, corner_px, agree_max) -> (r,g,b) |
   None` — the four-corner colour vote (see `BG_MODE_AUTO` above);
   `None` when the corners disagree.
-- `apply_plan(img, removal) -> (rgba, removed_frac)` — run the engine
-  with one plan's parameters.
-- `remove_color_background(img, target, dist_full, dist_edge, sigma)
-  -> (rgba, removed_frac)` — THE engine (see above); the second value
-  is the fraction the removal clears, which the guard checks.
+- `apply_plan(img, removal, reach) -> (rgba, removed_frac)` — run the
+  engine with one plan's parameters. `reach` is NOT part of the plan:
+  it is orthogonal to WHICH colour is the background (any mode,
+  detected or stated, runs either way), so it stays the caller's
+  choice rather than something detection decides.
+- `remove_color_background(img, target, dist_full, dist_edge, sigma,
+  reach) -> (rgba, removed_frac)` — THE engine (see above); the second
+  value is the fraction the removal clears, which the guard checks.
 - `color_distance(rgb, target)` — the per-pixel Chebyshev distance key.
 - `parse_hex_color(text) -> (r, g, b)` — `#FF0000` / `ff0000` / `#f00`;
   loud `ValueError` on anything else (Rule #1 — a mistyped colour must
@@ -177,5 +205,5 @@ run is the other. Pinned by
   stay untouched. Returns the cleaned copy and the count of pixels
   that actually lost visible alpha.
 - `main(argv)` — the standalone CLI (`--in-place`, `--crop`,
-  `--backup`, `--mode auto|white|black|color`, and for the colour mode
-  `--color '#RRGGBB'` / `--tolerance <percent>`).
+  `--backup`, `--mode auto|white|black|color`, `--reach edge|all`, and
+  for the colour mode `--color '#RRGGBB'` / `--tolerance <percent>`).

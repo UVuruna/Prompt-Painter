@@ -27,6 +27,8 @@ from painter.config import (
     BG_MODE_BLACK,
     BG_MODE_COLOR,
     BG_MODE_WHITE,
+    BG_REACH_ALL,
+    BG_REACH_EDGE,
     CLEAN_EDGE_ALPHA,
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
@@ -266,7 +268,7 @@ def test_hex_colour_parsing_accepts_the_owner_forms():
 def test_a_mistyped_hex_colour_is_loud():
     """Rule #1 — a bad colour never silently becomes some other colour."""
     for bad in ("", "#12345", "not-a-colour", "#GGGGGG"):
-        with pytest.raises(ValueError, match="background colour"):
+        with pytest.raises(ValueError, match="background color"):
             parse_hex_color(bad)
 
 
@@ -362,6 +364,82 @@ def test_corner_vote_tolerates_slight_corner_noise():
     assert corner_background_color(rgb) is None
 
 
+# --- REACH: border-connected vs everywhere (owner 2026-07-28) --------
+
+
+def make_letter_o(size: int = 100) -> np.ndarray:
+    """A ring on a black plate — the 'O' of HOPE in miniature. Its
+    COUNTER (the hole) is pure #000000, exactly like the background,
+    but enclosed by the stroke."""
+    yy, xx = np.mgrid[0:size, 0:size]
+    c = (size - 1) / 2.0
+    r2 = (xx - c) ** 2 + (yy - c) ** 2
+    rgb = np.zeros((size, size, 3), dtype=np.uint8)
+    rgb[(r2 <= 40 ** 2) & (r2 >= 25 ** 2)] = (200, 200, 255)
+    return rgb
+
+
+def test_edge_reach_keeps_the_black_enclosed_by_a_letter():
+    """Why the counters of HOPE / SALVATION survive: the flood fill
+    walks INWARD FROM THE FRAME, and the hole is not reachable through
+    the stroke — same colour, not connected."""
+    img = Image.fromarray(make_letter_o(), mode="RGB")
+    out, _ = apply_plan(img, plan(img, BG_MODE_BLACK), BG_REACH_EDGE)
+    alpha = np.asarray(out)[:, :, 3]
+
+    assert alpha[2, 2] == 0        # outer void cleared
+    assert alpha[50, 50] == 255    # the COUNTER stays fully opaque
+    assert alpha[50, 18] == 255    # the stroke stays
+
+
+def test_all_reach_removes_the_same_colour_wherever_it_sits():
+    """The owner's added option: no connectivity test, so the counter
+    goes too and the letter is left as an outline."""
+    img = Image.fromarray(make_letter_o(), mode="RGB")
+    out, _ = apply_plan(img, plan(img, BG_MODE_BLACK), BG_REACH_ALL)
+    alpha = np.asarray(out)[:, :, 3]
+
+    assert alpha[2, 2] == 0        # outer void cleared
+    assert alpha[50, 50] == 0      # the COUNTER cleared too
+    assert alpha[50, 18] == 255    # the stroke still stands
+
+
+def test_all_reach_removes_at_least_as_much_as_edge_reach():
+    img = Image.fromarray(make_letter_o(), mode="RGB")
+    removal = plan(img, BG_MODE_BLACK)
+    _, edge = apply_plan(img, removal, BG_REACH_EDGE)
+    _, everywhere = apply_plan(img, removal, BG_REACH_ALL)
+    assert everywhere > edge
+
+
+def test_reach_reaches_the_engine_through_remove_background(tmp_path):
+    img = tmp_path / "o.png"
+    Image.fromarray(make_letter_o(), mode="RGB").save(img, "PNG")
+    # "everywhere" clears MORE by construction, so it meets the guard
+    # sooner — a deliberate choice the guard cannot distinguish from an
+    # eaten subject, so it is the owner's to raise (the abort message
+    # names it). Here the plate is 70 % background.
+    assert remove_background(
+        img, print, mode=BG_MODE_BLACK, reach=BG_REACH_ALL,
+        safety_max_remove_frac=0.80,
+    ) == "done"
+    with Image.open(img) as out:
+        assert np.asarray(out.convert("RGBA"))[50, 50, 3] == 0
+
+
+def test_reach_all_meeting_the_guard_is_reported_not_silent(tmp_path):
+    """Rule #1 — switching to 'everywhere' can push a normal plate over
+    the guard; that must be a named report, never a silent no-op."""
+    img = tmp_path / "o.png"
+    Image.fromarray(make_letter_o(), mode="RGB").save(img, "PNG")
+    logs: list[str] = []
+
+    assert remove_background(
+        img, logs.append, mode=BG_MODE_BLACK, reach=BG_REACH_ALL,
+    ) == "unclear"
+    assert any("black safety guard" in line for line in logs)
+
+
 def test_auto_colour_never_overrides_the_white_or_black_sniff(tmp_path):
     """The corner vote is strictly a FALLBACK — everything white/black
     detection already recognised keeps its own recipe (and its own
@@ -428,7 +506,7 @@ def test_unclear_report_names_the_sniffed_border_colour(tmp_path):
 
 def test_a_mistyped_colour_stops_the_run_before_the_image_is_read(tmp_path):
     missing = tmp_path / "not-even-there.png"
-    with pytest.raises(ValueError, match="background colour"):
+    with pytest.raises(ValueError, match="background color"):
         remove_background(missing, print, mode=BG_MODE_COLOR, color="nope")
 
 
