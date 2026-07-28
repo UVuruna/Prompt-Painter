@@ -1,4 +1,4 @@
-﻿{
+{
     "version": "0.0.148",
     "name": "PromptPainter",
     "description": "Supervised automation that generates images from prompt-sheet .md files by driving an already open Gemini/ChatGPT tab over CDP",
