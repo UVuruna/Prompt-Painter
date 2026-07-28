@@ -71,6 +71,20 @@ file → loud) and `crop_transparent` (content box + safety margin,
 second pass already tight, opaque/fully-transparent → nothing,
 margin clamped at the edge).
 
+Also the BACKGROUND MODE block (owner 2026-07-28): hex parsing and
+its loud failures, the owner's own `± X %` worked example
+(`#FF0000 ± 6.67 %` = 17 levels), a colour that is neither white nor
+black cleared once STATED, the tolerance bounding what counts as
+background, forced modes overruling the border sniff, an
+already-transparent image skipped in EVERY mode, and the "unclear"
+report naming the sniffed border colour. Its REGRESSION pin (root
+Rule #25) is
+`test_pointers_regression_black_guard_bails_custom_colour_succeeds`:
+a disc on pure black whose LEGITIMATE background is ~42 % — black's
+0.40 guard bails on it (message naming the guard) while the stated
+colour goes through. That geometry is the owner's real "pointers"
+folder in miniature (17 plates, 41.2–42.2 %).
+
 ### `test_upscale.py` — Upscale Gating
 The locked gate (aspect 0.9–1.1 AND a dimension under 800) against
 a MOCKED binary: non-square and big-enough images never touch the
@@ -363,7 +377,12 @@ NON-default Advanced override actually reaches
 `change_aspect`, run-state/pause/Stop button availability, and the
 settings round-trip (BG/Crop's safety+margin+ink fields, Upscale's
 min-side, Aspect's target ratio, the AI checker's `conditions`-only
-shape). `PainterGui._start_tool_from_panel`'s pre-filter path end to
+shape). BG's mode block (owner 2026-07-28) gets the same treatment:
+the chosen mode/colour/tolerance reaching the engine call, a mistyped
+colour raising at Start (and being HARMLESS in a mode that ignores
+it), an out-of-range tolerance, the colour fields packed only in
+Custom mode, and the round-trip storing the MODE KEY (an unknown
+stored mode falling back to the default). `PainterGui._start_tool_from_panel`'s pre-filter path end to
 end through a duck-typed `FakeGuiForPanel` (`_run_tool_job` a
 RECORDING stand-in) for the four tools; `PainterGui._start_ai_check`'s
 OWN equivalent through a SEPARATE `FakeGuiForAiCheck`

@@ -40,16 +40,18 @@ See [Chrome Launcher](chrome.md).
 
 ### `postprocess.py` — Background Removal + Crop
 The two split, composable per-save steps (owner's #7):
-`remove_background` (auto-detected, in place) and
-`crop_transparent` (content box + safety margin) — callers compose
+`remove_background` (auto-detected or a stated background, in place)
+and `crop_transparent` (content box + safety margin) — callers compose
 them by flags; loud on failure, never fatal. See
 [Postprocess](postprocess.md).
 
 ### `bg_remove.py` — Background Remover
 The remover itself (moved in from DOMY Watch tools — no part of
-this program lives in another project): per-file auto-detection,
-white/black clearing, autocrop; also runnable standalone. See
-[Background Remover](bg_remove.md).
+this program lives in another project): ONE colour-keyed engine that
+clears the border-connected region around ANY target colour, with
+per-file auto-detection (white/black), forced white/black, or a custom
+colour ± tolerance (owner 2026-07-28); plus autocrop. Also runnable
+standalone. See [Background Remover](bg_remove.md).
 
 ### `upscale.py` — Real-ESRGAN Upscaler
 Upscales small near-square (badge-class) images with the
@@ -139,6 +141,12 @@ gate (Phase 6); the BG/Crop tools are still unmigrated. See
   its heavy imports (numpy/scipy) load lazily, only when a fix
   actually runs. Fix failures are loud but never kill a run (the
   raw image is already saved; the remover is rerun-safe).
+- **ONE removal, not one per colour** (owner 2026-07-28, root Rule
+  #19). White and black were two hard-wired scalar keys; they are now
+  two TARGET COLOURS handed to a single distance-keyed engine, which
+  is what made "clear any background colour ± X %" a parameter rather
+  than a third algorithm. The unification was proven byte-identical
+  against the old code over 17 real plates and 400 randomised ones.
 - **Postprocess steps are split and composable** (owner's #7):
   background removal, transparent crop and the Real-ESRGAN upscale
   are three separate functions; the entry points compose them into

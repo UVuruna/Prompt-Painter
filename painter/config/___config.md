@@ -67,12 +67,17 @@ module.
 ### `postprocess.py` — Background Removal + Crop Thresholds
 `CROP_MARGIN_PX`, the INK-BASED content-box thresholds
 (`CROP_INK_ALPHA`, `CROP_MIN_INK_PX`), the border-connected edge-halo
-cleanup (`CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`), and the
+cleanup (`CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`), the BACKGROUND MODE
+block (owner 2026-07-28 — `BG_MODE_AUTO`/`_BLACK`/`_WHITE`/`_COLOR`,
+`BG_MODE_DEFAULT`, the GUI-facing `BG_MODE_LABEL`, plus the
+custom-colour `BG_COLOR_DEFAULT` and `BG_COLOR_TOLERANCE_PCT`), and the
 black-void removal + PER-PATH safety guards (`BLACK_VOID_MAX`,
-`SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE` — BLACK
-guards at 0.40 since legit bright-on-black clears ~0.24 vs. destroyed
-dark rondels at 0.45+; WHITE guards at 0.85 since legit white
-backgrounds routinely clear 0.33-0.57). A leaf module (pure numbers).
+`SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`,
+`SAFETY_MAX_REMOVE_FRAC_COLOR` — BLACK guards at 0.40 since it fences a
+GUESS: legit bright-on-black clears ~0.24 vs. destroyed dark rondels at
+0.45+; WHITE and CUSTOM guard at 0.85 since legit white backgrounds
+routinely clear 0.33-0.57 and a custom colour was TYPED by the owner).
+A leaf module (pure numbers and mode names).
 
 ### `upscale.py` — Real-ESRGAN Upscaler Config
 Where the downloaded `realesrgan-ncnn-vulkan` binary lives
@@ -205,11 +210,12 @@ WEBSITE FIX disabled until the owner captures real selectors);
 - [Chrome Launcher](../chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,
   `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 - [Postprocess](../postprocess.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
-  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`,
-  `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`
+  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`, the
+  `BG_MODE_*`/`BG_COLOR_*` block, and the three SAFETY guards
+  `SAFETY_MAX_REMOVE_FRAC` / `_WHITE` / `_COLOR`
 - [Background Remover](../bg_remove.md) — the same crop/cleanup
-  constants plus `BLACK_VOID_MAX` and the two SAFETY guards,
-  imported package-or-standalone
+  constants plus `BLACK_VOID_MAX`, the `BG_MODE_*`/`BG_COLOR_*` block
+  and the three SAFETY guards, imported package-or-standalone
 - [Upscale](../upscale.md) — the `UPSCALE_*` block
 - [Job Temp](../jobtemp.md) — `PROJECT_ROOT`, `JOBTEMP_DIRNAME`,
   `JOBTEMP_REMOVED_ALPHA`, `JOB_METRIC`, `JOBTEMP_STEPS_SUBDIR`,

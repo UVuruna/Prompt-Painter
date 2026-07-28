@@ -51,6 +51,16 @@ Rule #5 — the pace/action-delay fields are its instances): direct
 typing stays allowed (validated on Start), the +/- buttons step the
 value by a configurable amount, never below 0.
 
+### Field parsers
+One per numeric field SHAPE, all sharing the same "raise `ValueError`
+naming the field that failed" contract so a panel's Start reports
+which box is wrong: `_parse_fraction` (0 < x ≤ 1 — the safety-guard
+ceilings), `_parse_nonneg_int` (≥ 0), `_parse_int_range` (that plus an
+inclusive bound — the 0-255 alpha fields), and `_parse_percent`
+(0-100 %, FRACTIONS ALLOWED — the BG panel's custom-colour tolerance,
+whose worked example lands on 6.67, so whole-percent rounding would
+quietly move the colour key by a level).
+
 ## Design Decisions
 See [GUI (folder)](___gui.md)'s own "Design Decisions" section for
 the full reasoning behind the `ACTIVE_THEME`/`FONT_BASE` module-

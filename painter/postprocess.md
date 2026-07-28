@@ -11,22 +11,35 @@ file they are given (inside the output folder), and NEVER raise for
 a no-op — only for real errors (`PostprocessError`, loud).
 
 - **`remove_background`** — the in-house
-  [Background Remover](bg_remove.md) internals, auto-detected per
-  file: already-transparent → `"nothing"` (untouched), white
-  (Gemini) or black background → cleared, `"done"`, ambiguous
-  (gradient, mid-tone) → `"unclear"` (reported via the log,
+  [Background Remover](bg_remove.md) internals. Already-transparent →
+  `"nothing"` (untouched, in EVERY mode); the background cleared →
+  `"done"`; nothing done → `"unclear"` (reported via the log, ORIGINAL
   left untouched). No cropping any more — that is the second step.
-  A **SAFETY GUARD** (owner 2026-07-19) also returns `"unclear"`
-  (reported, ORIGINAL untouched) when the removal would clear more
-  than the path's guard fraction — it ate the subject rather than the
-  background. The guard is PER PATH: the black guard
-  (`SAFETY_MAX_REMOVE_FRAC`, 0.40) catches the dark-rondel destruction
-  that motivated the fix (a dark subject keyed as black background); the
-  white guard (`SAFETY_MAX_REMOVE_FRAC_WHITE`, 0.85) runs high because
-  legit white backgrounds are large (real plates reach ~0.57), so it
-  fires only on a catastrophic white-subject-eaten. Each `remove_*`
-  now returns `(rgba, removed_frac)` and this step checks it before
-  saving.
+
+  Its **`mode`** (owner 2026-07-28) picks WHICH background is cleared:
+  `BG_MODE_AUTO` sniffs the border (white or black; an ambiguous
+  gradient / mid-tone is `"unclear"`, and the report NAMES the sniffed
+  border colour so the owner can state it), `BG_MODE_BLACK` /
+  `BG_MODE_WHITE` force one and skip the sniff, and `BG_MODE_COLOR`
+  clears ANY `color` (hex) within `tolerance_pct` % of 255 per channel.
+  A mistyped colour is parsed BEFORE the image is opened, so it is
+  reported as the configuration error it is rather than as a per-image
+  failure.
+
+  A **SAFETY GUARD** (owner 2026-07-19) also returns `"unclear"` when
+  the removal would clear more than the path's guard fraction — it ate
+  the subject rather than the background. The guard is PER PATH: black
+  (`SAFETY_MAX_REMOVE_FRAC`, 0.40) is tight because it fences a GUESS —
+  it catches the dark-rondel destruction that motivated the fix (a dark
+  subject keyed as black background); white
+  (`SAFETY_MAX_REMOVE_FRAC_WHITE`, 0.85) and custom colour
+  (`SAFETY_MAX_REMOVE_FRAC_COLOR`, 0.85) run high because their legit
+  backgrounds are large (real white plates reach ~0.57) and, for a
+  custom colour, the owner has already TOLD the tool what the
+  background is. The abort message NAMES the guard that fired and its
+  value — the owner's "pointers" case (a legitimate 42 %-background
+  plate bailing on black's 0.40) was unreadable precisely because the
+  old message named neither.
 - **`crop_transparent`** — halo cleanup THEN autocrop in place (owner
   2026-07-18, the OldAge.png case): (1) `clean_edge_halo` zeroes the
   faint stray line / halo CONNECTED TO THE IMAGE BORDER
@@ -53,11 +66,12 @@ constant they read — defaulting to the matching constant, so every
 EXISTING caller (which passes neither) keeps today's exact byte-for-
 byte behaviour. [GUI](../gui.md)'s new `BgSettingsPanel`/
 `CropSettingsPanel` (a standalone tool's persistent settings panel) is
-the one caller that overrides them, per run, via each panel's
-Advanced collapsible: `remove_background`'s
-`safety_max_remove_frac`/`safety_max_remove_frac_white` (the SAFETY
-GUARD ceilings below) and `crop_transparent`'s `clean_edge_enable`/
-`clean_edge_alpha`/`crop_margin_px`/`crop_ink_alpha`/`crop_min_ink_px`.
+the one caller that overrides them, per run: `remove_background`'s
+`mode`/`color`/`tolerance_pct` (from `BgSettingsPanel`'s always-visible
+primary block) plus `safety_max_remove_frac`/`_white`/`_color` (the
+three SAFETY GUARD ceilings, from its Advanced collapsible), and
+`crop_transparent`'s `clean_edge_enable`/`clean_edge_alpha`/
+`crop_margin_px`/`crop_ink_alpha`/`crop_min_ink_px`.
 The site-generation pipeline ([GUI](../gui.md)'s own composed hook)
 and [Main (Entry Point)](../main.md) still call both with no
 overrides — the config constants remain the single source of truth
@@ -68,11 +82,12 @@ for every run that doesn't explicitly override them.
 ### Uses
 - [Config (subfolder)](config/___config.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
   `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`,
-  `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`
-- [Background Remover](bg_remove.md) — `detect`,
-  `remove_white_border`, `remove_black_background`, `content_bbox`,
-  `clean_edge_halo`; imported lazily (numpy/scipy load only when a
-  step actually runs)
+  `BG_MODE_*`, `BG_COLOR_DEFAULT`, `BG_COLOR_TOLERANCE_PCT`,
+  `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`,
+  `SAFETY_MAX_REMOVE_FRAC_COLOR`
+- [Background Remover](bg_remove.md) — `plan`, `apply_plan`,
+  `parse_hex_color`, `content_bbox`, `clean_edge_halo`; imported
+  lazily (numpy/scipy load only when a step actually runs)
 
 ### Used by
 - [Main (Entry Point)](../main.md) — composed into the `post_save`
@@ -84,11 +99,16 @@ for every run that doesn't explicitly override them.
 - `deps_error() -> str | None` — `None` when numpy/scipy/Pillow are
   importable; otherwise the reason. Callers refuse to start instead
   of failing on every item.
-- `remove_background(path, log, *, safety_max_remove_frac=SAFETY_MAX_REMOVE_FRAC,
-  safety_max_remove_frac_white=SAFETY_MAX_REMOVE_FRAC_WHITE) -> str` —
+- `remove_background(path, log, *, mode=BG_MODE_DEFAULT,
+  color=BG_COLOR_DEFAULT, tolerance_pct=BG_COLOR_TOLERANCE_PCT,
+  safety_max_remove_frac=SAFETY_MAX_REMOVE_FRAC,
+  safety_max_remove_frac_white=SAFETY_MAX_REMOVE_FRAC_WHITE,
+  safety_max_remove_frac_color=SAFETY_MAX_REMOVE_FRAC_COLOR) -> str` —
   `"done" | "nothing" | "unclear"`, in place; `"unclear"` covers both
-  an ambiguous background and a SAFETY-guard abort (removal too large
-  — original untouched). Raises `PostprocessError` on real failure.
+  an ambiguous background (auto mode) and a SAFETY-guard abort (removal
+  too large — original untouched). Raises `ValueError` for a mistyped
+  `color` (before any image is read) and `PostprocessError` on real
+  failure.
 - `crop_transparent(path, log, *, clean_edge_enable=CLEAN_EDGE_ENABLE,
   clean_edge_alpha=CLEAN_EDGE_ALPHA, crop_margin_px=CROP_MARGIN_PX,
   crop_ink_alpha=CROP_INK_ALPHA, crop_min_ink_px=CROP_MIN_INK_PX) ->

@@ -6,33 +6,84 @@
 Makes a generated image's background transparent. Originally built
 inside DOMY Watch (`tools/bg_remove.py`); moved here 2026-07-17 on
 the owner's rule that no part of this program lives in another
-project. The code is the proven original, unchanged.
+project.
 
-Per image it auto-detects (sampling the outer 1% frame):
+### One engine, several recipes
 
-- **already transparent** → skipped untouched (safe to re-run)
-- **white / off-white background** → removes only the white
-  connected to the border (flood fill), so bright detail inside
-  the subject survives; softly feathered edge, halo-free
-- **black void** around the subject → the BORDER-CONNECTED near-black
-  (brightness ≤ `BLACK_VOID_MAX`) is cleared, while dark regions
-  ENCLOSED by the subject (the black leading between glass, dark inner
-  areas) stay opaque — the SAME edge-connected flood the white path
-  uses (owner 2026-07-19). This replaced the old "largest bright blob
-  + fill holes" disc, which could not tell a DARK subject from a black
-  background and ate the dark stone frame of the bible/dark rondels
-  (50-78% turned transparent — swiss cheese).
-- **ambiguous** (gradient, mid-tone) → reported and left alone —
-  skip, never guess
+`remove_color_background` is the ONLY removal (owner 2026-07-28, root
+Rule #19 — define the rule, never enumerate the cases). It clears the
+BORDER-CONNECTED region within a per-channel distance of a TARGET
+COLOUR; white, black and any custom colour are three sets of arguments
+to it, not three algorithms:
 
-A **SAFETY GUARD** wraps both removals (owner 2026-07-19): each
-`remove_*` returns `(rgba, removed_frac)`, and the caller ABORTS when
-the fraction cleared exceeds the path's guard (`SAFETY_MAX_REMOVE_FRAC`
-for black, `SAFETY_MAX_REMOVE_FRAC_WHITE` for white — legit white
-backgrounds run large, reaching ~0.57, so their guard is higher). An
-aborted removal leaves the ORIGINAL untouched (never a destroyed save):
-`process_file` returns `"skip-risky"` and [Postprocess](postprocess.md)
-returns `"unclear"`.
+```
+distance(pixel, target) = MAX over channels of |pixel_channel - target_channel|
+background              = pixels with distance <= dist_edge
+                          THAT CONNECT TO THE IMAGE BORDER
+alpha                   = 0        where distance <= dist_full
+                          ramps    between dist_full and dist_edge
+                          255      elsewhere
+                          (then a Gaussian feather when sigma > 0)
+```
+
+That single key subsumes both historical ones EXACTLY: distance from
+black `#000000` is `max(r,g,b)` (the old `brightness`) and distance
+from white `#FFFFFF` is `255 - min(r,g,b)` (255 minus the old
+`whiteness`) — so black and white lost no tuning when they became
+targets (verified byte-identical against the pre-refactor code over
+17 real plates and 400 randomised ones).
+
+Only BORDER-CONNECTED pixels are cleared, so a dark region ENCLOSED by
+the subject (the black leading between glass, Aurora's own black hour
+sector) stays opaque. This replaced the old "largest bright blob + fill
+holes" disc, which could not tell a DARK subject from a black
+background and ate the dark stone frame of the bible/dark rondels
+(50-78% turned transparent — swiss cheese).
+
+### Which recipe an image gets — `plan(img, mode)`
+
+- **`BG_MODE_AUTO`** — sniffs the outer 1% frame: white / off-white
+  (thresholds ADAPTED to that plate's own white level), black void, or
+  **ambiguous** (gradient, mid-tone) → reported and left alone. The
+  report NAMES the sniffed border colour so it can be pasted into the
+  custom-colour field — skip, never guess, but never a dead end either.
+- **`BG_MODE_BLACK` / `BG_MODE_WHITE`** (owner 2026-07-28) — the owner
+  STATING the background; the sniff is skipped entirely.
+- **`BG_MODE_COLOR`** (owner 2026-07-28) — any target colour plus a
+  `±X %` tolerance (percent of 255, per channel). His own worked
+  example: `#FF0000 ± 6.67 %` spans `#EE0000`…`#FF1111`.
+- **already transparent** → skipped untouched in EVERY mode, forced
+  ones included (it has a real alpha channel a colour key knows nothing
+  about) — this is what makes re-running a folder safe.
+
+A custom removal at `#000000` IS a fully tunable black removal, which
+is why the black path needs no tolerance knob of its own.
+
+### The SAFETY GUARD
+
+`remove_color_background` returns `(rgba, removed_frac)`, and the
+caller ABORTS when the fraction cleared exceeds the path's guard
+(`SAFETY_GUARD_DEFAULT`). An aborted removal leaves the ORIGINAL
+untouched (never a destroyed save): `process_file` returns
+`"skip-risky"` and [Postprocess](postprocess.md) returns `"unclear"`,
+its message NAMING the guard that fired.
+
+| Path | Guard | Why |
+|------|-------|-----|
+| black | `SAFETY_MAX_REMOVE_FRAC` (0.40) | tight — a fence around a GUESS (auto may have keyed a dark subject as background) |
+| white | `SAFETY_MAX_REMOVE_FRAC_WHITE` (0.85) | legit white backgrounds run large, reaching ~0.57 |
+| custom | `SAFETY_MAX_REMOVE_FRAC_COLOR` (0.85) | the owner TYPED the colour — only a catastrophe needs catching |
+
+**Known limit (owner 2026-07-28, the "pointers" case).** The black
+guard measures AREA, which is only a proxy for "it ate the subject",
+and the proxy fails on shapes whose legitimate background is simply
+large. 17 disc-in-a-square plates measured 41.2–42.2 % of pure-black
+background with the subject fully intact — a perfectly clean cut (the
+mask moves < 0.6 pp while the void threshold sweeps 2 → 20) that black's
+0.40 nonetheless bails on. Stating the colour (`BG_MODE_COLOR`
+`#000000`, guard 0.85) is the way through; raising the black guard per
+run is the other. Pinned by
+`test_pointers_regression_black_guard_bails_custom_colour_succeeds`.
 
 ## Connections
 
@@ -40,34 +91,49 @@ returns `"unclear"`.
 - numpy, scipy (`ndimage`), Pillow
 - [Config (subfolder)](config/___config.md) — `CROP_INK_ALPHA`, `CROP_MIN_INK_PX`,
   `CLEAN_EDGE_ALPHA` (the ink-crop / edge-cleanup thresholds),
-  `BLACK_VOID_MAX` (the black-void brightness ceiling), and the two
-  SAFETY guards `SAFETY_MAX_REMOVE_FRAC` /
-  `SAFETY_MAX_REMOVE_FRAC_WHITE`. Imported package-first
-  (`from painter.config`) with a bare `from config` fallback so the
-  standalone script still runs.
+  `BLACK_VOID_MAX` (the black-void brightness ceiling), the four
+  background-mode constants (`BG_MODE_*`, `BG_COLOR_DEFAULT`,
+  `BG_COLOR_TOLERANCE_PCT`) and the three SAFETY guards
+  `SAFETY_MAX_REMOVE_FRAC` / `_WHITE` / `_COLOR`. Imported
+  package-first (`from painter.config`) with a bare `from config`
+  fallback so the standalone script still runs.
 
 ### Used by
-- [Postprocess](postprocess.md) — uses the internals (`detect`,
-  `remove_white_border`, `remove_black_background`, `content_bbox`,
-  `clean_edge_halo`) for its two split, composable steps
+- [Postprocess](postprocess.md) — uses the internals (`plan`,
+  `apply_plan`, `parse_hex_color`, `content_bbox`, `clean_edge_halo`)
+  for its two split, composable steps
+- [Standalone-Tool Settings Panels](../gui/tool_panels.md) —
+  `BgSettingsPanel` calls `parse_hex_color` to validate the typed
+  colour at Start and to drive the live swatch
 - The owner, standalone:
   `python painter/bg_remove.py <file-or-folder> --in-place --crop`
 
 ## Functions
 
-- `process_file(src, dst, mode, crop, force_full, force_edge) ->
-  str` — one image; returns the action taken, or `"skip-risky"` when
-  the SAFETY guard fires (removal too large — source left untouched,
-  nothing written). The standalone CLI's engine — the per-save
-  pipeline goes through [Postprocess](postprocess.md) instead.
-- `detect(img)` — the auto-detection described above.
-- `remove_white_border(img, white_full, white_edge) -> (rgba,
-  removed_frac)` — edge-connected white made transparent; the second
-  value is the fraction the removal clears (the guard checks it).
-- `remove_black_background(img, void_max, sigma) -> (rgba,
-  removed_frac)` — the BORDER-CONNECTED black void cleared (brightness
-  ≤ `void_max`, connected to the frame), interior enclosed dark
-  regions kept opaque; returns the cleared fraction too.
+- `process_file(src, dst, mode, crop, force_full, force_edge, color,
+  tolerance_pct) -> str` — one image; returns the action taken, or
+  `"skip-risky"` when the SAFETY guard fires (removal too large —
+  source left untouched, nothing written). The standalone CLI's engine
+  — the per-save pipeline goes through [Postprocess](postprocess.md)
+  instead.
+- `plan(img, mode, *, color, tolerance_pct) -> RemovalPlan` — decides
+  how ONE image is treated (see the modes above). The named tuple
+  carries `action`, the `target` colour, `dist_full`/`dist_edge`,
+  `sigma`, and `border_hex` (always the sniffed border colour, so an
+  ambiguous skip can say WHICH colour to state instead).
+- `apply_plan(img, removal) -> (rgba, removed_frac)` — run the engine
+  with one plan's parameters.
+- `remove_color_background(img, target, dist_full, dist_edge, sigma)
+  -> (rgba, removed_frac)` — THE engine (see above); the second value
+  is the fraction the removal clears, which the guard checks.
+- `color_distance(rgb, target)` — the per-pixel Chebyshev distance key.
+- `parse_hex_color(text) -> (r, g, b)` — `#FF0000` / `ff0000` / `#f00`;
+  loud `ValueError` on anything else (Rule #1 — a mistyped colour must
+  never silently become a different one).
+- `format_hex_color(rgb) -> str` — the inverse, used to report a
+  sniffed border colour back to the owner.
+- `tolerance_to_distance(pct) -> int` — the owner's `± X %` as a
+  per-channel distance in 0..255 (6.67 % → 17 levels).
 - `autocrop` — crop to the ink-based content box.
 - `content_bbox(img, ink_alpha, min_ink_px) -> (l, t, r, b) | None`
   — the INK-BASED content box shared by `autocrop` and the
@@ -84,4 +150,5 @@ returns `"unclear"`.
   stay untouched. Returns the cleaned copy and the count of pixels
   that actually lost visible alpha.
 - `main(argv)` — the standalone CLI (`--in-place`, `--crop`,
-  `--backup`, `--mode auto|white|black`).
+  `--backup`, `--mode auto|white|black|color`, and for the colour mode
+  `--color '#RRGGBB'` / `--tolerance <percent>`).

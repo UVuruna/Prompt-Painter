@@ -87,8 +87,14 @@ is the binding spec.
    (`painter/postprocess.py` over the IN-HOUSE
    `painter/bg_remove.py` internals — moved from DOMY Watch tools,
    owner 2026-07-17: no part of this program lives in another
-   project; auto-detects per file — already-transparent nothing,
-   white/black cleared, ambiguous reported and left untouched),
+   project; ONE colour-keyed engine clears the border-connected
+   region around a target colour, and its MODE (owner 2026-07-28)
+   is AUTO-detect per file (already-transparent nothing, white/black
+   cleared, ambiguous reported with the sniffed border colour and
+   left untouched), a FORCED white/black, or a CUSTOM COLOUR ± X %
+   per channel that clears ANY background colour — the standalone
+   BG tool's own always-visible dropdown, with the three per-path
+   safety-guard fractions as its Advanced fine-tune),
    `crop_transparent` (autocrop to the content box + a small config
    margin), and `upscale_if_small` (`painter/upscale.py`,
    Real-ESRGAN ncnn-vulkan binary auto-downloaded into `tools/`,

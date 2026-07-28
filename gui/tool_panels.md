@@ -52,9 +52,12 @@ import ...`) with no circular import back into the still-monolithic
   the same `smooth_transition`-covered mutate. Defaults to a no-op so
   every headless panel in the test suite still works unchanged.
 - [Themed Widget Toolkit](widgets.md) — `Spinner`, the numeric-field
-  parsers (`_parse_fraction`/`_parse_nonneg_int`/`_parse_int_range`),
-  `rounded_button`/`rounded_entry`/`rounded_switch`,
-  `style_action_button`, `tk_font`
+  parsers (`_parse_fraction`/`_parse_nonneg_int`/`_parse_int_range`/
+  `_parse_percent`), `rounded_button`/`rounded_combo`/`rounded_entry`/
+  `rounded_switch`, `style_action_button`, `tk_font`
+- [Background Remover](../painter/bg_remove.md) — `parse_hex_color`
+  (`BgSettingsPanel` validates the typed colour at Start and drives
+  its live swatch with it)
 
 ### Used by
 - [GUI (folder)](___gui.md) — `__init__.py` re-exports
@@ -82,9 +85,22 @@ contribute `_build_advanced`/`build_func`/`_advanced_settings`/
 `_apply_advanced_settings`.
 
 ### BgSettingsPanel / CropSettingsPanel
-BG removal's/Crop's Advanced knobs — the safety-guard fractions
-`remove_background` aborts past; the border-halo-cleanup toggle,
-safety margin and ink-detection thresholds `crop_transparent` reads.
+BG removal's/Crop's knobs. BG's PRIMARY control is always visible
+(`_build_extra`, owner 2026-07-28): a **Background** dropdown — Auto
+(detect), Black, White, or **Custom colour** — plus, in Custom mode
+only, the target hex (with a live swatch) and a `±X %` per-channel
+tolerance. Its Advanced collapsible keeps the three safety-guard
+fractions `remove_background` aborts past (black / white / custom).
+Crop's Advanced holds the border-halo-cleanup toggle, safety margin
+and ink-detection thresholds `crop_transparent` reads.
+
+The mode lives in the ALWAYS-VISIBLE block rather than behind the gear
+because the guard that hides there is exactly what silently blocked
+the owner's "pointers" run: a hidden 0.40 he never saw. The stored
+settings key is the MODE (`BG_MODE_COLOR`), never the shown label, so
+relabelling the dropdown cannot invalidate a saved `settings.json`; an
+unknown stored mode keeps the current default instead of putting an
+unresolvable label in the dropdown.
 
 ### UpscaleSettingsPanel / AspectSettingsPanel
 No Advanced section — the min-side spinner (Upscale) / target-ratio
