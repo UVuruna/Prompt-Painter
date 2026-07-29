@@ -318,33 +318,22 @@ def test_sync_running_state_recolours_the_icon_bar_while_running(root):
     assert fake._icon_bar._buttons["bg"].cget("border_width") == 1  # idle
 
 
-def test_apply_running_layout_packs_icon_bar_and_controls_box_by_default(
-    root,
-):
-    """Owner 2026-07-21 workflow fix: ``_controls_box`` (the queue +
-    BOTH AgentPanels + toolbar) is the DEFAULT running-view inline
-    surface — it used to stay hidden unless ``_inline_kind ==
-    "website_gen"``, which meant Start (unconditionally clearing
-    ``_inline_kind`` to ``None``) immediately hid the very controls the
-    owner needed to Start the OTHER site or reach this one's Pause/
-    Stop. ``_inline_kind is None`` (the state right after any Start) now
-    shows it, same as ``_compact_box`` staying hidden throughout."""
+def test_apply_running_layout_default_is_dashboard_only(root):
+    """Owner 2026-07-29 ("posle Starta samo DASHBOARD"): right after
+    any Start (``_inline_kind is None``) the running view shows the
+    icon strip and the dashboard — NO settings surface of any kind."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._apply_running_layout(fake)
     assert fake._icon_bar.winfo_manager() == "pack"
-    assert fake._controls_box.winfo_manager() == "pack"
+    assert fake._controls_box.winfo_manager() == ""
     assert fake._compact_box.winfo_manager() == ""
 
 
-def test_apply_running_layout_controls_box_shows_for_none_and_website_gen(
-    root,
-):
-    """Both ``_inline_kind`` values that do NOT name a ``_tool_panels``
-    entry — ``None`` (the post-Start default) and the legacy explicit
-    "website_gen" marker ``_click_icon_bar_tile``/``_toggle_pause_job``
-    still set — show the SAME ``_controls_box``; only an entry actually
-    IN ``_tool_panels`` supersedes it (see the sibling test below)."""
+def test_apply_running_layout_controls_box_only_for_website_gen(root):
+    """``_controls_box`` packs ONLY while the owner explicitly opened
+    it (``_inline_kind == "website_gen"`` — the icon click); ``None``
+    (post-Start) shows the dashboard alone (owner 2026-07-29)."""
     fake = FakeGui(root)
     fake._view = "running"
     fake._inline_kind = "website_gen"
@@ -353,7 +342,7 @@ def test_apply_running_layout_controls_box_shows_for_none_and_website_gen(
 
     fake._inline_kind = None
     gui.PainterGui._apply_running_layout(fake)
-    assert fake._controls_box.winfo_manager() == "pack"
+    assert fake._controls_box.winfo_manager() == ""
 
 
 def test_apply_running_layout_shows_a_tool_panel_only_while_its_inline(root):
@@ -433,18 +422,10 @@ def test_click_icon_bar_tile_on_a_running_tool_just_focuses_the_dashboard(
     assert fake._inline_kind is None  # untouched — not a settings toggle
 
 
-def test_click_icon_bar_tile_website_gen_toggle_never_hides_controls_box(
-    root,
-):
-    """The website_gen tile still flips ``_inline_kind`` between
-    "website_gen" and ``None`` (the toggle itself is unchanged) — but
-    since GUI rework 2026-07-21, NEITHER value ever hides
-    ``_controls_box`` any more (it is the running view's default
-    inline surface, see ``_apply_running_layout``), so the toggle is
-    now visually a no-op either way. This replaces the old assertion
-    that a second click hid the controls — that behaviour was exactly
-    the bug (the owner had no way to reach the OTHER site's Start after
-    Starting one)."""
+def test_click_icon_bar_tile_website_gen_toggles_controls_box(root):
+    """Owner 2026-07-29: the Website GEN icon is THE way to bring the
+    site settings back over the dashboard — first click shows them,
+    second click dismisses them back to the dashboard alone."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._click_icon_bar_tile(fake, "website_gen")
@@ -453,7 +434,7 @@ def test_click_icon_bar_tile_website_gen_toggle_never_hides_controls_box(
 
     gui.PainterGui._click_icon_bar_tile(fake, "website_gen")
     assert fake._inline_kind is None
-    assert fake._controls_box.winfo_manager() == "pack"  # still shown
+    assert fake._controls_box.winfo_manager() == ""  # dashboard only
 
 
 def test_click_icon_bar_tile_website_gen_never_dead_ends_while_a_site_runs(
@@ -924,21 +905,24 @@ def test_workflow_starting_chatgpt_leaves_gemini_startable_and_visible(
 
     _simulate_start_site_tail(fake, "chatgpt")
 
+    # owner 2026-07-29: after Start the screen is the DASHBOARD alone
+    assert fake._controls_box.winfo_manager() == ""
+    assert fake._icon_bar.winfo_manager() == "pack"
+    # ONE icon click brings the settings back — and with them the
+    # OTHER site's fully reachable Start
+    gui.PainterGui._click_icon_bar_tile(fake, "website_gen")
     assert fake._controls_box.winfo_manager() == "pack"
     assert fake.agents["chatgpt"].winfo_manager() == "pack"
     assert fake.agents["gemini"].winfo_manager() == "pack"
     assert fake.agents["chatgpt"].btn_start.cget("state") == "disabled"
     assert fake.agents["chatgpt"].btn_stop.cget("state") == "normal"
-    # THE core assertion: the OTHER site's Start is still fully reachable
     assert fake.agents["gemini"].btn_start.cget("state") == "normal"
     assert fake.agents["gemini"].btn_start.winfo_manager() == "pack"
 
-    # Gemini starts too -> BOTH panels show active Pause/Stop, in parallel
+    # Gemini starts too -> back to the dashboard; both jobs live
     _simulate_start_site_tail(fake, "gemini")
 
     assert fake._running == {"chatgpt", "gemini"}
-    assert fake._controls_box.winfo_manager() == "pack"
+    assert fake._controls_box.winfo_manager() == ""  # dashboard again
     assert fake.agents["chatgpt"].btn_stop.cget("state") == "normal"
     assert fake.agents["gemini"].btn_stop.cget("state") == "normal"
-    assert fake.agents["chatgpt"].btn_start.cget("state") == "disabled"
-    assert fake.agents["gemini"].btn_start.cget("state") == "disabled"

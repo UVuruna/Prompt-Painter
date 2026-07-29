@@ -255,6 +255,11 @@ class ViewMixin:
         target = _next_view(self._view, len(self._active_kinds()))
         if target != self._view:
             self._go_view(target)
+        elif self._view == "running":
+            # already running: a Start from the reopened settings just
+            # cleared _inline_kind — re-reconcile so the screen drops
+            # back to the dashboard (owner 2026-07-29)
+            self._apply_running_layout()
         if self._view == "running":
             self._icon_bar.set_active(self._active_tile_ids())
 
@@ -263,18 +268,14 @@ class ViewMixin:
         view: the IconBar is always shown, and exactly ONE inline
         surface always shows beneath it.
 
-        ``_controls_box`` (the Collections queue + BOTH ``AgentPanel``s
-        + toolbar) is the DEFAULT — owner 2026-07-21 workflow fix: it
-        used to show ONLY while ``_inline_kind == "website_gen"``,
-        which meant starting either site (their shared Start tail
-        unconditionally clears ``_inline_kind`` to ``None``, see
-        ``_start_site``) hid it immediately, stranding the owner with
-        no visible way to Start the OTHER site and no visible
-        Pause/Stop for the one just started. Now ``_controls_box``
-        shows whenever ``_inline_kind`` does NOT name an entry in
-        ``_tool_panels`` (``None`` or the legacy ``"website_gen"``
-        marker alike) — it is superseded ONLY by an explicitly-open
-        ``ToolSettingsPanel`` (BG/Crop/Upscale/Aspect, GUI rework Phase
+        The DEFAULT after Start is the DASHBOARD ALONE (owner
+        2026-07-29: "posle Starta samo dashboard") — ``_inline_kind``
+        is ``None`` then and NO settings surface packs. The Website
+        GEN icon toggles ``_controls_box`` back
+        (``_inline_kind == "website_gen"``); a running job's
+        Pause/Stop stays reachable through it, one click away, and
+        each tool icon shows its own ``ToolSettingsPanel``
+        (BG/Crop/Upscale/Aspect, GUI rework Phase
         13/14; the AI checker, Phase 15; API Image GEN, Phase 19) while
         ``_inline_kind`` names one of them via ``_open_tool_panel``.
         Every functionality WITHOUT an entry in ``_tool_panels`` still
@@ -293,7 +294,10 @@ class ViewMixin:
             self._tool_panels[self._inline_kind].pack(
                 fill="x", before=self.notebook
             )
-        else:
+        elif self._inline_kind == "website_gen":
+            # settings return ONLY on an explicit Website GEN icon
+            # click (owner 2026-07-29: after Start the screen is the
+            # DASHBOARD — the icon strip is the way back to setup)
             self._controls_box.pack(fill="x", before=self.notebook)
         self._icon_bar.set_active(self._active_tile_ids())
         self._scroll.refresh()
@@ -342,18 +346,12 @@ class ViewMixin:
         """One IconBar tile clicked while ``_view == "running"``.
 
         "website_gen" is checked FIRST and unconditionally toggles
-        ``_inline_kind`` between "website_gen" and ``None`` (owner
-        2026-07-21 workflow fix): it used to fall through to the
-        "already active -> just focus the Dashboard" branch below
-        whenever EITHER site was running, which dead-ended — the owner
-        had no way back to ``_controls_box`` (and the OTHER site's
-        Start) once some other inline surface (a tool's own settings
-        panel) was showing instead. website_gen's inline surface is
-        ``_controls_box`` itself, now the running view's DEFAULT (see
-        ``_apply_running_layout``), so this toggle can never truly hide
-        it any more either — at worst it is a no-op re-pack — but it
-        ALWAYS supersedes whatever tool panel was open, which is the
-        fix: the site controls are always one click away.
+        ``_inline_kind`` between "website_gen" and ``None``: the
+        running view's default is the DASHBOARD ALONE (owner
+        2026-07-29), so this icon IS the way to bring the site
+        settings/controls back above it — and to dismiss them again.
+        It always supersedes whatever tool panel was open; the site
+        controls stay one click away.
 
         Every OTHER tile keeps the pre-existing rule: a tile whose job
         kind(s) (``TILE_JOB_KINDS``) are CURRENTLY active just focuses

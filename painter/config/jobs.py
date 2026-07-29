@@ -98,7 +98,10 @@ def job_color_pair(kind: str) -> tuple[str, str]:
 # identically, columns = how many MIN-width cards fit (1xN when very
 # narrow ... up to 4 columns full-screen). The old per-count column
 # table (GRID_COLS_BY_COUNT) is retired.
-DASH_CARD_MIN_W = 430   # px — one dashboard card's minimum useful width
+# one card's stats grid + collections tree realistically need ~600 px
+# before columns clip (owner screenshot 2026-07-29) — smaller values
+# squeezed two crippled columns into windows that should show ONE
+DASH_CARD_MIN_W = 600   # px — one dashboard card's minimum useful width
 DASH_GRID_MAX_COLS = 4  # never wider than this many columns
 # the dashboard's two display modes: the responsive GRID, and the
 # SLIDER — exactly one card at full width with prev/next arrows
