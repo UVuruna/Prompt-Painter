@@ -16,7 +16,10 @@ from .paths import PROJECT_ROOT
 # still gives each its right background. "black" joins per the F7
 # helper decree (custom colour wheel arrives with F7).
 BACKGROUND_DEFAULT = "default"
-BACKGROUND_CHOICES = ("default", "transparent", "white", "black", "none")
+BACKGROUND_CUSTOM = "custom"
+BACKGROUND_CHOICES = (
+    "default", "transparent", "white", "black", "custom", "none",
+)
 
 _BACKGROUND_RULE = {
     "transparent": (
@@ -35,33 +38,55 @@ _BACKGROUND_RULE = {
     "none": None,
 }
 
-# Extra laws forced into EVERY prompt of a site. Gemini's weaker
-# model drifts (wrong ratios, glossy reflections under the subject —
-# the rondel_Dawn / rondel_Shield case), so it gets hard rules.
-# ChatGPT drifts the OTHER way (the Voljin_gpt case, owner
-# 2026-07-27): photorealistic prompts carrying glow words ("glowing
-# totems", "overflowing with spirit-light") render the light as
-# clouds of bright speckles plus film grain — the whole scene
-# dissolves into high-frequency noise and the subject loses its
-# separation from the background (Gallywix, same run and suffix but
-# zero glow words, came out clean). Hence its anti-grain law.
-SITE_PROMPT_RULES = {
-    "chatgpt": (
+# F7 (owner 2026-07-29, REWORK.md): the per-site LAWS became PROMPT
+# HELPERS — per-agent ON/OFF toggles. The old baked laws moved here
+# VERBATIM and their sites keep them ON BY DEFAULT
+# (HELPER_DEFAULTS), so default behavior is byte-identical to the
+# pre-F7 suffixes; every other combination is now the owner's
+# switch, not a code change. Texts are DATA — reword freely.
+#
+# Origins: no_grainy = ChatGPT's anti-grain law (the Voljin_gpt case,
+# owner 2026-07-27: glow words + photorealistic render as speckle
+# clouds); no_mirror = Gemini's no-reflections law (the rondel_Dawn /
+# rondel_Shield drift, 2026-07-17); no_empty_space is NEW (owner
+# 2026-07-29 + UV/data "dimension i resolution.txt": a round badge in
+# a WIDE canvas leaves dead bands left/right) — DEFAULT OFF for every
+# agent until the owner approves/retunes its wording.
+PROMPT_HELPERS = {
+    "no_mirror": (
+        "absolutely NO reflections — no mirror effect, no glossy"
+        " floor, no reflective surface under or around the subject"
+    ),
+    "no_empty_space": (
+        "the subject FILLS the canvas — no wide empty margins on any"
+        " side; match the canvas to the subject's silhouette (a round"
+        " or square subject means a SQUARE image with the subject"
+        " reaching close to the frame edges; a tall subject a"
+        " portrait one) and render at a HIGH resolution, never a"
+        " small letterboxed image inside dead background bands"
+    ),
+    "no_grainy": (
         "render CLEAN and SMOOTH — absolutely NO film grain, NO"
         " speckle or noise texture, NO stippling; keep every glow and"
         " light effect SOFT and CONTAINED around its source, never"
         " dissolving into sparkle dust or washing over the scene, and"
-        " keep the subject clearly SEPARATED from the background",
+        " keep the subject clearly SEPARATED from the background"
     ),
-    "gemini": (
-        "absolutely NO reflections — no mirror effect, no glossy"
-        " floor, no reflective surface under or around the subject",
-    ),
-    # GUI rework Phase 19 (API Image GEN, gemini-image via the paid
-    # REST API): no extra rule YET — there is no live drift evidence
-    # for this model the way there is for the Gemini WEBSITE's
-    # reflections (that rule was captured from real observed drift);
-    # add one here if the owner sees the same pattern from the API.
+}
+HELPER_CHOICES = tuple(PROMPT_HELPERS)  # UI order
+# which helpers start ON per agent — the pre-F7 baked laws, preserved
+HELPER_DEFAULTS = {
+    "chatgpt": ("no_grainy",),
+    "gemini": ("no_mirror",),
+    "api_image": (),
+}
+
+# Legacy per-site law table: EMPTY since F7 (the laws live in
+# PROMPT_HELPERS above); kept because prompt_suffix still reads it as
+# the seam for any future truly-unswitchable site law.
+SITE_PROMPT_RULES = {
+    "chatgpt": (),
+    "gemini": (),
     "api_image": (),
 }
 
@@ -122,16 +147,21 @@ def prompt_suffix(
     site_key: str,
     background: str,
     style: str | None = None,
+    helpers: tuple[str, ...] | None = None,
+    custom_hex: str = "",
 ) -> str:
     """The rule block appended to one prompt of one site — a CONSTANT
-    per (site, background, style) since the aspect inference was
-    removed (owner 2026-07-22; the sheet prompt states its own aspect
-    ratio explicitly).
+    per (site, background, style, helpers) since the aspect inference
+    was removed (owner 2026-07-22; the sheet prompt states its own
+    aspect ratio explicitly).
 
-    ``style`` (a STYLES key, "None"/None = no style) appends that style's
-    clause at the very END, after the background/site rules. With no
-    background rule, no site law and no style the suffix is "" — the
-    prompt is sent bare.
+    ``helpers`` (F7, owner 2026-07-29) are the AGENT's toggled
+    ``PROMPT_HELPERS`` keys; ``None`` = that agent's
+    ``HELPER_DEFAULTS`` (byte-identical to the pre-F7 baked laws).
+    ``custom_hex`` colors the ``"custom"`` background choice.
+    ``style`` (a STYLES key, "None"/None = no style) appends that
+    style's clause at the very END, after everything else. With no
+    rule at all the suffix is "" — the prompt is sent bare.
     """
     rules: list[str] = []
     if background == BACKGROUND_DEFAULT:
@@ -142,9 +172,21 @@ def prompt_suffix(
 
         site = SITES.get(site_key)
         background = site.default_background if site else "white"
-    bg_rule = _BACKGROUND_RULE[background]
+    if background == BACKGROUND_CUSTOM:
+        bg_rule = (
+            f"render on a PLAIN solid {custom_hex or '#ffffff'}"
+            " background — one flat color, no gradients, no vignette,"
+            " no backdrop scenery"
+        )
+    else:
+        bg_rule = _BACKGROUND_RULE[background]
     if bg_rule:
         rules.append(bg_rule)
+    if helpers is None:
+        helpers = HELPER_DEFAULTS.get(site_key, ())
+    for key in HELPER_CHOICES:  # stable order, whatever the input order
+        if key in helpers:
+            rules.append(PROMPT_HELPERS[key])
     rules.extend(SITE_PROMPT_RULES[site_key])
     if not rules:
         suffix = ""

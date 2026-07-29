@@ -484,7 +484,11 @@ class SiteJobsMixin:
                 timing,
                 driver,
                 post_save,
-                prompt_suffix(key, background, style=style),
+                prompt_suffix(
+                    key, background, style=style,
+                    helpers=panel.helpers(),
+                    custom_hex=panel.background_custom_var.get(),
+                ),
                 extra_suffix,
                 panel.report_var.get(),
                 selection,

@@ -28,8 +28,11 @@ from painter.config import (
     ASPECT_DEFAULT_H,
     ASPECT_DEFAULT_W,
     BACKGROUND_CHOICES,
+    BACKGROUND_CUSTOM,
     BACKGROUND_DEFAULT,
     DEGRADE_ASK,
+    HELPER_CHOICES,
+    HELPER_DEFAULTS,
     DEGRADE_CHOICES,
     FILTER_KIND_ASPECT_RANGE,
     FILTER_POLARITY_IF,
@@ -90,6 +93,10 @@ class AgentPanel(ttk.Labelframe):
         # a weaker model (Gemini's Flash-Lite banner) — ask / continue /
         # wait; see config.DEGRADE_CHOICES
         "degrade",
+        # F7 (owner 2026-07-29): the per-agent prompt-helper toggles +
+        # the custom-background hex
+        "helper_no_mirror", "helper_no_empty_space", "helper_no_grainy",
+        "background_custom",
         "new_chat", "pause_min",
         "pause_max", "act_min", "act_max",
         # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
@@ -210,6 +217,17 @@ class AgentPanel(ttk.Labelframe):
         self.fixer_mode_var = tk.StringVar(value=FIXER_MODE_API)
         # F2: the model-degradation choice (Gemini Flash-Lite banner)
         self.degrade_var = tk.StringVar(value=DEGRADE_ASK)
+        # F7 (owner 2026-07-29): the per-agent PROMPT HELPERS — this
+        # site's pre-F7 baked law starts ON (HELPER_DEFAULTS), so the
+        # default suffix stays byte-identical; the rest start OFF
+        self.helper_vars = {
+            key: tk.BooleanVar(
+                value=key in HELPER_DEFAULTS.get(site_key, ())
+            )
+            for key in HELPER_CHOICES
+        }
+        # F7: the "custom" background's picked color (hex)
+        self.background_custom_var = tk.StringVar(value="#ffffff")
         self.new_chat_var = tk.StringVar(value="collection")
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
@@ -345,6 +363,39 @@ class AgentPanel(ttk.Labelframe):
             self._row_switches2, "AI checker", self.checker_var,
         ).pack(side="left", padx=8)
 
+        # F7 (owner 2026-07-29): the per-agent PROMPT-HELPER toggles —
+        # primary per-generation choices like Background/Style, so they
+        # live in the always-visible area; texts are config data
+        # (PROMPT_HELPERS)
+        self._row_helpers = ttk.Frame(self._content)
+        ttk.Label(self._row_helpers, text="Helpers:").pack(side="left")
+        _HELPER_LABEL = {
+            "no_mirror": "no mirror",
+            "no_empty_space": "no empty space",
+            "no_grainy": "no grainy",
+        }
+        for i, key in enumerate(HELPER_CHOICES):
+            rounded_switch(
+                self._row_helpers, _HELPER_LABEL.get(key, key),
+                self.helper_vars[key],
+            ).pack(side="left", padx=(8 if i == 0 else 6, 0))
+        # F7: the "custom" background color — picking "custom" in the
+        # Background dropdown opens the color wheel; the swatch shows
+        # the chosen hex and reopens the picker on click
+        self._custom_swatch = tk.Label(
+            self._row_helpers, text="", width=8, cursor="hand2",
+        )
+        self._custom_swatch.bind(
+            "<Button-1>", lambda _e: self._pick_custom_background()
+        )
+        self.background_var.trace_add(
+            "write", lambda *_a: self._on_background_change()
+        )
+        self.background_custom_var.trace_add(
+            "write", lambda *_a: self._render_custom_swatch()
+        )
+        self._render_custom_swatch()
+
         # narrow (both sites visible) by default — matches the grid this
         # constructor just built above byte-for-byte; PainterGui.
         # _relayout_agents flips this the moment a visibility change makes
@@ -414,13 +465,14 @@ class AgentPanel(ttk.Labelframe):
         switch/combo inside keeps its exact variable and command."""
         rows = (
             self._row_dropdowns, self._row_style,
-            self._row_switches1, self._row_switches2,
+            self._row_switches1, self._row_switches2, self._row_helpers,
         )
         for w in rows:
             w.grid_forget()
         if self._dense:
             self._row_switches1.grid(row=0, column=0, sticky="ew", pady=2)
             self._row_switches2.grid(row=1, column=0, sticky="ew", pady=2)
+            self._row_helpers.grid(row=2, column=0, sticky="ew", pady=2)
             self._row_dropdowns.grid(
                 row=0, column=1, sticky="ew", pady=2,
                 padx=(DENSE_COL_GAP_PX, 0),
@@ -436,6 +488,7 @@ class AgentPanel(ttk.Labelframe):
             self._row_style.grid(row=1, column=0, sticky="ew", pady=2)
             self._row_switches1.grid(row=2, column=0, sticky="ew", pady=2)
             self._row_switches2.grid(row=3, column=0, sticky="ew", pady=2)
+            self._row_helpers.grid(row=4, column=0, sticky="ew", pady=2)
             self._content.columnconfigure(0, weight=1)
             self._content.columnconfigure(1, weight=0)
 
@@ -854,6 +907,55 @@ class AgentPanel(ttk.Labelframe):
         )
         return self._visible_btn
 
+    def helpers(self) -> tuple[str, ...]:
+        """This agent's toggled prompt helpers, in HELPER_CHOICES
+        order — what ``prompt_suffix(..., helpers=...)`` consumes."""
+        return tuple(
+            key for key in HELPER_CHOICES if self.helper_vars[key].get()
+        )
+
+    def _on_background_change(self) -> None:
+        """Picking "custom" in the Background dropdown opens the color
+        wheel once; the swatch beside the helpers row reopens it."""
+        self._render_custom_swatch()
+        if self.background_var.get() == BACKGROUND_CUSTOM:
+            self._pick_custom_background()
+
+    def _pick_custom_background(self) -> None:
+        from tkinter import colorchooser
+
+        picked = colorchooser.askcolor(
+            initialcolor=self.background_custom_var.get() or "#ffffff",
+            parent=self,
+            title=f"{SITES[self.site_key].name} — custom background",
+        )
+        if picked and picked[1]:
+            self.background_custom_var.set(picked[1])
+
+    def _render_custom_swatch(self) -> None:
+        """The swatch shows ONLY while Background == "custom" — its
+        fill is the picked color, its text the hex, its foreground
+        black/white by real luminance so the hex always reads."""
+        if self.background_var.get() != BACKGROUND_CUSTOM:
+            self._custom_swatch.pack_forget()
+            return
+        hex_color = self.background_custom_var.get() or "#ffffff"
+        try:
+            r, g, b = (
+                int(hex_color[1:3], 16),
+                int(hex_color[3:5], 16),
+                int(hex_color[5:7], 16),
+            )
+        except (ValueError, IndexError):
+            hex_color, (r, g, b) = "#ffffff", (255, 255, 255)
+        luma = 0.299 * r + 0.587 * g + 0.114 * b
+        self._custom_swatch.configure(
+            text=hex_color, bg=hex_color,
+            fg="#000000" if luma > 140 else "#ffffff",
+        )
+        if not self._custom_swatch.winfo_manager():
+            self._custom_swatch.pack(side="left", padx=(10, 0))
+
     def set_shared_header(self, shared: bool) -> None:
         """F4c (owner 2026-07-29): while the both-sites shared editor
         is active, this (primary) panel's header names BOTH sites so
@@ -890,6 +992,10 @@ class AgentPanel(ttk.Labelframe):
             "fixer": self.fixer_var,
             "fixer_mode": self.fixer_mode_var,
             "degrade": self.degrade_var,
+            "helper_no_mirror": self.helper_vars["no_mirror"],
+            "helper_no_empty_space": self.helper_vars["no_empty_space"],
+            "helper_no_grainy": self.helper_vars["no_grainy"],
+            "background_custom": self.background_custom_var,
             "new_chat": self.new_chat_var,
             "pause_min": self.pause_min_var,
             "pause_max": self.pause_max_var,

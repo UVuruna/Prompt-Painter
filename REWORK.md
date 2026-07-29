@@ -294,6 +294,14 @@ The largest phase — may be split into two sessions (4a–4d screens,
 
 ## Phase F5 — API model discovery + image attach
 
+**STATUS: LANDED 2026-07-29** (`ai.list_models` + per-purpose
+`recommend_model`/`model_for` with the `MODEL_PURPOSE_RANKING` config
+table and settings overrides; a Models row with three dropdowns in
+the API panel; `generate_image(image_path=...)` +
+`ApiImageAdapter.submit_with_image` close the attach gap). Follow-up
+debt: `painter/ai.py` is over the Rule #20 budget (~1174 lines) — the
+same dedicated god-file split session as `gui/viewers.py`.
+
 Files: `painter/ai.py`, `painter/config/ai.py`, `gui/api_panel.py`.
 
 - **Model discovery (owner D1/D2):** call the ListModels endpoint
@@ -335,6 +343,16 @@ Files: `painter/ai.py`, `painter/config/ai.py`,
 <a id="f7"></a>
 
 ## Phase F7 — Prompt helpers
+
+**STATUS: LANDED 2026-07-29** (the baked site laws moved VERBATIM
+into `PROMPT_HELPERS` with `HELPER_DEFAULTS` keeping them ON for
+their sites — default suffixes byte-identical, pinned by
+`tests/test_prompt_helpers.py`; per-agent switches no mirror / no
+empty space / no grainy in the always-visible panel area;
+`no_empty_space` ships DEFAULT OFF pending the owner's wording
+approval; Background gained CUSTOM with a color wheel + live
+swatch). Helper texts are config data (`painter/config/ai.py`) — the
+owner rewords freely.
 
 Files: `painter/config/ai.py`, `gui/agent_panel.py` (or its 4c
 successor), docs.
