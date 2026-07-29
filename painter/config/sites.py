@@ -39,6 +39,13 @@ class Timing:
     # the run WAITS this long for the owner to log in (polling for the
     # composer, status logged) before failing loudly
     login_wait_timeout_s: float = 900.0
+    # LIVE-RUN HOTFIX (owner 2026-07-29): ChatGPT's busy signal
+    # FLICKERS between its text phase and its image-tool phase — a
+    # "text + not busy" observation is terminal only after it holds
+    # CONTINUOUSLY this long (else the item was being skipped, and the
+    # next submit's refresh KILLED the still-running generation — the
+    # send/interrupt/send loop the owner caught live)
+    text_settle_s: float = 6.0
     # busy signal seen -> its disappearance (the done edge), hard cap
     generation_timeout_s: float = 420.0
     # done edge -> a real (non-placeholder) result <img> src

@@ -938,11 +938,14 @@ def test_sites_declare_a_user_turn_selector():
 
 def test_ensure_ready_refreshes_over_a_stuck_busy_signal():
     """F1 root cause 1 (owner 2026-07-29): a busy signal STILL PRESENT
-    from the previous item must never be sent over — the driver waits
-    the grace period, then REFRESHES, and only THEN sends — so the
-    reload happens BEFORE the send click, never after."""
+    from the previous item must never be sent over. LIVE-RUN HOTFIX:
+    the driver now WAITS OUT the whole generation window first (a busy
+    site may honestly be finishing the previous item — refreshing
+    early KILLED it mid-work); only a busy signal that outlives even
+    that is stuck, and only then does the pre-send REFRESH happen —
+    still strictly BEFORE the send click."""
     site = SITES["gemini"]
-    timing = replace(FAST, busy_clear_grace_s=0.05)
+    timing = replace(FAST, generation_timeout_s=0.05)
     page = FakePage()
     page.locators[site.busy_signal[0]] = PresentLocator()  # never clears
     prompt_box = FakeLocator("prompt_box", page)
@@ -1015,8 +1018,10 @@ def test_confirm_sent_raises_loudly_when_composer_never_empties():
 
 def test_await_done_text_answer_without_image_raises_had_text():
     """A finished turn that answered with TEXT but no image, busy gone
-    -> NoImage(had_text=True) — the runner's loud skip, never a nudge
-    (F1 root cause 2)."""
+    AND SETTLED (text_settle_s — the busy signal flickers between
+    ChatGPT's text and image phases, so the verdict must hold, LIVE-RUN
+    HOTFIX 2026-07-29) -> NoImage(had_text=True) — the runner's loud
+    skip, never a nudge (F1 root cause 2)."""
     site = SITES["gemini"]
     timing = replace(
         TIMING,
@@ -1024,6 +1029,7 @@ def test_await_done_text_answer_without_image_raises_had_text():
         progress_log_interval_s=1000.0,
         busy_appear_timeout_s=1.0,
         generation_timeout_s=2.0,
+        text_settle_s=0.05,
     )
     page = FakePage()
     page.locators[site.response_container[0]] = TextLocator(

@@ -374,22 +374,33 @@ class SiteDriver:
 
     def _ensure_ready(self, log: Log) -> None:
         """Never send over a busy composer (F1, root cause 1 — the
-        STUCK button): a busy signal still present before OUR send is
-        a leftover from the previous item. Wait a short grace for it
-        to clear; if it stays, REFRESH the page (the profile keeps the
-        login; only the wedged page state is thrown away)."""
+        STUCK button). LIVE-RUN HOTFIX (owner 2026-07-29): a busy
+        signal here can be a PREVIOUS generation still honestly
+        running (e.g. after a per-item skip) — refreshing after a
+        short grace KILLED it mid-work. Now the driver WAITS it out,
+        up to the full generation timeout (progress logged); only a
+        busy signal that outlives even that is treated as stuck and
+        cleared with a refresh."""
         if not self._busy():
             return
         log(
-            f"    {self.site.name}: busy signal still present before"
-            " send — waiting for it to clear"
+            f"    {self.site.name}: site still busy before send —"
+            " waiting for the previous generation to finish"
         )
-        deadline = time.monotonic() + self._timing.busy_clear_grace_s
+        deadline = time.monotonic() + self._timing.generation_timeout_s
+        last_log = time.monotonic()
         while time.monotonic() < deadline:
             if not self._busy():
                 return
+            now = time.monotonic()
+            if now - last_log >= self._timing.progress_log_interval_s:
+                log("    ... still busy (previous generation running)")
+                last_log = now
             time.sleep(self._timing.poll_interval_s)
-        log("    still busy (stuck) — refreshing the page before send")
+        log(
+            "    busy signal outlived the whole generation timeout —"
+            " stuck; refreshing the page before send"
+        )
         self.refresh(log)
 
     def _type_into_box(self, prompt: str) -> None:
@@ -521,12 +532,19 @@ class SiteDriver:
         while time.monotonic() < deadline:
             composer = self._composer_text()
             composer_empty = composer is not None and not composer.strip()
+            busy = self._busy()
             user_text = self._last_user_turn_text()
             if user_text is not None:
                 user_turn_seen = True
-                if composer_empty and head in normalize_text(user_text):
+                # LIVE-RUN HOTFIX (owner 2026-07-29): a BUSY signal is
+                # as good as an emptied composer — the site is already
+                # generating our turn (a lingering placeholder/ghost in
+                # the composer read must not block confirmation)
+                if (composer_empty or busy) and (
+                    head in normalize_text(user_text)
+                ):
                     return  # confirmed: our text IS the newest user turn
-            elif composer_empty and self._busy():
+            elif composer_empty and busy:
                 # documented fallback: no user-turn selector matched —
                 # loud, never silent (the run continues on the weaker
                 # "composer emptied + busy appeared" evidence)
@@ -536,7 +554,10 @@ class SiteDriver:
                     " (verify user_turn selectors in config.sites)"
                 )
                 return
-            if not retried and time.monotonic() >= halfway:
+            # LIVE-RUN HOTFIX: never retry while the site is BUSY —
+            # the morphed composer button is a STOP button then, and
+            # clicking it KILLED the very generation we started
+            if not retried and not busy and time.monotonic() >= halfway:
                 log("    send not confirmed yet — retrying (click + Enter)")
                 self._retry_send()
                 retried = True
@@ -679,6 +700,13 @@ class SiteDriver:
         deadline = start + t.generation_timeout_s
         quiet_deadline = start + t.busy_appear_timeout_s
         last_log = start
+        # LIVE-RUN HOTFIX (owner 2026-07-29): "text + not busy" must
+        # HOLD for text_settle_s continuously before it is terminal —
+        # ChatGPT's busy signal flickers between its text phase and
+        # its image-tool phase, and the instant verdict skipped items
+        # whose generation was mid-flight (then the next submit killed
+        # it — the send/interrupt/send loop caught live).
+        text_only_since: float | None = None
         while True:
             now = time.monotonic()
             if now > deadline:
@@ -696,14 +724,20 @@ class SiteDriver:
                     self._check_degrade_banner()
                     self._check_image_failed(text)
                     self._check_markers(text)
-                    if not busy:
+                if text and not busy:
+                    if text_only_since is None:
+                        text_only_since = now
+                    elif now - text_only_since >= t.text_settle_s:
                         raise NoImage(
                             f"{self.site.name}: the response answered"
-                            " with TEXT but no image, and the text"
+                            " with TEXT but no image (settled"
+                            f" {t.text_settle_s:.0f}s), and the text"
                             " matches no known marker — loud skip,"
                             f" never a nudge. Text starts: {text[:300]!r}",
                             had_text=True,
                         )
+                else:
+                    text_only_since = None  # busy again / image incoming
             elif not busy and now > quiet_deadline:
                 raise NoImage(
                     f"{self.site.name}: nothing happened after the"
@@ -865,7 +899,14 @@ class SiteDriver:
         """Second chance for a submit that did not take: click the send
         button again if present, then Enter in the prompt box (both
         sites send on Enter). Harmless when the text already went —
-        Enter on an empty box does nothing."""
+        Enter on an empty box does nothing.
+
+        LIVE-RUN HOTFIX (owner 2026-07-29): a BUSY site is proof the
+        send took — and ChatGPT's composer button IS the Stop button
+        while generating (same element id), so clicking it here KILLED
+        the running generation. Never retry over a busy signal."""
+        if self._busy():
+            return
         send = self._query(self.site.send_button)
         if send is not None:
             self._hesitate()
