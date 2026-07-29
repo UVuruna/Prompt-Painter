@@ -645,6 +645,9 @@ class DashPanel(JobPanel):
         # _new_theme) — a late checker result must stay reachable even
         # after the run has moved on to the next collection.
         self._check_results: dict[str, dict] = {}
+        # refused drop paths — each counts ONCE per panel lifetime
+        # (owner 2026-07-29, the 176/161 over-count)
+        self._refused_drops: set[str] = set()
         self.task_prog_var.set(f"0 / {task_total}")
         self.task_bar.configure(maximum=max(task_total, 1), value=0)
         self.theme_name_var.set("—")
@@ -758,9 +761,20 @@ class DashPanel(JobPanel):
                 st["time"] += event["gen_s"] + over
                 self._update_folder(folder)
         elif kind == "item_refused":
+            drop = event.get("drop_path", "")
+            # owner 2026-07-29 ("176/161"): the SAME item refused again
+            # on a later restart used to count (and add a row) EVERY
+            # time, pushing done+refused past the task total — one
+            # refusal counts ONCE per drop path for the whole panel
+            # lifetime (F3 continuity keeps this across begin_run)
+            if drop and drop in self._refused_drops:
+                self._update_parent()
+                self._refresh()  # handle()'s shared tail, kept on the
+                return           # early-out too
+            if drop:
+                self._refused_drops.add(drop)
             self._theme_refused += 1
             self._task_refused += 1
-            drop = event.get("drop_path", "")
             fnode = self._ensure_folder(folder_of(drop))
             rnode = self.tree.insert(
                 fnode, "end", text=PurePosixPath(drop).name or "refused",

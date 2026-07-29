@@ -287,6 +287,10 @@ SITES = {
             "limit resets",
             "generation limit",
             "image generation limit",
+            # live capture 2026-07-29 (read off the owner's running
+            # tab): "You're out of image creations for now. Upgrade
+            # your plan to continue, or wait for more tomorrow ..."
+            "out of image creations",
         ),
         # live capture 2026-07-21 (BUG 3 — a real run lost 7 minutes to
         # this): "Image generation failed / Try again" heading, body "I
@@ -315,6 +319,15 @@ SITES = {
             "can't retry it automatically after this kind of failure",
             "something seems to have gone wrong",
             "error on my side",
+            # live capture 2026-07-29 (the near-quota flaky state, read
+            # off the owner's running tab): "I was unable to invoke the
+            # image-generation tool right now." — transient; rides the
+            # ladder, and when the quota is truly out the retry's own
+            # answer carries the quota text -> TerminalState stops the
+            # site cleanly. Was unmatched before: 30+ items burned as
+            # false REFUSED while the plan limit was approaching.
+            "unable to invoke the image-generation tool",
+            "unable to invoke the image generation tool",
         ),
         # the Retry button of the "something went wrong" turn (verified
         # against the live DOM by the owner 2026-07-23, UV/RETRY
