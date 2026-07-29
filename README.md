@@ -14,8 +14,10 @@ sheet, resumable, paced, sources strictly read-only.
 **GitHub:** [UVuruna/Prompt-Painter](https://github.com/UVuruna/Prompt-Painter)
 **The handover pack: [CLAUDE.md](CLAUDE.md)** (the BINDING spec —
 decisions, workflow, DOM states, build order) **+
-[PLAN.md](PLAN.md)** (the design discussion behind it). First
-consumer: DOMY Watch prompt sheets.
+[PLAN.md](PLAN.md)** (the design discussion behind it) **+
+[REWORK.md](REWORK.md)** (the BIG REWORK plan, owner Q&A
+2026-07-29 — wins over older CLAUDE.md sections until folded in).
+First consumer: DOMY Watch prompt sheets.
 
 ## Structure
 

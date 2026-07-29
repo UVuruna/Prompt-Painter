@@ -18,7 +18,10 @@ projects (first consumer: DOMY Watch `research/prompts/`); this tool
 only consumes them.
 
 The full design discussion lives in [PLAN.md](PLAN.md) — this file
-is the binding spec.
+is the binding spec. **A BIG REWORK is planned (owner Q&A
+2026-07-29): [REWORK.md](REWORK.md) is BINDING and wins over any
+conflicting section below until each phase lands and is folded back
+in here.**
 
 ## Decisions Already Made (owner 2026-07-16 — do not relitigate)
 
