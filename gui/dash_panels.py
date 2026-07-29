@@ -357,6 +357,11 @@ class DashPanel(JobPanel):
             hdr, "Show", command=self._show_selected, kind="link",
             icon_name="right", compound="right",
         ).pack(side="right")
+        # F3 (owner 2026-07-29): the ONLY wipe surface — Start never
+        # clears the table any more (begin_run appends/continues)
+        rounded_button(
+            hdr, "Clear", command=self._confirm_clear, kind="link",
+        ).pack(side="right", padx=(0, 6))
         # the per-step restore filmstrip (GUI rework Phase 9) — a
         # SEPARATE button from 'Show' above (same focused-row idiom,
         # never overloaded onto the tree's own double-click, which
@@ -429,7 +434,7 @@ class DashPanel(JobPanel):
         wrap.columnconfigure(0, weight=1)
         self.tree.bind("<Double-1>", lambda _e: self._show_selected())
 
-        self.reset(active=False)
+        self.clear(active=False)
 
     def _show_selected(self) -> None:
         info = self._node_info.get(self.tree.focus())
@@ -581,11 +586,45 @@ class DashPanel(JobPanel):
 
     # --- state ---------------------------------------------------------
 
-    def reset(
-        self, active: bool = True, task_total: int = 0, task_themes: int = 0
-    ) -> None:
+    def begin_run(self, task_total: int = 0, task_themes: int = 0) -> None:
+        """Prepare a NEW run while KEEPING everything already shown
+        (F3, owner 2026-07-29: Start never wipes — a resumed/next run
+        APPENDS: rows land in their existing collection nodes and the
+        counters CONTINUE; the only wipe is ``clear()``, behind the
+        explicit Clear button). ``task_total``/``task_themes`` are the
+        new run's PENDING counts — stacked on top of what this panel
+        already finished, so the progress bar keeps its history."""
         self.reset_finished()  # a fresh run hides the CLOSE button again
         self._hide_cap_banner()  # a fresh run starts with a clean slate
+        if not self.tree.get_children():
+            # nothing shown yet (first run of this panel) — clean slate
+            self._t_task = time.monotonic()
+            self._task_done = 0
+            self._task_refused = 0
+            self._task_themes_done = 0
+            self._task_gen = []
+            self._task_over = []
+            self._task_totals = []
+        self._task_total = self._task_done + task_total
+        self._task_themes = self._task_themes_done + task_themes
+        self._new_theme("—", 0)
+        self.task_prog_var.set(f"{self._task_done} / {self._task_total}")
+        self.task_bar.configure(
+            maximum=max(self._task_total, 1), value=self._task_done
+        )
+        self.theme_name_var.set("—")
+        self.image_var.set("running ...")
+        self.theme_bar.configure(maximum=1, value=0)
+        self._refresh()
+
+    def clear(
+        self, active: bool = False, task_total: int = 0, task_themes: int = 0
+    ) -> None:
+        """FULL wipe — tree, counters, checker results. Called at
+        construction and by the explicit Clear button ONLY (F3):
+        starting a run goes through ``begin_run`` and never wipes."""
+        self.reset_finished()
+        self._hide_cap_banner()
         now = time.monotonic()
         self._task_total = task_total
         self._task_themes = task_themes
@@ -612,6 +651,19 @@ class DashPanel(JobPanel):
         self.image_var.set("running ..." if active else "idle")
         self.theme_bar.configure(maximum=1, value=0)
         self._refresh()
+
+    def _confirm_clear(self) -> None:
+        """The Clear button (F3): the ONE way to wipe the panel —
+        confirmed, never implicit. Files on disk are untouched."""
+        from tkinter import messagebox
+
+        if messagebox.askyesno(
+            "Clear dashboard",
+            "Clear this panel's collections table and statistics?\n\n"
+            "Saved images on disk are NOT touched — only the display.",
+            parent=self,
+        ):
+            self.clear(active=False)
 
     def _new_theme(self, name: str, pending: int) -> None:
         self._theme_name = name

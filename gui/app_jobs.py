@@ -441,7 +441,10 @@ class SiteJobsMixin:
         dash = self.panels[key]
         dash.jobtemp = self._job_temps[key]
         dash.out_base = out_base
-        dash.reset(active=True, task_total=total, task_themes=themes)
+        # F3 (owner 2026-07-29): Start APPENDS — the panel's table and
+        # stats survive every restart (manual or quota auto-restart);
+        # the only wipe is the panel's own explicit Clear button
+        dash.begin_run(task_total=total, task_themes=themes)
         self._dashgrid.add(key)  # reveal the panel (idempotent on restart)
         self._update_status()
         background = panel.background_var.get()
@@ -646,7 +649,7 @@ class SiteJobsMixin:
         dash = self.panels["api_image"]
         dash.jobtemp = self._job_temps["api_image"]
         dash.out_base = out_base
-        dash.reset(active=True, task_total=total, task_themes=themes)
+        dash.begin_run(task_total=total, task_themes=themes)  # F3: appends
         self._dashgrid.add("api_image")
         self._update_status()
         background = panel.background_var.get()
@@ -951,6 +954,19 @@ class SiteJobsMixin:
                     # _maybe_spawn_checker's own docstring)
                     if msg[2].get("type") == "item_progress":
                         self._maybe_spawn_checker(msg[1], msg[2])
+                        # F3 (owner 2026-07-29, the _vN landmine): the
+                        # selection is LIVE — a saved item unticks
+                        # itself, so a restart re-submits only the
+                        # REMAINDER and a leftover tick can never turn
+                        # into an unwanted redo version. A deliberate
+                        # redo is a NEW tick on a green (done) row in
+                        # Select — that one the owner makes himself.
+                        drop = msg[2].get("drop_path")
+                        for (site, _src, d), var in (
+                            self._select_vars.items()
+                        ):
+                            if site == msg[1] and d == drop and var.get():
+                                var.set(False)
                     # GUI rework Phase 20: the Fixer AI hangs off the
                     # checker's OWN item_checked result (posted by
                     # _run_checker_one onto this SAME queue) — see

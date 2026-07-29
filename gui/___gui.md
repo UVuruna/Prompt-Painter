@@ -246,7 +246,11 @@ the before/after transparency-checkerboard helpers (`_checkerboard`/
 close/pause, the folder>image tree-node plumbing) and `DashPanel`
 (one generation site's live view — task/theme progress, the two-scope
 stats table, the collections history tree, the per-step restore
-viewer and the parallel Checker AI's per-row report). See
+viewer and the parallel Checker AI's per-row report). F3 (owner
+2026-07-29): Start goes through `begin_run` — the table and counters
+SURVIVE every restart (manual or quota auto-restart) and the new
+pending count stacks on top; the full wipe is `clear()`, behind the
+header's explicit Clear button only. See
 [Dashboard Job Panel Base + Site Panel](dash_panels.md).
 
 ### `tool_dash.py` — Tool + AI-Checker Dashboard Panels + Grid

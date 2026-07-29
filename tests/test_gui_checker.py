@@ -351,7 +351,11 @@ def test_dash_panel_reset_clears_check_results(root, tmp_path):
     })
     assert panel._check_results
 
-    panel.reset(active=True, task_total=1, task_themes=1)
+    # F3 (owner 2026-07-29): a NEW RUN keeps past rows AND their check
+    # results (begin_run appends); only the explicit Clear wipes them
+    panel.begin_run(task_total=1, task_themes=1)
+    assert panel._check_results
+    panel.clear()
     assert panel._check_results == {}
 
 
@@ -455,6 +459,9 @@ class _FakeGuiForChecker:
         self.agents = agents
         self.panels = panels
         self._q: "queue.Queue" = queue.Queue()
+        # F3: _dispatch unticks a saved item's selection var — empty
+        # here (no selection in these tests), the attr must exist
+        self._select_vars: dict = {}
 
 
 def test_maybe_spawn_checker_off_does_nothing(root, tmp_path):

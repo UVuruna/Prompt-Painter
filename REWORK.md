@@ -181,6 +181,13 @@ Files: `painter/config/ai.py`, `painter/config/sites.py`,
 
 ## Phase F3 — Run lifecycle and dashboard continuity
 
+**STATUS: LANDED 2026-07-29** (`DashPanel.begin_run` appends —
+rows/stats survive every restart including the quota auto-restart;
+the explicit Clear button is the only wipe; the selection is LIVE —
+`item_progress` unticks the saved item, so a restart re-submits only
+the remainder and a leftover tick can never become an unwanted `_vN`
+redo; regression tests in `tests/test_gui_dash_continuity.py`).
+
 Files: `gui/app_jobs.py`, `gui/dash_panels.py`,
 `gui/select_window.py`, `gui/app_settings.py`.
 

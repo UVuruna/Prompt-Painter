@@ -620,8 +620,10 @@ def test_dash_panel_over_cap_event_shows_a_loud_persistent_banner(root):
     panel.handle({"type": "item_retry"})
     assert panel._cap_banner.winfo_manager() == "pack"
 
-    # only a fresh run (reset(), what _start_site calls) hides it again
-    panel.reset(active=True, task_total=1, task_themes=1)
+    # only a fresh run (begin_run(), what _start_site calls) hides it
+    # again — F3: begin_run appends instead of wiping, but the banner
+    # slate still starts clean
+    panel.begin_run(task_total=1, task_themes=1)
     assert panel._cap_banner.winfo_manager() == ""
 
 
