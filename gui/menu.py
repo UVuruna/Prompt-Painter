@@ -66,9 +66,11 @@ class MainMenu(ttk.Frame):
         super().__init__(parent)
         self._on_select = on_select
 
+        # HOTFIX (owner 2026-07-29, slika 1): the big title moved into
+        # the top strip (in line with the theme switcher) — the menu
+        # keeps only its short instruction line
         header = ttk.Frame(self)
-        header.pack(pady=(24, 4))
-        ttk.Label(header, text="PromptPainter", style="Big.TLabel").pack()
+        header.pack(pady=(16, 4))
         ttk.Label(header, text="Pick what to do", style="Muted.TLabel").pack()
 
         self._grid = ttk.Frame(self)

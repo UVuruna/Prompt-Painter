@@ -124,19 +124,41 @@ class ViewMixin:
             self._collapse_btn.configure(state="normal")
             self._set_collapsed(self._collapsed)
         # F4b (owner 2026-07-29): the icon strip shows on the SETUP
-        # screen too — icons-only, centered, above the settings; its
-        # own Menu button serves as HOME there, so the top-strip Menu
-        # button steps aside (one Menu affordance at a time).
+        # screen too — icons-only, above the settings; its own Menu
+        # button serves as HOME there. HOTFIX (owner 2026-07-29,
+        # slika 2): entering the setup screen ALWAYS expands the full
+        # controls — a persisted collapsed state used to leave only
+        # the thin compact strip, i.e. NO settings and no way to
+        # start; the Controls toggle still collapses afterwards.
         if view == "main":
-            target = (
-                self._compact_box if self._collapsed else self._controls_box
-            )
+            if self._collapsed:
+                self._set_collapsed(False)
+            target = self._controls_box
             if not target.winfo_manager():
                 target = self.notebook
             self._icon_bar.pack(fill="x", pady=(2, 4), before=target)
-            self._menu_btn.pack_forget()
         elif view == "menu":
             self._icon_bar.pack_forget()
+        # HOTFIX (owner 2026-07-29, slika 1): the MENU screen shows a
+        # CLEAN top strip — title + theme switch only; Check/Controls/
+        # grid-slider (and the legacy Menu button, permanently) belong
+        # to the working views and hide here.
+        self._menu_btn.pack_forget()  # IconBar's Menu is the one HOME
+        if view == "menu":
+            self.btn_check.pack_forget()
+            self._collapse_btn.pack_forget()
+            self._dash_mode_btn.pack_forget()
+        else:
+            if not self.btn_check.winfo_manager():
+                self.btn_check.pack(side="left", padx=(8, 0))
+            if not self._dash_mode_btn.winfo_manager():
+                self._dash_mode_btn.pack(
+                    side="right", padx=(0, 8), after=self.switch
+                )
+            if not self._collapse_btn.winfo_manager():
+                self._collapse_btn.pack(
+                    side="right", padx=(0, 8), after=self._dash_mode_btn
+                )
         self._scroll.refresh()
 
     def _go_view(self, view: str) -> None:

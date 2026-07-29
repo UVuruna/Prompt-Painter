@@ -190,11 +190,16 @@ def test_clamp_geometry_leaves_a_small_geometry_untouched():
     assert gui.PainterGui._clamp_geometry(fake, "900x640+80+80") == "900x640+80+80"
 
 
-def test_clamp_geometry_shrinks_an_oversized_geometry_to_the_screen():
+def test_clamp_geometry_reopens_an_oversized_geometry_at_the_default():
+    """HOTFIX (owner 2026-07-29, slika 1): a maximized close used to
+    persist a full-screen WxH and reopen huge — near-screen sizes now
+    reopen at the modest ~4:3 default instead."""
     root = FakeRoot(screen=(1920, 1080))
     fake = FakeGui(root)
     out = gui.PainterGui._clamp_geometry(fake, "3000x2000+0+0")
-    assert out.startswith("1840x1000")  # screen - WINDOW_SCREEN_MARGIN_PX
+    assert out.startswith(
+        f"{gui.app_build.WINDOW_DEFAULT_W}x{gui.app_build.WINDOW_DEFAULT_H}"
+    )
 
 
 def test_clamp_geometry_pulls_an_offscreen_position_back_on_screen():

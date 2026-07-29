@@ -72,6 +72,11 @@ WINDOW_MIN_W = 900          # root.minsize width
 WINDOW_MIN_H = 640          # root.minsize height
 WINDOW_SCREEN_MARGIN_PX = 80  # taskbar + titlebar + slack subtracted from
 #                               screen w/h when clamping a restored geometry
+# HOTFIX (owner 2026-07-29, slika 1): the window OPENS at a modest
+# ~4:3 — never huge; a restored geometry is capped to this too (a
+# maximized close used to persist a full-screen WxH and reopen huge)
+WINDOW_DEFAULT_W = 1120
+WINDOW_DEFAULT_H = 840
 COMPACT_CLUSTER_GAP_PX = 24  # gap between the two agent clusters when collapsed
 COLLAPSE_GLYPH_EXPANDED = "▾  Controls"   # toggle label while controls show
 COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
@@ -84,6 +89,7 @@ class BuildMixin:
         self.root = root
         root.title("PromptPainter")
         root.minsize(WINDOW_MIN_W, WINDOW_MIN_H)
+        root.geometry(f"{WINDOW_DEFAULT_W}x{WINDOW_DEFAULT_H}")
 
         # register the custom light theme before anything can apply it
         register_painter_day()
@@ -381,6 +387,13 @@ class BuildMixin:
             self._top_strip, "Menu", command=self._request_menu,
         )
         self._menu_btn.pack(side="left")
+        # HOTFIX (owner 2026-07-29, slika 1): the app TITLE lives in
+        # the top strip, in line with the theme switcher — centered
+        # between the left buttons and the right toggles
+        ttk.Label(
+            self._top_strip, text="PromptPainter", style="Head.TLabel",
+            anchor="center",
+        ).pack(side="left", expand=True, fill="x")
         # F4g (owner 2026-07-29): the "Open Chrome (login)" button is
         # GONE — starting an agent ensures Chrome itself (launches it
         # with the automation profile when needed, opens the site tab,
@@ -674,6 +687,11 @@ class BuildMixin:
                                          sw - WINDOW_SCREEN_MARGIN_PX)))
         h = max(WINDOW_MIN_H, min(h, max(WINDOW_MIN_H,
                                          sh - WINDOW_SCREEN_MARGIN_PX)))
+        # HOTFIX (owner 2026-07-29): a maximized close persists a
+        # full-screen WxH — reopen those at the modest default instead
+        if (w >= sw - WINDOW_SCREEN_MARGIN_PX
+                or h >= sh - WINDOW_SCREEN_MARGIN_PX):
+            w, h = WINDOW_DEFAULT_W, WINDOW_DEFAULT_H
         if m.group(3) is None:
             return f"{w}x{h}"
         x, y = int(m.group(3)), int(m.group(4))
