@@ -277,6 +277,21 @@ Selectors rot with every reskin — when none match, FAIL LOUDLY
 
 ## The Run Loop
 
+**F1 REWORK LANDED (owner 2026-07-29, [REWORK.md](REWORK.md)):** the
+per-item mechanics below are now TURN-BASED — the driver snapshots a
+pre-submit `Baseline` (assistant-turn count + last image src), clears
+the composer only when non-empty, VERIFIES the typed text, CONFIRMS
+the send (composer emptied + our text as the newest user turn, via
+`SiteConfig.user_turn`), and "done" = a NEW assistant turn holding a
+loaded image with a fresh src (the busy button is secondary — a stuck
+stop button can no longer stall or mis-attribute a result). Unmatched
+TEXT answers loud-skip the item (`NoImage.had_text` — the continue
+nudge fires ONLY on truly empty answers); a refusal inside the
+image-failed ladder skips the item instead of stopping the site; a
+byte-identical result to the previous save is re-submitted once then
+loud-skipped (the duplicate-save bug). Details in
+[CDP Driver](painter/driver.md) and [Run Loop](painter/runner.md).
+
 `parse(sheet) → queue` → per pending item: paste (+ suffix) →
 submit → await the done-edge (hard timeout) → extract bytes → save
 `<out>/<rest>/<File>_gem|_gpt|_api.png` (the assets mirror — DOMY

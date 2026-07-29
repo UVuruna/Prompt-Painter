@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import random
 import time
+from dataclasses import dataclass
 from typing import Callable
 
 from playwright.sync_api import Locator, Page, sync_playwright
@@ -75,14 +76,19 @@ class GenerationTimeout(DriverError):
 
 
 class NoImage(DriverError):
-    """The done edge fired (or the busy signal never appeared) but no
-    generated image loaded, and the response text matches no refusal /
-    quota marker — an UNKNOWN DOM state (empty answer, selector rot, or
-    ChatGPT simply stalling mid-generation). Distinct from the generic
-    ``DriverError`` so the runner can catch JUST this and try a one-shot
-    "continue" nudge before giving up (the owner's recurring stuck-
-    ChatGPT case). If the nudge does not recover it, it propagates like
-    any other ``DriverError`` and the site stops loudly."""
+    """No generated image arrived in OUR response turn, and the text
+    matches no refusal / quota / image-failed marker — an UNKNOWN DOM
+    state. ``had_text`` (F1 protocol, owner 2026-07-29) records whether
+    the site DID answer with text: True means the model replied
+    something unrecognized — the runner must LOUD-SKIP the item and
+    NEVER send the continue nudge (the market-scene incident: a nudge
+    after an unmatched refusal made Gemini draw a random image that got
+    saved under the item's name). False means a truly empty/interrupted
+    answer — the one case where a single continue nudge is allowed."""
+
+    def __init__(self, message: str, had_text: bool = False):
+        super().__init__(message)
+        self.had_text = had_text
 
 
 class ImageGenFailed(DriverError):
@@ -151,6 +157,33 @@ _MAGIC = (
 )
 
 
+def normalize_text(text: str) -> str:
+    """Whitespace-collapsed, lowercased text for DOM comparisons.
+
+    ProseMirror/Quill editors reflow whitespace and newlines, so the
+    F1 protocol's "does the composer / user turn hold OUR prompt"
+    checks compare normalized forms, never raw strings."""
+    return " ".join(text.split()).lower()
+
+
+# how much of the prompt's normalized head must be found when
+# verifying the composer content / the sent user turn (F1 protocol)
+VERIFY_PREFIX_CHARS = 60
+
+
+@dataclass(frozen=True)
+class Baseline:
+    """The page state snapshot taken BEFORE a submit (F1 protocol,
+    owner 2026-07-29): everything after the send is judged RELATIVE to
+    it — a result is accepted only from an assistant turn NEWER than
+    ``turn_count``, holding an image whose src differs from
+    ``last_img_src``. This is what makes "grab the last visible image"
+    (root cause of the duplicate-save bug) impossible."""
+
+    turn_count: int
+    last_img_src: str | None
+
+
 def sniff_format(data: bytes) -> str | None:
     """Best-effort image format from magic bytes; None if unknown."""
     for magic, name in _MAGIC:
@@ -171,6 +204,9 @@ class SiteDriver:
         self._pw = None
         self._browser = None
         self.page: Page | None = None
+        # F1 protocol: the pre-submit snapshot every await/extract is
+        # judged against; set by submit_prompt/submit_with_image
+        self._baseline: Baseline | None = None
 
     # --- lifecycle ----------------------------------------------------
 
@@ -225,21 +261,120 @@ class SiteDriver:
             )
         )
 
+    # --- F1 element-state readers (owner 2026-07-29, UV/prompt.txt §1A):
+    # the four tracked states — composer text, send/busy button, last
+    # SENT user text, last image — every decision reads these, never
+    # assumptions.
+
+    def _composer_text(self) -> str | None:
+        """The prompt box's current text; None when the box itself is
+        missing (selector rot territory — callers stay loud)."""
+        box = self._query(self.site.prompt_box)
+        return None if box is None else box.inner_text()
+
+    def _busy(self) -> bool:
+        """Is the site generating right now (stop button visible)?"""
+        return self._query(self.site.busy_signal) is not None
+
+    def _turns_count(self) -> int:
+        """How many assistant turns the conversation currently holds."""
+        for sel in self.site.response_container:
+            loc = self.page.locator(sel)
+            n = loc.count()
+            if n:
+                return n
+        return 0
+
+    def _last_user_turn_text(self) -> str | None:
+        """Text of the newest USER turn; None when the site names no
+        ``user_turn`` selector or none matches (the caller falls back
+        LOUDLY — see ``_confirm_sent``)."""
+        if not self.site.user_turn:
+            return None
+        for sel in self.site.user_turn:
+            loc = self.page.locator(sel)
+            if loc.count():
+                return loc.last.inner_text()
+        return None
+
+    def _last_image_src(self) -> str | None:
+        """src of the last generated image anywhere on the page — the
+        pre-submit fingerprint a result image must DIFFER from."""
+        for sel in self.site.result_image:
+            loc = self.page.locator(sel)
+            n = loc.count()
+            if n:
+                return loc.nth(n - 1).get_attribute("src")
+        return None
+
+    def capture_baseline(self) -> Baseline:
+        """Snapshot the page BEFORE a submit (F1 protocol)."""
+        self._baseline = Baseline(
+            turn_count=self._turns_count(),
+            last_img_src=self._last_image_src(),
+        )
+        return self._baseline
+
+    def _ensure_ready(self, log: Log) -> None:
+        """Never send over a busy composer (F1, root cause 1 — the
+        STUCK button): a busy signal still present before OUR send is
+        a leftover from the previous item. Wait a short grace for it
+        to clear; if it stays, REFRESH the page (the profile keeps the
+        login; only the wedged page state is thrown away)."""
+        if not self._busy():
+            return
+        log(
+            f"    {self.site.name}: busy signal still present before"
+            " send — waiting for it to clear"
+        )
+        deadline = time.monotonic() + self._timing.busy_clear_grace_s
+        while time.monotonic() < deadline:
+            if not self._busy():
+                return
+            time.sleep(self._timing.poll_interval_s)
+        log("    still busy (stuck) — refreshing the page before send")
+        self.refresh(log)
+
     def _type_into_box(self, prompt: str) -> None:
-        """Click the prompt box, select-all + delete, paste ``prompt``
-        verbatim — the typing half of ``_paste_and_send``, factored out
-        so the send-button reload recovery (below) can re-type after a
-        ``page.reload()`` wipes the composer's unsent text."""
+        """Click the prompt box, clear it ONLY when it holds text
+        (owner 2026-07-29: "ako je empty ne treba delete"), paste
+        ``prompt`` verbatim, then VERIFY the composer really holds our
+        text — one silent re-type on mismatch, loud failure after."""
         box = self._require(self.site.prompt_box, "the prompt box")
         self._hesitate()
         box.click()
         self._hesitate()
+        current = self._composer_text()
+        if current is not None and current.strip():
+            self.page.keyboard.press("Control+A")
+            self._hesitate()
+            self.page.keyboard.press("Delete")
+            self._hesitate()
+        self.page.keyboard.insert_text(prompt)
+        self._hesitate()
+        if self._composer_holds(prompt):
+            return
+        # one retype: clear whatever landed and paste again
         self.page.keyboard.press("Control+A")
         self._hesitate()
         self.page.keyboard.press("Delete")
         self._hesitate()
         self.page.keyboard.insert_text(prompt)
         self._hesitate()
+        if not self._composer_holds(prompt):
+            raise DriverError(
+                f"{self.site.name}: the composer does not hold the"
+                " typed prompt after two attempts — box state:"
+                f" {str(self._composer_text())[:120]!r}"
+            )
+
+    def _composer_holds(self, prompt: str) -> bool:
+        """Does the composer text start with our prompt's head?"""
+        text = self._composer_text()
+        if text is None:
+            return False
+        head = normalize_text(prompt)[:VERIFY_PREFIX_CHARS]
+        return normalize_text(text).startswith(head)
 
     def _click_send(
         self,
@@ -302,8 +437,60 @@ class SiteDriver:
 
     def submit_prompt(self, prompt: str, log: Log = print) -> None:
         """Paste the prompt byte-identical and press send — with a
-        person's rhythm (click ... paste ... send), never instant."""
+        person's rhythm — then CONFIRM the send took (F1 protocol):
+        composer emptied AND our text visible as the newest user turn.
+        Never assumes; a send that cannot be confirmed fails loudly."""
+        self._ensure_ready(log)
+        self.capture_baseline()
         self._paste_and_send(prompt, log)
+        self._confirm_sent(prompt, log)
+
+    def _confirm_sent(self, prompt: str, log: Log) -> None:
+        """Block until the send is CONFIRMED (owner 2026-07-29): the
+        composer is empty again AND the newest USER turn holds our
+        prompt's head. When the site's ``user_turn`` selector matches
+        nothing (not configured / rotted), the documented LOUD fallback
+        is "composer emptied + busy signal appeared". At half the
+        confirm window the send is retried once (click + Enter). A
+        window spent without confirmation raises — the runner never
+        proceeds on an unsent prompt (root cause of the silent-skip
+        and duplicate-save bugs)."""
+        t = self._timing
+        head = normalize_text(prompt)[:VERIFY_PREFIX_CHARS]
+        deadline = time.monotonic() + t.send_confirm_timeout_s
+        halfway = time.monotonic() + t.send_confirm_timeout_s / 2
+        retried = False
+        user_turn_seen = False
+        while time.monotonic() < deadline:
+            composer = self._composer_text()
+            composer_empty = composer is not None and not composer.strip()
+            user_text = self._last_user_turn_text()
+            if user_text is not None:
+                user_turn_seen = True
+                if composer_empty and head in normalize_text(user_text):
+                    return  # confirmed: our text IS the newest user turn
+            elif composer_empty and self._busy():
+                # documented fallback: no user-turn selector matched —
+                # loud, never silent (the run continues on the weaker
+                # "composer emptied + busy appeared" evidence)
+                log(
+                    f"    {self.site.name}: user-turn selector matched"
+                    " nothing — confirming send by composer+busy only"
+                    " (verify user_turn selectors in config.sites)"
+                )
+                return
+            if not retried and time.monotonic() >= halfway:
+                log("    send not confirmed yet — retrying (click + Enter)")
+                self._retry_send()
+                retried = True
+            time.sleep(t.poll_interval_s)
+        raise DriverError(
+            f"{self.site.name}: send NOT confirmed within"
+            f" {t.send_confirm_timeout_s:.0f}s — composer:"
+            f" {str(self._composer_text())[:80]!r}, newest user turn"
+            f" {'seen' if user_turn_seen else 'NOT seen'} — the prompt"
+            " was not accepted; nothing was submitted silently"
+        )
 
     def submit_with_image(
         self, image_path: str, prompt: str, log: Log = print
@@ -339,6 +526,8 @@ class SiteDriver:
         reuse the EXISTING ``await_done``/``extract_image`` unchanged —
         the caller invokes them next, exactly as after ``submit_prompt``.
         """
+        self._ensure_ready(log)
+        self.capture_baseline()
         self._attach_image(image_path)
         self._hesitate()
         # reattach: a send-button reload recovery would drop the image, so
@@ -346,6 +535,7 @@ class SiteDriver:
         self._paste_and_send(
             prompt, log, reattach=lambda: self._attach_image(image_path)
         )
+        self._confirm_sent(prompt, log)
 
     def _attach_image(self, image_path: str) -> None:
         """Walk the "+" menu like a person and attach ``image_path``, then
@@ -406,79 +596,147 @@ class SiteDriver:
             )
 
     def await_done(self, log: Log = print) -> None:
-        """Watch the done edge: the busy signal appears, then goes.
+        """Wait until OUR result exists (F1 protocol, owner 2026-07-29).
 
-        A submit does not always take (the send button can be
-        momentarily blocked) — while the busy signal is missing, the
-        send is retried every ``send_retry_after_s`` before the loud
-        give-up at the hard timeout.
+        The old done edge was button-only ("stop button disappears") —
+        which stalls forever on ChatGPT's stuck button and cannot tell
+        OUR generation from a leftover one. Now the primary signal is
+        the RESULT itself: an assistant turn NEWER than the pre-submit
+        baseline holding a loaded image whose src differs from the
+        baseline's. The busy button is only secondary evidence:
+
+        - new turn + fresh loaded image  -> done (even if the busy
+          signal is stuck — root cause 4);
+        - new turn text matching quota / refusal / image-failed
+          markers -> classified raise (checked on EVERY poll);
+        - new turn with final text, NO image, busy gone ->
+          ``NoImage(had_text=True)`` — the runner LOUD-SKIPS, never
+          nudges (root cause 2);
+        - nothing new and busy never appeared within the appear
+          window -> ``NoImage(had_text=False)`` (empty/interrupted —
+          the one nudge-eligible case);
+        - the hard ``generation_timeout_s`` still bounds everything.
         """
         t = self._timing
         start = time.monotonic()
-
-        deadline = start + t.busy_appear_timeout_s
-        next_retry = start + t.send_retry_after_s
-        while self._query(self.site.busy_signal) is None:
-            now = time.monotonic()
-            if now > deadline:
-                self._raise_no_image(
-                    "the busy signal never appeared after submit"
-                    " (send retried)"
-                )
-            if now >= next_retry:
-                log("    send did not take — retrying (click + Enter)")
-                self._retry_send()
-                next_retry = time.monotonic() + t.send_retry_after_s
-            time.sleep(t.poll_interval_s)
-
-        deadline = time.monotonic() + t.generation_timeout_s
-        last_log = time.monotonic()
-        while self._query(self.site.busy_signal) is not None:
+        deadline = start + t.generation_timeout_s
+        quiet_deadline = start + t.busy_appear_timeout_s
+        last_log = start
+        while True:
             now = time.monotonic()
             if now > deadline:
                 raise GenerationTimeout(
-                    f"{self.site.name}: no done edge after"
+                    f"{self.site.name}: no result for OUR turn after"
                     f" {t.generation_timeout_s:.0f}s (hard timeout)"
                 )
-            # BUG 3 (owner 2026-07-21): ChatGPT's "Image generation
-            # failed" answer leaves the busy/stop signal stuck FOREVER
-            # — the done edge this loop waits for never comes. Scan the
-            # response text on EVERY poll so the failure is caught in
-            # seconds instead of burning the whole hard timeout; a
-            # no-op wherever the site names no such marker (Gemini).
-            self._check_image_failed()
+            turn = self._new_turn()
+            busy = self._busy()
+            if turn is not None:
+                if self._turn_image(turn) is not None:
+                    return  # our image is loaded — done, button ignored
+                text = self._safe_text(turn)
+                if text:
+                    self._check_image_failed(text)
+                    self._check_markers(text)
+                    if not busy:
+                        raise NoImage(
+                            f"{self.site.name}: the response answered"
+                            " with TEXT but no image, and the text"
+                            " matches no known marker — loud skip,"
+                            f" never a nudge. Text starts: {text[:300]!r}",
+                            had_text=True,
+                        )
+            elif not busy and now > quiet_deadline:
+                raise NoImage(
+                    f"{self.site.name}: nothing happened after the"
+                    f" confirmed send ({t.busy_appear_timeout_s:.0f}s:"
+                    " no new turn, no busy signal) — empty/interrupted"
+                    " answer",
+                    had_text=False,
+                )
             if now - last_log >= t.progress_log_interval_s:
                 log(f"    ... still generating ({now - start:.0f}s)")
                 last_log = now
             time.sleep(t.poll_interval_s)
 
     def extract_image(self) -> bytes:
-        """Read the generated image's bytes straight from the DOM.
+        """Read OUR generated image's bytes straight from the DOM.
 
-        While waiting for a real <img>, the response text is checked
-        every poll — a refusal or quota answer raises immediately
-        instead of burning the whole image timeout.
+        F1 protocol: the image is taken ONLY from an assistant turn
+        newer than the pre-submit baseline, and only when its src
+        differs from the baseline's last image — never "the last
+        visible image on the page" (the duplicate-save root cause).
         """
         t = self._timing
         deadline = time.monotonic() + t.image_ready_timeout_s
         while True:
-            try:
-                img = self._last_result_image()
-            except SelectorRot:
-                # the response container can be TRANSIENTLY absent
-                # (route transition, list virtualization) — keep
-                # polling; the deadline below stays the loud stop
-                img = None
+            turn = self._new_turn()
+            img = None if turn is None else self._turn_image(turn)
             if img is not None:
                 break
-            self._check_markers()
+            text = "" if turn is None else self._safe_text(turn)
+            if text:
+                self._check_markers(text)
             if time.monotonic() > deadline:
-                self._raise_no_image(
-                    "the response holds no loaded generated image"
+                raise NoImage(
+                    f"{self.site.name}: OUR response turn holds no"
+                    " loaded generated image, and its text matches no"
+                    f" known marker. Text starts: {text[:300]!r}",
+                    had_text=bool(text),
                 )
             time.sleep(t.poll_interval_s)
         b64 = img.evaluate(_FETCH_IMAGE_JS)
         return base64.b64decode(b64)
+
+    # --- F1 turn-scoping helpers ----------------------------------------
+
+    def _require_baseline(self) -> Baseline:
+        if self._baseline is None:
+            raise DriverError(
+                f"{self.site.name}: await/extract called without a"
+                " submit — no baseline captured (internal call-order"
+                " bug, never a site state)"
+            )
+        return self._baseline
+
+    def _new_turn(self) -> Locator | None:
+        """The LAST assistant turn, but only when the conversation has
+        MORE turns than the pre-submit baseline — else None."""
+        base = self._require_baseline()
+        for sel in self.site.response_container:
+            loc = self.page.locator(sel)
+            n = loc.count()
+            if n:
+                return loc.nth(n - 1) if n > base.turn_count else None
+        return None
+
+    def _turn_image(self, turn: Locator) -> Locator | None:
+        """The last fully loaded, non-placeholder <img> INSIDE ``turn``
+        whose src differs from the baseline's last image src."""
+        base = self._require_baseline()
+        for sel in self.site.result_image:
+            imgs = turn.locator(sel)
+            for k in range(imgs.count() - 1, -1, -1):
+                img = imgs.nth(k)
+                loaded = img.evaluate(
+                    "(el, min) => el.complete && el.naturalWidth >= min",
+                    MIN_IMAGE_PX,
+                )
+                if not loaded:
+                    continue
+                if (
+                    base.last_img_src is not None
+                    and img.get_attribute("src") == base.last_img_src
+                ):
+                    continue  # the PREVIOUS item's image — never ours
+                return img
+        return None
+
+    def _safe_text(self, turn: Locator) -> str:
+        try:
+            return turn.inner_text()
+        except Exception:
+            return ""  # transiently detached turn — next poll re-reads
 
     def new_chat(self, log: Log = print) -> None:
         """Open a fresh conversation (the sidebar's New chat control).
@@ -492,6 +750,9 @@ class SiteDriver:
         self._hesitate()
         # the fresh composer must be there before the next paste
         self._require(self.site.prompt_box, "the prompt box (new chat)")
+        # a fresh conversation restarts the turn numbering — the next
+        # submit captures a fresh baseline (F1)
+        self._baseline = None
         log("    new chat opened")
 
     def click_error_retry(self, log: Log = print) -> bool:
@@ -504,7 +765,12 @@ class SiteDriver:
         then waits for the regenerated image); False when the site
         defines no such button, or none is present right now — the
         caller falls through to the next rung. Never loud: a missing
-        button is a normal branch, not selector rot."""
+        button is a normal branch, not selector rot.
+
+        F1 note: the regeneration happens IN PLACE (no new user turn;
+        the error turn is replaced), so the baseline is re-anchored one
+        turn BACK — the regenerated last turn then counts as "new" for
+        ``await_done``/``extract_image``."""
         if not self.site.image_error_retry_button:
             return False
         button = self._query(self.site.image_error_retry_button)
@@ -513,6 +779,14 @@ class SiteDriver:
         self._hesitate()
         button.click()
         self._hesitate()
+        prev = self._baseline
+        self._baseline = Baseline(
+            turn_count=max(0, self._turns_count() - 1),
+            last_img_src=(
+                prev.last_img_src if prev is not None
+                else self._last_image_src()
+            ),
+        )
         log("    clicked the site's Retry button")
         return True
 
@@ -604,41 +878,9 @@ class SiteDriver:
                 )
             time.sleep(self._timing.poll_interval_s)
 
-    def _last_response(self) -> Locator:
-        for sel in self.site.response_container:
-            loc = self.page.locator(sel)
-            if loc.count():
-                return loc.last
-        raise SelectorRot(
-            f"{self.site.name}: no response container matched — tried:"
-            f" {', '.join(self.site.response_container)}"
-        )
-
-    def _last_result_image(self) -> Locator | None:
-        """The last fully loaded, non-placeholder <img> of the last turn."""
-        container = self._last_response()
-        for sel in self.site.result_image:
-            imgs = container.locator(sel)
-            for k in range(imgs.count() - 1, -1, -1):
-                img = imgs.nth(k)
-                loaded = img.evaluate(
-                    "(el, min) => el.complete && el.naturalWidth >= min",
-                    MIN_IMAGE_PX,
-                )
-                if loaded:
-                    return img
-        return None
-
-    def _response_text(self) -> str:
-        try:
-            return self._last_response().inner_text()
-        except DriverError:
-            return ""
-
-    def _check_markers(self) -> None:
+    def _check_markers(self, text: str) -> None:
         """Raise on a quota (TerminalState) or refusal (ItemRefused)
-        answer; silent when the response matches neither."""
-        text = self._response_text()
+        answer in ``text``; silent when it matches neither."""
         lowered = text.lower()
         for marker in self.site.quota_text_markers:
             if marker in lowered:
@@ -659,18 +901,15 @@ class SiteDriver:
                         category=category,
                     )
 
-    def _check_image_failed(self) -> None:
-        """Raise ``ImageGenFailed`` when the CURRENT response text
-        already names a known image-generation failure (BUG 3, owner
-        2026-07-21) — a silent no-op wherever
-        ``site.image_failed_text_markers`` is empty (Gemini today), so
-        this is safe to call unconditionally from ``await_done``'s
-        wait loop for every site. Distinct from ``_check_markers``
+    def _check_image_failed(self, text: str) -> None:
+        """Raise ``ImageGenFailed`` when ``text`` names a known
+        image-generation failure (BUG 3, owner 2026-07-21) — a silent
+        no-op wherever ``site.image_failed_text_markers`` is empty
+        (Gemini today). Distinct from ``_check_markers``
         (refusal/quota) — an entirely different failure mode, with its
         own recovery (the runner resends the site's own "retry" word)."""
         if not self.site.image_failed_text_markers:
             return
-        text = self._response_text()
         lowered = text.lower()
         for marker in self.site.image_failed_text_markers:
             if marker in lowered:
@@ -679,16 +918,3 @@ class SiteDriver:
                     f" (matched '{marker}'): {text[:300]}"
                 )
 
-    def _raise_no_image(self, situation: str) -> None:
-        """No image and no recognized marker — an unknown DOM state.
-
-        Raises ``NoImage`` (a ``DriverError`` subclass) so the runner
-        can catch exactly this and try a one-shot continue nudge; a
-        matched refusal/quota marker still wins first (``_check_markers``
-        raises ``ItemRefused`` / ``TerminalState`` instead)."""
-        self._check_markers()
-        raise NoImage(
-            f"{self.site.name}: {situation}, and the response matches no"
-            f" known refusal/quota marker — DOM state unknown (selector"
-            f" rot?). Response starts: {self._response_text()[:300]!r}"
-        )

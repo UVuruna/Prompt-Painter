@@ -26,6 +26,14 @@ class Timing:
     # no busy signal after this long -> click send / press Enter again
     # (the send button is sometimes momentarily blocked)
     send_retry_after_s: float = 5.0
+    # F1 protocol (owner 2026-07-29): a busy signal STILL PRESENT from
+    # the previous item blocks a new send — wait this long for it to
+    # clear, then page-REFRESH (never send over a busy composer)
+    busy_clear_grace_s: float = 6.0
+    # F1 protocol: after the send click, "SENT" must be CONFIRMED
+    # (composer emptied + our text visible as the new user turn)
+    # within this window; at half of it the send is retried once
+    send_confirm_timeout_s: float = 20.0
     # busy signal seen -> its disappearance (the done edge), hard cap
     generation_timeout_s: float = 420.0
     # done edge -> a real (non-placeholder) result <img> src
@@ -120,6 +128,16 @@ class SiteConfig:
     # `generation_timeout_s` waiting for a done edge that never comes.
     # EMPTY BY DEFAULT (Gemini has shown no such failure text) — the
     # check is a silent no-op wherever this tuple is empty.
+    # one USER turn — the F1 protocol (owner 2026-07-29) confirms a
+    # send by seeing OUR text appear as the newest user turn. EMPTY =
+    # confirmation falls back to "composer emptied + busy appeared",
+    # loudly logged (never silent). NOTE: the ChatGPT selectors are
+    # from the same data-turn / data-message-author-role family the
+    # owner captured live for assistant turns (UV/ screenshots);
+    # Gemini's <user-query> is the standard element — both still await
+    # one live-run confirmation (they fail LOUDLY, never misbehave,
+    # if wrong).
+    user_turn: tuple[str, ...] = ()
     image_failed_text_markers: tuple[str, ...] = ()
     # the NATIVE "Retry" button ChatGPT renders under its "Hmm...
     # something seems to have gone wrong." error turn (owner capture
@@ -192,6 +210,14 @@ SITES = {
             '[data-testid^="conversation-turn"][data-turn="assistant"]',
             'article[data-testid^="conversation-turn"]',
             "article",
+        ),
+        # same attribute family as the captured assistant turns; the
+        # data-message-author-role attribute is visible in the owner's
+        # UV/RETRY button.png devtools capture (assistant variant)
+        user_turn=(
+            'section[data-turn="user"]',
+            '[data-message-author-role="user"]',
+            '[data-turn="user"]',
         ),
         result_image=(
             'div[id^="image-"] img',
@@ -355,6 +381,11 @@ SITES = {
             "model-response",
             "message-content",
         ),
+        # Gemini renders the sent prompt as a <user-query> element
+        user_turn=(
+            "user-query",
+            '[class*="user-query"]',
+        ),
         result_image=(
             "generated-image img",
             "single-image img",
@@ -374,9 +405,21 @@ SITES = {
                 "cannot generate",
                 "unable to generate",
                 "unsafe",
+                # live captures 2026-07-25 (UV/data/copyright gemini —
+                # the market-scene incident: these texts matched NO
+                # marker, so the continue nudge ran and an unrelated
+                # image was saved; F1 root cause 2). Generic-guidelines
+                # refusals sit under SAFETY until a distinctly-copyright
+                # Gemini text is captured (REWORK.md, open items).
+                "can't help with this particular request",
+                "cannot help with this particular request",
+                "may go against my guidelines",
+                "go against my guidelines",
+                "against my guidelines",
                 # Gemini answers in the account's language — Serbian too
                 "ne mogu da generi",
                 "ne mogu da kreiram",
+                "ne mogu da pomognem",
                 "bezbednosn",
             ),
         },

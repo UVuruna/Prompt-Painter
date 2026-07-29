@@ -13,6 +13,7 @@ background fixes) — sheets are READ ONLY by construction.
 
 from __future__ import annotations
 
+import hashlib
 import random
 import struct
 import time
@@ -519,6 +520,11 @@ def run_sheet(
     fix_failures = 0
     stopped_why = "all pending items done"
     last_folder: str | None = None
+    # F1 duplicate guard (owner 2026-07-29): byte-hash of the LAST
+    # saved image this run — a new result identical to it means the
+    # site re-served the previous image (the "AI 1s" duplicate bug);
+    # one fresh re-submit, then a loud per-item skip
+    last_saved_digest: bytes | None = None
     try:
         for idx, item in enumerate(queue, start=1):
             if should_stop is not None and should_stop():
@@ -590,17 +596,18 @@ def run_sheet(
                 input_path = str(ref)
                 log(f"    input image: {ref.name}")
 
-            retried = False  # True when the SAFER RETRY produced the image
-            try:
-                data, t_send = generate_one(base, attach=input_path)
-            except ItemRefused as exc:
+            retried = False  # True when a RETRY path produced the image
+            skip_reason: str | None = None
+            data = None
+            t_send = 0.0
+
+            def try_safer(exc: ItemRefused):
+                """One safer retry with the category's preamble (owner
+                2026-07-23); returns (data, t_send) or (None, reason).
+                Shared by the first-attempt refusal AND a refusal that
+                surfaces inside the image-failed ladder (F1 root cause
+                3 — that one used to stop the whole site)."""
                 reason = str(exc)
-                data = None
-                # the reframing depends on WHY it refused (owner
-                # 2026-07-23): a safety block gets the allegory preamble,
-                # a copyright block the homage preamble. A category with
-                # no preamble (or an unclassified refusal) is reported
-                # without a retry.
                 preamble = RETRY_PREAMBLES.get(exc.category)
                 if safer_retry and preamble is not None:
                     log(
@@ -609,64 +616,115 @@ def run_sheet(
                     )
                     emit({"type": "item_retry"})
                     try:
-                        data, t_send = generate_one(
+                        out = generate_one(
                             preamble + base, attach=input_path
                         )
-                        retried = True
                         log("    safer retry SUCCEEDED")
+                        return out, None
                     except ItemRefused as exc2:
                         reason = str(exc2)
-                if data is None:
-                    refused += 1
-                    log(f"    REFUSED — {reason}")
+                return None, reason
+
+            try:
+                data, t_send = generate_one(base, attach=input_path)
+            except ItemRefused as exc:
+                result, reason = try_safer(exc)
+                if result is None:
+                    skip_reason = reason
+                else:
+                    data, t_send = result
+                    retried = True
+            except NoImage as exc:
+                # F1 nudge policy (owner 2026-07-29, root cause 2): the
+                # continue nudge is allowed ONLY for a truly empty /
+                # interrupted answer. A TEXT answer matching no marker
+                # is a LOUD per-item skip — nudging after text made
+                # Gemini draw an unrelated image that got saved under
+                # the item's name (the market-scene incident).
+                if exc.had_text or not continue_nudge:
+                    skip_reason = f"no image — {exc}"
+                else:
                     log(
-                        "    continuing with the next item; rework the"
-                        " prompt (or intervene manually) and rerun later"
+                        f"    NO RESPONSE - nudging {driver.site.name}"
+                        " to continue (1 try) ..."
                     )
-                    if run_report is not None:
-                        run_report.refused(item.drop_path, reason)
-                    emit(
-                        {
-                            "type": "item_refused",
-                            "drop_path": item.drop_path,
-                        }
-                    )
-                    if idx < total:
-                        _pause(timing, should_stop, log)
-                    continue
-            except NoImage:
-                # ChatGPT stalled: the done edge fired but no image and no
-                # marker matched. The owner's fix is a plain "continue"
-                # nudge in the SAME chat — try it ONCE. On recovery the
-                # nudge's own send time becomes t_send (gen_s is timed from
-                # it); if the nudge STILL yields no image (or any other
-                # DriverError — e.g. the nudge itself hits quota/refusal),
-                # it propagates and the site stops loudly, exactly as before.
-                if not continue_nudge:
-                    raise
-                log("    NO RESPONSE - nudging ChatGPT to continue (1 try) ...")
-                emit({"type": "item_nudge", "drop_path": item.drop_path})
-                data, t_send = generate_one(CONTINUE_NUDGE)
-                log("    continue nudge RECOVERED")
+                    emit({"type": "item_nudge", "drop_path": item.drop_path})
+                    try:
+                        data, t_send = generate_one(CONTINUE_NUDGE)
+                        log("    continue nudge RECOVERED")
+                    except NoImage as exc2:
+                        skip_reason = f"no image after nudge — {exc2}"
             except ImageGenFailed as exc:
                 # BUG 3, two faces (owner 2026-07-21 / 2026-07-23):
                 # ChatGPT's image tool failed — either its own "reply
                 # with 'retry'" text or the generic "Hmm...something
-                # seems to have gone wrong." error turn (both matched by
-                # image_failed_text_markers; the busy signal stays stuck
-                # so the driver raises WITHOUT burning the hard timeout).
-                # Both ride one recovery ladder: native Retry button ->
-                # paced text "retry" -> escalation rounds (wait, refresh,
-                # new session, whole prompt). On success we continue with
-                # the recovered image; when the ladder is spent it
+                # seems to have gone wrong." error turn. Both ride one
+                # recovery ladder: native Retry button -> paced text
+                # "retry" -> escalation rounds (wait, refresh, new
+                # session, whole prompt). When the ladder is spent it
                 # re-raises and the worker stops (files on disk resume).
+                # A REFUSAL surfacing mid-ladder is handled exactly like
+                # a first-attempt refusal (F1 fix — it used to escape
+                # this block and stop the whole site).
                 if not image_failed_retry:
                     raise
-                data, t_send = _recover_image_failed(
-                    exc, driver, generate_one, base, should_stop, log,
-                    emit, input_path,
+                try:
+                    data, t_send = _recover_image_failed(
+                        exc, driver, generate_one, base, should_stop, log,
+                        emit, input_path,
+                    )
+                    retried = True
+                except ItemRefused as exc2:
+                    result, reason = try_safer(exc2)
+                    if result is None:
+                        skip_reason = reason
+                    else:
+                        data, t_send = result
+                        retried = True
+
+            # F1 duplicate guard: identical bytes to the previous save
+            # = the site re-served the old image; one fresh re-submit,
+            # then a loud skip (never a silent duplicate file)
+            if skip_reason is None:
+                digest = hashlib.sha1(data).digest()
+                if digest == last_saved_digest:
+                    log(
+                        "    DUPLICATE IMAGE — identical to the previous"
+                        " save; one fresh re-submit ..."
+                    )
+                    emit({"type": "item_retry"})
+                    try:
+                        data, t_send = generate_one(base, attach=input_path)
+                        digest = hashlib.sha1(data).digest()
+                        retried = True
+                    except (ItemRefused, NoImage, ImageGenFailed) as exc:
+                        skip_reason = f"duplicate image, retry failed: {exc}"
+                    if skip_reason is None and digest == last_saved_digest:
+                        skip_reason = (
+                            "duplicate image persisted after a fresh"
+                            " re-submit"
+                        )
+                if skip_reason is None:
+                    last_saved_digest = digest
+
+            if skip_reason is not None:
+                refused += 1
+                log(f"    REFUSED/SKIPPED — {skip_reason}")
+                log(
+                    "    continuing with the next item; rework the"
+                    " prompt (or intervene manually) and rerun later"
                 )
-                retried = True
+                if run_report is not None:
+                    run_report.refused(item.drop_path, skip_reason)
+                emit(
+                    {
+                        "type": "item_refused",
+                        "drop_path": item.drop_path,
+                    }
+                )
+                if idx < total:
+                    _pause(timing, should_stop, log)
+                continue
             t_image = time.monotonic()
             gen_s = t_image - t_send
 

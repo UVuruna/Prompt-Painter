@@ -191,16 +191,22 @@ checker's copy (`AI_FLAGS_FILENAME`, `AI_CHECK_INSTRUCTIONS`,
 
 ### `sites.py` — Timing + Per-Site DOM Selectors
 `Timing` (the frozen dataclass of every wait/pace, `TIMING` the
-instance), `PAUSE_POLL_INTERVAL_S`, `MIN_IMAGE_PX`; `SiteConfig` (the
-per-site DOM hook dataclass — prompt box, send/busy/response/result
-selectors, refusal/quota text markers, `image_failed_text_markers`
+instance — F1 2026-07-29 added `busy_clear_grace_s`, the stuck-busy
+wait before a pre-send refresh, and `send_confirm_timeout_s`, the
+confirmed-send window), `PAUSE_POLL_INTERVAL_S`, `MIN_IMAGE_PX`;
+`SiteConfig` (the per-site DOM hook dataclass — prompt box,
+send/busy/response/result selectors, `user_turn` (F1: the USER-turn
+selectors the confirmed-send check reads; ChatGPT's data-turn family,
+Gemini's `user-query` — pending one live-run confirmation, loud-fail
+if wrong), refusal/quota text markers (Gemini gained the
+generic-guidelines refusal texts of the market-scene incident,
+classified SAFETY), `image_failed_text_markers`
 (BUG 3, owner 2026-07-21 + second face 2026-07-23 — ChatGPT's "Image
 generation failed" AND "something seems to have gone wrong." answer
 text, empty for sites with no such marker), `image_error_retry_button`
 (the native Retry button of that "something went wrong" turn — ChatGPT
-only, empty elsewhere), the WEBSITE FIX attach selectors) and `SITES` (`chatgpt`/`gemini`, both shipping with
-WEBSITE FIX disabled until the owner captures real selectors);
-`NEW_CHAT_CHOICES`.
+only, empty elsewhere), the attach selectors) and `SITES`
+(`chatgpt`/`gemini`); `NEW_CHAT_CHOICES`.
 
 ## Connections
 

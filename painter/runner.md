@@ -29,9 +29,10 @@ reference in its fresh session (the earlier same-chat rungs do not).
 ### Uses
 - [Sheet Parser](sheet_parser.md) — consumes `Sheet`
 - [CDP Driver](driver.md) — the per-item protocol, `sniff_format`,
-  the `NoImage` exception (the stuck-response case the nudge catches),
-  the `ImageGenFailed` exception (BUG 3 — ChatGPT's own "image
-  generation failed" answer, the retry-resend case)
+  the `NoImage` exception (`had_text` decides loud-skip vs the one
+  allowed nudge — F1, owner 2026-07-29), the `ImageGenFailed`
+  exception (BUG 3 — ChatGPT's own "image generation failed" answer,
+  the retry-resend case)
 - [Config (subfolder)](config/___config.md) — `Timing`, `REPORT_SUFFIX`,
   `RETRY_PREAMBLES` (the per-category safer-retry preambles:
   `SAFER_PREAMBLE` / `COPYRIGHT_PREAMBLE`), `CONTINUE_NUDGE`,
@@ -181,17 +182,23 @@ event) so the dashboard never stalls; the `item_done` event with
   `RETRY_PREAMBLES[exc.category]`: `SAFER_PREAMBLE` (allegory) for a
   safety block, `COPYRIGHT_PREAMBLE` (homage) for a copyright block — and
   only a second refusal counts as REFUSED. A category with no preamble
-  (or an unclassified refusal) is reported with no retry. A **stuck `NoImage`** (the done edge fired but no image and
-  no marker — ChatGPT's recurring stall) is handled the same shape as
-  the safer retry but for the OTHER failure: when `continue_nudge` is
-  on (the default) the runner sends `CONTINUE_NUDGE` ONCE into the same
-  chat (a plain "continue" message, NO prompt suffix — the prompt is
-  already there) and, if that yields the image, uses it as a normal
-  success (its `gen_s` timed from the nudge's own send). One nudge
-  attempt per item: if the nudge still raises `NoImage` (or any other
-  `DriverError` — e.g. the nudge itself hits quota/refusal) it
-  propagates and the site stops loudly, exactly as before. With
-  `continue_nudge` off, the first `NoImage` stops the site immediately.
+  (or an unclassified refusal) is reported with no retry. **`NoImage`
+  (F1, owner 2026-07-29) never stops the site any more.** With
+  `had_text=True` (the model answered unrecognized TEXT) the item is
+  LOUD-SKIPPED immediately — counted and reported like a refusal,
+  never nudged (the market-scene incident: nudging after an unmatched
+  Gemini refusal produced a random unrelated image saved under the
+  item's name). With `had_text=False` (a truly empty/interrupted
+  answer) and `continue_nudge` on (the default), the runner sends
+  `CONTINUE_NUDGE` ONCE into the same chat and uses a recovered image
+  as a normal success (its `gen_s` timed from the nudge's own send);
+  a nudge that raises `NoImage` again loud-skips the item. Other
+  exceptions from the nudge (quota, refusal) propagate per their own
+  type. With `continue_nudge` off, every `NoImage` is a loud skip.
+  **Duplicate guard (F1):** a result whose bytes hash identical to
+  the PREVIOUS save this run means the site re-served the old image
+  (the "AI 1s" bug) — one fresh re-submit, then a loud skip; a
+  duplicate file is never silently saved.
   **BUG 3 recovery LADDER** (owner 2026-07-21, escalation added
   2026-07-23): an `ImageGenFailed` — ChatGPT's own "Image generation
   failed" answer OR the generic "something seems to have gone wrong."
@@ -214,10 +221,15 @@ event) so the dashboard never stalls; the `item_done` event with
   re-raises `ImageGenFailed` and the whole site STOPS (owner's "GASI",
   2026-07-23) — finished items are safe on disk, so a restart resumes
   past them; there is no per-item skip for this failure any more. Every
-  wait polls `should_stop`, so a Stop never hangs behind the 22-36 min
+  wait polls `should_stop`, so a Stop never hangs behind the longest
   round; a Stop mid-ladder abandons recovery at once. With
   `image_failed_retry` off, the FIRST `ImageGenFailed` propagates and
-  stops the site immediately, same shape as `continue_nudge=False`.
+  stops the site immediately. **F1 fix (root cause 3):** an
+  `ItemRefused` surfacing INSIDE the ladder (e.g. after the native
+  Retry click the site answers a copyright block) is now handled
+  exactly like a first-attempt refusal — one safer retry with the
+  category preamble, then a per-item skip; it used to escape the
+  handler and stop the whole site (the owner's Star Wars run log).
   Terminal/driver errors propagate to the caller — the
   report stays saved (resume is by the files already on disk). A `TerminalState` is re-raised
   UNCHANGED, so callers read its `retry_after_s` (the quota reset

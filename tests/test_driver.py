@@ -1,9 +1,9 @@
 """Tests for painter.driver.SiteDriver — the project's FIRST driver
-tests (GUI rework Phase 17, WEBSITE FIX). Real DOM behavior needs the
-owner's live browser session (driver.py has always been verified by
-supervised runs, never unit tests); these use minimal duck-typed fakes
-for playwright's ``Locator``/``Page`` to prove the parts that ARE
-agent-verifiable:
+tests (GUI rework Phase 17, WEBSITE FIX; extended for the F1 turn-based
+protocol, owner 2026-07-29). Real DOM behavior needs the owner's live
+browser session (driver.py has always been verified by supervised runs,
+never unit tests); these use minimal duck-typed fakes for playwright's
+``Locator``/``Page`` to prove the parts that ARE agent-verifiable:
 
 - ``submit_with_image`` raises ``AttachNotConfigured`` LOUDLY and
   IMMEDIATELY (before touching the page at all) when a site's
@@ -15,8 +15,14 @@ agent-verifiable:
   then paste + send — and never sends when the preview never appears.
 - ``submit_prompt``'s existing text-only flow is byte-identical after
   being routed through the shared ``_paste_and_send`` helper.
+- F1: a submit is not "sent" until CONFIRMED (composer emptied + our
+  text is the newest user turn); ``await_done``/``extract_image`` are
+  scoped to a pre-submit ``Baseline`` (turn count + last image src), so
+  a leftover busy button or the PREVIOUS item's image can never be
+  mistaken for OUR result.
 """
 
+import base64
 import time
 from dataclasses import replace
 
@@ -31,8 +37,11 @@ from painter.config import (
 )
 from painter.driver import (
     AttachNotConfigured,
+    Baseline,
+    DriverError,
     ImageGenFailed,
     ItemRefused,
+    NoImage,
     SelectorRot,
     SiteDriver,
 )
@@ -65,14 +74,32 @@ class FakeLocator:
 
     Records every ``click``/``set_input_files`` onto the owning
     ``FakePage.calls`` list so a test can assert the exact ORDER of
-    actions across several different locators.
+    actions across several different locators. ``text`` backs
+    ``inner_text()`` (the F1 protocol reads composer / user-turn text
+    straight off the locator); ``attrs`` backs ``get_attribute()``;
+    ``on_click`` (settable via the constructor or assigned afterwards)
+    runs AFTER the click is recorded — the confirmed-send flow wires it
+    to simulate a real send: copy the composer's text into a user-turn
+    locator, then empty the composer.
     """
 
-    def __init__(self, name: str, page: "FakePage", *, visible: bool = True):
+    def __init__(
+        self,
+        name: str,
+        page: "FakePage",
+        *,
+        visible: bool = True,
+        text: str = "",
+        attrs: dict | None = None,
+        on_click=None,
+    ):
         self.name = name
         self.page = page
         self._visible = visible
         self.set_files = None
+        self.text = text
+        self.attrs = attrs or {}
+        self.on_click = on_click
 
     def count(self):
         return 1
@@ -85,11 +112,23 @@ class FakeLocator:
     def first(self):
         return self
 
+    @property
+    def last(self):
+        return self
+
     def is_visible(self):
         return self._visible
 
+    def inner_text(self):
+        return self.text
+
+    def get_attribute(self, name):
+        return self.attrs.get(name)
+
     def click(self):
         self.page.calls.append(("click", self.name))
+        if self.on_click is not None:
+            self.on_click()
 
     def set_input_files(self, path):
         self.set_files = path
@@ -97,14 +136,22 @@ class FakeLocator:
 
 
 class FakeKeyboard:
+    """``press("Delete")`` and ``insert_text`` mutate ``page.composer``
+    (when set) so the F1 verification reads (``_composer_text`` /
+    ``_composer_holds``) see the SAME object the test wired up."""
+
     def __init__(self, page: "FakePage"):
         self.page = page
 
     def press(self, key):
         self.page.calls.append(("press", key))
+        if key == "Delete" and self.page.composer is not None:
+            self.page.composer.text = ""
 
     def insert_text(self, text):
         self.page.calls.append(("insert_text", text))
+        if self.page.composer is not None:
+            self.page.composer.text = text
 
 
 class _FakeFileChooser:
@@ -138,13 +185,15 @@ class FakePage:
     """Duck-typed playwright Page: resolves ``locator(selector)`` from
     a dict the test wires up, records every meaningful action (click /
     set_input_files / keyboard press / insert_text / file-chooser) IN
-    ORDER."""
+    ORDER. ``composer`` (F1) is the FakeLocator the keyboard fakes
+    mutate — set directly or via ``_wire_send_flow``."""
 
     def __init__(self):
         self.locators: dict[str, FakeLocator] = {}
         self.calls: list[tuple] = []
         self.keyboard = FakeKeyboard(self)
         self.chooser_files = None  # set by _FakeFileChooser.set_files
+        self.composer: FakeLocator | None = None
 
     def locator(self, sel):
         return self.locators.get(sel, _MISSING)
@@ -160,6 +209,30 @@ def _driver(site, page: FakePage) -> SiteDriver:
     driver = SiteDriver(site, FAST, "http://unused")
     driver.page = page
     return driver
+
+
+def _wire_send_flow(site, page, prompt_box, send):
+    """Wire the F1 confirmed-send flow onto ``prompt_box``/``send``:
+    ``page.composer`` becomes ``prompt_box`` (so the keyboard fakes
+    mutate the SAME locator ``_composer_text()`` reads back), and
+    ``send``'s click copies the composer's CURRENT text into a
+    user-turn FakeLocator registered at ``site.user_turn[0]`` before
+    emptying the composer — mirroring a real send: the box clears and
+    the text becomes the newest user turn, which is exactly what
+    ``_confirm_sent`` polls for. Used by every test that drives
+    ``submit_prompt``/``submit_with_image`` all the way through
+    confirmation (including the reload-recovery tests, where the hook
+    must be re-wired onto the send button injected post-reload)."""
+    page.composer = prompt_box
+
+    def _on_send_click():
+        page.locators[site.user_turn[0]] = FakeLocator(
+            "user_turn", page, text=prompt_box.text
+        )
+        prompt_box.text = ""
+
+    send.on_click = _on_send_click
+    return send
 
 
 # --- (a) the gate: AttachNotConfigured, loud + immediate --------------
@@ -190,7 +263,9 @@ def test_submit_with_image_raises_loudly_when_not_configured():
     with pytest.raises(AttachNotConfigured):
         driver.submit_with_image("C:/out/img.png", "put the hero in")
 
-    # IMMEDIATE: no selector was even queried before the raise.
+    # loud and immediate: no click/attach action was ever taken —
+    # _ensure_ready/capture_baseline only READ selectors (safely, on an
+    # empty page) before the gate raises
     assert page.calls == []
 
 
@@ -200,7 +275,9 @@ def test_submit_with_image_raises_loudly_when_not_configured():
 def _wire_attach(site, page, *, with_input: bool):
     """Wire the '+' step, the add-image option, the preview, prompt box
     and send onto ``page`` (and the hidden file input when the site uses
-    one). Returns the FakeLocator map for extra assertions."""
+    one) — and the F1 confirmed-send flow, so every attach test can
+    drive ``submit_with_image`` to completion. Returns the FakeLocator
+    map for extra assertions."""
     plus = FakeLocator("plus", page)
     option = FakeLocator("option", page)
     preview = FakeLocator("preview", page)
@@ -213,7 +290,14 @@ def _wire_attach(site, page, *, with_input: bool):
         site.prompt_box[0]: prompt_box,
         site.send_button[0]: send,
     }
-    loc = {"plus": plus, "option": option, "preview": preview}
+    _wire_send_flow(site, page, prompt_box, send)
+    loc = {
+        "plus": plus,
+        "option": option,
+        "preview": preview,
+        "prompt_box": prompt_box,
+        "send": send,
+    }
     if with_input:
         # a real <input type=file> is routinely hidden by design — prove
         # the driver still finds it (require_visible=False)
@@ -242,9 +326,6 @@ def test_submit_with_image_sequence_chatgpt_hidden_input():
     i_send = calls.index(("click", "send"))
     # a person's path: expand "+", pick add-image, attach, THEN paste+send
     assert i_plus < i_option < i_files < i_text < i_send
-    # the follow-up prompt reused the SAME paste path as submit_prompt
-    assert ("press", "Control+A") in calls
-    assert ("press", "Delete") in calls
 
 
 def test_submit_with_image_sequence_gemini_file_chooser():
@@ -307,9 +388,13 @@ def test_submit_with_image_waits_for_the_preview_before_sending():
     assert ("click", "send") not in page.calls
 
 
-# --- (c) submit_prompt unchanged through the shared helper -------------
+# --- (c) submit_prompt through the shared _paste_and_send helper -------
 
-def test_submit_prompt_unchanged_through_shared_helper():
+def test_submit_prompt_empty_composer_skips_delete():
+    """Owner 2026-07-29: "ako je empty ne treba delete" — an EMPTY
+    composer gets NO Ctrl+A/Delete, just click, insert_text, send. The
+    send is CONFIRMED via the wired flow (composer clears, our text
+    becomes the newest user turn)."""
     site = SITES["chatgpt"]
     page = FakePage()
     prompt_box = FakeLocator("prompt_box", page)
@@ -318,13 +403,34 @@ def test_submit_prompt_unchanged_through_shared_helper():
         site.prompt_box[0]: prompt_box,
         site.send_button[0]: send,
     }
+    _wire_send_flow(site, page, prompt_box, send)
     driver = _driver(site, page)
 
     driver.submit_prompt("hello world")
 
-    # byte-for-byte the original submit_prompt body: click, Ctrl+A,
-    # Delete, insert_text, click send — no extra steps introduced by
-    # the _paste_and_send extraction.
+    assert page.calls == [
+        ("click", "prompt_box"),
+        ("insert_text", "hello world"),
+        ("click", "send"),
+    ]
+
+
+def test_submit_prompt_composer_with_leftover_text_deletes_first():
+    """The companion case: the composer STARTS with leftover text — the
+    driver clears it (Ctrl+A + Delete) before pasting the new prompt."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    prompt_box = FakeLocator("prompt_box", page, text="old junk")
+    send = FakeLocator("send", page)
+    page.locators = {
+        site.prompt_box[0]: prompt_box,
+        site.send_button[0]: send,
+    }
+    _wire_send_flow(site, page, prompt_box, send)
+    driver = _driver(site, page)
+
+    driver.submit_prompt("hello world")
+
     assert page.calls == [
         ("click", "prompt_box"),
         ("press", "Control+A"),
@@ -339,10 +445,13 @@ def test_submit_prompt_still_uses_only_prompt_box_and_send_selectors():
     attach selectors — it stays text-only."""
     site = SITES["gemini"]
     page = FakePage()
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)
     page.locators = {
-        site.prompt_box[0]: FakeLocator("prompt_box", page),
-        site.send_button[0]: FakeLocator("send", page),
+        site.prompt_box[0]: prompt_box,
+        site.send_button[0]: send,
     }
+    _wire_send_flow(site, page, prompt_box, send)
     driver = _driver(site, page)
 
     driver.submit_prompt("hello gemini")  # must not raise / must not hang
@@ -368,11 +477,14 @@ def test_submit_prompt_recovers_via_reload_when_send_button_missing():
     # the send button is ABSENT until the fake reload "fixes" the DOM —
     # mirrors the real site coming back sane after a refresh
     page.locators = {site.prompt_box[0]: prompt_box}
+    page.composer = prompt_box
     base_reload = page.reload
 
     def reload_and_recover():
         base_reload()
+        prompt_box.text = ""  # a reload wipes the unsent composer text
         page.locators[site.send_button[0]] = send
+        _wire_send_flow(site, page, prompt_box, send)
 
     page.reload = reload_and_recover
     driver = _driver(site, page)
@@ -396,7 +508,8 @@ def test_submit_with_image_reattaches_on_send_reload_recovery():
     reference-image filename (a Rule #1 violation)."""
     site = SITES["chatgpt"]
     page = FakePage()
-    _wire_attach(site, page, with_input=True)
+    loc = _wire_attach(site, page, with_input=True)
+    prompt_box = loc["prompt_box"]
     send = FakeLocator("send", page)
     # send button ABSENT until the fake reload "fixes" the DOM
     del page.locators[site.send_button[0]]
@@ -404,7 +517,9 @@ def test_submit_with_image_reattaches_on_send_reload_recovery():
 
     def reload_and_recover():
         base_reload()
+        prompt_box.text = ""  # a reload wipes the unsent composer text
         page.locators[site.send_button[0]] = send
+        _wire_send_flow(site, page, prompt_box, send)
 
     page.reload = reload_and_recover
     driver = _driver(site, page)
@@ -432,7 +547,9 @@ def test_submit_prompt_reload_recovery_gives_up_when_still_missing():
     never a retry loop."""
     site = SITES["gemini"]
     page = FakePage()
-    page.locators = {site.prompt_box[0]: FakeLocator("prompt_box", page)}
+    prompt_box = FakeLocator("prompt_box", page)
+    page.locators = {site.prompt_box[0]: prompt_box}
+    page.composer = prompt_box  # so the typed text actually verifies
     driver = _driver(site, page)
 
     with pytest.raises(SelectorRot):
@@ -444,14 +561,17 @@ def test_submit_prompt_reload_recovery_gives_up_when_still_missing():
 def test_submit_prompt_normal_path_never_reloads():
     """MUST NOT REGRESS: when the send button is present on the first
     try (the common case), no reload ever happens — proven both by the
-    exact-call-list assertion above (test_submit_prompt_unchanged_
-    through_shared_helper) and explicitly here."""
+    exact-call-list assertion above (test_submit_prompt_empty_composer_
+    skips_delete) and explicitly here."""
     site = SITES["chatgpt"]
     page = FakePage()
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)
     page.locators = {
-        site.prompt_box[0]: FakeLocator("prompt_box", page),
-        site.send_button[0]: FakeLocator("send", page),
+        site.prompt_box[0]: prompt_box,
+        site.send_button[0]: send,
     }
+    _wire_send_flow(site, page, prompt_box, send)
     driver = _driver(site, page)
 
     driver.submit_prompt("hello world")
@@ -472,16 +592,23 @@ _CHATGPT_FAILURE_TEXT = (
 
 
 class TextLocator:
-    """Duck-typed playwright Locator standing for a response
-    container: ``count()``/``last``/``inner_text()`` — enough for
-    ``_last_response``/``_response_text``. ``holder`` is a one-item
-    list so a test can flip the text the driver reads mid-poll."""
+    """Duck-typed playwright Locator standing for an assistant response
+    container holding ONE turn with TEXT and NO image: ``count()`` /
+    ``nth`` / ``last`` / ``inner_text()`` stand in for both the
+    container (queried by ``_new_turn``) AND the turn itself (the
+    object they return); ``locator(sel)`` (queried BY THE TURN, F1's
+    ``_turn_image``) always misses — there is no image in this turn.
+    ``holder`` is a one-item list so a test can flip the text the
+    driver reads mid-poll."""
 
     def __init__(self, holder: list[str]):
         self._holder = holder
 
     def count(self):
         return 1
+
+    def nth(self, k):
+        return self
 
     @property
     def last(self):
@@ -490,11 +617,14 @@ class TextLocator:
     def inner_text(self):
         return self._holder[0]
 
+    def locator(self, sel):
+        return _MISSING
+
 
 class PresentLocator:
     """Duck-typed Locator for a busy/stop signal that is ALWAYS
     present — mirrors ChatGPT's stuck-forever busy state (BUG 3): the
-    done edge this stands for never comes on its own."""
+    OLD done edge this stood for never came on its own."""
 
     def count(self):
         return 1
@@ -506,24 +636,65 @@ class PresentLocator:
         return True
 
 
-class FlipLocator:
-    """Duck-typed Locator present for ``n_present`` polls, then gone —
-    a normal busy signal that clears once generation finishes."""
+class ImageLocator:
+    """Duck-typed playwright Locator for ONE generated <img> (F1):
+    ``count()``/``nth`` stand for a one-element image list;
+    ``evaluate`` answers BOTH calls the driver makes on it — the
+    loaded-check (``evaluate(js, min_px)``, called WITH an extra arg)
+    returns ``loaded``, the byte-fetch (``evaluate(_FETCH_IMAGE_JS)``,
+    called with none) returns the base64 payload; ``get_attribute
+    ('src')`` is the fingerprint the F1 baseline compares against."""
 
-    def __init__(self, n_present: int):
-        self._n = n_present
+    def __init__(self, src: str, *, loaded: bool = True, b64: str = ""):
+        self._src = src
+        self._loaded = loaded
+        self._b64 = b64
 
     def count(self):
-        if self._n > 0:
-            self._n -= 1
-            return 1
-        return 0
+        return 1
 
     def nth(self, k):
         return self
 
-    def is_visible(self):
-        return True
+    def evaluate(self, js, *args):
+        return self._loaded if args else self._b64
+
+    def get_attribute(self, name):
+        return self._src if name == "src" else None
+
+
+class TurnLocator:
+    """Duck-typed playwright Locator for ONE assistant turn (F1):
+    ``locator(sel)`` resolves to the wired image locator for a matched
+    selector, else the missing locator (no image inside this turn);
+    ``inner_text()`` answers the turn's own text (default none)."""
+
+    def __init__(self, images: dict | None = None, text: str = ""):
+        self._images = images or {}
+        self._text = text
+
+    def locator(self, sel):
+        return self._images.get(sel, _MISSING)
+
+    def inner_text(self):
+        return self._text
+
+
+class ContainerLocator:
+    """Duck-typed playwright Locator standing for
+    ``site.response_container`` (F1): a fixed list of turns —
+    ``count()``/``nth`` mirror however many are "in the conversation"
+    right now, so a baseline turn_count comparison and the "last turn"
+    lookup both work exactly like the real fallback-selector Locator."""
+
+    def __init__(self, turns: list):
+        self._turns = turns
+
+    def count(self):
+        return len(self._turns)
+
+    def nth(self, k):
+        return self._turns[k]
 
 
 def test_chatgpt_ships_image_failed_markers_gemini_does_not():
@@ -536,38 +707,26 @@ def test_chatgpt_ships_image_failed_markers_gemini_does_not():
 
 def test_check_image_failed_raises_on_a_marked_response():
     site = SITES["chatgpt"]
-    page = FakePage()
-    page.locators[site.response_container[0]] = TextLocator(
-        [_CHATGPT_FAILURE_TEXT]
-    )
-    driver = _driver(site, page)
+    driver = _driver(site, FakePage())
 
     with pytest.raises(ImageGenFailed):
-        driver._check_image_failed()
+        driver._check_image_failed(_CHATGPT_FAILURE_TEXT)
 
 
 def test_check_image_failed_is_a_noop_without_markers_configured():
     """Gemini-safe: the exact same failure text never raises on a site
     whose ``image_failed_text_markers`` is empty."""
     site = SITES["gemini"]
-    page = FakePage()
-    page.locators[site.response_container[0]] = TextLocator(
-        [_CHATGPT_FAILURE_TEXT]
-    )
-    driver = _driver(site, page)
+    driver = _driver(site, FakePage())
 
-    driver._check_image_failed()  # must not raise
+    driver._check_image_failed(_CHATGPT_FAILURE_TEXT)  # must not raise
 
 
 def test_check_image_failed_is_a_noop_on_a_normal_response():
     site = SITES["chatgpt"]
-    page = FakePage()
-    page.locators[site.response_container[0]] = TextLocator(
-        ["Here is your generated image."]
-    )
-    driver = _driver(site, page)
+    driver = _driver(site, FakePage())
 
-    driver._check_image_failed()  # must not raise
+    driver._check_image_failed("Here is your generated image.")  # no raise
 
 
 # --- refusal scenario classification (owner 2026-07-23) --------------
@@ -592,28 +751,36 @@ def test_check_markers_classifies_copyright_before_safety():
     though it also contains the generic safety substrings — categories
     are checked most-specific-first."""
     site = SITES["chatgpt"]
-    page = FakePage()
-    page.locators[site.response_container[0]] = TextLocator(
-        [_CHATGPT_COPYRIGHT_TEXT]
-    )
-    driver = _driver(site, page)
+    driver = _driver(site, FakePage())
 
     with pytest.raises(ItemRefused) as exc:
-        driver._check_markers()
+        driver._check_markers(_CHATGPT_COPYRIGHT_TEXT)
     assert exc.value.category == REFUSAL_COPYRIGHT
 
 
 def test_check_markers_classifies_a_plain_safety_refusal():
     site = SITES["chatgpt"]
-    page = FakePage()
-    page.locators[site.response_container[0]] = TextLocator(
-        [_CHATGPT_SAFETY_TEXT]
-    )
-    driver = _driver(site, page)
+    driver = _driver(site, FakePage())
 
     with pytest.raises(ItemRefused) as exc:
-        driver._check_markers()
+        driver._check_markers(_CHATGPT_SAFETY_TEXT)
     assert exc.value.category == REFUSAL_SAFETY
+
+
+def test_gemini_generic_guideline_refusal_classifies_as_safety():
+    """The market-scene incident markers (owner 2026-07-25) — generic
+    "against my guidelines" Gemini refusals classify as REFUSAL_SAFETY,
+    the category the safer-retry preamble picks off of."""
+    site = SITES["gemini"]
+    driver = _driver(site, FakePage())
+
+    for text in (
+        "I can't help with this particular request, sorry.",
+        "Sorry, this may go against my guidelines.",
+    ):
+        with pytest.raises(ItemRefused) as exc:
+            driver._check_markers(text)
+        assert exc.value.category == REFUSAL_SAFETY
 
 
 def test_chatgpt_ships_a_copyright_category_gemini_does_not():
@@ -627,10 +794,9 @@ def test_chatgpt_ships_a_copyright_category_gemini_does_not():
 
 def test_await_done_raises_image_gen_failed_without_burning_timeout():
     """The exact real failure (owner's log, BUG 3): the busy/stop
-    signal never clears for this ChatGPT state, so the SECOND await
-    loop ("still generating ...") must catch the failure text WHILE
-    still polling instead of waiting out the whole hard
-    ``generation_timeout_s``."""
+    signal never clears for this ChatGPT state, so ``await_done`` must
+    catch the failure text WHILE still polling instead of waiting out
+    the whole hard ``generation_timeout_s``."""
     site = SITES["chatgpt"]
     timing = replace(
         TIMING,
@@ -646,6 +812,7 @@ def test_await_done_raises_image_gen_failed_without_burning_timeout():
     )
     driver = SiteDriver(site, timing, "http://unused")
     driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src=None)
 
     start = time.monotonic()
     with pytest.raises(ImageGenFailed):
@@ -655,11 +822,11 @@ def test_await_done_raises_image_gen_failed_without_burning_timeout():
     assert elapsed < 1.0
 
 
-def test_await_done_normal_response_never_raises_image_gen_failed():
-    """MUST NOT REGRESS: a normal successful generation (busy signal
-    appears, then clears on its own after a few polls) is byte-behavior
-    unchanged — the new text scan never fires on ordinary response
-    text."""
+def test_await_done_returns_on_loaded_image_even_if_busy_signal_stuck():
+    """F1 root cause 4 (owner 2026-07-29): the RESULT is the primary
+    done edge — a fresh loaded image in a new assistant turn is 'done'
+    even while the busy signal (stop button) is STILL PRESENT, which
+    used to stall forever on ChatGPT's stuck button."""
     site = SITES["chatgpt"]
     timing = replace(
         TIMING,
@@ -669,14 +836,15 @@ def test_await_done_normal_response_never_raises_image_gen_failed():
         generation_timeout_s=5.0,
     )
     page = FakePage()
-    page.locators[site.busy_signal[0]] = FlipLocator(3)
-    page.locators[site.response_container[0]] = TextLocator(
-        ["Here is your generated image."]
-    )
+    img = ImageLocator("blob:fresh")
+    turn = TurnLocator(images={site.result_image[0]: img})
+    page.locators[site.response_container[0]] = ContainerLocator([turn])
+    page.locators[site.busy_signal[0]] = PresentLocator()  # never clears
     driver = SiteDriver(site, timing, "http://unused")
     driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src=None)
 
-    driver.await_done(log=lambda s: None)  # must not raise
+    driver.await_done(log=lambda s: None)  # must return, never hang
 
 
 # --- (f) BUG 3, second face — "something went wrong" + Retry button
@@ -696,14 +864,10 @@ def test_went_wrong_text_is_an_image_failed_marker():
     catches it during the wait instead of dropping to a hard-stop
     NoImage as it did live at 17/24."""
     site = SITES["chatgpt"]
-    page = FakePage()
-    page.locators[site.response_container[0]] = TextLocator(
-        [_CHATGPT_WENT_WRONG_TEXT]
-    )
-    driver = _driver(site, page)
+    driver = _driver(site, FakePage())
 
     with pytest.raises(ImageGenFailed):
-        driver._check_image_failed()
+        driver._check_image_failed(_CHATGPT_WENT_WRONG_TEXT)
 
 
 def test_chatgpt_ships_the_error_retry_button_gemini_does_not():
@@ -755,3 +919,157 @@ def test_refresh_reloads_then_waits_for_the_composer():
     driver.refresh(log=lambda s: None)
 
     assert ("reload",) in page.calls
+
+
+# --- (g) F1 turn-based protocol regressions (owner 2026-07-29) --------
+
+def test_timing_has_the_f1_protocol_fields():
+    t = Timing()
+    assert t.busy_clear_grace_s > 0
+    assert t.send_confirm_timeout_s > 0
+
+
+def test_sites_declare_a_user_turn_selector():
+    assert SITES["chatgpt"].user_turn != ()
+    assert SITES["gemini"].user_turn != ()
+
+
+def test_ensure_ready_refreshes_over_a_stuck_busy_signal():
+    """F1 root cause 1 (owner 2026-07-29): a busy signal STILL PRESENT
+    from the previous item must never be sent over — the driver waits
+    the grace period, then REFRESHES, and only THEN sends — so the
+    reload happens BEFORE the send click, never after."""
+    site = SITES["gemini"]
+    timing = replace(FAST, busy_clear_grace_s=0.05)
+    page = FakePage()
+    page.locators[site.busy_signal[0]] = PresentLocator()  # never clears
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)
+    page.locators[site.prompt_box[0]] = prompt_box
+    page.locators[site.send_button[0]] = send
+    _wire_send_flow(site, page, prompt_box, send)
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    logs: list[str] = []
+
+    driver.submit_prompt("hello gemini", logs.append)
+
+    i_reload = page.calls.index(("reload",))
+    i_send = page.calls.index(("click", "send"))
+    assert i_reload < i_send
+    assert any("stuck" in line.lower() for line in logs)
+
+
+def test_type_into_box_retypes_once_on_composer_mismatch():
+    """A pasted prompt that lands GARBLED (the composer holds something
+    else) gets ONE silent retype — the second attempt succeeds and the
+    driver proceeds without raising."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    prompt_box = FakeLocator("prompt_box", page)
+    page.locators[site.prompt_box[0]] = prompt_box
+    page.composer = prompt_box
+    calls = {"n": 0}
+    real_insert = page.keyboard.insert_text
+
+    def flaky_insert_text(text):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            page.calls.append(("insert_text", text))
+            prompt_box.text = "garbled nonsense"  # landed wrong
+        else:
+            real_insert(text)
+
+    page.keyboard.insert_text = flaky_insert_text
+    driver = _driver(site, page)
+
+    driver._type_into_box("hello world")  # must not raise
+
+    assert calls["n"] == 2
+    assert prompt_box.text == "hello world"
+
+
+def test_confirm_sent_raises_loudly_when_composer_never_empties():
+    """No hook wired on ``send`` — the composer never clears and no user
+    turn ever appears, so the send can never be CONFIRMED: a loud
+    DriverError, never a silent proceed."""
+    site = SITES["gemini"]
+    timing = replace(FAST, send_confirm_timeout_s=0.05)
+    page = FakePage()
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)  # on_click does nothing
+    page.locators = {
+        site.prompt_box[0]: prompt_box,
+        site.send_button[0]: send,
+    }
+    page.composer = prompt_box
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+
+    with pytest.raises(DriverError) as exc:
+        driver.submit_prompt("hello gemini")
+    assert "NOT confirmed" in str(exc.value)
+
+
+def test_await_done_text_answer_without_image_raises_had_text():
+    """A finished turn that answered with TEXT but no image, busy gone
+    -> NoImage(had_text=True) — the runner's loud skip, never a nudge
+    (F1 root cause 2)."""
+    site = SITES["gemini"]
+    timing = replace(
+        TIMING,
+        poll_interval_s=0.01,
+        progress_log_interval_s=1000.0,
+        busy_appear_timeout_s=1.0,
+        generation_timeout_s=2.0,
+    )
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        ["I can't draw that particular thing today, sorry!"]
+    )
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src=None)
+
+    with pytest.raises(NoImage) as exc:
+        driver.await_done(log=lambda s: None)
+    assert exc.value.had_text is True
+
+
+def test_extract_image_rejects_the_previous_items_image():
+    """The F1 src-differs rule inside extract_image too: an image whose
+    src equals the baseline's ``last_img_src`` is the PREVIOUS item's
+    result, never ours — extract_image must not return it."""
+    site = SITES["chatgpt"]
+    timing = replace(FAST, image_ready_timeout_s=0.05)
+    page = FakePage()
+    img = ImageLocator("blob:same-as-baseline")
+    turn = TurnLocator(images={site.result_image[0]: img})
+    page.locators[site.response_container[0]] = ContainerLocator([turn])
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0, last_img_src="blob:same-as-baseline"
+    )
+
+    with pytest.raises(NoImage):
+        driver.extract_image()
+
+
+def test_extract_image_returns_bytes_for_a_fresh_src():
+    """The other half: a src DIFFERENT from the baseline's is OURS —
+    extract_image reads it and decodes the base64 payload."""
+    site = SITES["chatgpt"]
+    timing = replace(FAST, image_ready_timeout_s=0.5)
+    page = FakePage()
+    b64 = base64.b64encode(b"tiny-png-bytes").decode("ascii")
+    img = ImageLocator("blob:fresh", b64=b64)
+    turn = TurnLocator(images={site.result_image[0]: img})
+    page.locators[site.response_container[0]] = ContainerLocator([turn])
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src="blob:old")
+
+    data = driver.extract_image()
+
+    assert data == b"tiny-png-bytes"

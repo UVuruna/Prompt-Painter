@@ -66,6 +66,11 @@ and builds+releases (Rule #24).
 
 ## Phase F1 — Core submit/await/extract protocol (turn-based)
 
+**STATUS: LANDED 2026-07-29** (driver/runner/sites rework + regression
+tests, full suite green). Remaining: ONE live supervised run to
+confirm the new `user_turn` selectors (they fail loudly, never
+misbehave, if wrong).
+
 **Kills root causes 1–4. The most critical phase; do it first.**
 Files: `painter/driver.py`, `painter/config/sites.py`,
 `painter/runner.py`, tests.

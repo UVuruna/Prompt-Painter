@@ -4,8 +4,13 @@ Covers what needs no browser: the per-site rule suffix, the
 assets-mirroring output layout, the report txt, resume by FILE
 EXISTENCE (a saved dest file = done; the folder is ALWAYS the source
 of truth — `only` narrows the candidates but never overwrites a file
-already on disk), the stop flag, and the loud-but-not-fatal
-background-fix hook.
+already on disk), the stop flag, the loud-but-not-fatal
+background-fix hook, and the F1 runner contract (owner 2026-07-29):
+a ``NoImage`` is now ALWAYS a loud per-item skip (never a site-stopping
+raise), an ``ItemRefused`` surfacing INSIDE the image-failed recovery
+ladder is handled exactly like a first-attempt refusal, and a
+duplicate-bytes save (the site re-serving the previous image) gets one
+fresh re-submit before being skipped.
 """
 
 from dataclasses import replace
@@ -60,7 +65,15 @@ def _fast_recovery(monkeypatch):
 
 
 class FakeDriver:
-    """Duck-typed SiteDriver: records prompts, returns PNG bytes."""
+    """Duck-typed SiteDriver: records prompts, returns PNG bytes.
+
+    ``extract_image`` returns UNIQUE bytes per call (a counter byte
+    appended after the valid 1x1 PNG — still sniffs as PNG, the header
+    parse at bytes[16:24] is unaffected) so a normal multi-item run
+    never trips the F1 duplicate-save guard, which compares SHA1
+    digests of consecutive saves. A test that deliberately wants two
+    identical saves (to exercise the guard itself) overrides
+    ``extract_image`` and returns a literal constant instead."""
 
     def __init__(self, site):
         self.site = site
@@ -69,6 +82,7 @@ class FakeDriver:
         self.retry_clicks = 0
         self.refreshes = 0
         self.new_chats = 0
+        self._extract_n = 0
 
     def submit_prompt(self, prompt, log=print):
         self.submitted.append(prompt)
@@ -83,7 +97,8 @@ class FakeDriver:
         pass
 
     def extract_image(self):
-        return PNG_1PX
+        self._extract_n += 1
+        return PNG_1PX + bytes([self._extract_n % 256])
 
     # image-failure recovery ladder (owner 2026-07-23) — the base fake
     # has NO native retry button and treats refresh/new-session as no-ops
@@ -257,7 +272,9 @@ def test_suffix_layout_report_and_resume(tmp_path):
     assert generated == 2
     assert driver.submitted[0] == "prompt 0" + suffix
     # legacy drops keep the <site>/<drop> layout
-    assert (out / "gemini" / "fake" / "img_0.png").read_bytes() == PNG_1PX
+    assert (out / "gemini" / "fake" / "img_0.png").read_bytes().startswith(
+        PNG_1PX
+    )
     # NO progress sidecar any more — "done" is the saved file itself;
     # only the report lives under _state/ (asserted below)
     assert not state(out, "gemini", "fake_prompts.progress.json").exists()
@@ -333,7 +350,7 @@ def test_safer_retry_recovers_then_gives_up(tmp_path):
                 raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)
             if "prompt 1" in last:
                 raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)  # never recovers
-            return PNG_1PX
+            return super().extract_image()
 
     sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
@@ -364,7 +381,7 @@ def test_copyright_refusal_uses_the_copyright_preamble(tmp_path):
                     "refused: third-party content",
                     category=REFUSAL_COPYRIGHT,
                 )
-            return PNG_1PX
+            return super().extract_image()
 
     sheet = make_sheet(tmp_path, n=1)
     out = tmp_path / "out"
@@ -383,7 +400,7 @@ def test_no_safer_retry_by_default(tmp_path):
         def extract_image(self):
             if "prompt 0" in self.submitted[-1]:
                 raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)
-            return PNG_1PX
+            return super().extract_image()
 
     sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
@@ -472,7 +489,7 @@ def test_input_image_reattached_on_escalation_new_session(tmp_path):
             # succeeds only once the image has been attached a SECOND
             # time — i.e. in the fresh escalation session
             if len(self.attached) >= 2:
-                return PNG_1PX
+                return super().extract_image()
             raise ImageGenFailed(
                 "ChatGPT: image generation failed (matched '...'): ..."
             )
@@ -501,11 +518,11 @@ def test_continue_nudge_recovers_a_stuck_response(tmp_path):
     class StuckThenNudged(FakeDriver):
         def extract_image(self):
             if CONTINUE_NUDGE in self.submitted[-1]:
-                return PNG_1PX
+                return super().extract_image()
             raise NoImage(
-                "ChatGPT: the response holds no loaded generated image,"
-                " and the response matches no known refusal/quota marker"
-                " — DOM state unknown (selector rot?). Response starts: ''"
+                "ChatGPT: nothing happened after the confirmed send —"
+                " empty/interrupted answer",
+                had_text=False,
             )
 
     sheet = make_sheet(tmp_path, n=1)
@@ -521,7 +538,7 @@ def test_continue_nudge_recovers_a_stuck_response(tmp_path):
     )
     # the stuck item recovered on the nudge and counts as generated
     assert generated == 1
-    assert (out / "chatgpt" / "fake" / "img_0.png").read_bytes() == PNG_1PX
+    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
     assert any("continue nudge RECOVERED" in line for line in logs)
     # the original prompt, then the nudge sent VERBATIM into the same chat
     # (CONTINUE_NUDGE, no prompt suffix) — one nudge attempt per item
@@ -531,9 +548,41 @@ def test_continue_nudge_recovers_a_stuck_response(tmp_path):
     assert any(e["type"] == "item_nudge" for e in events)
 
 
-def test_continue_nudge_still_stuck_stops_the_site(tmp_path):
-    # the nudge does not recover it either -> NoImage propagates and the
-    # whole site stops loudly, exactly as before the nudge existed
+def test_noimage_with_text_is_skipped_never_nudged(tmp_path):
+    """F1 root cause 2 (owner 2026-07-29): a NoImage carrying
+    ``had_text=True`` is a LOUD SKIP, NEVER a nudge — nudging after
+    unmatched text made Gemini draw an unrelated image once (the
+    market-scene incident). The run continues to the next item."""
+    class TextOnlyOnFirst(FakeDriver):
+        def extract_image(self):
+            if "prompt 0" in self.submitted[-1]:
+                raise NoImage(
+                    "Gemini: the response answered with TEXT but no"
+                    " image, and the text matches no known marker",
+                    had_text=True,
+                )
+            return super().extract_image()
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = TextOnlyOnFirst(SITES["gemini"])
+    generated = run_sheet(sheet, driver, out, "gemini", FAST)
+
+    assert generated == 1
+    assert CONTINUE_NUDGE not in driver.submitted
+    assert not (out / "gemini" / "fake" / "img_0.png").exists()
+    assert (out / "gemini" / "fake" / "img_1.png").exists()
+    report = state(out, "gemini", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "REFUSED" in report
+
+
+def test_continue_nudge_still_stuck_is_skipped_loudly(tmp_path):
+    """F1 (owner 2026-07-29): a NoImage that survives even the one-shot
+    nudge is now a LOUD SKIP, never a site-stopping raise — the run
+    keeps going to the next item (both items here hit the same stuck
+    state, so both end up skipped, and run_sheet never raises)."""
     class AlwaysStuck(FakeDriver):
         def extract_image(self):
             raise NoImage("ChatGPT: DOM state unknown (selector rot?)")
@@ -541,21 +590,27 @@ def test_continue_nudge_still_stuck_stops_the_site(tmp_path):
     sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
     driver = AlwaysStuck(SITES["chatgpt"])
-    with pytest.raises(NoImage):
-        run_sheet(sheet, driver, out, "chatgpt", FAST, continue_nudge=True)
-    # ONE item attempted: its original submit + one nudge submit, then stop
-    assert len(driver.submitted) == 2
-    assert driver.submitted[-1] == CONTINUE_NUDGE
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, continue_nudge=True,
+    )
+    assert generated == 0  # neither item ever produced an image
+    # each item: original submit + one nudge attempt
+    assert driver.submitted == [
+        "prompt 0", CONTINUE_NUDGE, "prompt 1", CONTINUE_NUDGE,
+    ]
     assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    # the report records the honest stop reason
+    assert not (out / "chatgpt" / "fake" / "img_1.png").exists()
     report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
-    assert "no image — DOM state unknown" in report
+    assert "no image after nudge" in report
+    assert "Refused: 2" in report
 
 
-def test_no_continue_nudge_stops_on_the_first_no_image(tmp_path):
-    # continue_nudge OFF: the first NoImage stops the site, no nudge sent
+def test_no_continue_nudge_skips_the_item_without_nudging(tmp_path):
+    """continue_nudge OFF: the first NoImage is a loud skip with NO
+    nudge sent at all — and (F1) the run still continues to the next
+    item, never stops."""
     class AlwaysStuck(FakeDriver):
         def extract_image(self):
             raise NoImage("ChatGPT: DOM state unknown (selector rot?)")
@@ -563,10 +618,11 @@ def test_no_continue_nudge_stops_on_the_first_no_image(tmp_path):
     sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
     driver = AlwaysStuck(SITES["chatgpt"])
-    with pytest.raises(NoImage):
-        run_sheet(sheet, driver, out, "chatgpt", FAST, continue_nudge=False)
-    # only the original submit — no nudge at all
-    assert len(driver.submitted) == 1
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, continue_nudge=False,
+    )
+    assert generated == 0
+    assert driver.submitted == ["prompt 0", "prompt 1"]  # no nudge, ever
     assert CONTINUE_NUDGE not in driver.submitted
 
 
@@ -582,7 +638,7 @@ def test_image_gen_failed_recovers_on_a_later_retry(tmp_path):
                 s for s in self.submitted if s == IMAGE_RETRY_NUDGE
             ]
             if len(retries) >= 2:  # succeeds on the 2nd "retry" resend
-                return PNG_1PX
+                return super().extract_image()
             raise ImageGenFailed(
                 "ChatGPT: image generation failed (matched 'image"
                 " generation failed'): ..."
@@ -598,7 +654,7 @@ def test_image_gen_failed_recovers_on_a_later_retry(tmp_path):
         log=logs.append, on_event=events.append,
     )
     assert generated == 1
-    assert (out / "chatgpt" / "fake" / "img_0.png").read_bytes() == PNG_1PX
+    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
     assert any("retry RECOVERED" in line for line in logs)
     # original submit + 2 "retry" resends
     assert driver.submitted == [
@@ -661,7 +717,7 @@ def test_image_gen_failed_recovers_via_the_retry_button(tmp_path):
         def extract_image(self):
             # fails until the Retry button has been clicked
             if self._clicked:
-                return PNG_1PX
+                return super().extract_image()
             raise ImageGenFailed("ChatGPT: image generation failed: ...")
 
     sheet = make_sheet(tmp_path, n=1)
@@ -684,7 +740,7 @@ def test_image_gen_failed_recovers_in_a_fresh_session(tmp_path):
         def extract_image(self):
             # succeeds only once a new session has been opened
             if self.new_chats >= 1:
-                return PNG_1PX
+                return super().extract_image()
             raise ImageGenFailed("ChatGPT: image generation failed: ...")
 
     sheet = make_sheet(tmp_path, n=1)
@@ -701,33 +757,81 @@ def test_image_gen_failed_recovers_in_a_fresh_session(tmp_path):
     assert any("RECOVERED (fresh session)" in line for line in logs)
 
 
-def test_image_gen_failed_stop_during_recovery_aborts(tmp_path, monkeypatch):
-    """A Stop request while the ladder is waiting abandons recovery
-    immediately (it does not sit out the 1-3 / 22-36 min wait)."""
-    class AlwaysFails(FakeDriver):
-        def extract_image(self):
-            raise ImageGenFailed("ChatGPT: image generation failed: ...")
+def test_refusal_inside_ladder_skips_item_not_site(tmp_path):
+    """F1 fix (owner 2026-07-29): an ItemRefused surfacing INSIDE the
+    image-failed recovery ladder used to escape and stop the WHOLE
+    site; now it is caught exactly like a first-attempt refusal — one
+    safer retry when enabled (none here), else a loud per-item skip —
+    and the run continues to the next item."""
+    class RefusedInLadder(FakeDriver):
+        def submit_prompt(self, prompt, log=print):
+            super().submit_prompt(prompt)
+            if prompt == IMAGE_RETRY_NUDGE:
+                # the site refuses the "retry" resend itself, mid-ladder
+                raise ItemRefused(
+                    "ChatGPT: prompt refused mid-ladder",
+                    category=REFUSAL_SAFETY,
+                )
 
-    # a real (tiny) wait so _sleep actually enters its poll loop and
-    # sees the stop flag mid-wait (a 0s wait would never poll)
-    monkeypatch.setattr(
-        runner_module, "IMAGE_FAILED_RETRY_DELAY_RANGE_S", (0.6, 0.6)
-    )
-    sheet = make_sheet(tmp_path, n=1)
+        def extract_image(self):
+            if "prompt 0" in self.submitted[-1]:
+                raise ImageGenFailed(
+                    "ChatGPT: image generation failed: ..."
+                )
+            return super().extract_image()
+
+    sheet = make_sheet(tmp_path, n=2)
     out = tmp_path / "out"
     logs: list[str] = []
-    driver = AlwaysFails(SITES["chatgpt"])
-    # False at the loop's top-of-iteration check (submitted empty), True
-    # once prompt 0 has been sent and the ladder starts waiting
-    should_stop = lambda: bool(driver.submitted)  # noqa: E731
-    with pytest.raises(ImageGenFailed):
-        run_sheet(
-            sheet, driver, out, "chatgpt", FAST,
-            should_stop=should_stop, log=logs.append,
-        )
-    # stop won on the FIRST wait — no text retry ever sent
-    assert driver.submitted == ["prompt 0"]
-    assert any("STOPPED on request during recovery" in line for line in logs)
+    driver = RefusedInLadder(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, log=logs.append,
+    )  # must not raise — the refusal skips item 0, never stops the site
+
+    assert generated == 1  # item 0 refused mid-ladder, item 1 still ran
+    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "REFUSED" in report
+
+
+def test_duplicate_bytes_retries_once_then_skips(tmp_path):
+    """F1 duplicate guard (owner 2026-07-29): the site re-serving the
+    PREVIOUS item's exact bytes gets ONE fresh re-submit; still
+    identical afterwards -> a loud per-item skip, never a silent
+    duplicate file. Item 0 (unique bytes) saves normally; item 1
+    re-serves item 0's bytes both times and ends up skipped."""
+    class DuplicateOnSecond(FakeDriver):
+        def __init__(self, site):
+            super().__init__(site)
+            self._first_bytes = None
+
+        def extract_image(self):
+            if "prompt 0" in self.submitted[-1]:
+                self._first_bytes = super().extract_image()
+                return self._first_bytes
+            # item 1 (and its one fresh re-submit) both re-serve item
+            # 0's exact bytes — the site handing back a stale image
+            return self._first_bytes
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = DuplicateOnSecond(SITES["chatgpt"])
+    generated = run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append)
+
+    assert generated == 1  # only item 0 saved
+    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert not (out / "chatgpt" / "fake" / "img_1.png").exists()
+    # item 1's duplicate triggered exactly ONE fresh re-submit
+    assert driver.submitted.count("prompt 1") == 2
+    assert any("DUPLICATE IMAGE" in line for line in logs)
+    report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "REFUSED" in report
 
 
 def test_image_failed_retry_off_stops_the_site_immediately(tmp_path):
@@ -789,7 +893,7 @@ def test_refusal_skips_the_item_and_the_run_continues(tmp_path):
                     "Gemini: prompt refused ('unsafe')",
                     category=REFUSAL_SAFETY,
                 )
-            return PNG_1PX
+            return super().extract_image()
 
     driver = RefusingDriver(SITES["gemini"])
     logs: list[str] = []
@@ -882,8 +986,12 @@ def test_file_existence_resume_skips_saved_and_runs_missing(tmp_path):
     # img_0 already on disk -> skipped and NOT overwritten; 1 & 2 run
     assert generated == 2
     assert dest0.read_bytes() == b"OLD"  # a done item is never touched
-    assert (out / dest_for("fake/img_1.png", "chatgpt")).read_bytes() == PNG_1PX
-    assert (out / dest_for("fake/img_2.png", "chatgpt")).read_bytes() == PNG_1PX
+    assert (
+        out / dest_for("fake/img_1.png", "chatgpt")
+    ).read_bytes().startswith(PNG_1PX)
+    assert (
+        out / dest_for("fake/img_2.png", "chatgpt")
+    ).read_bytes().startswith(PNG_1PX)
     assert len(driver.submitted) == 2  # only the two missing ones ran
     assert any("RESUME: 1/3 already saved" in line for line in logs)
 
@@ -916,8 +1024,12 @@ def test_only_ticked_existing_redoes_as_a_new_version(tmp_path):
     # the saved files are untouched; the redos landed beside them
     assert (out / dest_for("fake/img_0.png", "gemini")).read_bytes() == b"STALE"
     assert (out / dest_for("fake/img_1.png", "gemini")).read_bytes() == b"STALE"
-    assert (out / "gemini" / "fake" / "img_0_v2.png").read_bytes() == PNG_1PX
-    assert (out / "gemini" / "fake" / "img_1_v2.png").read_bytes() == PNG_1PX
+    assert (
+        out / "gemini" / "fake" / "img_0_v2.png"
+    ).read_bytes().startswith(PNG_1PX)
+    assert (
+        out / "gemini" / "fake" / "img_1_v2.png"
+    ).read_bytes().startswith(PNG_1PX)
     assert any("NEW VERSION: 2/2" in line for line in logs)
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
@@ -956,8 +1068,12 @@ def test_ticked_redo_saves_domy_form_and_events_carry_the_rel(tmp_path):
     )
     assert generated == 2
     assert done.read_bytes() == b"STALE"  # the master is never touched
-    assert (out / "emblem/mood/Glory_v2_gem.png").read_bytes() == PNG_1PX
-    assert (out / "emblem/mood/Hope_gem.png").read_bytes() == PNG_1PX
+    assert (
+        out / "emblem/mood/Glory_v2_gem.png"
+    ).read_bytes().startswith(PNG_1PX)
+    assert (
+        out / "emblem/mood/Hope_gem.png"
+    ).read_bytes().startswith(PNG_1PX)
 
     rels = {
         ev["drop_path"]: ev["rel"]
@@ -994,7 +1110,9 @@ def test_only_still_queues_a_ticked_item_missing_on_disk(tmp_path):
         sheet, driver, out, "gemini", FAST, only={"fake/img_0.png"}
     )
     assert generated == 1
-    assert (out / dest_for("fake/img_0.png", "gemini")).read_bytes() == PNG_1PX
+    assert (
+        out / dest_for("fake/img_0.png", "gemini")
+    ).read_bytes().startswith(PNG_1PX)
     assert not (out / dest_for("fake/img_1.png", "gemini")).exists()
 
 
@@ -1025,7 +1143,7 @@ def test_extra_suffix_survives_the_safer_retry(tmp_path):
         def extract_image(self):
             if SAFER_PREAMBLE not in self.submitted[-1]:
                 raise ItemRefused("refused: unsafe", category=REFUSAL_SAFETY)
-            return PNG_1PX
+            return super().extract_image()
 
     sheet = make_sheet(tmp_path, n=1)
     out = tmp_path / "out"
