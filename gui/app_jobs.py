@@ -193,6 +193,15 @@ class SiteJobsMixin:
         # the Force-Aspect target ratio, read ONCE the same way — already
         # validated by the caller's Start checks (see _start_site)
         force_w, force_h = panel.force_aspect_ratio() if do_aspect else (0, 0)
+        # UI-SKETCH (owner 2026-07-29): BG removal's per-agent fine-tune
+        # (mode/color/tolerance/reach), read ONCE. The API panel has no
+        # bg_params yet — its BG removal keeps the engine defaults, the
+        # documented pre-sketch behavior.
+        bg_kwargs = (
+            panel.bg_params()
+            if do_bg and hasattr(panel, "bg_params")
+            else {}
+        )
         keep_all_steps = panel.keep_all_steps_var.get()
         log = lambda msg: self._q.put(f"[{key}]     {msg}")
         # this site's JobTemp, created by _start_site right before this
@@ -221,9 +230,10 @@ class SiteJobsMixin:
 
             steps: list[tuple[str, str, Callable[[Path], str]]] = []
             if do_bg:
-                steps.append(
-                    ("REMOVE BG", "bg", lambda p: remove_background(p, log))
-                )
+                steps.append((
+                    "REMOVE BG", "bg",
+                    lambda p: remove_background(p, log, **bg_kwargs),
+                ))
             if do_crop:
                 steps.append(
                     ("CROP", "crop", lambda p: crop_transparent(p, log))

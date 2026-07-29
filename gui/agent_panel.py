@@ -30,6 +30,13 @@ from painter.config import (
     BACKGROUND_CHOICES,
     BACKGROUND_CUSTOM,
     BACKGROUND_DEFAULT,
+    BG_COLOR_DEFAULT,
+    BG_COLOR_TOLERANCE_PCT,
+    BG_MODE_COLOR,
+    BG_MODE_DEFAULT,
+    BG_MODE_LABEL,
+    BG_REACH_DEFAULT,
+    BG_REACH_LABEL,
     DEGRADE_ASK,
     HELPER_CHOICES,
     HELPER_DEFAULTS,
@@ -98,6 +105,8 @@ class AgentPanel(ttk.Labelframe):
         # the custom-background hex
         "helper_no_mirror", "helper_no_empty_space", "helper_no_grainy",
         "background_custom",
+        # UI-SKETCH (owner 2026-07-29): BG removal's own fine-tune
+        "bg_mode", "bg_color", "bg_tolerance", "bg_reach",
         "new_chat", "pause_min",
         "pause_max", "act_min", "act_max",
         # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
@@ -238,6 +247,15 @@ class AgentPanel(ttk.Labelframe):
         }
         # F7: the "custom" background's picked color (hex)
         self.background_custom_var = tk.StringVar(value="#ffffff")
+        # UI-SKETCH (owner 2026-07-29): BG removal's own per-agent
+        # fine-tune — the SAME knobs the standalone BG tool exposes,
+        # passed straight into painter.postprocess.remove_background
+        self.bg_mode_var = tk.StringVar(value=BG_MODE_DEFAULT)
+        self.bg_color_var = tk.StringVar(value=BG_COLOR_DEFAULT)
+        self.bg_tolerance_var = tk.StringVar(
+            value=f"{BG_COLOR_TOLERANCE_PCT:g}"
+        )
+        self.bg_reach_var = tk.StringVar(value=BG_REACH_DEFAULT)
         self.new_chat_var = tk.StringVar(value="collection")
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
@@ -954,6 +972,18 @@ class AgentPanel(ttk.Labelframe):
         )
         return self._visible_btn
 
+    def bg_params(self) -> dict:
+        """BG removal's per-agent kwargs for ``remove_background``
+        (UI-SKETCH, owner 2026-07-29) — read once at Start like every
+        other setting; a bad tolerance number propagates loudly to the
+        caller's validation."""
+        return {
+            "mode": self.bg_mode_var.get(),
+            "color": self.bg_color_var.get() or BG_COLOR_DEFAULT,
+            "tolerance_pct": float(self.bg_tolerance_var.get()),
+            "reach": self.bg_reach_var.get(),
+        }
+
     def helpers(self) -> tuple[str, ...]:
         """This agent's toggled prompt helpers, in HELPER_CHOICES
         order — what ``prompt_suffix(..., helpers=...)`` consumes."""
@@ -1044,6 +1074,10 @@ class AgentPanel(ttk.Labelframe):
             "helper_no_empty_space": self.helper_vars["no_empty_space"],
             "helper_no_grainy": self.helper_vars["no_grainy"],
             "background_custom": self.background_custom_var,
+            "bg_mode": self.bg_mode_var,
+            "bg_color": self.bg_color_var,
+            "bg_tolerance": self.bg_tolerance_var,
+            "bg_reach": self.bg_reach_var,
             "new_chat": self.new_chat_var,
             "pause_min": self.pause_min_var,
             "pause_max": self.pause_max_var,

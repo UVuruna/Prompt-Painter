@@ -19,6 +19,7 @@ from __future__ import annotations
 from functools import partial
 from pathlib import PurePosixPath
 from tkinter import font as tkfont
+from tkinter import ttk
 
 import customtkinter as ctk
 import ttkbootstrap as tb
@@ -402,6 +403,74 @@ def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
         fg_color=theme_pair("secondary"), progress_color=theme_pair("success"),
         text_color=theme_pair("fg"), bg_color=theme_pair("bg"),
     )
+
+
+class ExpandableSwitch(ttk.Frame):
+    """A switch whose FINE-TUNE lives in an indented sub-panel right
+    below it (owner's UI-SKETCH, 2026-07-29): turning the switch ON
+    auto-expands the sub-panel; a ▸/▾ caret collapses/expands it by
+    hand; turning the switch OFF hides it entirely. ``build_sub(frame)``
+    builds the sub-panel's content LAZILY on the first expand.
+    ``build_sub=None`` renders a plain switch (no caret, no sub).
+
+    At CONSTRUCTION an already-ON switch (a restored setting) starts
+    COLLAPSED — the auto-expand fires only on a live OFF->ON click, so
+    a restored panel opens compact."""
+
+    def __init__(
+        self, parent, label: str, variable,
+        build_sub=None, on_layout_change=None,
+    ):
+        super().__init__(parent)
+        self._var = variable
+        self._build_sub = build_sub
+        self._on_layout_change = on_layout_change or (lambda: None)
+        self._open = False
+        self._built = False
+        row = ttk.Frame(self)
+        row.pack(fill="x")
+        rounded_switch(row, label, variable).pack(side="left")
+        self._caret = ttk.Label(row, text="", cursor="hand2", width=2)
+        self._caret.pack(side="left", padx=(4, 0))
+        self._caret.bind("<Button-1>", lambda _e: self.toggle())
+        self.sub = ttk.Frame(self)
+        if build_sub is not None:
+            variable.trace_add("write", lambda *_a: self._on_switch())
+            self._render_caret()
+
+    def _render_caret(self) -> None:
+        if self._build_sub is None or not self._var.get():
+            self._caret.configure(text="")
+        else:
+            self._caret.configure(text="▾" if self._open else "▸")
+
+    def _on_switch(self) -> None:
+        if self._var.get():
+            self.toggle(open_=True)  # a live turn-ON auto-expands once
+        elif self._open:
+            self.toggle(open_=False)
+        else:
+            self._render_caret()
+
+    def toggle(self, open_: bool | None = None) -> None:
+        if self._build_sub is None:
+            return
+        want = (not self._open) if open_ is None else open_
+        if want and not self._var.get():
+            return  # the sub exists only while the switch is ON
+        if want and not self._built:
+            self._build_sub(self.sub)
+            self._built = True
+        if want == self._open:
+            self._render_caret()
+            return
+        self._open = want
+        if want:
+            self.sub.pack(fill="x", padx=(28, 0), pady=(2, 4))
+        else:
+            self.sub.pack_forget()
+        self._render_caret()
+        self._on_layout_change()
 
 
 

@@ -1,4 +1,4 @@
-"""Pipeline reorder + Force Aspect Ratio + per-step backups (GUI rework
+﻿"""Pipeline reorder + Force Aspect Ratio + per-step backups (GUI rework
 Phase 8): BG -> Crop -> Aspect(force) -> Upscale, per-step JobTemp
 backups for the two gen SITES (new plumbing — only the four standalone
 tools had a JobTemp before this phase), the disk cap fallback, and the
@@ -324,7 +324,7 @@ def test_compose_post_save_all_four_on_orders_bg_crop_aspect_upscale(
     root, monkeypatch,
 ):
     monkeypatch.setattr(
-        postprocess_module, "remove_background", lambda p, log: "done"
+        postprocess_module, "remove_background", lambda p, log, **_kw: "done"
     )
     monkeypatch.setattr(
         postprocess_module, "crop_transparent", lambda p, log: "done"
@@ -347,7 +347,7 @@ def test_compose_post_save_all_four_on_orders_bg_crop_aspect_upscale(
 
 def test_compose_post_save_correct_subset_when_some_switches_off(root, monkeypatch):
     monkeypatch.setattr(
-        postprocess_module, "remove_background", lambda p, log: "done"
+        postprocess_module, "remove_background", lambda p, log, **_kw: "done"
     )
     monkeypatch.setattr(
         aspect_module, "change_aspect", lambda p, w, h, log: "nothing"
@@ -423,7 +423,7 @@ def test_compose_post_save_emits_over_cap_event_once_per_run(
     message through the queue exactly ONCE, however many times the cap
     is actually hit across many images."""
     monkeypatch.setattr(
-        postprocess_module, "remove_background", lambda p, log: "done"
+        postprocess_module, "remove_background", lambda p, log, **_kw: "done"
     )
     monkeypatch.setattr(
         postprocess_module, "crop_transparent", lambda p, log: "done"
