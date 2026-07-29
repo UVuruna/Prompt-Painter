@@ -35,6 +35,7 @@ from painter.config import (
     dest_for,
     fmt_duration,
     fmt_size,
+    parse_quota_reset,
     versioned_dest_for,
 )
 from painter.driver import (
@@ -527,6 +528,11 @@ def run_sheet(
     # site re-served the previous image (the "AI 1s" duplicate bug);
     # one fresh re-submit, then a loud per-item skip
     last_saved_digest: bytes | None = None
+    # F2 gap fix (owner 2026-07-29): the degradation banner can be up
+    # while images STILL arrive (Flash-Lite renders them) — probed
+    # after every save, the owner's choice asked ONCE per run
+    degrade_probe = getattr(driver, "degrade_banner_text", None)
+    degrade_handled = False
     try:
         for idx, item in enumerate(queue, start=1):
             if should_stop is not None and should_stop():
@@ -849,6 +855,35 @@ def run_sheet(
                     "retried": retried,
                 }
             )
+
+            # F2 gap fix (owner 2026-07-29): the image ARRIVED, but is
+            # the site quietly rendering on a degraded model? The
+            # banner check runs AFTER the save (the made image is
+            # never wasted); "wait" stops the site like a quota (the
+            # auto-restart resumes past the saved files), "continue"
+            # is remembered for the rest of the run.
+            if degrade_probe is not None and not degrade_handled:
+                banner = degrade_probe()
+                if banner is not None:
+                    degrade_handled = True
+                    reset_s = parse_quota_reset(banner)
+                    choice = (
+                        on_degrade(reset_s)
+                        if on_degrade is not None
+                        else "wait"
+                    )
+                    if choice == "continue":
+                        log(
+                            "    MODEL DEGRADED (banner up, images"
+                            " still rendering) — continuing on the"
+                            " weaker model by choice"
+                        )
+                    else:
+                        raise TerminalState(
+                            "model degraded (banner) — waiting for"
+                            f" the reset: {banner[:200]}",
+                            retry_after_s=reset_s,
+                        )
     except TerminalState as exc:
         stopped_why = "quota / rate limit — stopped"
         if exc.retry_after_s is not None:

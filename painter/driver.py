@@ -978,6 +978,23 @@ class SiteDriver:
                 )
             time.sleep(self._timing.poll_interval_s)
 
+    def degrade_banner_text(self) -> str | None:
+        """Non-raising probe of the degradation banner (F2 gap fix,
+        owner 2026-07-29): Gemini's Flash-Lite banner can be up while
+        images STILL arrive (the weaker model renders them) — the
+        runner probes this after every save and asks the owner's
+        choice even then, once per run. None = no banner / site has
+        none configured."""
+        if not self.site.degrade_banner:
+            return None
+        banner = self._query(self.site.degrade_banner)
+        if banner is None:
+            return None
+        try:
+            return banner.inner_text() or ""
+        except Exception:
+            return ""  # transiently detached — treat as present, no text
+
     def _check_degrade_banner(self) -> None:
         """Raise ``ModelDegraded`` when the site's degradation banner
         is up (F2) — checked BEFORE the quota text markers, because the
