@@ -275,12 +275,17 @@ responsive. See [Select-Images Window](select_window.md).
 
 ### `viewers.py` — Read-Only Viewers
 `DocWindow` (the Markdown/prompt/image viewer, plus its optional
-Fixer-AI manual buttons), `BeforeAfterWindow` (a tool job's
+Fixer-AI manual buttons — since GUI rework Phase F4f, sheet/folder-
+level dashboard rows only), `BeforeAfterWindow` (a tool job's
 before/after viewer), `_filmstrip_stages` (the pure per-image
-pipeline-stage list) and `StepRestoreWindow` (the per-step restore
-filmstrip built from it). Also owns the shared `DOC_*`/
-`BEFORE_AFTER_*`/`STEP_RESTORE_*` sizing constants. See
-[Read-Only Viewers](viewers.md).
+pipeline-stage list), `StepRestoreWindow` (the per-step restore
+filmstrip built from it) and `ImageViewer` (Phase F4f, owner G6/G7 —
+the PORTRAIT Prev/Next/Delete viewer that replaces `DocWindow` for
+IMAGE-level dashboard rows: the image's own file-stem title, the main
+image or its refusal reason, the prompt block, and two lookup-gated
+expandable sub-sections, Check and Steps). Also owns the shared
+`DOC_*`/`BEFORE_AFTER_*`/`STEP_RESTORE_*`/`IMAGE_VIEWER_*` sizing
+constants. See [Read-Only Viewers](viewers.md).
 
 ### `dialogs.py` — Modal Dialogs
 `_ModalToolDialog` (shared centre-on-parent placement), `_AiDialog`

@@ -227,7 +227,11 @@ class SiteDriver:
     # --- lifecycle ----------------------------------------------------
 
     def attach(self) -> str:
-        """Connect over CDP and adopt the open site tab; returns its title."""
+        """Connect over CDP and adopt the open site tab; returns its
+        title. F4g (owner 2026-07-29): a MISSING site tab is no longer
+        an error — the driver opens one itself (the caller has already
+        ensured Chrome is running via ``painter.chrome.ensure_chrome``)
+        and the subsequent ``wait_for_login`` covers a login page."""
         self._pw = sync_playwright().start()
         try:
             self._browser = self._pw.chromium.connect_over_cdp(self._cdp_url)
@@ -241,20 +245,57 @@ class SiteDriver:
 
         pages = [p for ctx in self._browser.contexts for p in ctx.pages]
         matches = [p for p in pages if self.site.url_fragment in p.url]
-        if not matches:
-            open_tabs = ", ".join(p.url for p in pages) or "(none)"
-            self.close()
-            raise DriverError(
-                f"no open {self.site.name} tab — looked for"
-                f" '{self.site.url_fragment}' among: {open_tabs}"
-            )
-        # several site tabs: drive the last (most recently opened) one
-        self.page = matches[-1]
+        if matches:
+            # several site tabs: drive the last (most recently opened)
+            self.page = matches[-1]
+        else:
+            contexts = self._browser.contexts
+            if not contexts:
+                self.close()
+                raise DriverError(
+                    f"{self.site.name}: Chrome has no browser context to"
+                    " open a tab in — restart the automation Chrome"
+                )
+            try:
+                self.page = contexts[0].new_page()
+                self.page.goto(self.site.url)
+            except Exception as exc:
+                self.close()
+                raise DriverError(
+                    f"{self.site.name}: could not open {self.site.url}"
+                    f" in the automation Chrome: {exc}"
+                ) from exc
         self.page.set_default_timeout(
             self._timing.busy_appear_timeout_s * 1000
         )
         self.page.bring_to_front()
         return self.page.title()
+
+    def wait_for_login(self, log: Log = print) -> None:
+        """Block until the site shows its COMPOSER (= logged in) —
+        F4g: a freshly opened tab may land on a login page; the owner
+        logs in by hand while the run waits (status logged every 15 s).
+        Loud after ``login_wait_timeout_s``. An already-logged-in tab
+        returns on the first poll."""
+        t = self._timing
+        deadline = time.monotonic() + t.login_wait_timeout_s
+        last_log = 0.0
+        while True:
+            if self._query(self.site.prompt_box) is not None:
+                return
+            now = time.monotonic()
+            if now > deadline:
+                raise DriverError(
+                    f"{self.site.name}: no composer after"
+                    f" {t.login_wait_timeout_s / 60:.0f} min — still on"
+                    " the login page? Log in in the automation Chrome"
+                    " window and press Start again."
+                )
+            if now - last_log >= 15.0:
+                log("    waiting for login (the site shows no composer"
+                    " yet) ...")
+                last_log = now
+            time.sleep(t.poll_interval_s)
 
     def close(self) -> None:
         """Detach from Chrome (never closes the owner's browser)."""

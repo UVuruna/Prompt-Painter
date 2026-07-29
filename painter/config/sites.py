@@ -34,6 +34,11 @@ class Timing:
     # (composer emptied + our text visible as the new user turn)
     # within this window; at half of it the send is retried once
     send_confirm_timeout_s: float = 20.0
+    # F4g (owner 2026-07-29): Chrome is opened automatically at agent
+    # Start; when the site shows a LOGIN page instead of the composer,
+    # the run WAITS this long for the owner to log in (polling for the
+    # composer, status logged) before failing loudly
+    login_wait_timeout_s: float = 900.0
     # busy signal seen -> its disappearance (the done edge), hard cap
     generation_timeout_s: float = 420.0
     # done edge -> a real (non-placeholder) result <img> src

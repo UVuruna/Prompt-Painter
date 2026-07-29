@@ -28,10 +28,13 @@ from pathlib import Path, PurePosixPath
 from tkinter import messagebox, ttk
 
 from painter.config import (
-    GRID_COLS_BY_COUNT,
+    DASH_CARD_MIN_W,
+    DASH_GRID_MAX_COLS,
+    DASH_MODE_GRID,
+    DASH_MODE_SLIDER,
     JOB_LABEL,
-    JOB_METRIC,
     JOB_ORDER,
+    JOB_METRIC,
     fmt_op_duration,
     fmt_pct,
     fmt_size,
@@ -564,26 +567,50 @@ class AiCheckPanel(JobPanel):
 
 
 class DashGrid(ttk.Frame):
-    """The dashboard's up-to-6 per-job panels in a responsive grid, gen
-    sites FIRST.
+    """The dashboard's per-job panels — F4e (owner 2026-07-29): TWO
+    display modes.
 
-    Panels are added on job START and removed on CLOSE; the grid
-    re-flows by the active count (``GRID_COLS_BY_COUNT``, row-major over
-    ``JOB_ORDER`` — so ChatGPT + Gemini always fill the top row and, at
-    N=5, the 6th cell stays empty). Cells share a ``uniform`` group so
-    they are equal and evenly fill the area. A muted placeholder shows
-    when no job has run yet.
+    GRID (default): every card treated identically; the column count
+    comes from the WINDOW WIDTH against one card's ``DASH_CARD_MIN_W``
+    (1xN when very narrow ... ``DASH_GRID_MAX_COLS`` full-screen),
+    re-flowing on resize (debounced <Configure>). The old per-count
+    column table is retired.
+
+    SLIDER: exactly ONE card at full width, with a prev/next arrow row
+    above it — the owner flips modes from the top strip's toggle
+    (``set_mode``). Panels are added on job START and removed on
+    CLOSE, rendered in ``JOB_ORDER``; a muted placeholder shows when
+    no job has run yet.
     """
 
-    def __init__(self, master):
+    def __init__(self, master, mode: str = DASH_MODE_GRID):
         super().__init__(master)
         self._panels: dict[str, JobPanel] = {}
         self._active: list[str] = []  # gridded slots (rendered in JOB_ORDER)
+        self._mode = mode
+        self._slider_idx = 0
+        self._last_cols = 0
+        self._resize_job: str | None = None
         self._placeholder = ttk.Label(
             self,
             text="No jobs yet — press a site Start, or a tool button above.",
             style="Muted.TLabel", anchor="center",
         )
+        # the slider mode's nav row (built once, gridded on demand)
+        self._nav = ttk.Frame(self)
+        self._nav_prev = rounded_button(
+            self._nav, "◀", command=lambda: self._slide(-1), kind="link",
+        )
+        self._nav_prev.pack(side="left")
+        self._nav_label = ttk.Label(
+            self._nav, text="", style="Head.TLabel", anchor="center",
+        )
+        self._nav_label.pack(side="left", expand=True, fill="x")
+        self._nav_next = rounded_button(
+            self._nav, "▶", command=lambda: self._slide(1), kind="link",
+        )
+        self._nav_next.pack(side="right")
+        self.bind("<Configure>", self._on_configure)
 
     def attach(self, panels: dict) -> None:
         self._panels = panels
@@ -602,11 +629,59 @@ class DashGrid(ttk.Frame):
             self._active.remove(kind)
         self.relayout()
 
+    # --- F4e mode + width plumbing ------------------------------------
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def set_mode(self, mode: str) -> None:
+        """Flip grid <-> slider (the top strip's toggle)."""
+        if mode != self._mode:
+            self._mode = mode
+            self._slider_idx = 0
+            self.relayout()
+
+    def _slide(self, step: int) -> None:
+        slots = self.active()
+        if not slots:
+            return
+        self._slider_idx = max(
+            0, min(len(slots) - 1, self._slider_idx + step)
+        )
+        self.relayout()
+
+    def _grid_cols(self, n: int) -> int:
+        """Columns purely from the available WIDTH (F4e): how many
+        MIN-width cards fit, clamped to [1, DASH_GRID_MAX_COLS] and to
+        the active count. An unmapped widget (width 1) shows one
+        column until the first real <Configure> arrives."""
+        width = self.winfo_width()
+        fit = max(1, width // DASH_CARD_MIN_W) if width > 1 else 1
+        return max(1, min(n, fit, DASH_GRID_MAX_COLS))
+
+    def _on_configure(self, _event) -> None:
+        """Debounced resize re-flow — only when the fitting column
+        count actually changed (a relayout changes our own size, so an
+        unconditional re-run would loop)."""
+        if self._mode != DASH_MODE_GRID or not self._active:
+            return
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(150, self._resize_settled)
+
+    def _resize_settled(self) -> None:
+        self._resize_job = None
+        if self._grid_cols(len(self.active())) != self._last_cols:
+            self.relayout()
+
     def relayout(self) -> None:
         self._placeholder.grid_forget()
+        self._nav.grid_forget()
         for panel in self._panels.values():
             panel.grid_forget()
-        for i in range(3):  # reset every row/col this grid can ever use
+        max_span = max(DASH_GRID_MAX_COLS, 1) + 1
+        for i in range(max(max_span, 9)):  # reset every row/col ever used
             self.rowconfigure(i, weight=0, uniform="")
             self.columnconfigure(i, weight=0, uniform="")
         slots = self.active()
@@ -616,7 +691,26 @@ class DashGrid(ttk.Frame):
             self.rowconfigure(0, weight=1)
             self.columnconfigure(0, weight=1)
             return
-        cols = GRID_COLS_BY_COUNT[n]
+        if self._mode == DASH_MODE_SLIDER:
+            self._slider_idx = max(0, min(n - 1, self._slider_idx))
+            kind = slots[self._slider_idx]
+            self._nav_label.configure(
+                text=f"{JOB_LABEL[kind]}   ({self._slider_idx + 1}/{n})"
+            )
+            state_prev = "normal" if self._slider_idx > 0 else "disabled"
+            state_next = "normal" if self._slider_idx < n - 1 else "disabled"
+            self._nav_prev.configure(state=state_prev)
+            self._nav_next.configure(state=state_next)
+            self._nav.grid(row=0, column=0, sticky="ew", padx=4)
+            self._panels[kind].grid(
+                row=1, column=0, sticky="nsew", padx=4, pady=4
+            )
+            self.columnconfigure(0, weight=1)
+            self.rowconfigure(1, weight=1)
+            self._last_cols = 1
+            return
+        cols = self._grid_cols(n)
+        self._last_cols = cols
         rows = math.ceil(n / cols)
         for idx, kind in enumerate(slots):
             r, c = divmod(idx, cols)

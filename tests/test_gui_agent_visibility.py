@@ -291,6 +291,12 @@ class FakeGui:
     geometry managers on the SAME parent, exactly like
     ``_build_options``/``_build_compact`` keep them apart for real."""
 
+    # F4c: _relayout_agents now consults the run state and drives the
+    # shared both-sites editor — the fake carries that surface too,
+    # with the REAL _set_agent_mirror aliased on (same unbound-method
+    # convention as every other FakeGui in the suite)
+    _set_agent_mirror = gui.PainterGui._set_agent_mirror
+
     def __init__(self, root):
         self._agents_frame = ttk.Frame(root)
         self.agents = {
@@ -307,6 +313,10 @@ class FakeGui:
         for cluster in self._compact_clusters.values():
             cluster.pack(side="left")
         self._scroll = SimpleNamespace(refresh=lambda: None)
+        self._running: set = set()
+        self._restart_jobs: dict = {}
+        self._agent_mirror_on = False
+        self._mirror_traces: list = []
 
 
 @pytest.fixture
@@ -314,10 +324,26 @@ def fake(root):
     return FakeGui(root)
 
 
-def test_relayout_both_visible_grids_and_packs_both(fake):
+def test_relayout_both_ticked_idle_shows_the_single_shared_editor(fake):
+    """F4c (owner 2026-07-29): BOTH ticked and idle = ONE shared
+    editor — only the primary (chatgpt) panel shows, mirroring is on,
+    and edits flow to the hidden site's vars live."""
+    gui.PainterGui._relayout_agents(fake)
+    assert fake.agents["chatgpt"].winfo_manager() == "grid"
+    assert fake.agents["gemini"].winfo_manager() == ""  # hidden, mirrored
+    assert fake._agent_mirror_on is True
+    fake.agents["chatgpt"].crop_var.set(False)
+    assert fake.agents["gemini"].crop_var.get() is False  # mirrored live
+
+
+def test_relayout_both_ticked_but_running_shows_both_panels(fake):
+    """A live job always gets its own per-site panel back — the shared
+    editor never hides a running site's controls."""
+    fake._running = {"gemini"}
     gui.PainterGui._relayout_agents(fake)
     assert fake.agents["chatgpt"].winfo_manager() == "grid"
     assert fake.agents["gemini"].winfo_manager() == "grid"
+    assert fake._agent_mirror_on is False
     assert fake._compact_clusters["chatgpt"].winfo_manager() == "pack"
     assert fake._compact_clusters["gemini"].winfo_manager() == "pack"
 
@@ -340,11 +366,14 @@ def test_relayout_hiding_chatgpt_compacts_gemini_into_column_zero(fake):
     assert fake.agents["gemini"].grid_info()["column"] == 0
 
 
-def test_relayout_reshowing_restores_both_columns(fake):
+def test_relayout_reshowing_both_reenters_the_shared_editor(fake):
+    """Re-ticking the second site while idle goes back to the F4c
+    shared editor (primary only), never the old two-column layout."""
     fake.agents["gemini"].visible_var.set(False)
     gui.PainterGui._relayout_agents(fake)
+    assert fake._agent_mirror_on is False
     fake.agents["gemini"].visible_var.set(True)
     gui.PainterGui._relayout_agents(fake)
     assert fake.agents["chatgpt"].grid_info()["column"] == 0
-    assert fake.agents["gemini"].grid_info()["column"] == 1
-    assert fake.agents["gemini"].winfo_manager() == "grid"
+    assert fake.agents["gemini"].winfo_manager() == ""
+    assert fake._agent_mirror_on is True

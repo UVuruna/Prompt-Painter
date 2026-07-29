@@ -368,15 +368,9 @@ class SiteJobsMixin:
             action_delay_max_s=act_max,
         )
 
-        from painter.chrome import cdp_alive
-
-        if not cdp_alive():
-            messagebox.showerror(
-                "PromptPainter",
-                "No debuggable Chrome is running — press"
-                " 'Open Chrome (login)' first.",
-            )
-            return
+        # F4g (owner 2026-07-29): no "is Chrome running" gate any more
+        # — the worker itself ensures Chrome (launch + site tab +
+        # wait-for-login) right before attaching; see _drive_site.
 
         # this site's per-step backup store (GUI rework Phase 8) — a
         # restart while a previous run's panel is still on screen must
@@ -719,7 +713,24 @@ class SiteJobsMixin:
             from painter.runner import run_sheet
 
             t_site = time.monotonic()
+            # F4g (owner 2026-07-29): no manual "Open Chrome" step —
+            # ensure the automation Chrome is up (launch it with the
+            # dedicated profile when nothing answers on CDP), attach
+            # (the driver opens the site tab itself when missing), and
+            # WAIT for the owner's login when the composer is absent.
+            # Browser sites only — the API adapter needs no Chrome.
+            if key in SITES:
+                from painter.chrome import ensure_chrome
+
+                state = ensure_chrome((SITES[key].url,))
+                if state == "launched":
+                    log(
+                        "Chrome launched (automation profile) — opening"
+                        f" {SITES[key].url}"
+                    )
             title = driver.attach()
+            if key in SITES:
+                driver.wait_for_login(log)
             log(f"attached to {title!r} — SUPERVISED, watch the window")
             for n, sheet in enumerate(sheets, start=1):
                 if stop_event.is_set():
@@ -801,6 +812,26 @@ class SiteJobsMixin:
         finally:
             driver.close()
             self._q.put(("__worker_done__", key))
+
+    def _start_site_clicked(self, key: str) -> None:
+        """F4c (owner 2026-07-29): the Start button's entry point. In
+        the shared both-sites editor (both ticked, idle) ONE Start
+        drives EVERY ticked site: the hidden mirrored panel first gets
+        a full settings copy (covers the non-var FilterEditor stack the
+        live mirror cannot reach), then each site starts as its own
+        job. Outside that mode it is a plain per-site start."""
+        if getattr(self, "_agent_mirror_on", False):
+            keys = sorted(SITES)
+            primary, others = keys[0], keys[1:]
+            if key == primary:
+                shared = self.agents[primary].get_settings()
+                shared.pop("visible", None)
+                for other in others:
+                    self.agents[other].apply_settings(dict(shared))
+                for site in (primary, *others):
+                    self._start_site(site)
+                return
+        self._start_site(key)
 
     def _stop_site(self, key: str) -> None:
         """Stop ONE site: a running worker finishes its current item;

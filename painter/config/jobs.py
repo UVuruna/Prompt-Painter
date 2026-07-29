@@ -93,13 +93,18 @@ def job_color_pair(kind: str) -> tuple[str, str]:
     return JOB_COLORS[kind]
 
 
-# how many grid COLUMNS for N active panels; rows = ceil(N / cols). The
-# owner's chosen shape: 1→1, 2→2, 3→3, 4→2x2, 5→2x3 (ChatGPT+Gemini in
-# the top row, 6th cell empty), 6→2x3; 7 (all six + AI check) → 3x3.
-# 8 (GUI rework Phase 19 adds "api_image" to JOB_ORDER, the new max
-# active count) stays 3x3 too — one more empty cell, the same shape the
-# owner already accepted at 7.
-GRID_COLS_BY_COUNT = {1: 1, 2: 2, 3: 3, 4: 2, 5: 2, 6: 2, 7: 3, 8: 3}
+# F4e (owner 2026-07-29, REWORK.md): the dashboard grid is laid out by
+# WINDOW WIDTH against one card MIN width — every card treated
+# identically, columns = how many MIN-width cards fit (1xN when very
+# narrow ... up to 4 columns full-screen). The old per-count column
+# table (GRID_COLS_BY_COUNT) is retired.
+DASH_CARD_MIN_W = 430   # px — one dashboard card's minimum useful width
+DASH_GRID_MAX_COLS = 4  # never wider than this many columns
+# the dashboard's two display modes: the responsive GRID, and the
+# SLIDER — exactly one card at full width with prev/next arrows
+DASH_MODE_GRID = "grid"
+DASH_MODE_SLIDER = "slider"
+DASH_MODES = (DASH_MODE_GRID, DASH_MODE_SLIDER)
 
 
 # --- Dashboard status badges (owner 2026-07-20) ----------------------
@@ -206,17 +211,22 @@ class MenuTile:
 MENU_TILES: tuple[MenuTile, ...] = (
     # spans BOTH gen sites, not one job — no single JOB_COLORS entry
     # fits, so this gets its own accent (indigo)
+    # F4a (owner 2026-07-29): the description IS the card's short
+    # ABOUT text — logo + title + what it does, in a sentence or two
     MenuTile(
         id="website_gen", label="Website GEN",
         description=(
-            "Drive your logged-in ChatGPT/Gemini tabs to generate a"
-            " collection"
+            "Drive your logged-in ChatGPT/Gemini tabs through whole"
+            " prompt collections — paced, supervised, resumable"
         ),
         icon="web", color=("#4338ca", "#818cf8"),
     ),
     MenuTile(
         id="ai_sheet_gen", label="New collection (AI)",
-        description="Ask Gemini to draft a new prompt sheet from a request",
+        description=(
+            "Ask Gemini to draft a new prompt sheet from your request"
+            " — questions first, then a ready-to-run .md"
+        ),
         icon="ai", color=("#a16207", "#facc15"),  # yellow
     ),
     # GUI rework Phase 19: wired up — the adapter/panel/gating below.

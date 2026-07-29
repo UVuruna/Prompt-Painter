@@ -221,10 +221,14 @@ image timeout.
 
 ### SiteDriver
 `attach()` (find the tab by URL fragment; several tabs → the last
-one), `submit_prompt()`, `submit_with_image()` (image + text, GATED by
-`attach_menu_path` — see Failure taxonomy), `await_done()`,
-`extract_image()`, `close()` (detaches; never closes the owner's
-browser).
+one; **F4g, owner 2026-07-29: a MISSING tab is opened by the driver
+itself** — the caller has already ensured Chrome via
+`painter.chrome.ensure_chrome`), `wait_for_login()` (F4g: poll for
+the composer while the owner logs in by hand — status every 15 s,
+loud after `login_wait_timeout_s`), `submit_prompt()`,
+`submit_with_image()` (image + text, GATED by `attach_menu_path` —
+see Failure taxonomy), `await_done()`, `extract_image()`, `close()`
+(detaches; never closes the owner's browser).
 
 ## Functions
 

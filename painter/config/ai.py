@@ -10,10 +10,13 @@ from .paths import PROJECT_ROOT
 
 # --- Prompt rules appended per site (owner 2026-07-17) ---------------
 
-# The GUI shows ONE background dropdown PER SITE; the default
-# selection is the site's default_background (ChatGPT transparent —
-# it can do real alpha; Gemini white — the background fix clears it).
-BACKGROUND_CHOICES = ("transparent", "white", "none")
+# F4c (owner 2026-07-29): "default" resolves PER SITE at suffix-build
+# time (ChatGPT transparent — real alpha; Gemini white — the
+# background fix clears it), so ONE shared setup driving BOTH sites
+# still gives each its right background. "black" joins per the F7
+# helper decree (custom colour wheel arrives with F7).
+BACKGROUND_DEFAULT = "default"
+BACKGROUND_CHOICES = ("default", "transparent", "white", "black", "none")
 
 _BACKGROUND_RULE = {
     "transparent": (
@@ -23,6 +26,10 @@ _BACKGROUND_RULE = {
     ),
     "white": (
         "render on a PLAIN PURE WHITE background — flat white, no"
+        " gradients, no vignette, no backdrop scenery"
+    ),
+    "black": (
+        "render on a PLAIN PURE BLACK background — flat black, no"
         " gradients, no vignette, no backdrop scenery"
     ),
     "none": None,
@@ -127,6 +134,14 @@ def prompt_suffix(
     prompt is sent bare.
     """
     rules: list[str] = []
+    if background == BACKGROUND_DEFAULT:
+        # F4c: the shared-setup "Default (per site)" choice. The paid
+        # API job has no SITES entry — its documented default is white
+        # (the model cannot render real alpha; see gui/api_panel.py).
+        from .sites import SITES
+
+        site = SITES.get(site_key)
+        background = site.default_background if site else "white"
     bg_rule = _BACKGROUND_RULE[background]
     if bg_rule:
         rules.append(bg_rule)

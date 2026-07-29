@@ -29,6 +29,8 @@ from tkinter import ttk
 
 from painter import jobtemp
 from painter.config import (
+    DASH_MODE_GRID,
+    DASH_MODE_SLIDER,
     DEFAULT_OUT_DIR,
     JOB_ORDER,
     JOB_TOOL_KINDS,
@@ -136,6 +138,11 @@ class BuildMixin:
         # (site -> unix epoch seconds) — INFO ONLY, survives app close
         # via settings.json ("site_cooldowns"); never gates Start
         self._cooldowns: dict[str, float] = {}
+        # F4c (owner 2026-07-29): the shared both-sites editor state —
+        # True while BOTH sites are ticked and idle, so ONE panel edits
+        # settings for both (var mirroring, see _set_agent_mirror)
+        self._agent_mirror_on = False
+        self._mirror_traces: list = []
         # the four in-place tools each run as their OWN job (one worker
         # thread + one dashboard panel per kind; one job per kind at a
         # time). GUI rework Phase 8: the two gen-SITE jobs now ALSO get
@@ -340,8 +347,16 @@ class BuildMixin:
         ).pack(fill="x", pady=(4, 0))
 
         # the mini Day/Night switch — reflects the already-applied theme
+        # (LAST at the edge, owner F4/G5)
         self.switch = DayNightSwitch(self._top_strip, self)
         self.switch.pack(side="right")
+        # F4e (owner 2026-07-29): the dashboard grid/slider mode toggle
+        # — in the top strip, right beside the theme switch
+        self._dash_mode_btn = rounded_button(
+            self._top_strip, "", command=self._toggle_dash_mode,
+        )
+        self._dash_mode_btn.pack(side="right", padx=(0, 8))
+        self._render_dash_mode_btn()
         # the Controls collapse toggle, packed AFTER the switch so
         # side='right' places it to the switch's LEFT; carries the gamepad
         # icon (owner 2026-07-19) beside a state caret. The per-agent
@@ -366,26 +381,16 @@ class BuildMixin:
             self._top_strip, "Menu", command=self._request_menu,
         )
         self._menu_btn.pack(side="left")
-        # the #1 prerequisite, PINNED (owner 2026-07-21 workflow fix):
-        # moved here from _build_toolbar (Rule #5 — one copy, not two)
-        # because _build_toolbar's row lives inside _controls_box,
-        # itself inside _main_view — invisible on the very FIRST screen
-        # the owner sees ("menu", where _main_view as a whole is
-        # pack_forgotten for _menu_view) and, before this same session's
-        # running-view fix, invisible again the instant a job started.
-        # _top_strip is a sibling of the whole _scroll/_main_view/
-        # _menu_view tree, so these two are reachable from every view.
-        # The rest of the toolbar (Select images…/Instructions/New
-        # collection/AI key) stays exactly where it was.
-        self.btn_chrome = rounded_button(
-            self._top_strip, "Open Chrome (login)", command=self._open_chrome,
-            icon_name="web",
-        )
-        self.btn_chrome.pack(side="left", padx=(8, 0))
+        # F4g (owner 2026-07-29): the "Open Chrome (login)" button is
+        # GONE — starting an agent ensures Chrome itself (launches it
+        # with the automation profile when needed, opens the site tab,
+        # and WAITS for the owner to log in — see _drive_site +
+        # SiteDriver.wait_for_login). The Check button stays pinned
+        # here so sheet validation is reachable from every view.
         self.btn_check = rounded_button(
             self._top_strip, "Check", command=self._check_sheets,
         )
-        self.btn_check.pack(side="left", padx=4)
+        self.btn_check.pack(side="left", padx=(8, 0))
 
         self._bind_zoom()
         self._bind_wheel_routing()
@@ -522,8 +527,27 @@ class BuildMixin:
         visible = {
             key: panel.visible_var.get() for key, panel in self.agents.items()
         }
-        cols = _visible_agent_columns(sorted(SITES), visible)
-        dense = len(cols) == 1
+        # F4c (owner 2026-07-29): BOTH sites ticked and idle = ONE
+        # shared editor — only the primary panel shows (dense, marked
+        # "shared") and every edit mirrors to the hidden site live; a
+        # running/pending site always drops back to per-site panels so
+        # a live job's controls are never hidden.
+        busy = set(self._running) | set(self._restart_jobs)
+        both_mode = (
+            len(visible) > 1
+            and all(visible.values())
+            and not (busy & set(visible))
+        )
+        self._set_agent_mirror(both_mode)
+        if both_mode:
+            primary = sorted(SITES)[0]
+            cols = {primary: 0}
+            dense = True
+        else:
+            cols = _visible_agent_columns(sorted(SITES), visible)
+            dense = len(cols) == 1
+        for key, panel in self.agents.items():
+            panel.set_shared_header(both_mode and key in cols)
         for c in range(len(SITES)):
             self._agents_frame.columnconfigure(c, weight=0)
         for key, panel in self.agents.items():
@@ -540,6 +564,42 @@ class BuildMixin:
             else:
                 cluster.pack_forget()
         self._scroll.refresh()
+
+    def _set_agent_mirror(self, on: bool) -> None:
+        """F4c: live var mirroring primary → the other site while the
+        shared both-sites editor is active. Trace tokens are kept so
+        leaving the mode detaches cleanly; entering it first copies the
+        primary's current values across so the two start identical.
+        The upscale FilterEditor's condition stack is NOT a tk.Variable
+        — it is copied wholesale at Start-both instead (see
+        ``_start_site_clicked``)."""
+        if on == self._agent_mirror_on:
+            return
+        self._agent_mirror_on = on
+        keys = sorted(SITES)
+        primary, others = keys[0], keys[1:]
+        src_vars = self.agents[primary]._vars()
+        if not on:
+            for var, token in self._mirror_traces:
+                try:
+                    var.trace_remove("write", token)
+                except Exception:
+                    pass  # a destroyed var mid-teardown is fine
+            self._mirror_traces = []
+            return
+        dst_maps = [self.agents[o]._vars() for o in others]
+        for name, var in src_vars.items():
+            if name == "visible":
+                continue  # unticking must EXIT the mode, never mirror
+
+            def _sync(*_a, name=name, var=var):
+                for dst in dst_maps:
+                    if dst[name].get() != var.get():
+                        dst[name].set(var.get())
+
+            _sync()  # initial copy
+            token = var.trace_add("write", _sync)
+            self._mirror_traces.append((var, token))
 
     def _on_root_configure(self, event) -> None:
         """The root <Configure> watcher. One job now:
@@ -687,7 +747,7 @@ class BuildMixin:
         for i, key in enumerate(sorted(SITES)):
             panel = AgentPanel(
                 self._agents_frame, key,
-                on_start=self._start_site, on_stop=self._stop_site,
+                on_start=self._start_site_clicked, on_stop=self._stop_site,
                 on_pause=self._toggle_pause_job,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
@@ -704,10 +764,11 @@ class BuildMixin:
     def _build_toolbar(self, parent) -> None:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(0, 6))
-        # "Open Chrome (login)"/"Check" used to live here — PINNED into
-        # the always-visible _top_strip instead (owner 2026-07-21
-        # workflow fix, Rule #5 — moved, not duplicated); see __init__'s
-        # own comment beside self.btn_chrome/self.btn_check for why.
+        # "Check" used to live here — PINNED into the always-visible
+        # _top_strip instead (owner 2026-07-21 workflow fix, Rule #5 —
+        # moved, not duplicated). "Open Chrome (login)" is GONE
+        # entirely (F4g, owner 2026-07-29): Chrome is ensured
+        # automatically at agent Start, including the wait-for-login.
         self.btn_select = rounded_button(
             row, "Select images…", command=self._select_images,
         )

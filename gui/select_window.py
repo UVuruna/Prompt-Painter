@@ -86,14 +86,23 @@ class SelectWindow(tk.Toplevel):
     far its name wraps.
     """
 
-    def __init__(self, gui: PainterGui, sheets: list[Sheet]):
+    def __init__(
+        self,
+        gui: PainterGui,
+        sheets: list[Sheet],
+        site_keys: list[str] | None = None,
+    ):
         super().__init__(gui.root)
         self.title("Select images per site")
         self.minsize(SELECT_MIN_W, SELECT_OPEN_H)
         skin_toplevel(self)  # bg registered so a flip re-tints the window
         THEME_TOPLEVELS.append(self)  # flip coherently with the main window
         self._gui = gui
-        self._site_keys = sorted(SITES)
+        # F4d (owner 2026-07-29): only the TICKED sites' columns show —
+        # the caller passes them; None keeps every site (tests, tools)
+        self._site_keys = (
+            sorted(site_keys) if site_keys else sorted(SITES)
+        )
 
         done = {
             key: {
@@ -215,6 +224,10 @@ class SelectWindow(tk.Toplevel):
         # --- the tree: L1 + L2 always materialised, L3 lazy
         self._static_labels: list[ttk.Label] = []  # L1/L2 names (wrap)
         self._count_nodes: list[dict] = []  # L1 + L2 nodes for _recount
+        # F4d (owner 2026-07-29): the traffic-light DONE squares on
+        # L1/L2 rows — (scope leaves, site key, label), recoloured on a
+        # theme flip like the leaf labels
+        self._traffic_labels: list[tuple[list, str, ttk.Label]] = []
         self._collection_nodes: list[dict] = []
         for coll in self._collections:
             self._build_collection_widgets(self._scroll.body, coll)
@@ -301,6 +314,10 @@ class SelectWindow(tk.Toplevel):
         self._progress_lbl.configure(foreground=tb.Style().colors.info)
         for role, lbl in self._legend_labels:
             lbl.configure(foreground=status(role))
+        for scope, key, square in self._traffic_labels:
+            square.configure(
+                foreground=status(self._traffic_role(scope, key))
+            )
         default_fg = tb.Style().colors.fg
         for cnode in self._collection_nodes:
             for fnode in cnode["folders"]:
@@ -326,9 +343,29 @@ class SelectWindow(tk.Toplevel):
         row.columnconfigure(4, minsize=SELECT_COUNT_COL_PX)
         return row
 
+    def _traffic_role(self, scope: list, key: str) -> str:
+        """The F4d traffic light for one node+site: every leaf DONE →
+        green ('done'), some → yellow-orange ('advice' palette slot),
+        none → red ('superseded' slot). Reads the theme palette live,
+        so a Day/Night flip recolours through the same roles."""
+        done_n = sum(1 for leaf in scope if leaf["sites"][key]["done"])
+        if scope and done_n == len(scope):
+            return "done"
+        if done_n:
+            return "advice"
+        return "superseded"
+
     def _count_cell(self, row, col: int, scope: list, key: str) -> ttk.Label:
-        lbl = ttk.Label(row, text="0/0", anchor="center", cursor="hand2")
-        lbl.grid(row=0, column=col, sticky="n")
+        cell = ttk.Frame(row)
+        cell.grid(row=0, column=col, sticky="n")
+        # F4d: the done-state square (green/yellow/red) beside the count
+        square = ttk.Label(
+            cell, text="■", foreground=status(self._traffic_role(scope, key)),
+        )
+        square.pack(side="left", padx=(0, 3))
+        self._traffic_labels.append((scope, key, square))
+        lbl = ttk.Label(cell, text="0/0", anchor="center", cursor="hand2")
+        lbl.pack(side="left")
         lbl.bind(
             "<Button-1>", lambda _e: self._toggle_scope(scope, key)
         )

@@ -18,7 +18,11 @@ from __future__ import annotations
 from functools import partial
 from typing import Callable
 
-from painter.config import TILE_JOB_KINDS
+from painter.config import (
+    DASH_MODE_GRID,
+    DASH_MODE_SLIDER,
+    TILE_JOB_KINDS,
+)
 from .app_build import COLLAPSE_GLYPH_COLLAPSED, COLLAPSE_GLYPH_EXPANDED
 from .logic import _next_view
 from .theme import smooth_transition
@@ -27,6 +31,25 @@ from .theme import smooth_transition
 class ViewMixin:
     """The Main Menu / "main" / "running" view switch + running-view
     layout reconciliation."""
+
+    def _toggle_dash_mode(self) -> None:
+        """F4e (owner 2026-07-29): flip the dashboard between the
+        width-responsive GRID and the one-card SLIDER; persisted as
+        'dash_mode' by the normal debounced settings save."""
+        new = (
+            DASH_MODE_SLIDER
+            if self._dashgrid.mode == DASH_MODE_GRID
+            else DASH_MODE_GRID
+        )
+        self._dashgrid.set_mode(new)
+        self._render_dash_mode_btn()
+        self._schedule_save()
+
+    def _render_dash_mode_btn(self) -> None:
+        slider = self._dashgrid.mode == DASH_MODE_SLIDER
+        self._dash_mode_btn.configure(
+            text="▭ slider" if slider else "▦ grid"
+        )
 
     def _set_collapsed(self, collapsed: bool) -> None:
         """Swap the full controls for the thin per-agent strip (or back).
@@ -100,6 +123,20 @@ class ViewMixin:
             self._menu_btn.pack(side="left")
             self._collapse_btn.configure(state="normal")
             self._set_collapsed(self._collapsed)
+        # F4b (owner 2026-07-29): the icon strip shows on the SETUP
+        # screen too — icons-only, centered, above the settings; its
+        # own Menu button serves as HOME there, so the top-strip Menu
+        # button steps aside (one Menu affordance at a time).
+        if view == "main":
+            target = (
+                self._compact_box if self._collapsed else self._controls_box
+            )
+            if not target.winfo_manager():
+                target = self.notebook
+            self._icon_bar.pack(fill="x", pady=(2, 4), before=target)
+            self._menu_btn.pack_forget()
+        elif view == "menu":
+            self._icon_bar.pack_forget()
         self._scroll.refresh()
 
     def _go_view(self, view: str) -> None:

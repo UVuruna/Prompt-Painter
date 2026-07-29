@@ -213,6 +213,20 @@ Files: `gui/app_jobs.py`, `gui/dash_panels.py`,
 
 ## Phase F4 — UI rework
 
+**STATUS: LANDED 2026-07-29** (4a home-card about texts; 4b icon
+strip on the setup screen, HOME left / mode+theme toggles right; 4c
+ONE shared editor when both sites are ticked — live var mirroring,
+Start-both, background "default (per site)" + black; 4d Select
+traffic-light squares + ticked-sites-only columns; 4e width-based
+grid + slider mode with the top-strip toggle; 4f the new
+`ImageViewer` — portrait, Prev/Next, Check/Steps expanders with step
+thumbnails + restore, Delete of exactly the displayed version; 4g
+"Open Chrome" button removed — Start ensures Chrome, opens the tab
+and waits for login; 4h the folder-view crash instrumented — guarded
+open + full-traceback logging, NOT declared fixed). Full suite 749
+green. Follow-up debt: `gui/viewers.py` is over the Rule #20 budget
+(~1185 lines) — a dedicated god-file split session.
+
 Files: `gui/` (menu, app_build, app_views, agent_panel, tool_panels,
 dash_panels, tool_dash, viewers, select_window), `painter/config/`
 (jobs, theme). Follows [DESIGN.md](../../DESIGN.md) (Rule #16).

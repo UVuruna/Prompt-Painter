@@ -9,8 +9,9 @@ folder…/Remove/Clear — ``_queue_sheets``/``_add_sheets``/
 parsing/planning helpers shared by the site jobs (``_parse_all``/
 ``_out_base``/``_done_on_disk``/``_plan``), the dashboard row viewers
 (``_show_node``/``_show_folder_excerpt``), the top-strip "prerequisite"
-button handlers (``_open_chrome``/``_check_sheets``/``_select_images``/
-``_open_instructions``/``_new_collection_ai``/``_open_key_wizard``), the
+button handlers (``_check_sheets``/``_select_images``/
+``_open_instructions``/``_new_collection_ai``/``_open_key_wizard`` —
+``_open_chrome`` was retired in F4g: Chrome is ensured at Start), the
 AI-features key gate (``gemini_key``/``set_gemini_key``/
 ``_ensure_ai_key``/``add_generated_sheet``) and the whole settings
 round-trip (``_collect_settings``/``_apply_settings``/the two one-time
@@ -33,6 +34,7 @@ import threading
 import time
 import tkinter as tk
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -41,6 +43,7 @@ from painter.config import (
     DEFAULT_OUT_DIR,
     FILTER_PRESETS_SETTING,
     GEMINI_KEY_SETTING,
+    JOBTEMP_STEP_LABEL,
     SITES,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
@@ -58,7 +61,17 @@ from .logic import (
     _parse_condition_dicts,
 )
 from .select_window import SelectWindow
+from .viewers import ImageViewer, _filmstrip_stages, _restore_step
 from .widgets import folder_of
+
+# GUI rework Phase F4f: the reverse of JOBTEMP_STEP_LABEL — ImageViewer's
+# Steps section only ever hands back a friendly LABEL (never the raw
+# JobTemp step key, see ImageViewer's own docstring for why), so the
+# 'Restore to this step' wiring built in _image_viewer_restore_cb below
+# maps it back before calling JobTemp.restore_to. Built once here (not
+# per-call) since JOBTEMP_STEP_LABEL is fixed config data with unique
+# values.
+_STEP_LABEL_TO_KEY = {label: step for step, label in JOBTEMP_STEP_LABEL.items()}
 
 
 class SettingsMixin:
@@ -84,8 +97,32 @@ class SettingsMixin:
     def _show_node(self, site_key: str, info: dict) -> None:
         """A dashboard row's 'Show': a collection opens its whole file,
         a FOLDER opens only that folder's excerpt of the sheet, an
-        image opens its own prompt PLUS the saved image below it (when
-        the destination file already exists)."""
+        IMAGE opens ``ImageViewer`` (GUI rework Phase F4f, owner G6/G7)
+        over the WHOLE collection's items so Prev/Next can walk it in
+        one window — ``DocWindow`` stays for the collection/folder
+        levels, unchanged.
+
+        F4h (owner 2026-07-29, the unreproduced folder-view crash):
+        the whole open is GUARDED — a viewer failure logs the full
+        traceback and shows a dialog instead of killing the app, so a
+        recurrence pins itself (REWORK.md open items; instrumented,
+        NOT declared fixed)."""
+        try:
+            self._show_node_inner(site_key, info)
+        except Exception as exc:  # loud, never app-fatal
+            import traceback
+
+            self._log(
+                f"VIEWER ERROR ({info.get('level')}):"
+                f" {type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            )
+            messagebox.showerror(
+                "PromptPainter",
+                f"The viewer failed to open: {exc}\n\n(The full error"
+                " is in the Log tab — please report it.)",
+            )
+
+    def _show_node_inner(self, site_key: str, info: dict) -> None:
         source = next(
             (p for p in self._sheets if p.name == info["sheet"]), None
         )
@@ -104,25 +141,21 @@ class SettingsMixin:
             except (SheetError, OSError) as exc:
                 messagebox.showerror("PromptPainter", str(exc))
                 return
-            item = next(
-                (it for it in sheet.items if it.drop_path == info["drop"]),
-                None,
-            )
-            if item is None:
+            entries, start = self._image_viewer_entries(site_key, sheet, info)
+            if not entries:
                 messagebox.showinfo(
                     "PromptPainter",
                     f"No prompt found for {info['drop']} in {source.name}.",
                 )
                 return
-            md = (
-                f"# {item.title}\n\n`{item.drop_path}`\n\n"
-                f"```\n{item.prompt}\n```\n"
-            )
-            dest = self._out_base() / dest_for(item.drop_path, site_key)
-            gui.DocWindow(
-                self.root, item.drop_path, md, copy_text=item.prompt,
-                hint="The prompt for this one image.",
-                image_path=dest if dest.is_file() else None,
+            panel = getattr(self, "panels", {}).get(site_key)
+            ImageViewer(
+                self.root, entries, start,
+                check_lookup=self._image_viewer_check_lookup(panel),
+                steps_lookup=self._image_viewer_steps_lookup(panel),
+                restore_cb=self._image_viewer_restore_cb(panel),
+                on_restored=partial(self._image_viewer_on_restored, panel),
+                on_deleted=self._image_viewer_on_deleted,
             )
         elif info["level"] == "folder":
             self._show_folder_excerpt(source, info["folder"])
@@ -133,6 +166,120 @@ class SettingsMixin:
                 messagebox.showerror("PromptPainter", str(exc))
                 return
             gui.DocWindow(self.root, source.name, text)
+
+    # --- ImageViewer wiring (GUI rework Phase F4f, owner G6/G7) --------
+
+    def _image_viewer_entries(
+        self, site_key: str, sheet: Sheet, info: dict,
+    ) -> tuple[list[dict], int]:
+        """The ORDERED entries ``ImageViewer`` walks for the CLICKED
+        image's whole collection: every item of ``sheet``, in sheet
+        order, dest resolved via ``dest_for`` + this run's out base —
+        except the CLICKED item itself, whose ``rel`` comes from the
+        dashboard row's own node info when present (the ACTUAL saved
+        file, which may be a redo's ``_vN`` sibling — see REWORK.md's
+        Run Loop; every OTHER item in the list uses the plain canonical
+        ``dest_for``, same simplification the old single-image 'Show'
+        already made). No per-item refusal reason is tracked anywhere
+        reachable here (the runner logs it to the report txt, never
+        back to the GUI — see ``painter.runner``), so a missing file
+        reads as a generic note rather than a fabricated specific
+        reason."""
+        out_base = self._out_base()
+        clicked_drop = info.get("drop")
+        entries: list[dict] = []
+        start = 0
+        for i, item in enumerate(sheet.items):
+            if item.drop_path == clicked_drop and info.get("rel"):
+                rel = info["rel"]
+            else:
+                rel = dest_for(item.drop_path, site_key)
+            dest = out_base / rel
+            exists = dest.is_file()
+            entries.append({
+                "title": item.title,
+                "drop_path": item.drop_path,
+                "rel": rel if exists else None,
+                "dest": dest if exists else None,
+                "prompt": item.prompt,
+                "refused_reason": (
+                    None if exists else
+                    "No saved file — refused, skipped, or not generated"
+                    " yet."
+                ),
+            })
+            if item.drop_path == clicked_drop:
+                start = i
+        return entries, start
+
+    def _image_viewer_check_lookup(self, panel):
+        """``ImageViewer``'s ``check_lookup`` — the SAME
+        ``DashPanel._check_results`` dict (keyed by drop path)
+        ``_show_check`` already reads; None when not opened from a live
+        dashboard panel (e.g. the panel slot never started a job)."""
+        if panel is None:
+            return None
+        return panel._check_results.get
+
+    def _image_viewer_steps_lookup(self, panel):
+        """``ImageViewer``'s ``steps_lookup`` — the SAME
+        ``_filmstrip_stages`` list ``StepRestoreWindow`` renders, minus
+        its own trailing 'current' entry (ImageViewer's Steps section
+        must be ABSENT when there are zero real backups, never present
+        showing only 'current')."""
+        if panel is None:
+            return None
+
+        def lookup(rel: str) -> list[tuple[str, Path]]:
+            temp = panel.jobtemp
+            if temp is None or not temp.steps_for(rel):
+                return []
+            live_path = (panel.out_base or self._out_base()) / rel
+            return _filmstrip_stages(temp, rel, live_path)[:-1]
+
+        return lookup
+
+    def _image_viewer_restore_cb(self, panel):
+        """``ImageViewer``'s ``restore_cb(rel, label) -> bool`` — maps
+        the Steps section's display LABEL back to the raw JobTemp step
+        key (``_STEP_LABEL_TO_KEY``) and calls the SAME ``_restore_step``
+        helper ``StepRestoreWindow._do_restore`` calls (Rule #5)."""
+        if panel is None:
+            return None
+
+        def restore(rel: str, label: str) -> bool:
+            temp = panel.jobtemp
+            step = _STEP_LABEL_TO_KEY.get(label)
+            if temp is None or step is None:
+                return False
+            return _restore_step(temp, rel, step)
+
+        return restore
+
+    def _image_viewer_on_restored(self, panel, entry: dict) -> None:
+        """After a Steps restore, refresh the dashboard row's
+        resolution/size straight off disk — the SAME refresh
+        ``DashPanel._show_steps``'s own ``on_restored`` already wires
+        for ``StepRestoreWindow``."""
+        if panel is not None and entry.get("drop_path"):
+            panel.refresh_image_row(entry["drop_path"])
+
+    def _image_viewer_on_deleted(self, entry: dict) -> None:
+        """ImageViewer's Delete callback (owner G7). ``entry`` arrives
+        ALREADY marked deleted (``ImageViewer._delete_current`` clears
+        its own ``dest``/``rel`` before firing this, so the viewer's own
+        Prev/Next immediately reflects it) — only ``drop_path``/
+        ``title`` survive to identify WHICH image this was. The
+        dashboard row is NOT cheaply reachable from here — no rel/drop
+        -> tree-node index survives a collection switch
+        (``DashPanel._child_ids`` is reset per collection, see its own
+        comment in ``_new_theme``) — so this just logs; the row itself
+        stays showing its last-known state until the run naturally
+        re-reads the file (a rerun/redo) or the owner reopens Show.
+        Building the machinery to hunt down and live-patch an arbitrary
+        past row would be new cross-module plumbing for a cosmetic gap,
+        not a fix (root Rule #15)."""
+        self._log(f"DELETED image — {entry.get('drop_path', '?')}")
 
     def _show_folder_excerpt(self, source: Path, folder: str) -> None:
         """Only the contiguous portion of the sheet covering the
@@ -319,32 +466,11 @@ class SettingsMixin:
         return total, themes
 
     # --- actions -------------------------------------------------------
-
-    def _open_chrome(self) -> None:
-        # both sites' tabs — a site "participates" by being Started,
-        # and a spare logged-in tab costs nothing
-        urls = tuple(SITES[k].url for k in sorted(SITES))
-        self.status_var.set("opening Chrome …")
-
-        def work():
-            from painter.chrome import ChromeError, ensure_chrome
-
-            try:
-                state = ensure_chrome(urls)
-            except ChromeError as exc:
-                self._q.put(f"CHROME ERROR: {exc}")
-                self._q.put(("__status__", "idle"))
-                return
-            if state == "launched":
-                self._q.put(
-                    "Chrome opened with the PromptPainter profile — log in"
-                    " on each site tab once, then press Start."
-                )
-            else:
-                self._q.put("Chrome already running — ready.")
-            self._q.put(("__status__", "idle"))
-
-        threading.Thread(target=work, daemon=True).start()
+    # F4g (owner 2026-07-29): the old _open_chrome handler (and its
+    # top-strip button) is GONE — starting an agent ensures Chrome
+    # itself: launch with the automation profile, open the site tab,
+    # wait for the owner's login (see SiteJobsMixin._drive_site and
+    # SiteDriver.wait_for_login).
 
     def _check_sheets(self) -> None:
         if not self._sheets:
@@ -372,7 +498,12 @@ class SettingsMixin:
                 "PromptPainter", "No usable sheets in the queue."
             )
             return
-        SelectWindow(self, sheets)
+        # F4d (owner 2026-07-29): only the TICKED sites' columns show
+        ticked = [
+            key for key, panel in self.agents.items()
+            if panel.visible_var.get()
+        ]
+        SelectWindow(self, sheets, site_keys=ticked or None)
 
     # --- the in-place tools (each its own concurrent job + panel) ------
 
@@ -439,6 +570,8 @@ class SettingsMixin:
             "theme": widgets.ACTIVE_THEME,
             "geometry": self.root.geometry(),
             "controls_collapsed": self._collapsed,
+            # F4e (owner 2026-07-29): the dashboard grid/slider mode
+            "dash_mode": self._dashgrid.mode,
             # the AI features' credential (owner 2026-07-20): held on
             # the GUI so the whole-dict save round-trips it; painter.ai
             # reads it back from settings.json per call
@@ -613,6 +746,11 @@ class SettingsMixin:
             if key in self.agents and float(until) > now
         }
         self.root.after(1000, self._refresh_cooldown_labels)
+        # F4e: restore the dashboard display mode (grid is the default)
+        saved_mode = stored.get("dash_mode")
+        if saved_mode in config.DASH_MODES:
+            self._dashgrid.set_mode(saved_mode)
+            self._render_dash_mode_btn()
         if self._cooldowns:
             lines = []
             for key, until in sorted(self._cooldowns.items()):

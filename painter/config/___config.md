@@ -194,6 +194,7 @@ checker's copy (`AI_FLAGS_FILENAME`, `AI_CHECK_INSTRUCTIONS`,
 instance — F1 2026-07-29 added `busy_clear_grace_s`, the stuck-busy
 wait before a pre-send refresh, and `send_confirm_timeout_s`, the
 confirmed-send window), `PAUSE_POLL_INTERVAL_S`, `MIN_IMAGE_PX`;
+F4g added `login_wait_timeout_s` (the wait-for-manual-login window);
 `SiteConfig` (the per-site DOM hook dataclass — prompt box,
 send/busy/response/result selectors, `user_turn` (F1: the USER-turn
 selectors the confirmed-send check reads; ChatGPT's data-turn family,

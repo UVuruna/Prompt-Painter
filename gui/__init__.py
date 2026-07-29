@@ -50,7 +50,8 @@ from painter.config import (
     FILTER_PRESETS_SETTING,
     GEMINI_KEY_SETTING,
     GEMINI_VISION_MODEL,
-    GRID_COLS_BY_COUNT,
+    DASH_MODE_GRID,
+    DASH_MODE_SLIDER,
     JOB_LABEL,
     JOB_LOGO,
     JOB_METRIC,
@@ -235,6 +236,7 @@ from .tool_panels import (
 from .viewers import (
     BeforeAfterWindow,
     DocWindow,
+    ImageViewer,
     StepRestoreWindow,
     _filmstrip_stages,
 )

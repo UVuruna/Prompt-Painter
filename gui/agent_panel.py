@@ -28,6 +28,7 @@ from painter.config import (
     ASPECT_DEFAULT_H,
     ASPECT_DEFAULT_W,
     BACKGROUND_CHOICES,
+    BACKGROUND_DEFAULT,
     DEGRADE_ASK,
     DEGRADE_CHOICES,
     FILTER_KIND_ASPECT_RANGE,
@@ -154,7 +155,8 @@ class AgentPanel(ttk.Labelframe):
             head, text="", image=icon(JOB_LOGO[site_key]), width=22,
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
-        ttk.Label(head, text=site.name, style="Head.TLabel").pack(side="left")
+        self._head_name = ttk.Label(head, text=site.name, style="Head.TLabel")
+        self._head_name.pack(side="left")
         # F2 cooldown INFO (owner 2026-07-29): a persisted quota reset
         # shown right beside the site's name during setup — information
         # only, it NEVER gates the Start button
@@ -164,7 +166,10 @@ class AgentPanel(ttk.Labelframe):
         ).pack(side="left", padx=(8, 0))
         self.configure(labelwidget=head, padding=6)
 
-        self.background_var = tk.StringVar(value=site.default_background)
+        # F4c (owner 2026-07-29): "default" resolves per site at Start
+        # (chatgpt transparent / gemini white) — ONE shared setup can
+        # drive both sites and each still gets its right background
+        self.background_var = tk.StringVar(value=BACKGROUND_DEFAULT)
         # the rendering STYLE clause appended at the END of this site's
         # prompt suffix (owner 2026-07-19); "None" = nothing appended
         self.style_var = tk.StringVar(value=STYLE_DEFAULT)
@@ -848,6 +853,16 @@ class AgentPanel(ttk.Labelframe):
             parent, SITES[self.site_key].name, self.visible_var,
         )
         return self._visible_btn
+
+    def set_shared_header(self, shared: bool) -> None:
+        """F4c (owner 2026-07-29): while the both-sites shared editor
+        is active, this (primary) panel's header names BOTH sites so
+        it is obvious one setup drives the pair."""
+        if shared:
+            names = " + ".join(SITES[k].name for k in sorted(SITES))
+            self._head_name.configure(text=f"{names} — shared settings")
+        else:
+            self._head_name.configure(text=SITES[self.site_key].name)
 
     def pace_floats(self) -> tuple[float, float, float, float]:
         """The four pace numbers — ValueError propagates to the
