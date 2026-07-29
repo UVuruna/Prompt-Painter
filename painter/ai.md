@@ -88,11 +88,18 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   the response text. `key=None` reads settings — the wizard's Test
   passes its candidate explicitly. `model=None` resolves via
   `model_for("text")` (F5). `log` receives the transient-retry lines.
-- `check_image(image_path, instructions, *, key=None, model=None,
-  log=print)` — the vision call: the instructions text part + the
-  image as base64 `inlineData` (png/jpg/webp by suffix, via
+- `check_image(image_path, instructions, *, prompt=None, key=None,
+  model=None, log=print)` — the vision call: the instructions text part +
+  the image as base64 `inlineData` (png/jpg/webp by suffix, via
   `_mime_for`). `model=None` resolves via `model_for("vision")` (F5).
-  `log` receives the transient-retry lines.
+  `log` receives the transient-retry lines. `prompt` (F6, REWORK.md) is
+  OPTIONAL — the item's own sheet prompt: when given,
+  `config.AI_CHECK_PROMPT_MATCH` (formatted with it) is appended to
+  `instructions`, so the model ALSO judges whether the image shows what
+  the prompt describes (the tilted-cosmos case: a flat medallion
+  rendered as a tilted 3D view from above) on top of the banal-defects
+  check `instructions` already asks for; `None` sends `instructions`
+  unchanged.
 - `generate_image(prompt, *, image_path=None, key=None, model=None,
   log=print) -> bytes` (GUI rework Phase 18; `image_path` F5, owner
   D3) — one IMAGE-GENERATION call against the PAID image model
@@ -215,14 +222,18 @@ requested model. PERMANENT: raised on the FIRST attempt inside
 - `parse_check_response(text) -> list[str]` — the strict format:
   `OK` → `[]`; `DEFECTS:` + dash lines → the list; anything else is
   a loud `AiError` (never guessed).
-- `check_one_image(src, out_base, instructions, *, model=..., log,
-  check=None) -> dict` — the pure per-image driver TWO independent GUI
-  callers now share (Rule #5, offline-testable — `check` defaults to
-  this module's `check_image`, so a test injects a per-image mock): the
-  standalone batch checker's worker loop (`_run_ai_check_job`) and, GUI
-  rework Phase 16, the SITE dashboard's parallel per-item checker
-  (`PainterGui._run_checker_one`, one bare call per saved image, no
-  loop of its own). Times
+- `check_one_image(src, out_base, instructions, *, prompt=None,
+  model=..., log, check=None) -> dict` — the pure per-image driver TWO
+  independent GUI callers now share (Rule #5, offline-testable — `check`
+  defaults to this module's `check_image`, so a test injects a per-image
+  mock): the standalone batch checker's worker loop (`_run_ai_check_job`)
+  and, GUI rework Phase 16, the SITE dashboard's parallel per-item
+  checker (`PainterGui._run_checker_one`, one bare call per saved image,
+  no loop of its own). `prompt` (F6, REWORK.md) passes straight through
+  to `check` — but ONLY when not `None`, so a `check` double with no
+  `prompt` parameter of its own (older tests, callers that never opt in)
+  keeps working unchanged; `check_image` itself now accepts it (see
+  above). Times
   the call, parses the answer, MERGES the flag (or CLEARS a fixed
   image's old one) and returns the row the panel renders:
   `{rel (=flag_key), kind ('flagged'/'ok'/'error'), defects, raw
@@ -359,6 +370,15 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   `check_one_image` resolves it ONE line earlier than its own `check`
   call specifically so the RESOLVED name (not the literal string
   `"None"`) is what `record_flag` persists.
+- **The prompt-match clause is appended text, not a second call**
+  (F6, REWORK.md). `check_image`/`check_one_image` still make ONE vision
+  call per image — `AI_CHECK_PROMPT_MATCH` is glued onto whatever
+  `instructions` the caller already built, and the model is told to
+  report a content mismatch in the SAME `DEFECTS:` format
+  (`parse_check_response` reads one strict shape, never two). This
+  keeps the pacing/retry/flag-memory machinery entirely unaware that a
+  prompt was involved at all — `prompt` only ever changes what text
+  goes INTO the request, never how the response comes back.
 - **The reference-image part order is the ONE deliberate asymmetry.**
   `_payload_image` (the checker/`edit_image` convention: TEXT then
   the picture) and `_payload_reference_and_prompt` (`generate_image`'s

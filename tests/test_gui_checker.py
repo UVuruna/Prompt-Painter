@@ -48,6 +48,7 @@ a screenshot" split (___tests.md):
 
 from __future__ import annotations
 
+import os
 import queue
 from pathlib import Path
 from types import SimpleNamespace
@@ -146,6 +147,58 @@ def test_apply_settings_missing_checker_key_keeps_the_default(root):
     panel = make_panel(root)
     panel.apply_settings({"background": "white"})  # no 'checker' key
     assert panel.checker_var.get() is False
+
+
+# ---------------------------------------------------------------------
+# AgentPanel.checker_prompt_var (F6, REWORK.md) — default ON,
+# persistence round-trip, visibility tied to checker_var. Mirrors
+# checker_var's own block above exactly, just for the new field.
+# ---------------------------------------------------------------------
+
+
+def test_checker_prompt_var_defaults_true(root):
+    panel = make_panel(root)
+    assert panel.checker_prompt_var.get() is True
+
+
+def test_checker_prompt_is_in_persist_and_vars(root):
+    panel = make_panel(root)
+    assert "checker_prompt" in panel._PERSIST
+    assert panel._vars()["checker_prompt"] is panel.checker_prompt_var
+
+
+def test_get_settings_round_trips_checker_prompt_false(root):
+    panel = make_panel(root)
+    panel.checker_prompt_var.set(False)
+    stored = panel.get_settings()
+    assert stored["checker_prompt"] is False
+
+    fresh = make_panel(root)
+    assert fresh.checker_prompt_var.get() is True  # a fresh panel still defaults ON
+    fresh.apply_settings(stored)
+    assert fresh.checker_prompt_var.get() is False
+
+
+def test_apply_settings_missing_checker_prompt_key_keeps_the_default(root):
+    """An old settings.json predating F6 has no 'checker_prompt' key at
+    all — missing key keeps the current default (ON), same contract
+    every other field follows."""
+    panel = make_panel(root)
+    panel.checker_prompt_var.set(False)
+    panel.apply_settings({"background": "white"})  # no 'checker_prompt' key
+    assert panel.checker_prompt_var.get() is False  # untouched, stays as set
+
+
+def test_checker_prompt_subblock_visible_only_while_checker_is_on(root):
+    """Mirrors the Fixer-AI sub-block's own visibility contract
+    (_apply_fixer_visibility) — _checker_box shows/hides on checker_var,
+    independent of the Settings-gear collapse state."""
+    panel = make_panel(root)
+    assert not panel._checker_box.winfo_manager()  # checker OFF by default
+    panel.checker_var.set(True)
+    assert panel._checker_box.winfo_manager() == "pack"
+    panel.checker_var.set(False)
+    assert not panel._checker_box.winfo_manager()
 
 
 # ---------------------------------------------------------------------
@@ -446,22 +499,33 @@ class _FakeGuiForChecker:
     (so their emit/log closures have somewhere to land) plus
     .agents/.panels — the same minimal-surface FakeGui convention
     every other GUI-phase test file already uses (never a full
-    PainterGui). _run_checker_one/_maybe_spawn_checker are ALIASED
-    onto the class (the SAME test_gui_running_view.py convention: its
-    own docstring explains why) so ``self._run_checker_one(...)``
-    inside the UNBOUND ``_maybe_spawn_checker``/``_dispatch`` resolves
-    even though ``self`` is this fake, not a real PainterGui."""
+    PainterGui). _run_checker_one/_maybe_spawn_checker/_prompt_for_drop
+    are ALIASED onto the class (the SAME test_gui_running_view.py
+    convention: its own docstring explains why) so
+    ``self._run_checker_one(...)``/``self._prompt_for_drop(...)`` inside
+    the UNBOUND ``_maybe_spawn_checker``/``_dispatch`` resolve even
+    though ``self`` is this fake, not a real PainterGui.
+
+    ``sheets`` (F6, REWORK.md) — the QUEUED sheet source paths
+    ``_prompt_for_drop`` scans; defaults to ``[]`` (no queued sheets,
+    matching every OTHER existing call site here that never opts into
+    the prompt-match sub-toggle explicitly)."""
 
     _maybe_spawn_checker = gui.PainterGui._maybe_spawn_checker
     _run_checker_one = gui.PainterGui._run_checker_one
+    _prompt_for_drop = gui.PainterGui._prompt_for_drop
 
-    def __init__(self, agents: dict, panels: dict):
+    def __init__(self, agents: dict, panels: dict, sheets=None):
         self.agents = agents
         self.panels = panels
         self._q: "queue.Queue" = queue.Queue()
         # F3: _dispatch unticks a saved item's selection var — empty
         # here (no selection in these tests), the attr must exist
         self._select_vars: dict = {}
+        # F6: the queued sheets _prompt_for_drop scans; _sheet_cache is
+        # left for _maybe_spawn_checker to lazily create, exactly like
+        # the real mixin (see its own docstring)
+        self._sheets: list = list(sheets or [])
 
 
 def test_maybe_spawn_checker_off_does_nothing(root, tmp_path):
@@ -669,6 +733,169 @@ def test_run_checker_one_wraps_a_raised_exception_as_a_graceful_error(
     assert event["kind"] == "error"
     assert event["drop_path"] == "assets/x/img.png"
     assert "file vanished" in event["raw"]
+
+
+# ---------------------------------------------------------------------
+# F6 (REWORK.md) — the parallel checker's PROMPT-MATCH passthrough:
+# AgentPanel.checker_prompt_var decides whether _maybe_spawn_checker's
+# background half (_run_checker_one) resolves the item's own sheet
+# PROMPT (_prompt_for_drop, scanning self._sheets) before calling
+# ai.check_one_image; OFF (or no matching sheet) sends prompt=None,
+# the previous quality-only behavior.
+# ---------------------------------------------------------------------
+
+
+def _write_sheet(path: Path, drop: str, prompt: str) -> None:
+    path.write_text(
+        f"# Theme\n\n**Glory** → `{drop}`\n\n```\n{prompt}\n```\n",
+        encoding="utf-8",
+    )
+
+
+def _capturing_check(calls: list):
+    """A ``check_one_image`` stand-in that records the ``prompt`` it
+    was called with (or ``None`` when the caller never sent one) —
+    proves the F6 passthrough without any real vision call."""
+
+    def _check(src, out_base, instructions, *, prompt=None, log=print, **_kw):
+        calls.append(prompt)
+        return {
+            "rel": gui.PurePosixPath(src.name).as_posix(), "kind": "ok",
+            "defects": [], "raw": "OK", "time": 0.01,
+        }
+
+    return _check
+
+
+def test_maybe_spawn_checker_prompt_on_passes_the_sheet_prompt(
+    root, tmp_path, monkeypatch,
+):
+    import painter.ai as ai_module
+
+    calls: list = []
+    monkeypatch.setattr(ai_module, "check_one_image", _capturing_check(calls))
+
+    drop = "assets/emblem/Glory.png"
+    sheet = tmp_path / "theme.md"
+    _write_sheet(sheet, drop, "A golden sun disc, flat, 1:1.")
+
+    out_base = tmp_path / "out"
+    rel = gui.dest_for(drop, "gemini")
+    live = out_base / rel
+    make_png(live)
+
+    dash = gui.DashPanel(root, "gemini")
+    dash.out_base = out_base
+    dash.handle(make_progress_event(drop, live.stat().st_size))
+
+    agent = make_panel(root, "gemini")
+    agent.checker_var.set(True)
+    agent.checker_prompt_var.set(True)  # the default, set explicitly
+
+    fake = _FakeGuiForChecker(
+        {"gemini": agent}, {"gemini": dash}, sheets=[sheet],
+    )
+    gui.PainterGui._maybe_spawn_checker(
+        fake, "gemini",
+        {"type": "item_progress", "drop_path": drop, "rel": rel},
+    )
+    fake._q.get(timeout=5)  # the background thread's item_checked event
+    assert calls == ["A golden sun disc, flat, 1:1."]
+
+
+def test_maybe_spawn_checker_prompt_off_sends_none(root, tmp_path, monkeypatch):
+    import painter.ai as ai_module
+
+    calls: list = []
+    monkeypatch.setattr(ai_module, "check_one_image", _capturing_check(calls))
+
+    drop = "assets/emblem/Glory.png"
+    sheet = tmp_path / "theme.md"
+    _write_sheet(sheet, drop, "A golden sun disc, flat, 1:1.")
+
+    out_base = tmp_path / "out"
+    rel = gui.dest_for(drop, "gemini")
+    live = out_base / rel
+    make_png(live)
+
+    dash = gui.DashPanel(root, "gemini")
+    dash.out_base = out_base
+    dash.handle(make_progress_event(drop, live.stat().st_size))
+
+    agent = make_panel(root, "gemini")
+    agent.checker_var.set(True)
+    agent.checker_prompt_var.set(False)  # explicit OFF -> quality-only
+
+    fake = _FakeGuiForChecker(
+        {"gemini": agent}, {"gemini": dash}, sheets=[sheet],
+    )
+    gui.PainterGui._maybe_spawn_checker(
+        fake, "gemini",
+        {"type": "item_progress", "drop_path": drop, "rel": rel},
+    )
+    fake._q.get(timeout=5)
+    # OFF must never even trigger the sheet lookup — the sheet EXISTS
+    # and DOES match, so a stray prompt here would prove a live bug
+    assert calls == [None]
+
+
+def test_prompt_for_drop_no_match_returns_none(tmp_path):
+    sheet = tmp_path / "theme.md"
+    _write_sheet(sheet, "assets/emblem/Glory.png", "prompt text")
+    fake = _FakeGuiForChecker({}, {}, sheets=[sheet])
+    fake._sheet_cache = {}
+    assert gui.PainterGui._prompt_for_drop(
+        fake, "assets/emblem/NoSuchDrop.png", lambda _l: None,
+    ) is None
+
+
+def test_prompt_for_drop_empty_queue_returns_none(tmp_path):
+    """No queued sheets at all (the common standalone-site case before
+    the owner queues anything) — a plain None, never a crash."""
+    fake = _FakeGuiForChecker({}, {})  # sheets defaults to []
+    fake._sheet_cache = {}
+    assert gui.PainterGui._prompt_for_drop(
+        fake, "assets/emblem/Glory.png", lambda _l: None,
+    ) is None
+
+
+def test_prompt_for_drop_caches_and_reparses_on_mtime_change(
+    tmp_path, monkeypatch,
+):
+    """The cache (F6): a SECOND lookup of the SAME sheet at the SAME
+    mtime does not re-parse; editing the sheet (a new mtime) forces
+    exactly one re-parse and the fresh prompt wins."""
+    import painter.sheet_parser as sp
+
+    drop = "assets/emblem/Glory.png"
+    sheet = tmp_path / "theme.md"
+    _write_sheet(sheet, drop, "first prompt")
+
+    calls = {"n": 0}
+    real_parse = sp.parse_sheet
+
+    def counting_parse(path):
+        calls["n"] += 1
+        return real_parse(path)
+
+    monkeypatch.setattr(sp, "parse_sheet", counting_parse)
+
+    fake = _FakeGuiForChecker({}, {}, sheets=[sheet])
+    fake._sheet_cache = {}
+    log = lambda _l: None
+
+    p1 = gui.PainterGui._prompt_for_drop(fake, drop, log)
+    p2 = gui.PainterGui._prompt_for_drop(fake, drop, log)
+    assert p1 == p2 == "first prompt"
+    assert calls["n"] == 1  # the second lookup hit the cache
+
+    t0 = sheet.stat().st_mtime
+    _write_sheet(sheet, drop, "second prompt")
+    os.utime(sheet, (t0 + 5, t0 + 5))  # force a distinct, LATER mtime
+
+    p3 = gui.PainterGui._prompt_for_drop(fake, drop, log)
+    assert p3 == "second prompt"
+    assert calls["n"] == 2  # re-parsed exactly once, not on every call
 
 
 # ---------------------------------------------------------------------

@@ -88,7 +88,8 @@ class AgentPanel(ttk.Labelframe):
     # the keys persisted per agent in the settings file
     _PERSIST = (
         "background", "style", "bg_removal", "crop", "upscale", "report",
-        "safer_retry", "continue_nudge", "checker", "fixer", "fixer_mode",
+        "safer_retry", "continue_nudge", "checker", "checker_prompt",
+        "fixer", "fixer_mode",
         # F2 (owner 2026-07-29): what a run does when the site drops to
         # a weaker model (Gemini's Flash-Lite banner) — ask / continue /
         # wait; see config.DEGRADE_CHOICES
@@ -197,6 +198,15 @@ class AgentPanel(ttk.Labelframe):
         # retry/Continue nudge beside it. See PainterGui.
         # _maybe_spawn_checker for the spawn side.
         self.checker_var = tk.BooleanVar(value=False)
+        # F6 (REWORK.md, owner 2026-07-29): the checker's own fine-tune —
+        # ON by default (the new default behavior: the parallel checker
+        # asks for BOTH the banal-defects check AND a prompt-match
+        # judgement against the item's own sheet prompt); OFF drops back
+        # to yesterday's quality-only check (ai.check_image/
+        # check_one_image's prompt=None path). See
+        # PainterGui._maybe_spawn_checker/_run_checker_one for how this
+        # reaches the actual API call.
+        self.checker_prompt_var = tk.BooleanVar(value=True)
         # the Fixer AI (GUI rework Phase 20, owner's UV/prompt.txt item 1:
         # "ako ustanovi gresku salje fikseru da ispravi ... u situaciji ako
         # su oba ukljucena" — "both" being the checker AND the fixer). OFF
@@ -657,6 +667,30 @@ class AgentPanel(ttk.Labelframe):
         )
         self._apply_upscale_gate_visibility()  # correct initial state
 
+        # F6 (REWORK.md, owner 2026-07-29): the parallel Checker AI's own
+        # fine-tune — DEFAULT ON, so the checker ALSO asks "does the
+        # image match its sheet PROMPT" (config.AI_CHECK_PROMPT_MATCH) on
+        # top of the banal-defects check; OFF drops back to the previous
+        # quality-only check (prompt=None). Lives in its OWN sub-frame,
+        # packed/unpacked by _apply_checker_extra_visibility on the SAME
+        # checker_var trace pattern as the Fixer-AI block right below it
+        # — nothing to fine-tune about a check that is not running.
+        self._checker_box = ttk.Frame(box)
+        ttk.Label(
+            self._checker_box, text="Checker AI (this site):",
+            style="Head.TLabel",
+        ).pack(anchor="w", pady=(4, 0))
+        row = ttk.Frame(self._checker_box)
+        row.pack(fill="x", pady=2)
+        rounded_switch(
+            row, "Check prompt match too", self.checker_prompt_var,
+        ).pack(side="left")
+
+        self.checker_var.trace_add(
+            "write", lambda *_a: self._apply_checker_extra_visibility()
+        )
+        self._apply_checker_extra_visibility()  # correct initial state
+
         # the Fixer AI (GUI rework Phase 20) — makes sense only while the
         # parallel Checker AI is on (nothing to fix without a check), so
         # it lives in its OWN sub-frame, packed/unpacked by
@@ -689,6 +723,19 @@ class AgentPanel(ttk.Labelframe):
             "write", lambda *_a: self._apply_fixer_visibility()
         )
         self._apply_fixer_visibility()  # correct initial state
+
+    def _apply_checker_extra_visibility(self) -> None:
+        """Reflect ``checker_var`` onto the Checker-AI fine-tune sub-block
+        (F6, REWORK.md) — mirrors ``_apply_fixer_visibility``/
+        ``_apply_upscale_gate_visibility`` exactly: plain pack/pack_forget
+        on every trace fire (an interactive click through the checker
+        switch AND a silent settings restore alike), independent of the
+        gear's own collapse state. Nothing to fine-tune about a check
+        that is not running."""
+        if self.checker_var.get():
+            self._checker_box.pack(fill="x")
+        else:
+            self._checker_box.pack_forget()
 
     def _apply_fixer_visibility(self) -> None:
         """Reflect ``checker_var`` onto the Fixer-AI sub-block (GUI
@@ -989,6 +1036,7 @@ class AgentPanel(ttk.Labelframe):
             "safer_retry": self.safer_var,
             "continue_nudge": self.continue_nudge_var,
             "checker": self.checker_var,
+            "checker_prompt": self.checker_prompt_var,
             "fixer": self.fixer_var,
             "fixer_mode": self.fixer_mode_var,
             "degrade": self.degrade_var,

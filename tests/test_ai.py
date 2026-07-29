@@ -18,6 +18,7 @@ import pytest
 
 from painter import ai
 from painter.config import (
+    AI_CHECK_PROMPT_MATCH,
     AI_MAX_QUESTIONS,
     GEMINI_API_BASE,
     GEMINI_IMAGE_MODEL,
@@ -148,6 +149,45 @@ def test_check_image_embeds_the_base64_png(monkeypatch, tmp_path):
 def test_check_image_refuses_a_non_image_suffix(tmp_path):
     with pytest.raises(ai.AiError, match="unsupported image type"):
         ai.check_image(tmp_path / "notes.txt", "x", key="k")
+
+
+def test_check_image_with_prompt_embeds_both_instruction_blocks(
+    monkeypatch, tmp_path,
+):
+    """F6 (REWORK.md): the ``prompt`` kwarg APPENDS
+    AI_CHECK_PROMPT_MATCH (formatted with the prompt text) after the
+    caller's own instructions — never replaces them — so a single
+    request carries the banal-defects check AND the prompt-match
+    clause AND the prompt itself, verbatim."""
+    img = tmp_path / "plate.png"
+    img.write_bytes(PNG_1PX)
+    requests = capture_call(monkeypatch, text_response("OK"))
+    ai.check_image(
+        img, "find defects", key="k",
+        prompt="a round gold medallion, flat, no tilt",
+    )
+    parts = json.loads(requests[0][0].data)["contents"][0]["parts"]
+    text = parts[0]["text"]
+    assert "find defects" in text
+    assert AI_CHECK_PROMPT_MATCH.format(
+        prompt="a round gold medallion, flat, no tilt"
+    ) in text
+    # the instructions block precedes the prompt-match block
+    assert text.index("find defects") < text.index("ADDITIONALLY")
+
+
+def test_check_image_without_prompt_sends_instructions_unchanged(
+    monkeypatch, tmp_path,
+):
+    """The default (``prompt=None``) path is BYTE-IDENTICAL to before
+    F6 — no prompt-match clause, no regression for the quality-only
+    checker."""
+    img = tmp_path / "plate.png"
+    img.write_bytes(PNG_1PX)
+    requests = capture_call(monkeypatch, text_response("OK"))
+    ai.check_image(img, "find defects", key="k")
+    parts = json.loads(requests[0][0].data)["contents"][0]["parts"]
+    assert parts[0]["text"] == "find defects"
 
 
 # --- response parsing --------------------------------------------------
@@ -1038,6 +1078,42 @@ def test_check_one_image_flags_records_raw_and_times(tmp_path, monkeypatch):
     assert result["time"] == 0.5  # timing is plumbed, not a hardcoded 0
     # the raw is PERSISTED alongside the defects for later inspection
     assert ai.load_flags(out)["emblem/gemini/mood/Glory.png"]["raw"] == raw
+
+
+def test_check_one_image_passes_prompt_through_to_check(tmp_path):
+    """F6 (REWORK.md): a supplied ``prompt`` reaches ``check`` as a
+    keyword arg, exactly as given."""
+    out = tmp_path / "out"
+    img = _make_image(out, "emblem/gemini/mood/Glory.png")
+    seen: dict = {}
+
+    def fake_check(src, instructions, *, prompt=None, model=None, log=None):
+        seen["prompt"] = prompt
+        return "OK"
+
+    ai.check_one_image(
+        img, out, "instr", prompt="a golden sun disc",
+        check=fake_check, log=lambda _l: None,
+    )
+    assert seen["prompt"] == "a golden sun disc"
+
+
+def test_check_one_image_without_prompt_never_forwards_the_kwarg(tmp_path):
+    """The default (``prompt=None``) path never even SENDS the kwarg —
+    a ``check`` double with no ``prompt`` parameter of its own (an
+    older test, or a caller that never opts in) keeps working
+    unchanged; this is the backward-compatibility guarantee F6 relies
+    on for every EXISTING ``check=`` caller in this file."""
+    out = tmp_path / "out"
+    img = _make_image(out, "emblem/gemini/mood/Glory.png")
+
+    def fake_check(src, instructions, *, model=None, log=None):
+        return "OK"  # no **kwargs, no prompt param — must not blow up
+
+    result = ai.check_one_image(
+        img, out, "instr", check=fake_check, log=lambda _l: None,
+    )
+    assert result["kind"] == "ok"
 
 
 def test_check_one_image_ok_clears_stale_flag_and_carries_raw(tmp_path):

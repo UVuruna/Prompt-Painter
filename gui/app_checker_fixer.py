@@ -20,7 +20,11 @@ event this mixin itself posts — both calls resolve through the shared
 ``PainterGui`` MRO (``self.``), exactly as when the two mixins' code
 lived in one file. No ``__init__`` here — every attribute this mixin
 reads (``self.agents``, ``self.panels``, ``self._job_temps``, ``self._q``,
-…) is set by ``BuildMixin.__init__``.
+…) is set by ``BuildMixin.__init__``, with ONE exception:
+``self._sheet_cache`` (F6, REWORK.md's parallel prompt-match checker —
+``_prompt_for_drop``'s own per-sheet parse cache) is lazily created by
+``_maybe_spawn_checker`` itself on first use, always from the Tk
+thread, since this mixin has no constructor of its own to seed it in.
 """
 
 from __future__ import annotations
@@ -70,7 +74,19 @@ class CheckerFixerMixin:
         vision call runs on a daemon thread (``_run_checker_one``) that
         posts its OWN ``item_checked`` event back onto the SAME queue
         once it completes — never blocking this method or the run
-        loop."""
+        loop.
+
+        F6 (REWORK.md, owner 2026-07-29): ``agent.checker_prompt_var``
+        (also read LIVE) decides whether the background half should
+        ALSO resolve this item's own sheet PROMPT — the actual sheet
+        LOOKUP/parse is deferred entirely to ``_run_checker_one``'s own
+        thread (see that method and ``_prompt_for_drop``'s docstring:
+        parsing a sheet per SAVED IMAGE on this, the Tk thread, would
+        jank the UI under a real batch). ``_sheet_cache`` is lazily
+        created here (this mixin carries no ``__init__`` of its own —
+        see the module docstring) — always from THIS thread, never the
+        background one, so no lock is needed for the create-if-missing
+        step itself."""
         agent = self.agents.get(key)
         if agent is None or not agent.checker_var.get():
             return  # not a site, or this site's checker is off
@@ -83,14 +99,59 @@ class CheckerFixerMixin:
         # a ticked redo lands as a _vN version, not the canonical
         # dest_for guess) — check exactly what was just written
         src = dash.out_base / event["rel"]
+        want_prompt = agent.checker_prompt_var.get()
+        if not hasattr(self, "_sheet_cache"):
+            self._sheet_cache = {}
         threading.Thread(
             target=self._run_checker_one,
-            args=(key, drop_path, src, dash.out_base),
+            args=(key, drop_path, src, dash.out_base, want_prompt),
             daemon=True,
         ).start()
 
+    def _prompt_for_drop(self, drop_path: str, log) -> str | None:
+        """F6 (REWORK.md): this item's own sheet PROMPT, resolved by
+        scanning the QUEUED sheets (``self._sheets``) for the entry
+        whose ``drop_path`` matches — the SAME parse-and-match approach
+        ``PainterGui._show_node_inner`` already uses (``parse_sheet`` +
+        ``item.drop_path``), reused here from the checker's OWN
+        background thread (``_run_checker_one``), never the Tk thread:
+        parsing a sheet per SAVED IMAGE on the UI thread would jank it
+        under a real batch.
+
+        Sheets are cached per source path in ``self._sheet_cache``
+        (lazily created by ``_maybe_spawn_checker`` on the Tk thread),
+        invalidated by MTIME — a sheet edited mid-run re-parses once,
+        not on every image — so a 200-image run parses each queued
+        sheet at most a handful of times, never 200. ``None`` when no
+        queued sheet carries this drop path (including an empty queue)
+        or a sheet fails to parse/read (logged, never fatal — mirrors
+        ``ai.check_one_image``'s own loud-but-non-fatal contract)."""
+        from painter.sheet_parser import SheetError, parse_sheet
+
+        for source in self._sheets:
+            try:
+                mtime = source.stat().st_mtime
+            except OSError as exc:
+                log(f"sheet {source}: unreadable — {exc}")
+                continue
+            cached = self._sheet_cache.get(source)
+            if cached is not None and cached[0] == mtime:
+                sheet = cached[1]
+            else:
+                try:
+                    sheet = parse_sheet(source)
+                except SheetError as exc:
+                    log(f"sheet {source}: failed to parse — {exc}")
+                    continue
+                self._sheet_cache[source] = (mtime, sheet)
+            for item in sheet.items:
+                if item.drop_path == drop_path:
+                    return item.prompt
+        return None
+
     def _run_checker_one(
         self, key: str, drop_path: str, src: Path, out_base: Path,
+        want_prompt: bool = False,
     ) -> None:
         """ONE saved image's vision check, entirely on its own daemon
         thread — the background half of ``_maybe_spawn_checker``. Posts
@@ -108,14 +169,22 @@ class CheckerFixerMixin:
         (e.g. the file vanishing under a race, a disk-full flag-file
         write) so a checker thread can NEVER die silently and NEVER
         touches — let alone kills — the generation run it is checking
-        (Rule #1: loud, visible on the row, non-fatal)."""
+        (Rule #1: loud, visible on the row, non-fatal).
+
+        ``want_prompt`` (F6, REWORK.md, default False so an older/direct
+        call — e.g. an existing test double with no ``_sheets`` of its
+        own — behaves exactly as before) triggers the sheet LOOKUP
+        (``_prompt_for_drop``) on THIS thread, never the Tk one; the
+        resolved prompt (or ``None`` when nothing matched) passes
+        straight through to ``ai.check_one_image``."""
         from painter import ai
 
         emit = lambda ev: self._q.put(("__event__", key, ev))
         log = lambda msg: self._q.put(f"[{key} checker] {msg}")
         try:
+            prompt = self._prompt_for_drop(drop_path, log) if want_prompt else None
             result = ai.check_one_image(
-                src, out_base, AI_CHECK_INSTRUCTIONS, log=log,
+                src, out_base, AI_CHECK_INSTRUCTIONS, prompt=prompt, log=log,
             )
             emit({
                 "type": "item_checked", "drop_path": drop_path,

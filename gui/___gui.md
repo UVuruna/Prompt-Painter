@@ -104,13 +104,23 @@ module had grown past the ~1000-line budget on its own). Owns the
 parallel Checker AI (fired off every saved image, overlapping the next
 item's generation) and the Fixer AI (both its auto-dispatch half and
 its manual-button worker builders shared with `AiCheckPanel`'s own
-report viewer). See [Checker/Fixer Mixin](app_checker_fixer.md).
+report viewer). F6 (REWORK.md): when an `AgentPanel`'s
+`checker_prompt_var` is on, the checker's background thread ALSO
+resolves the item's own sheet PROMPT (`_prompt_for_drop`, scanning the
+queued sheets and caching each parse by mtime) and passes it into
+`ai.check_one_image` — the vision model then judges content match on
+top of the banal-defects check. See
+[Checker/Fixer Mixin](app_checker_fixer.md).
 
 ### `app_tools.py` — Tool Jobs Mixin
 `ToolJobsMixin` — the four standalone tools' (BG removal / Crop /
 Upscale / Aspect ratio) Start/worker/Stop, the AI image checker's own
 job, and its two report-viewer actions (Send flagged to generator /
-Clear flags). See [Tool Jobs Mixin](app_tools.md).
+Clear flags). F6 (REWORK.md): the checker's job also accepts an
+OPTIONAL prompt-sheet source (`ImageCheckerSettingsPanel.
+sheets_path()`) — when given, only images that match a sheet's drop
+path (via `ai.drop_and_site_for`) are checked, WITH that entry's
+prompt; the rest are loud-skipped. See [Tool Jobs Mixin](app_tools.md).
 
 ### `app_settings.py` — Settings Mixin
 `SettingsMixin` — the Collections queue, the sheet parsing/planning
@@ -124,7 +134,11 @@ the whole settings round-trip (collect/apply/migrate/save). See
 background/style dropdowns, the three composable post-save switches,
 Report/Safer retry/Continue nudge/Checker AI/Fixer AI, the Force
 Aspect Ratio block, the collapsible pause/action-delay/upscale-gate
-fine-tune, and its own Start/Pause/Stop. See
+fine-tune, and its own Start/Pause/Stop. F6 (REWORK.md) adds
+`checker_prompt_var` ("Check prompt match too", ON by default) — a
+small sub-toggle beside the Fixer-AI block, visible only while the
+parallel Checker AI is on, that drops the checker back to yesterday's
+quality-only check when turned off. See
 [Agent Panel](agent_panel.md).
 
 ### `api_panel.py` — API Panel
@@ -146,7 +160,11 @@ plus its five concrete subclasses — `BgSettingsPanel`/
 `CropSettingsPanel`/`UpscaleSettingsPanel`/`AspectSettingsPanel`/
 `ImageCheckerSettingsPanel`. Also owns the two-column-dense layout
 constants every control-panel family (this one, `AgentPanel`,
-`ApiImageGenPanel`) shares. See
+`ApiImageGenPanel`) shares. F6 (REWORK.md, owner E2):
+`ImageCheckerSettingsPanel` gains a SECOND, optional picker
+(`sheets_path()`) — a prompt-sheet `.md` file or a folder of them —
+that `PainterGui._run_ai_check_job` uses to pair each checked image
+with its own sheet prompt. See
 [Standalone-Tool Settings Panels](tool_panels.md).
 
 ### `widgets.py` — Themed Widget Toolkit

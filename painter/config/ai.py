@@ -494,6 +494,27 @@ AI_CHECK_INSTRUCTIONS = (
     " 'DEFECTS:' followed by one short defect description per line,"
     " each line starting with '- '."
 )
+# F6 (owner 2026-07-29, REWORK.md): the PROMPT-MATCH clause appended to
+# AI_CHECK_INSTRUCTIONS whenever ``ai.check_image``/``ai.check_one_image``
+# also know the item's own sheet PROMPT (the parallel per-item checker
+# with its "Check prompt match too" sub-toggle on; the standalone
+# checker's TWO-INPUT flow for a matched image) — asks the vision model
+# an ADDITIONAL question on TOP of the banal-defects check, catching a
+# CONTENT mismatch the banal check alone never looks for (the
+# tilted-cosmos case: a flat medallion rendered as a tilted 3D view from
+# above). {prompt} is the item's own fenced prompt, verbatim. Reports in
+# the SAME 'DEFECTS:' format AI_CHECK_INSTRUCTIONS already established
+# (painter.ai.parse_check_response reads one strict format, never two).
+AI_CHECK_PROMPT_MATCH = (
+    "ADDITIONALLY: does the image show what the ORIGINAL PROMPT below"
+    " describes? Flag WRONG CONTENT when the subject, composition, or"
+    " explicitly demanded framing/orientation contradicts the prompt"
+    " (e.g. a flat medallion rendered as a tilted 3D view from above)."
+    " Report a content mismatch as one more '- ' line under the SAME"
+    " 'DEFECTS:' header the instructions above already use — never a"
+    " different format.\n\n--- ORIGINAL PROMPT ---\n{prompt}\n--- END"
+    " PROMPT ---"
+)
 # the per-item extra suffix appended when a flagged image is re-sent to
 # its original generator ({defects} = the '; '-joined defect list)
 AI_FIX_NOTE = (

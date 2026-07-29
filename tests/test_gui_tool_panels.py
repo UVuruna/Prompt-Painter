@@ -1291,6 +1291,102 @@ def test_ai_check_panel_input_and_settings_round_trip(root, tmp_path):
 
 
 # ---------------------------------------------------------------------
+# ImageCheckerSettingsPanel.sheets_path() (F6, REWORK.md, owner E2) —
+# the OPTIONAL second input, mirroring the primary picker's own
+# "set the private field directly, never invoke a real dialog" test
+# convention (folder/files above).
+# ---------------------------------------------------------------------
+
+
+def test_ai_check_panel_sheets_path_defaults_none(root):
+    panel = make_panel(gui.ImageCheckerSettingsPanel, root)
+    assert panel.sheets_path() is None
+
+
+def test_ai_check_panel_pick_sheets_file_sets_the_path(root, tmp_path, monkeypatch):
+    sheet = tmp_path / "theme.md"
+    sheet.write_text("# Theme\n", encoding="utf-8")
+    monkeypatch.setattr(gui.filedialog, "askopenfilename", lambda **_k: str(sheet))
+
+    panel = make_panel(gui.ImageCheckerSettingsPanel, root)
+    panel._pick_sheets_file()
+    assert panel.sheets_path() == sheet
+    assert "theme.md" in panel._sheets_var.get()
+
+
+def test_ai_check_panel_pick_sheets_folder_sets_the_path(root, tmp_path, monkeypatch):
+    folder = tmp_path / "sheets"
+    folder.mkdir()
+    monkeypatch.setattr(gui.filedialog, "askdirectory", lambda **_k: str(folder))
+
+    panel = make_panel(gui.ImageCheckerSettingsPanel, root)
+    panel._pick_sheets_folder()
+    assert panel.sheets_path() == folder
+
+
+def test_ai_check_panel_pick_sheets_cancelled_leaves_it_none(root, monkeypatch):
+    """An empty string (Cancel) from either dialog must not clobber a
+    previous pick with an empty path — mirrors the base picker's own
+    ``if not folder/picks: return`` guard."""
+    monkeypatch.setattr(gui.filedialog, "askopenfilename", lambda **_k: "")
+    monkeypatch.setattr(gui.filedialog, "askdirectory", lambda **_k: "")
+
+    panel = make_panel(gui.ImageCheckerSettingsPanel, root)
+    panel._pick_sheets_file()
+    panel._pick_sheets_folder()
+    assert panel.sheets_path() is None
+
+
+# ---------------------------------------------------------------------
+# gui.app_tools._sheet_prompt_map (F6, REWORK.md, owner E2) — the pure
+# drop_path -> prompt builder over a sheet FILE or FOLDER, offline,
+# no Tk at all.
+# ---------------------------------------------------------------------
+
+
+def _write_sheet_md(path: Path, drop: str, prompt: str) -> None:
+    path.write_text(
+        f"# Theme\n\n**Entry** → `{drop}`\n\n```\n{prompt}\n```\n",
+        encoding="utf-8",
+    )
+
+
+def test_sheet_prompt_map_over_a_single_file(tmp_path):
+    sheet = tmp_path / "theme.md"
+    _write_sheet_md(sheet, "assets/emblem/Glory.png", "A golden sun disc.")
+    prompts = gui.app_tools._sheet_prompt_map(sheet, log=lambda _l: None)
+    assert prompts == {"assets/emblem/Glory.png": "A golden sun disc."}
+
+
+def test_sheet_prompt_map_over_a_folder_reads_every_md_recursively(tmp_path):
+    folder = tmp_path / "sheets"
+    (folder / "sub").mkdir(parents=True)
+    _write_sheet_md(folder / "a.md", "assets/emblem/Glory.png", "prompt A")
+    _write_sheet_md(folder / "sub" / "b.md", "assets/emblem/Mercy.png", "prompt B")
+
+    prompts = gui.app_tools._sheet_prompt_map(folder, log=lambda _l: None)
+    assert prompts == {
+        "assets/emblem/Glory.png": "prompt A",
+        "assets/emblem/Mercy.png": "prompt B",
+    }
+
+
+def test_sheet_prompt_map_a_bad_sheet_is_logged_not_fatal(tmp_path):
+    """A sheet with no '# H1' theme heading is not a prompt sheet at
+    all (SheetError) — a loud per-file log line, never a run kill; its
+    sibling sheets still contribute (root Rule #1)."""
+    folder = tmp_path / "sheets"
+    folder.mkdir()
+    (folder / "broken.md").write_text("no theme heading here\n", encoding="utf-8")
+    _write_sheet_md(folder / "good.md", "assets/emblem/Glory.png", "prompt A")
+
+    logs: list[str] = []
+    prompts = gui.app_tools._sheet_prompt_map(folder, log=logs.append)
+    assert prompts == {"assets/emblem/Glory.png": "prompt A"}
+    assert any("broken.md" in line and "failed to parse" in line for line in logs)
+
+
+# ---------------------------------------------------------------------
 # PainterGui._start_ai_check — the pre-filter path, end to end (GUI
 # rework Phase 15). NOT _start_tool_from_panel (a different worker
 # shape — see ImageCheckerSettingsPanel's own docstring), so it gets
@@ -1358,9 +1454,11 @@ class FakeGuiForAiCheck:
 
     def _run_ai_check_job(
         self, folder, files, out_base, pause_event, stop_event,
+        sheets_path=None,
     ):
         self.run_ai_check_job_calls.append({
             "folder": folder, "files": list(files), "out_base": out_base,
+            "sheets_path": sheets_path,
         })
 
 
@@ -1419,6 +1517,44 @@ def test_start_ai_check_empty_conditions_queues_everything(root, tmp_path):
     fake._tool_workers["aicheck"].join(timeout=5)
     call = fake.run_ai_check_job_calls[0]
     assert sorted(p.name for p in call["files"]) == ["a.png", "b.png"]
+
+
+def test_start_ai_check_passes_the_panels_sheets_path(root, tmp_path):
+    """F6 (REWORK.md, owner E2): the panel's OPTIONAL second input
+    reaches the worker UNCHANGED — resolved (folder-walked) only on
+    the worker thread, never here."""
+    folder = tmp_path / "images"
+    folder.mkdir()
+    Image.new("RGBA", (10, 10)).save(folder / "a.png")
+    sheets_dir = tmp_path / "sheets"
+    sheets_dir.mkdir()
+
+    panel = make_panel(gui.ImageCheckerSettingsPanel, root)
+    panel._input_mode = "folder"
+    panel._folder = folder
+    panel._sheets_path = sheets_dir
+
+    fake = FakeGuiForAiCheck(panel)
+    gui.PainterGui._start_ai_check(fake, "aicheck")
+
+    fake._tool_workers["aicheck"].join(timeout=5)
+    assert fake.run_ai_check_job_calls[0]["sheets_path"] == sheets_dir
+
+
+def test_start_ai_check_with_no_sheets_picked_passes_none(root, tmp_path):
+    folder = tmp_path / "images"
+    folder.mkdir()
+    Image.new("RGBA", (10, 10)).save(folder / "a.png")
+
+    panel = make_panel(gui.ImageCheckerSettingsPanel, root)
+    panel._input_mode = "folder"
+    panel._folder = folder
+
+    fake = FakeGuiForAiCheck(panel)
+    gui.PainterGui._start_ai_check(fake, "aicheck")
+
+    fake._tool_workers["aicheck"].join(timeout=5)
+    assert fake.run_ai_check_job_calls[0]["sheets_path"] is None
 
 
 def test_start_ai_check_shows_a_message_when_nothing_picked(root, monkeypatch):
@@ -1590,3 +1726,131 @@ def test_run_ai_check_job_without_a_stop_processes_every_image(
         if isinstance(m, tuple) and m[0] == "__event__"
     ]
     assert [e[2]["type"] for e in events].count("item_start") == 2
+
+
+# ---------------------------------------------------------------------
+# _run_ai_check_job — the F6 (REWORK.md, owner E2) TWO-INPUT flow:
+# given a sheets_path, only images whose reversed drop path
+# (ai.drop_and_site_for) matches a sheet entry are checked, WITH that
+# entry's prompt; the rest are loud-skipped (never a silent
+# truncation). No sheets_path keeps every image quality-only
+# (prompt=None) — the pre-F6 contract, unchanged.
+# ---------------------------------------------------------------------
+
+
+def _capturing_check_one_image(calls: list):
+    def _check(src, out_base, instructions, *, prompt=None, log=print, **_kw):
+        calls.append((src.name, prompt))
+        return {
+            "rel": src.name, "kind": "ok", "defects": [], "raw": "OK",
+            "time": 0.01,
+        }
+    return _check
+
+
+def test_run_ai_check_job_with_sheets_checks_only_matched_images(
+    tmp_path, monkeypatch,
+):
+    import painter.ai as ai_module
+
+    # the DOMY assets-mirror layout ai.drop_and_site_for reverses:
+    # <out>/<rest>/<File>_<sfx>.png -> ('assets/<rest>/<File>.png', site)
+    out_base = tmp_path / "out"
+    (out_base / "emblem").mkdir(parents=True)
+    matched = out_base / "emblem" / "Glory_gem.png"
+    unmatched = out_base / "emblem" / "Mystery_gem.png"
+    Image.new("RGBA", (10, 10)).save(matched)
+    Image.new("RGBA", (10, 10)).save(unmatched)
+
+    sheets_dir = tmp_path / "sheets"
+    sheets_dir.mkdir()
+    _write_sheet_md(
+        sheets_dir / "theme.md", "assets/emblem/Glory.png",
+        "A golden sun disc.",
+    )
+
+    calls: list = []
+    monkeypatch.setattr(
+        ai_module, "check_one_image", _capturing_check_one_image(calls),
+    )
+
+    fake = _FakeGuiForJob()
+    gui.PainterGui._run_ai_check_job(
+        fake, out_base, [matched, unmatched], out_base,
+        pause_event=threading.Event(), stop_event=threading.Event(),
+        sheets_path=sheets_dir,
+    )
+
+    # ONLY the matched image was checked, WITH its sheet prompt
+    assert calls == [("Glory_gem.png", "A golden sun disc.")]
+
+    msgs = _drain(fake._q)
+    text_lines = [m for m in msgs if isinstance(m, str)]
+    events = [
+        m for m in msgs if isinstance(m, tuple) and m[0] == "__event__"
+    ]
+    # the unmatched skip is a LOUD log line — never a silent truncation
+    assert any(
+        "1 image(s) matched" in line and "1 skipped" in line
+        for line in text_lines
+    )
+    item_starts = [e[2] for e in events if e[2]["type"] == "item_start"]
+    assert len(item_starts) == 1
+    assert item_starts[0]["title"] == "Glory_gem.png"
+
+
+def test_run_ai_check_job_with_sheet_file_input_matches_too(
+    tmp_path, monkeypatch,
+):
+    """The sheets_path may be a single .md FILE, not only a folder."""
+    import painter.ai as ai_module
+
+    out_base = tmp_path / "out"
+    (out_base / "emblem").mkdir(parents=True)
+    matched = out_base / "emblem" / "Glory_gem.png"
+    Image.new("RGBA", (10, 10)).save(matched)
+
+    sheet = tmp_path / "theme.md"
+    _write_sheet_md(sheet, "assets/emblem/Glory.png", "A golden sun disc.")
+
+    calls: list = []
+    monkeypatch.setattr(
+        ai_module, "check_one_image", _capturing_check_one_image(calls),
+    )
+
+    fake = _FakeGuiForJob()
+    gui.PainterGui._run_ai_check_job(
+        fake, out_base, [matched], out_base,
+        pause_event=threading.Event(), stop_event=threading.Event(),
+        sheets_path=sheet,
+    )
+    assert calls == [("Glory_gem.png", "A golden sun disc.")]
+
+
+def test_run_ai_check_job_without_sheets_is_quality_only_for_everyone(
+    tmp_path, monkeypatch,
+):
+    """Regression guard (pre-F6 contract): no sheets_path -> every
+    image is checked, WITH prompt=None — nothing skipped, nothing
+    matched, exactly like before this phase."""
+    import painter.ai as ai_module
+
+    folder = tmp_path / "images"
+    folder.mkdir()
+    files = []
+    for i in range(2):
+        p = folder / f"img_{i}.png"
+        Image.new("RGBA", (10, 10)).save(p)
+        files.append(p)
+
+    calls: list = []
+    monkeypatch.setattr(
+        ai_module, "check_one_image", _capturing_check_one_image(calls),
+    )
+
+    fake = _FakeGuiForJob()
+    gui.PainterGui._run_ai_check_job(
+        fake, folder, files, tmp_path,
+        pause_event=threading.Event(), stop_event=threading.Event(),
+    )
+    assert sorted(calls) == [("img_0.png", None), ("img_1.png", None)]

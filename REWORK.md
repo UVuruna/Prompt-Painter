@@ -321,6 +321,16 @@ Files: `painter/ai.py`, `painter/config/ai.py`, `gui/api_panel.py`.
 
 ## Phase F6 — Checker rework (prompt-aware)
 
+**STATUS: LANDED 2026-07-29** (`check_image(prompt=...)` +
+`AI_CHECK_PROMPT_MATCH`; the parallel checker sends the item's sheet
+prompt BY DEFAULT — the "Check prompt match too" sub-toggle under the
+AI-checker switch drops to quality-only; the standalone checker
+gained the second input (sheet file/folder): with both inputs only
+MATCHED images are checked, each with its prompt, skipped counts
+logged; images-only input keeps quality-only checks). Follow-up
+debt: `gui/tool_panels.py` (~1283 lines) joins the god-file split
+list.
+
 Files: `painter/ai.py`, `painter/config/ai.py`,
 `gui/app_checker_fixer.py`, `gui/tool_panels.py`, `gui/app_tools.py`.
 
@@ -385,5 +395,15 @@ successor), docs.
 - **Gemini copyright category:** generic-guidelines refusals are
   classified SAFETY until a distinctly-copyright Gemini text is
   captured live; then a `REFUSAL_COPYRIGHT` marker group is added.
-- **F4 split decision:** the F4 session states in writing whether it
-  ships whole or splits into 4a–4d / 4e–4h.
+- **F4 split decision:** shipped whole (2026-07-29).
+- **God-file split session (Rule #20):** `gui/viewers.py` (~1185),
+  `painter/ai.py` (~1198) and `gui/tool_panels.py` (~1283) are past
+  the budget after F4–F6 — one dedicated split session per
+  [REFACTOR-GODFILES.md](../../REFACTOR-GODFILES.md), no behavior
+  change.
+- **`no_empty_space` helper wording:** ships DEFAULT OFF until the
+  owner approves/retunes the text (`PROMPT_HELPERS`, pure data).
+- **First supervised run checklist:** confirm the F1 `user_turn`
+  selectors live (a wrong one fails LOUDLY as "send NOT confirmed" —
+  capture the real selector like every other), watch one quota event
+  persist into `site_cooldowns`, and one degrade popup.

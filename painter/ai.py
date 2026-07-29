@@ -56,6 +56,7 @@ from pathlib import Path, PurePosixPath
 
 from painter.config import (
     AI_CALL_PAUSE_S,
+    AI_CHECK_PROMPT_MATCH,
     AI_FLAGS_FILENAME,
     AI_FIX_NOTE,
     AI_FIX_PROMPT_NO_DEFECTS,
@@ -617,16 +618,29 @@ def check_image(
     image_path: Path,
     instructions: str,
     *,
+    prompt: str | None = None,
     key: str | None = None,
     model: str | None = None,
     log=print,
 ) -> str:
     """One vision call over a saved image file; returns the raw text.
     ``model=None`` resolves via ``model_for("vision")`` (F5). ``log``
-    receives any transient-retry lines (see ``_call``)."""
+    receives any transient-retry lines (see ``_call``).
+
+    ``prompt`` (F6, REWORK.md) is the item's OWN sheet prompt — OPTIONAL:
+    when given, ``AI_CHECK_PROMPT_MATCH`` (formatted with it) is appended
+    to ``instructions`` so the model ALSO judges whether the image shows
+    what the prompt describes, on top of whatever banal-defects check
+    ``instructions`` already asks for. ``None`` (the default) sends
+    ``instructions`` unchanged — today's quality-only check."""
     image_path = Path(image_path)
     mime = _mime_for(image_path, purpose="the checker")
-    payload = _payload_image(image_path.read_bytes(), mime, instructions)
+    full_instructions = instructions
+    if prompt is not None:
+        full_instructions = (
+            f"{instructions}\n\n{AI_CHECK_PROMPT_MATCH.format(prompt=prompt)}"
+        )
+    payload = _payload_image(image_path.read_bytes(), mime, full_instructions)
     return _call(model or model_for("vision"), payload, key or api_key(), log=log)
 
 
@@ -1049,6 +1063,7 @@ def check_one_image(
     out_base: Path,
     instructions: str,
     *,
+    prompt: str | None = None,
     model: str | None = None,
     log=print,
     check=None,
@@ -1062,6 +1077,12 @@ def check_one_image(
     the call, not left for ``check_image`` to default itself — the
     RESOLVED name is what ``record_flag`` persists, so a flag entry
     never stores the literal string "None".
+
+    ``prompt`` (F6, REWORK.md) passes straight through to ``check`` —
+    ``None`` (the default) is NOT forwarded at all, so an older/simpler
+    ``check`` double with no ``prompt`` parameter of its own (existing
+    tests, callers) keeps working unchanged; only a caller that actually
+    supplies a prompt needs ``check`` to accept it.
 
     Times the call, parses the strict OK/DEFECTS answer, MERGES a flag
     (or CLEARS a fixed image's old flag) and returns the row the panel
@@ -1079,8 +1100,11 @@ def check_one_image(
     key = flag_key(src, out_base)
     t0 = time.monotonic()
     raw: str | None = None
+    call_kwargs = {"model": model, "log": log}
+    if prompt is not None:
+        call_kwargs["prompt"] = prompt
     try:
-        raw = check(src, instructions, model=model, log=log)
+        raw = check(src, instructions, **call_kwargs)
         defects = parse_check_response(raw)
     except AiError as exc:
         op_s = time.monotonic() - t0

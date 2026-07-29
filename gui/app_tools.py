@@ -32,6 +32,38 @@ from .logic import _filter_files
 AI_CHECK_LOG_EVERY = 5      # checker progress log cadence (paced calls are slow)
 
 
+def _sheet_prompt_map(sheets_path: Path, log) -> dict[str, str]:
+    """F6 (REWORK.md, owner E2): ``drop_path -> prompt`` across the
+    given sheet FILE or FOLDER of sheets (``config.iter_md_files`` for
+    the folder case — mirrors the Collections queue's own 'Add
+    folder…'). Backs ``_run_ai_check_job``'s TWO-INPUT flow: an image
+    whose reversed drop path ISN'T a key here is unmatched (loud-
+    skipped by the caller, never silently dropped).
+
+    A sheet that fails to parse (``SheetError``) or read (``OSError``)
+    is a loud PER-FILE log line, never a run kill (root Rule #1) — the
+    rest of the batch, and the rest of this sheet's siblings, still
+    contribute. A later sheet's entry silently WINS a ``drop_path``
+    collision across sheets — an owner sheet-authoring concern, not
+    this job's to police."""
+    from painter.config import iter_md_files
+    from painter.sheet_parser import SheetError, parse_sheet
+
+    md_files = (
+        iter_md_files(sheets_path) if sheets_path.is_dir() else [sheets_path]
+    )
+    prompts: dict[str, str] = {}
+    for md in md_files:
+        try:
+            sheet = parse_sheet(md)
+        except (SheetError, OSError) as exc:
+            log(f"[AI check] sheet {md.name}: failed to parse — {exc}")
+            continue
+        for item in sheet.items:
+            prompts[item.drop_path] = item.prompt
+    return prompts
+
+
 class ToolJobsMixin:
     """The four standalone tools' Start/Stop/worker loop and the AI
     image checker's own job + report-viewer actions."""
@@ -247,6 +279,12 @@ class ToolJobsMixin:
             return
         files = _filter_files(files, conditions, self._log)
         out_base = self._out_base()
+        # F6 (REWORK.md, owner E2): the OPTIONAL second input — a
+        # prompt-sheet .md file/folder — handed to the worker UNRESOLVED
+        # (a folder is only walked, config.iter_md_files, on that
+        # thread, never here on the Tk one). None keeps today's
+        # images-only, quality-only behavior.
+        sheets_path = panel.sheets_path()
 
         dash = self.panels[slot]
         dash.folder = folder_path
@@ -263,7 +301,7 @@ class ToolJobsMixin:
             target=self._run_ai_check_job,
             args=(
                 folder_path, files, out_base, self._pause_events[slot],
-                self._stop_events[slot],
+                self._stop_events[slot], sheets_path,
             ),
             daemon=True,
         )
@@ -281,6 +319,7 @@ class ToolJobsMixin:
 
     def _run_ai_check_job(
         self, folder, files, out_base, pause_event, stop_event,
+        sheets_path=None,
     ) -> None:
         """The checker worker: prune stale flags (regenerated files),
         then one paced vision call per image — flagged entries are
@@ -294,7 +333,19 @@ class ToolJobsMixin:
         own ``should_stop`` exactly: the in-flight vision call always
         finishes first, and it is also threaded into
         ``wait_while_paused`` so a Stop wins over a pending Pause
-        instead of hanging until Resume."""
+        instead of hanging until Resume.
+
+        ``sheets_path`` (F6, REWORK.md, owner E2) is the OPTIONAL second
+        input (``ImageCheckerSettingsPanel.sheets_path()``) — a prompt-
+        sheet ``.md`` FILE or FOLDER. ``None`` (the default) keeps
+        today's behavior: every image gets a quality-only check. Given,
+        this builds the drop_path -> prompt map (``_sheet_prompt_map``)
+        and resolves each candidate image's own drop path via
+        ``ai.drop_and_site_for`` (the ``dest_for`` reverse); ONLY the
+        MATCHED subset is actually checked — WITH its prompt — and the
+        unmatched count is logged (never a silent truncation, per the
+        owner: "when BOTH inputs are given, check ONLY the matched
+        images")."""
         from painter import ai
         from painter.runner import wait_while_paused
 
@@ -306,7 +357,28 @@ class ToolJobsMixin:
                 f" {GEMINI_VISION_MODEL}, paced {AI_CALL_PAUSE_S:.0f}s/call"
             )
             ai.prune_stale_flags(out_base, log)
-            emit({"type": "sheet_start", "total": len(files)})
+
+            if sheets_path is not None:
+                drop_to_prompt = _sheet_prompt_map(sheets_path, log)
+                pairs: list[tuple[Path, str | None]] = []
+                unmatched = 0
+                for src in files:
+                    rel = src.relative_to(folder).as_posix()
+                    mapped = ai.drop_and_site_for(rel)
+                    prompt = drop_to_prompt.get(mapped[0]) if mapped else None
+                    if prompt is None:
+                        unmatched += 1
+                        continue
+                    pairs.append((src, prompt))
+                log(
+                    f"{len(pairs)} image(s) matched a sheet drop path"
+                    f" from {sheets_path} — prompt-aware check;"
+                    f" {unmatched} skipped (no matching sheet entry)"
+                )
+            else:
+                pairs = [(src, None) for src in files]
+
+            emit({"type": "sheet_start", "total": len(pairs)})
             flagged = ok = errors = 0
             # check_one_image's kind -> the panel event type it emits
             event_type = {
@@ -315,11 +387,11 @@ class ToolJobsMixin:
                 "error": "item_error",
             }
             t0 = time.time()
-            for i, src in enumerate(files, start=1):
+            for i, (src, prompt) in enumerate(pairs, start=1):
                 if stop_event.is_set():
                     log(
                         f"STOPPED on request —"
-                        f" {flagged + ok + errors}/{len(files)} this run"
+                        f" {flagged + ok + errors}/{len(pairs)} this run"
                     )
                     break
                 if wait_while_paused(
@@ -327,18 +399,19 @@ class ToolJobsMixin:
                 ):
                     log(
                         f"STOPPED on request —"
-                        f" {flagged + ok + errors}/{len(files)} this run"
+                        f" {flagged + ok + errors}/{len(pairs)} this run"
                     )
                     break
                 emit({
-                    "type": "item_start", "idx": i, "of": len(files),
+                    "type": "item_start", "idx": i, "of": len(pairs),
                     "title": src.name,
                 })
                 # check_one_image does the timing, parse, flag merge/clear
                 # and the FLAGGED/FAIL logging; the loud-but-never-fatal
                 # AiError handling lives inside it (the tool-job convention)
                 result = ai.check_one_image(
-                    src, out_base, AI_CHECK_INSTRUCTIONS, log=log
+                    src, out_base, AI_CHECK_INSTRUCTIONS, prompt=prompt,
+                    log=log,
                 )
                 kind = result["kind"]
                 event = {
@@ -356,7 +429,7 @@ class ToolJobsMixin:
                 if i % AI_CHECK_LOG_EVERY == 0:
                     self._q.put(
                         f"[AI check] [{time.time() - t0:.0f}s]"
-                        f" {i}/{len(files)} ({i / len(files) * 100:.0f}%)"
+                        f" {i}/{len(pairs)} ({i / len(pairs) * 100:.0f}%)"
                     )
             emit({"type": "sheet_done"})
             log(
