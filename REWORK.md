@@ -152,6 +152,11 @@ I/O layer stays thin.
 
 ## Phase F2 — Failure ladder retiming, cooldown memory, Flash-Lite
 
+**STATUS: LANDED 2026-07-29** (ladder 3×3–6 min + 3×12–15 min;
+per-site cooldowns persisted in settings.json `site_cooldowns` with a
+setup-panel label + startup warning, never a Start gate; Gemini
+degrade banner → `ModelDegraded` → per-agent ask/continue/wait).
+
 Files: `painter/config/ai.py`, `painter/config/sites.py`,
 `painter/runner.py`, `gui/app_jobs.py`, `painter/settings.py`.
 

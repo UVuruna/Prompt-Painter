@@ -44,6 +44,9 @@ from painter import aspect, jobtemp
 from painter.config import (
     AI_IMAGE_GATE_MESSAGE,
     CDP_URL,
+    DEGRADE_ASK,
+    DEGRADE_CONTINUE,
+    DEGRADE_WAIT,
     SITES,
     TIMING,
     prompt_suffix,
@@ -460,6 +463,21 @@ class SiteJobsMixin:
         from painter.driver import SiteDriver
 
         driver = SiteDriver(SITES[key], timing, CDP_URL)
+        # F2 (owner 2026-07-29): the model-degradation choice — the
+        # panel's setting, or (on "ask") ONE popup per run, answered on
+        # the main thread while the worker blocks
+        degrade_mode = panel.degrade_var.get()
+        run_choice: dict[str, str] = {}
+
+        def on_degrade(retry_after_s: float | None) -> str:
+            if degrade_mode != DEGRADE_ASK:
+                return degrade_mode
+            if "choice" not in run_choice:
+                run_choice["choice"] = self._ask_degrade_blocking(
+                    key, retry_after_s
+                )
+            return run_choice["choice"]
+
         worker = threading.Thread(
             target=self._drive_site,
             args=(
@@ -479,6 +497,7 @@ class SiteJobsMixin:
                 self._stop_events[key],
                 self._pause_events[key],
             ),
+            kwargs={"on_degrade": on_degrade},
             daemon=True,
         )
         self._workers[key] = worker
@@ -672,7 +691,7 @@ class SiteJobsMixin:
     def _drive_site(
         self, key, sheets, out_base, timing, driver, post_save, suffix,
         extra_suffix, report, selection, safer, continue_nudge, new_chat,
-        stop_event, pause_event,
+        stop_event, pause_event, on_degrade=None,
     ) -> None:
         """One job's whole run — the theme queue in order, one thread.
 
@@ -722,6 +741,7 @@ class SiteJobsMixin:
                         safer_retry=safer,
                         continue_nudge=continue_nudge,
                         new_chat_per_folder=(new_chat == "folder"),
+                        on_degrade=on_degrade,
                     )
                     done_sheets += 1
                     log(f"collection done: {generated} image(s) into {out_base}")
@@ -808,22 +828,66 @@ class SiteJobsMixin:
         else:
             self.status_var.set("idle")
 
+    # --- model degradation (F2, owner 2026-07-29) ----------------------
+
+    def _ask_degrade_blocking(self, key: str, retry_after_s) -> str:
+        """WORKER-thread side of the "ask" degrade choice: post the
+        question to the main thread and block until it is answered.
+        An unanswered popup (10 min) defaults to the safe "wait"."""
+        holder = {"choice": DEGRADE_WAIT}
+        done = threading.Event()
+        self._q.put(("__ask_degrade__", key, retry_after_s, holder, done))
+        done.wait(timeout=600.0)
+        return holder["choice"]
+
     # --- quota auto-restart --------------------------------------------
 
     def _handle_terminal(self, key: str, retry_after_s: float) -> None:
         """A quota stop with a KNOWN reset time: schedule the site's
         auto-restart at reset + a polite random 30–120 s, with a live
         countdown on its dashboard panel. Runs whenever the app is
-        open; manual Stop cancels, manual Start just starts earlier."""
+        open; manual Stop cancels, manual Start just starts earlier.
+
+        F2 (owner 2026-07-29): the reset moment is also PERSISTED
+        (settings.json "site_cooldowns") so a fresh app launch still
+        KNOWS the cooldown — information only (setup-panel label +
+        startup warning), never a Start gate."""
         delay = retry_after_s + random.uniform(30.0, 120.0)
         self._restart_deadline[key] = time.monotonic() + delay
         self._restart_jobs[key] = self.root.after(
             int(delay * 1000), partial(self._auto_restart, key)
         )
         self._tick_restart(key)
+        self._cooldowns[key] = time.time() + retry_after_s
+        self._save_now()
+        self._refresh_cooldown_labels(reschedule=False)
         self._log(
             f"[{key}] auto-restart scheduled in {delay / 60:.1f} min"
         )
+
+    def _refresh_cooldown_labels(self, reschedule: bool = True) -> None:
+        """Render the persisted per-site cooldowns beside each site's
+        name in its setup panel; expired entries are dropped (and the
+        drop persisted). A 30 s self-rescheduling ticker — started
+        once at startup by ``_apply_settings``."""
+        now = time.time()
+        expired = False
+        for key, panel in self.agents.items():
+            until = self._cooldowns.get(key)
+            if until is None or until <= now:
+                if until is not None:
+                    self._cooldowns.pop(key, None)
+                    expired = True
+                panel.cooldown_var.set("")
+                continue
+            left = int(until - now)
+            panel.cooldown_var.set(
+                f"⏳ limit resets in {left // 3600}:{left % 3600 // 60:02d}"
+            )
+        if expired:
+            self._schedule_save()
+        if reschedule:
+            self.root.after(30_000, self._refresh_cooldown_labels)
 
     def _tick_restart(self, key: str) -> None:
         if key not in self._restart_jobs:
@@ -895,6 +959,24 @@ class SiteJobsMixin:
                         self._maybe_spawn_fixer(msg[1], msg[2])
             elif msg[0] == "__terminal__":
                 self._handle_terminal(msg[1], msg[2])
+            elif msg[0] == "__ask_degrade__":
+                # F2: the worker blocks on `done` while the owner picks
+                _tag, key, retry, holder, done = msg
+                mins = (
+                    f" (reset in ~{retry / 60:.0f} min)" if retry else ""
+                )
+                cont = messagebox.askyesno(
+                    "Model degraded",
+                    f"{key}: the site dropped to a weaker model —"
+                    f" image quota reached{mins}.\n\n"
+                    "YES — continue on the weaker model\n"
+                    "NO  — wait for the reset (auto-restart)",
+                    parent=self.root,
+                )
+                holder["choice"] = (
+                    DEGRADE_CONTINUE if cont else DEGRADE_WAIT
+                )
+                done.set()
             elif msg[0] == "__tool_done__":
                 slot = msg[1]
                 # GUI rework Phase 14: was THIS finish caused by

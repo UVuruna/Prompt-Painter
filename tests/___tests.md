@@ -33,7 +33,38 @@ is loud, counted, and never kills the run), the per-item
 site suffix for exactly the mapped item, and riding the safer
 retry), and `TerminalState`
 propagation — the runner logs the parsed quota reset time, stamps
-it into the report and re-raises the exception unchanged.
+it into the report and re-raises the exception unchanged. The F1
+turn-based protocol (owner 2026-07-29): `NoImage` is ALWAYS a loud
+per-item skip now (never a site-stopping raise, even after an
+exhausted nudge), an `ItemRefused` surfacing INSIDE the image-failed
+recovery ladder is handled exactly like a first-attempt refusal, and
+a duplicate-bytes save (the site re-serving the previous image) gets
+one fresh re-submit before being skipped. F2 model degradation adds
+`on_degrade`: a `ModelDegraded` asks it for a choice — "continue"
+loud-skips the item and the run keeps going, anything else (no
+callback included) re-raises as `TerminalState` with the same
+`retry_after_s` — plus a pin on the F2-retimed ladder constants
+(`IMAGE_FAILED_RETRY_MAX`, `IMAGE_FAILED_RETRY_DELAY_RANGE_S`,
+`IMAGE_FAILED_ESCALATION_DELAYS_S`), read straight from
+`painter.config` so the autouse fast-recovery fixture's monkeypatch
+of `painter.runner`'s own copies never masks the real shipped values.
+
+### `test_driver.py` — CDP Driver, F1/F2 Protocol
+Duck-typed Locator/Page fakes over `SiteDriver` (no browser — see the
+module's own docstring for the exact fakes). The F1 turn-based
+protocol (owner 2026-07-29): a submit is not "sent" until CONFIRMED
+(composer emptied + our text is the newest user turn, via the shared
+`_wire_send_flow` test helper), `await_done`/`extract_image` are
+scoped to a pre-submit `Baseline` (turn count + last image src) so a
+leftover busy button or the PREVIOUS item's image can never be
+mistaken for OUR result, a busy signal stuck from the previous item
+gets a page refresh BEFORE the next send, and a garbled paste gets
+one silent retype. F2 model degradation: Gemini's
+`degrade_banner` selector (ChatGPT has none) is checked BEFORE the
+image-failed/refusal/quota markers in both `await_done` and
+`extract_image`, raising `ModelDegraded` with `retry_after_s` parsed
+from the banner's own absolute-moment text — and, with no banner
+wired, the ordinary quota classification still fires unchanged.
 
 ### `test_ai.py` — Gemini Client + AI Flows
 NO live API anywhere: the HTTP layer is the monkeypatched
@@ -61,7 +92,12 @@ reasons).
 `parse_quota_reset` against the LIVE-captured ChatGPT quota
 messages (minutes and hours), short units, Serbian phrasings, and
 the no-time Gemini message (None, never a guess); plus the
-`TerminalState.retry_after_s` field itself.
+`TerminalState.retry_after_s` field itself. F2 (owner 2026-07-29)
+adds the ABSOLUTE banner phrasing ("... resets on Jul 25 at 2:18
+PM"): a positive real offset (the exact seconds are not
+reproducible — the moment may roll to next year), a message
+carrying BOTH phrasings still uses the RELATIVE sum, and text naming
+no month/day/time stays `None`.
 
 ### `test_postprocess.py` — Split Postprocess Steps
 Synthetic images through the two composable steps:
@@ -496,6 +532,20 @@ pure result-to-UI mapping behind `DocWindow._apply_fix_result`
 (Tk-free — no test in this suite constructs a real `tk.Toplevel`) plus
 `DashPanel._show_check`/`AiCheckPanel._on_activate` passing fix workers
 into `DocWindow` only when the report actually carries defects.
+
+### `test_gui_degrade.py` — F2 Model-Degradation Choice
+`AgentPanel`'s new `degrade_var` (ask/continue/wait, persisted key
+"degrade") — a real (withdrawn) Tk root, the same `make_panel`
+convention every other GUI-phase file uses: defaults to "ask", is in
+`_PERSIST`/`_vars()`, round-trips through `get_settings`/
+`apply_settings`, a missing key on an old settings.json keeps the
+default; plus `cooldown_var` (the info-only reset-time label beside
+the site name, never gating Start) defaulting to empty. The deeper
+F2 plumbing — `PainterGui`'s "site_cooldowns" persistence, the 30s
+`_refresh_cooldown_labels` poll, the `"__ask_degrade__"` queue
+message — needs a full `PainterGui`/real timers and stays outside
+this offline suite, same as the rest of the "barely Tk-unit-tested
+by design" surface.
 
 ### `conftest.py` — Import Path + Shared Tk Root
 Makes the `painter` package importable from any pytest invocation.

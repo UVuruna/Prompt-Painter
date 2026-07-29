@@ -30,6 +30,7 @@ copy frozen at import time.
 from __future__ import annotations
 
 import threading
+import time
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -442,6 +443,13 @@ class SettingsMixin:
             # the GUI so the whole-dict save round-trips it; painter.ai
             # reads it back from settings.json per call
             GEMINI_KEY_SETTING: self._gemini_key,
+            # F2 (owner 2026-07-29): persisted per-site quota reset
+            # moments (unix epoch) — INFO only, expired entries dropped
+            "site_cooldowns": {
+                key: until
+                for key, until in self._cooldowns.items()
+                if until > time.time()
+            },
             FILTER_PRESETS_SETTING: {
                 name: list(rows) for name, rows in self._filter_presets.items()
             },
@@ -592,6 +600,39 @@ class SettingsMixin:
         the collapsed state persist (a stale ``sash`` key from an older
         settings.json is simply ignored)."""
         self._gemini_key = str(stored.get(GEMINI_KEY_SETTING, "") or "")
+        # F2 (owner 2026-07-29): restore the persisted per-site quota
+        # cooldowns (expired ones dropped), start the 30 s info-label
+        # ticker, and WARN once at startup when any are still active —
+        # information only, Start is never gated
+        now = time.time()
+        self._cooldowns = {
+            key: float(until)
+            for key, until in dict(
+                stored.get("site_cooldowns", {})
+            ).items()
+            if key in self.agents and float(until) > now
+        }
+        self.root.after(1000, self._refresh_cooldown_labels)
+        if self._cooldowns:
+            lines = []
+            for key, until in sorted(self._cooldowns.items()):
+                left = int(until - now)
+                lines.append(
+                    f"{SITES[key].name}: limit resets in"
+                    f" {left // 3600}:{left % 3600 // 60:02d}"
+                )
+                self._log(f"[{key}] COOLDOWN active — {lines[-1]}")
+            self.root.after(
+                800,
+                lambda: messagebox.showwarning(
+                    "Quota cooldown active",
+                    "A previous run hit an image quota:\n\n"
+                    + "\n".join(lines)
+                    + "\n\nYou CAN still start — this is only a"
+                    " reminder of what the site said.",
+                    parent=self.root,
+                ),
+            )
         saved_out = stored.get("output")
         if saved_out and Path(saved_out).is_dir():
             self.out_var.set(saved_out)

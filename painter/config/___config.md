@@ -198,7 +198,9 @@ confirmed-send window), `PAUSE_POLL_INTERVAL_S`, `MIN_IMAGE_PX`;
 send/busy/response/result selectors, `user_turn` (F1: the USER-turn
 selectors the confirmed-send check reads; ChatGPT's data-turn family,
 Gemini's `user-query` — pending one live-run confirmation, loud-fail
-if wrong), refusal/quota text markers (Gemini gained the
+if wrong), `degrade_banner` (F2: Gemini's Flash-Lite quota banner —
+its presence with no image raises `ModelDegraded`), refusal/quota
+text markers (Gemini gained the
 generic-guidelines refusal texts of the market-scene incident,
 classified SAFETY), `image_failed_text_markers`
 (BUG 3, owner 2026-07-21 + second face 2026-07-23 — ChatGPT's "Image

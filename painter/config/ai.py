@@ -225,10 +225,8 @@ CONTINUE_NUDGE = "Continue - please finish generating the image."
 # recover: reply with this word, in the SAME chat.
 IMAGE_RETRY_NUDGE = "retry"
 # how many times the runner resends IMAGE_RETRY_NUDGE before giving up
-# on the item (same shape as safer_retry's one-shot preamble resend,
-# but this failure is flaky enough on the owner's runs to warrant more
-# than one attempt)
-IMAGE_FAILED_RETRY_MAX = 2
+# on the item (F2 retiming, owner 2026-07-29: "retry x3 (3-6 min)")
+IMAGE_FAILED_RETRY_MAX = 3
 # BUG 3 grew a SECOND failure face (owner 2026-07-23, live at 17/24):
 # "Hmm...something seems to have gone wrong." / "I wasn't able to
 # generate the image due to an error on my side." — no "reply retry"
@@ -238,7 +236,7 @@ IMAGE_FAILED_RETRY_MAX = 2
 #   2. resend IMAGE_RETRY_NUDGE up to IMAGE_FAILED_RETRY_MAX times,
 #      each preceded by a random wait in this range (server hiccups and
 #      soft rate-limits clear on their own — hammering just re-fails)
-IMAGE_FAILED_RETRY_DELAY_RANGE_S = (60.0, 180.0)  # 1-3 min, random
+IMAGE_FAILED_RETRY_DELAY_RANGE_S = (180.0, 360.0)  # 3-6 min, random
 #   3. escalation ROUNDS — one per entry below; each round waits a
 #      random duration in its (min, max) range, then REFRESHES the page
 #      and opens a NEW SESSION and resends the WHOLE original prompt
@@ -247,9 +245,13 @@ IMAGE_FAILED_RETRY_DELAY_RANGE_S = (60.0, 180.0)  # 1-3 min, random
 #      round still yields no image the worker STOPS loudly (like quota
 #      — finished items are safe on disk, a restart resumes). Tune the
 #      ranges / add or drop rounds here; nothing else names them.
+# F2 retiming (owner 2026-07-29): "eskalacija (12-15) jos 3x — to je
+# max blizu 60 min a zadrzavamo random". Worst case: 3x(3-6 min)
+# retries + 3x(12-15 min) rounds ~= 54-63 min, then the site stops.
 IMAGE_FAILED_ESCALATION_DELAYS_S = (
-    (60.0, 180.0),      # round 1: 1-3 min
-    (1320.0, 2160.0),   # round 2: 22-36 min
+    (720.0, 900.0),   # round 1: 12-15 min
+    (720.0, 900.0),   # round 2: 12-15 min
+    (720.0, 900.0),   # round 3: 12-15 min
 )
 
 
@@ -458,6 +460,20 @@ FIXER_MODE_API = "api"
 FIXER_MODE_WEBSITE = "website"
 FIXER_MODE_CHOICES = (FIXER_MODE_API, FIXER_MODE_WEBSITE)
 
+# --- Model degradation (F2, owner 2026-07-29) -------------------------
+#
+# Gemini's "Limit reached. Continuing with Flash-Lite." banner: the
+# image quota is spent but the chat continues on a weaker model. The
+# per-agent setting decides what a run does when its turn yields NO
+# image while that banner is up: "ask" pops the choice ONCE per run,
+# "continue" keeps running on the degraded model (failed items are
+# loud-skipped), "wait" behaves like a quota stop (auto-restart at
+# the parsed reset time).
+DEGRADE_ASK = "ask"
+DEGRADE_CONTINUE = "continue"
+DEGRADE_WAIT = "wait"
+DEGRADE_CHOICES = (DEGRADE_ASK, DEGRADE_CONTINUE, DEGRADE_WAIT)
+
 # --- Quota reset time (owner's #2) -----------------------------------
 
 # ChatGPT's live quota message names the wait ("... when the limit
@@ -476,11 +492,56 @@ QUOTA_RESET_PATTERNS: tuple[tuple[re.Pattern, float], ...] = (
 )
 
 
+# F2 (owner 2026-07-29): Gemini's quota BANNER names an ABSOLUTE
+# reset moment — "until your limit resets on Jul 25 at 2:18 PM" —
+# instead of a relative wait. Month names are English on the owner's
+# account; the year is inferred (this year, or next when the moment
+# already passed — a reset is always in the future).
+QUOTA_RESET_AT_PATTERN = re.compile(
+    r"\bon\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*"
+    r"\.?\s+(\d{1,2})\s+at\s+(\d{1,2}):(\d{2})\s*(AM|PM)\b",
+    re.IGNORECASE,
+)
+_MONTHS = (
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
+)
+
+
+def _parse_quota_reset_at(text: str) -> float | None:
+    """Seconds until an ABSOLUTE reset moment named in ``text``."""
+    import datetime as _dt
+
+    match = QUOTA_RESET_AT_PATTERN.search(text)
+    if not match:
+        return None
+    month = _MONTHS.index(match.group(1).lower()[:3]) + 1
+    day = int(match.group(2))
+    hour = int(match.group(3)) % 12
+    if match.group(5).upper() == "PM":
+        hour += 12
+    minute = int(match.group(4))
+    now = _dt.datetime.now()
+    try:
+        moment = now.replace(
+            month=month, day=day, hour=hour, minute=minute,
+            second=0, microsecond=0,
+        )
+    except ValueError:
+        return None  # e.g. day 31 in a shorter current month
+    if moment <= now:
+        moment = moment.replace(year=now.year + 1)
+    return (moment - now).total_seconds()
+
+
 def parse_quota_reset(text: str) -> float | None:
     """Seconds until the quota resets, read from a quota response.
 
-    None when no pattern matches — the message carried no parseable
-    wait time (e.g. Gemini's "as soon as your limit resets").
+    Tries the RELATIVE phrasings first ("in 27 minutes", "za 14
+    sati"), then the ABSOLUTE banner phrasing ("on Jul 25 at 2:18
+    PM"). None when nothing matches — the message carried no
+    parseable wait time (e.g. Gemini's "as soon as your limit
+    resets").
     """
     total = 0.0
     found = False
@@ -489,4 +550,6 @@ def parse_quota_reset(text: str) -> float | None:
         if match:
             total += float(match.group(1)) * unit_s
             found = True
-    return total if found else None
+    if found:
+        return total
+    return _parse_quota_reset_at(text)

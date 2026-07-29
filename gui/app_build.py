@@ -132,6 +132,10 @@ class BuildMixin:
         self._paused: set[str] = set()
         self._restart_jobs: dict[str, str] = {}  # site -> after id
         self._restart_deadline: dict[str, float] = {}  # site -> monotonic
+        # F2 (owner 2026-07-29): persisted per-site quota reset moments
+        # (site -> unix epoch seconds) — INFO ONLY, survives app close
+        # via settings.json ("site_cooldowns"); never gates Start
+        self._cooldowns: dict[str, float] = {}
         # the four in-place tools each run as their OWN job (one worker
         # thread + one dashboard panel per kind; one job per kind at a
         # time). GUI rework Phase 8: the two gen-SITE jobs now ALSO get

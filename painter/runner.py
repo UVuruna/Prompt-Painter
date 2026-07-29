@@ -40,6 +40,7 @@ from painter.config import (
 from painter.driver import (
     ImageGenFailed,
     ItemRefused,
+    ModelDegraded,
     NoImage,
     SiteDriver,
     TerminalState,
@@ -348,6 +349,7 @@ def run_sheet(
     continue_nudge: bool = True,
     image_failed_retry: bool = True,
     new_chat_per_folder: bool = False,
+    on_degrade: Callable[[float | None], str] | None = None,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -654,6 +656,30 @@ def run_sheet(
                         log("    continue nudge RECOVERED")
                     except NoImage as exc2:
                         skip_reason = f"no image after nudge — {exc2}"
+            except ModelDegraded as exc:
+                # F2 (owner 2026-07-29): the site dropped to a weaker
+                # model (Gemini's Flash-Lite banner) and OUR turn got
+                # no image. The choice is the user's: "wait" behaves
+                # like a quota stop (auto-restart at the parsed reset);
+                # "continue" keeps the run alive on the degraded model
+                # — this item is loud-skipped, the next ones simply
+                # succeed if the degraded model still renders images.
+                choice = (
+                    on_degrade(exc.retry_after_s)
+                    if on_degrade is not None
+                    else "wait"
+                )
+                if choice == "continue":
+                    log(
+                        "    MODEL DEGRADED — continuing on the weaker"
+                        " model by choice; this item is skipped"
+                    )
+                    skip_reason = f"model degraded — {exc}"
+                else:
+                    log("    MODEL DEGRADED — waiting for the reset")
+                    raise TerminalState(
+                        str(exc), retry_after_s=exc.retry_after_s
+                    ) from exc
             except ImageGenFailed as exc:
                 # BUG 3, two faces (owner 2026-07-21 / 2026-07-23):
                 # ChatGPT's image tool failed — either its own "reply

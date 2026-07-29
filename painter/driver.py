@@ -56,6 +56,22 @@ class TerminalState(DriverError):
         self.retry_after_s = retry_after_s
 
 
+class ModelDegraded(DriverError):
+    """The site's model-degradation banner is up (F2, owner
+    2026-07-29 — Gemini's "Limit reached. Continuing with
+    Flash-Lite.") and OUR turn produced no image. Not a plain quota
+    stop: the RUNNER asks the configured choice — continue on the
+    degraded model (per-item skips while images keep failing, or
+    plain successes if the degraded model still renders them) or
+    wait for the reset (behaves like ``TerminalState``).
+    ``retry_after_s`` is parsed from the banner's own text (the
+    absolute "on Jul 25 at 2:18 PM" phrasing) when present."""
+
+    def __init__(self, message: str, retry_after_s: float | None = None):
+        super().__init__(message)
+        self.retry_after_s = retry_after_s
+
+
 class ItemRefused(DriverError):
     """The site refused THIS prompt — the runner reports it, then either
     skips the item or SAFER-RETRIES it once, and continues with the rest.
@@ -636,6 +652,7 @@ class SiteDriver:
                     return  # our image is loaded — done, button ignored
                 text = self._safe_text(turn)
                 if text:
+                    self._check_degrade_banner()
                     self._check_image_failed(text)
                     self._check_markers(text)
                     if not busy:
@@ -676,6 +693,7 @@ class SiteDriver:
                 break
             text = "" if turn is None else self._safe_text(turn)
             if text:
+                self._check_degrade_banner()
                 self._check_markers(text)
             if time.monotonic() > deadline:
                 raise NoImage(
@@ -877,6 +895,27 @@ class SiteDriver:
                     f" tried: {', '.join(selectors)}"
                 )
             time.sleep(self._timing.poll_interval_s)
+
+    def _check_degrade_banner(self) -> None:
+        """Raise ``ModelDegraded`` when the site's degradation banner
+        is up (F2) — checked BEFORE the quota text markers, because the
+        banner's accompanying response text also matches them and would
+        otherwise always classify as a plain ``TerminalState``. A
+        silent no-op for sites with no ``degrade_banner``."""
+        if not self.site.degrade_banner:
+            return
+        banner = self._query(self.site.degrade_banner)
+        if banner is None:
+            return
+        try:
+            text = banner.inner_text()
+        except Exception:
+            text = ""
+        raise ModelDegraded(
+            f"{self.site.name}: model-degradation banner present"
+            f" (quota) — {text[:200]}",
+            retry_after_s=parse_quota_reset(text),
+        )
 
     def _check_markers(self, text: str) -> None:
         """Raise on a quota (TerminalState) or refusal (ItemRefused)

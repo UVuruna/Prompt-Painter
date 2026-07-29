@@ -199,6 +199,13 @@ event) so the dashboard never stalls; the `item_done` event with
   the PREVIOUS save this run means the site re-served the old image
   (the "AI 1s" bug) — one fresh re-submit, then a loud skip; a
   duplicate file is never silently saved.
+  **Model degradation (F2, owner 2026-07-29):** `on_degrade(retry_
+  after_s) -> "continue" | "wait"` decides a `ModelDegraded` raise
+  (Gemini's Flash-Lite banner + no image): "continue" loud-skips the
+  item and keeps the run on the weaker model; "wait" — and a missing
+  callback (the CLI) — re-raises as `TerminalState` with the parsed
+  reset time, riding the existing quota auto-restart. The GUI passes
+  the per-agent `degrade` setting (ask = one popup per run).
   **BUG 3 recovery LADDER** (owner 2026-07-21, escalation added
   2026-07-23): an `ImageGenFailed` — ChatGPT's own "Image generation
   failed" answer OR the generic "something seems to have gone wrong."

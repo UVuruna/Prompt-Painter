@@ -41,9 +41,11 @@ from painter.driver import (
     DriverError,
     ImageGenFailed,
     ItemRefused,
+    ModelDegraded,
     NoImage,
     SelectorRot,
     SiteDriver,
+    TerminalState,
 )
 
 # Zero out every human-rhythm pause and shrink the selector-timeout
@@ -1073,3 +1075,74 @@ def test_extract_image_returns_bytes_for_a_fresh_src():
     data = driver.extract_image()
 
     assert data == b"tiny-png-bytes"
+
+
+# --- (h) F2 model degradation (owner 2026-07-29) ------------------------
+# Gemini's "Limit reached. Continuing with Flash-Lite." banner: the
+# image quota is spent but the chat continues on a weaker model.
+# ``_check_degrade_banner`` runs BEFORE ``_check_image_failed``/
+# ``_check_markers`` in both ``await_done`` and ``extract_image``, so a
+# degrade banner classifies as ``ModelDegraded`` even though the same
+# response text would also match a plain quota marker.
+
+_GEMINI_DEGRADE_BANNER_TEXT = (
+    "Limit reached. Continuing with Flash-Lite. Some features aren't"
+    " available until your limit resets on Jul 25 at 2:18 PM."
+)
+
+
+def test_gemini_has_a_degrade_banner_chatgpt_does_not():
+    assert SITES["gemini"].degrade_banner != ()
+    assert SITES["chatgpt"].degrade_banner == ()
+
+
+def test_await_done_raises_model_degraded_when_the_banner_is_up():
+    """A text-only turn (no image) WITH the degrade banner wired ->
+    ModelDegraded, not a plain NoImage/TerminalState — and its
+    retry_after_s is parsed from the banner's own absolute-moment text."""
+    site = SITES["gemini"]
+    timing = replace(
+        TIMING,
+        poll_interval_s=0.01,
+        progress_log_interval_s=1000.0,
+        busy_appear_timeout_s=1.0,
+        generation_timeout_s=5.0,
+    )
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        ["Limit reached. Continuing with Flash-Lite."]
+    )
+    page.locators[site.degrade_banner[0]] = FakeLocator(
+        "degrade_banner", page, text=_GEMINI_DEGRADE_BANNER_TEXT,
+    )
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src=None)
+
+    with pytest.raises(ModelDegraded) as exc:
+        driver.await_done(log=lambda s: None)
+    assert exc.value.retry_after_s is not None
+
+
+def test_await_done_without_degrade_banner_still_classifies_quota_text():
+    """No banner wired — ``_check_degrade_banner`` is a silent no-op and
+    the ordinary quota classification fires unchanged (no regression)."""
+    site = SITES["gemini"]
+    timing = replace(
+        TIMING,
+        poll_interval_s=0.01,
+        progress_log_interval_s=1000.0,
+        busy_appear_timeout_s=1.0,
+        generation_timeout_s=5.0,
+    )
+    page = FakePage()
+    page.locators[site.response_container[0]] = TextLocator(
+        ["I can create more images as soon as your limit resets."
+         " Check your usage in Settings."]
+    )
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src=None)
+
+    with pytest.raises(TerminalState):
+        driver.await_done(log=lambda s: None)

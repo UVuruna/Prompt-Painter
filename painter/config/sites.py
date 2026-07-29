@@ -138,6 +138,12 @@ class SiteConfig:
     # one live-run confirmation (they fail LOUDLY, never misbehave,
     # if wrong).
     user_turn: tuple[str, ...] = ()
+    # F2 (owner 2026-07-29): the site's MODEL-DEGRADATION banner —
+    # Gemini's "Limit reached. Continuing with Flash-Lite." card. Its
+    # presence with NO image is ModelDegraded, not a plain quota stop:
+    # the user chooses (ask / continue on the degraded model / wait
+    # for reset). EMPTY = the site has no such state.
+    degrade_banner: tuple[str, ...] = ()
     image_failed_text_markers: tuple[str, ...] = ()
     # the NATIVE "Retry" button ChatGPT renders under its "Hmm...
     # something seems to have gone wrong." error turn (owner capture
@@ -385,6 +391,13 @@ SITES = {
         user_turn=(
             "user-query",
             '[class*="user-query"]',
+        ),
+        # live capture 2026-07-25 (UV/data/LIMIT Reach): the quota
+        # banner element; its text carries the absolute reset moment
+        # ("... until your limit resets on Jul 25 at 2:18 PM ...")
+        degrade_banner=(
+            '[data-test-id="gemini-quota-banner-lm"]',
+            "gemini-quota-banner",
         ),
         result_image=(
             "generated-image img",

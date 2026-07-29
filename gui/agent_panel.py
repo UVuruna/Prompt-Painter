@@ -28,6 +28,8 @@ from painter.config import (
     ASPECT_DEFAULT_H,
     ASPECT_DEFAULT_W,
     BACKGROUND_CHOICES,
+    DEGRADE_ASK,
+    DEGRADE_CHOICES,
     FILTER_KIND_ASPECT_RANGE,
     FILTER_POLARITY_IF,
     FIXER_MODE_API,
@@ -83,6 +85,10 @@ class AgentPanel(ttk.Labelframe):
     _PERSIST = (
         "background", "style", "bg_removal", "crop", "upscale", "report",
         "safer_retry", "continue_nudge", "checker", "fixer", "fixer_mode",
+        # F2 (owner 2026-07-29): what a run does when the site drops to
+        # a weaker model (Gemini's Flash-Lite banner) — ask / continue /
+        # wait; see config.DEGRADE_CHOICES
+        "degrade",
         "new_chat", "pause_min",
         "pause_max", "act_min", "act_max",
         # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
@@ -149,6 +155,13 @@ class AgentPanel(ttk.Labelframe):
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(head, text=site.name, style="Head.TLabel").pack(side="left")
+        # F2 cooldown INFO (owner 2026-07-29): a persisted quota reset
+        # shown right beside the site's name during setup — information
+        # only, it NEVER gates the Start button
+        self.cooldown_var = tk.StringVar(value="")
+        ttk.Label(
+            head, textvariable=self.cooldown_var, style="Muted.TLabel",
+        ).pack(side="left", padx=(8, 0))
         self.configure(labelwidget=head, padding=6)
 
         self.background_var = tk.StringVar(value=site.default_background)
@@ -190,6 +203,8 @@ class AgentPanel(ttk.Labelframe):
         # drive the browser, owner-triggered, see DocWindow/_run_website_fix).
         self.fixer_var = tk.BooleanVar(value=False)
         self.fixer_mode_var = tk.StringVar(value=FIXER_MODE_API)
+        # F2: the model-degradation choice (Gemini Flash-Lite banner)
+        self.degrade_var = tk.StringVar(value=DEGRADE_ASK)
         self.new_chat_var = tk.StringVar(value="collection")
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
@@ -466,6 +481,16 @@ class AgentPanel(ttk.Labelframe):
         ttk.Label(row, text="–").pack(side="left", padx=2)
         Spinner(row, self.act_max_var, step=0.1).pack(side="left")
         ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+
+        # F2 (owner 2026-07-29): what to do when the site continues on
+        # a WEAKER model after the image quota (Gemini's Flash-Lite
+        # banner): ask once per run / continue on it / wait for reset
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="on degrade", width=12).pack(side="left")
+        rounded_combo(
+            row, DEGRADE_CHOICES, self.degrade_var, width=110,
+        ).pack(side="left")
 
         # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — a
         # deliberate DEFORM to an exact target ratio, run AFTER Crop and
@@ -849,6 +874,7 @@ class AgentPanel(ttk.Labelframe):
             "checker": self.checker_var,
             "fixer": self.fixer_var,
             "fixer_mode": self.fixer_mode_var,
+            "degrade": self.degrade_var,
             "new_chat": self.new_chat_var,
             "pause_min": self.pause_min_var,
             "pause_max": self.pause_max_var,

@@ -10,7 +10,11 @@ a ``NoImage`` is now ALWAYS a loud per-item skip (never a site-stopping
 raise), an ``ItemRefused`` surfacing INSIDE the image-failed recovery
 ladder is handled exactly like a first-attempt refusal, and a
 duplicate-bytes save (the site re-serving the previous image) gets one
-fresh re-submit before being skipped.
+fresh re-submit before being skipped. Also the F2 contract (owner
+2026-07-29): a ``ModelDegraded`` (Gemini's "Continuing with
+Flash-Lite." banner) asks ``on_degrade(retry_after_s)`` for a choice —
+"continue" loud-skips the item and keeps the run going, anything else
+(including no callback) re-raises as ``TerminalState``.
 """
 
 from dataclasses import replace
@@ -22,6 +26,8 @@ from painter import runner as runner_module
 from painter.config import (
     CONTINUE_NUDGE,
     COPYRIGHT_PREAMBLE,
+    IMAGE_FAILED_ESCALATION_DELAYS_S,
+    IMAGE_FAILED_RETRY_DELAY_RANGE_S,
     IMAGE_FAILED_RETRY_MAX,
     IMAGE_RETRY_NUDGE,
     REFUSAL_COPYRIGHT,
@@ -34,7 +40,13 @@ from painter.config import (
     prompt_suffix,
     versioned_dest_for,
 )
-from painter.driver import ImageGenFailed, ItemRefused, NoImage, TerminalState
+from painter.driver import (
+    ImageGenFailed,
+    ItemRefused,
+    ModelDegraded,
+    NoImage,
+    TerminalState,
+)
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
@@ -1239,6 +1251,77 @@ def test_terminal_state_propagates_retry_after(tmp_path):
         encoding="utf-8"
     )
     assert "quota / rate limit — stopped (reset in ~27m 00s)" in report
+
+
+# --- F2 model degradation (owner 2026-07-29) --------------------------
+# Gemini's "Limit reached. Continuing with Flash-Lite." banner: the
+# driver raises ModelDegraded when its turn yields no image while the
+# banner is up. The runner asks on_degrade(retry_after_s) for a choice:
+# "continue" loud-skips the item and keeps the run going; anything
+# else (including no callback at all) re-raises as TerminalState with
+# the same retry_after_s, exactly like an ordinary quota stop.
+
+def test_model_degraded_continue_choice_skips_item_and_run_continues(tmp_path):
+    class DegradesOnFirst(FakeDriver):
+        def extract_image(self):
+            if "prompt 0" in self.submitted[-1]:
+                raise ModelDegraded(
+                    "Gemini: model-degradation banner present (quota)"
+                    " — Limit reached. Continuing with Flash-Lite.",
+                    retry_after_s=1620.0,
+                )
+            return super().extract_image()
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    driver = DegradesOnFirst(SITES["gemini"])
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST,
+        on_degrade=lambda retry_after_s: "continue",
+    )  # must not raise — "continue" keeps the run alive
+
+    assert generated == 1  # item 0 skipped (degraded), item 1 still ran
+    assert not (out / "gemini" / "fake" / "img_0.png").exists()
+    assert (out / "gemini" / "fake" / "img_1.png").exists()
+    report = state(out, "gemini", "fake_prompts_report.txt").read_text(
+        encoding="utf-8"
+    )
+    assert "REFUSED" in report
+
+
+def test_model_degraded_no_callback_raises_terminal_state(tmp_path):
+    """No on_degrade wired (the CLI path, or the GUI choice = "wait") —
+    ModelDegraded re-raises as TerminalState carrying the SAME
+    retry_after_s, so the caller's ordinary quota-stop handling (an
+    auto-restart at the parsed reset time) applies unchanged."""
+    class AlwaysDegrades(FakeDriver):
+        def extract_image(self):
+            raise ModelDegraded(
+                "Gemini: model-degradation banner present (quota)"
+                " — Limit reached. Continuing with Flash-Lite.",
+                retry_after_s=900.0,
+            )
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    driver = AlwaysDegrades(SITES["gemini"])
+    with pytest.raises(TerminalState) as excinfo:
+        run_sheet(sheet, driver, out, "gemini", FAST)  # on_degrade=None
+    assert excinfo.value.retry_after_s == 900.0
+
+
+def test_ladder_constants_are_the_f2_retimed_values():
+    """Pin the F2 retiming (owner 2026-07-29): retry x3 (3-6 min), then
+    3 escalation rounds of 12-15 min each — worst case ~54-63 min before
+    the site stops. Imported directly from painter.config (NOT via
+    runner_module) so the autouse _fast_recovery fixture's monkeypatch
+    of runner_module's copies never masks the REAL shipped values."""
+    assert IMAGE_FAILED_RETRY_MAX == 3
+    assert IMAGE_FAILED_RETRY_DELAY_RANGE_S == (180.0, 360.0)
+    assert len(IMAGE_FAILED_ESCALATION_DELAYS_S) == 3
+    assert all(
+        rng == (720.0, 900.0) for rng in IMAGE_FAILED_ESCALATION_DELAYS_S
+    )
 
 
 def test_pause_flag_waits_between_items_then_resumes(tmp_path, monkeypatch):

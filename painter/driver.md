@@ -186,6 +186,15 @@ image timeout.
   (Retry button -> paced "retry" text -> escalation rounds of
   refresh + new session); the ladder re-raises only when every rung is
   spent, which stops the site.
+- `ModelDegraded` — F2 (owner 2026-07-29): the site's degradation
+  banner is up (Gemini's "Limit reached. Continuing with Flash-Lite.",
+  `SiteConfig.degrade_banner`) and OUR turn produced no image. Checked
+  BEFORE the quota markers (the banner's companion text also matches
+  them). Carries `retry_after_s` parsed from the banner's own absolute
+  phrasing ("on Jul 25 at 2:18 PM"). The runner asks the configured
+  choice (`on_degrade`): "continue" = loud per-item skip, run stays
+  alive on the weaker model; "wait" (and the CLI default) = re-raised
+  as `TerminalState` (auto-restart at the reset).
 - `AttachNotConfigured` — `submit_with_image` (image + text) is
   disabled for this site because `attach_menu_path` is empty in
   `SITES`. Used by both input-image entries and WEBSITE FIX. Raised
