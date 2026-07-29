@@ -57,12 +57,19 @@ class ViewMixin:
         keeps its state; 'before=self.notebook' pins the vertical order
         [controls|compact] above the notebook regardless of pack order."""
         self._collapsed = collapsed
+        # the notebook is the anchor only while the dashboard is on
+        # screen (owner 2026-07-29: no dashboard before the first job)
+        anchor = (
+            {"before": self.notebook}
+            if self.notebook.winfo_manager()
+            else {}
+        )
         if collapsed:
             self._controls_box.pack_forget()
-            self._compact_box.pack(fill="x", before=self.notebook)
+            self._compact_box.pack(fill="x", **anchor)
         else:
             self._compact_box.pack_forget()
-            self._controls_box.pack(fill="x", before=self.notebook)
+            self._controls_box.pack(fill="x", **anchor)
         self._collapse_btn.configure(
             text=COLLAPSE_GLYPH_COLLAPSED if collapsed
             else COLLAPSE_GLYPH_EXPANDED
@@ -109,6 +116,19 @@ class ViewMixin:
         else:
             self._menu_view.pack_forget()
             self._main_view.pack(fill="both", expand=True)
+        # owner 2026-07-29: the DASHBOARD notebook shows only once a
+        # job has run ("running", or back on setup WITH live/past
+        # jobs); the fresh setup screen has no dashboard below it.
+        # Packed FIRST so every later pack(before=self.notebook) has
+        # its anchor when the notebook is present.
+        dashboard_visible = view == "running" or (
+            view == "main" and bool(self._dashgrid.active())
+        )
+        if dashboard_visible:
+            if not self.notebook.winfo_manager():
+                self.notebook.pack(fill="both", expand=True)
+        else:
+            self.notebook.pack_forget()
         if view == "running":
             if not was_running:
                 # Start hides the LAUNCHING tool's own settings panel
@@ -133,16 +153,18 @@ class ViewMixin:
         if view == "main":
             if self._collapsed:
                 self._set_collapsed(False)
-            target = self._controls_box
-            if not target.winfo_manager():
-                target = self.notebook
-            self._icon_bar.pack(fill="x", pady=(2, 4), before=target)
+            if self._controls_box.winfo_manager():
+                self._icon_bar.pack(
+                    fill="x", pady=(2, 4), before=self._controls_box
+                )
+            else:
+                self._icon_bar.pack(fill="x", pady=(2, 4))
         elif view == "menu":
             self._icon_bar.pack_forget()
         # HOTFIX (owner 2026-07-29, slika 1): the MENU screen shows a
-        # CLEAN top strip — title + theme switch only; Check/Controls/
-        # grid-slider (and the legacy Menu button, permanently) belong
-        # to the working views and hide here.
+        # CLEAN top strip — title + theme switch only; Check/Controls
+        # belong to the working views. The [▦ grid] toggle shows ONLY
+        # while the DASHBOARD itself is on screen (owner 2026-07-29).
         self._menu_btn.pack_forget()  # IconBar's Menu is the one HOME
         if view == "menu":
             self.btn_check.pack_forget()
@@ -151,14 +173,15 @@ class ViewMixin:
         else:
             if not self.btn_check.winfo_manager():
                 self.btn_check.pack(side="left", padx=(8, 0))
-            if not self._dash_mode_btn.winfo_manager():
-                self._dash_mode_btn.pack(
-                    side="right", padx=(0, 8), after=self.switch
-                )
+            if dashboard_visible:
+                if not self._dash_mode_btn.winfo_manager():
+                    self._dash_mode_btn.pack(
+                        side="right", padx=(0, 8), after=self.switch
+                    )
+            else:
+                self._dash_mode_btn.pack_forget()
             if not self._collapse_btn.winfo_manager():
-                self._collapse_btn.pack(
-                    side="right", padx=(0, 8), after=self._dash_mode_btn
-                )
+                self._collapse_btn.pack(side="right", padx=(0, 8))
         self._scroll.refresh()
 
     def _go_view(self, view: str) -> None:
