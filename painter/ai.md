@@ -42,15 +42,19 @@ numeric HTTP status, which the client attaches to the raised
 
 ### Uses
 - [Config (subfolder)](config/___config.md) — the whole `GEMINI_*` / `AI_*` block,
-  `SITES`, `STATE_DIRNAME`, `PROJECT_ROOT`
+  `MODEL_PURPOSE_RANKING`/`MODELS_SETTING` (F5), `SITES`,
+  `STATE_DIRNAME`, `PROJECT_ROOT`
 - [Settings](settings.md) — `load_settings` (the key lives in
-  `settings.json` under `gemini_api_key`)
+  `settings.json` under `gemini_api_key`; F5's per-purpose model
+  overrides under `MODELS_SETTING`, `"models"`)
 - [Sheet Parser](sheet_parser.md) — `parse_sheet` validates every
   AI-produced sheet with the REAL contract rules
 
 ### Used by
 - [GUI](../gui.md) — the key wizard's Test, the New-collection
-  dialog, the AI-check job, the re-send mapping
+  dialog, the AI-check job, the re-send mapping, and (F5)
+  `ApiImageGenPanel`'s "Models…" picker + `ApiImageAdapter`'s
+  `submit_with_image`/`extract_image`
 - [Tests (folder)](../tests/___tests.md) — mocked-HTTP client tests,
   flow tests, flag round-trips
 
@@ -78,29 +82,39 @@ requested model. PERMANENT: raised on the FIRST attempt inside
 
 - `api_key() -> str` — the key from `settings.json`
   (`GEMINI_KEY_SETTING`); `NoKey` when absent/blank.
-- `generate_text(prompt, system=None, *, key=None, model=...,
+- `generate_text(prompt, system=None, *, key=None, model=None,
   log=print)` — one `models/<model>:generateContent` POST (key in the
   `x-goog-api-key` header, `systemInstruction` when given); returns
   the response text. `key=None` reads settings — the wizard's Test
-  passes its candidate explicitly. `log` receives the transient-retry
-  lines.
-- `check_image(image_path, instructions, *, key=None, model=...,
+  passes its candidate explicitly. `model=None` resolves via
+  `model_for("text")` (F5). `log` receives the transient-retry lines.
+- `check_image(image_path, instructions, *, key=None, model=None,
   log=print)` — the vision call: the instructions text part + the
   image as base64 `inlineData` (png/jpg/webp by suffix, via
-  `_mime_for`). `log` receives the transient-retry lines.
-- `generate_image(prompt, *, key=None, model=GEMINI_IMAGE_MODEL,
-  log=print) -> bytes` (GUI rework Phase 18) — one IMAGE-GENERATION
-  call against the PAID `GEMINI_IMAGE_MODEL`: the SAME text payload
-  `generate_text` builds (`_payload_text`, no system instruction),
-  widened with `generationConfig.responseModalities: ["TEXT",
-  "IMAGE"]` so the model returns an inline image part. Returns the
+  `_mime_for`). `model=None` resolves via `model_for("vision")` (F5).
+  `log` receives the transient-retry lines.
+- `generate_image(prompt, *, image_path=None, key=None, model=None,
+  log=print) -> bytes` (GUI rework Phase 18; `image_path` F5, owner
+  D3) — one IMAGE-GENERATION call against the PAID image model
+  (`model=None` resolves via `model_for("image")`). With no
+  `image_path`: the SAME text payload `generate_text` builds
+  (`_payload_text`, no system instruction), widened with
+  `generationConfig.responseModalities: ["TEXT", "IMAGE"]` so the
+  model returns an inline image part. With `image_path` given: the
+  saved image at that path rides along as an `inlineData` part BEFORE
+  the prompt text (`_payload_reference_and_prompt` — mirrors
+  [CDP Driver](driver.md)'s own `submit_with_image` order, picture
+  attached before the prompt is sent) — closes the audited gap where
+  an API-mode sheet item carrying a "← ref" input image had no method
+  to call (`gui.ApiImageAdapter.submit_with_image`). Returns the
   decoded PNG bytes (`_response_image`).
-- `edit_image(image_path, prompt, *, key=None, model=
-  GEMINI_IMAGE_MODEL, log=print) -> bytes` (GUI rework Phase 18) —
+- `edit_image(image_path, prompt, *, key=None, model=None,
+  log=print) -> bytes` (GUI rework Phase 18) —
   one image EDIT call: the source image embedded exactly like
-  `check_image` (`_payload_image` + `_mime_for`) plus the edit
-  instruction, same `responseModalities` widening. Returns the
-  decoded edited PNG bytes.
+  `check_image` (`_payload_image` + `_mime_for`, TEXT part first, then
+  the image) plus the edit instruction, same `responseModalities`
+  widening. `model=None` resolves via `model_for("image")` (F5).
+  Returns the decoded edited PNG bytes.
 - `generate_text`/`check_image` go through `_call`, a THIN wrapper
   over `_call_raw(model, payload, key, *, log) -> dict` applying
   `_response_text`; `generate_image`/`edit_image` call `_call_raw`
@@ -108,10 +122,13 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   18 split — Rule #5, one retry/pace/HTTP shell instead of two
   near-identical copies; behavior-preserving for the text/vision
   path — every prior `_call` test still passes unchanged against the
-  new split). `_call_raw` does the pacing + the TRANSIENT-error
-  RETRY: on a 503/429/500 it waits and re-POSTs up to `AI_RETRY_MAX`
-  attempts (503/500 wait `AI_RETRY_BACKOFF_S`; a 429 honours the
-  server's own `retryDelay` / "retry in Xs", capped at
+  new split). `_call_raw` builds the POST request and delegates to
+  `_send_request(req, label, *, log) -> dict` (F5 split — Rule #5:
+  `list_models`'s GET calls share the SAME shell instead of a second
+  near-copy of the retry loop). `_send_request` does the pacing + the
+  TRANSIENT-error RETRY: on a 503/429/500 it waits and re-sends up to
+  `AI_RETRY_MAX` attempts (503/500 wait `AI_RETRY_BACKOFF_S`; a 429
+  honours the server's own `retryDelay` / "retry in Xs", capped at
   `AI_RETRY_MAX_WAIT_S`), logging each retry; a permanent code raises
   at once — EXCEPT a 429 carrying the free-tier-EXHAUSTED signal
   (`_is_paid_quota_error`), checked BEFORE the transient branch, which
@@ -127,6 +144,49 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   (an image-gen answer often carries both a caption text part and the
   image part; only the latter counts), LOUD when no candidate carries
   an image part at all.
+
+## Functions — model discovery + purpose recommendation (F5, owner D1/D2)
+
+- `list_models(*, key=None, log=print) -> list[dict]` — GETs the
+  ListModels endpoint (`{GEMINI_API_BASE}/models`), following
+  `nextPageToken` across every page, via `_send_request` (the SAME
+  auth header + retry/backoff shell every POST call uses). Each
+  returned dict: `{"name": <id without the "models/" prefix>,
+  "methods": <tuple of supportedGenerationMethods>, "display":
+  <displayName>}`. `key=None` reads settings.json (`NoKey` when
+  absent); any HTTP failure raises the usual `AiError` taxonomy.
+- `capable_models(models, purpose) -> list[dict]` — the subset of
+  `models` (as `list_models` returns them) CAPABLE of `purpose`
+  (`"image"`/`"vision"`/`"text"`; any other string raises
+  `ValueError` loudly). `"image"`: the name contains `"image"` OR a
+  `supportedGenerationMethods` entry does (the API names no single
+  canonical "image output" method). `"vision"`/`"text"`: the SAME
+  filter — `"generateContent"` among the methods AND the name carries
+  none of `_NON_TEXT_NAME_MARKERS` (`"image"`/`"embed"`/`"tts"`/
+  `"audio"`/`"video"`) — only the RANKING differs per purpose, not the
+  capability test. PURE, offline-testable.
+- `recommend_model(models, purpose) -> str | None` — the BEST-FOR-
+  THE-JOB model for `purpose` (owner D2: never one model for every
+  job): filters via `capable_models`, then walks
+  `config.MODEL_PURPOSE_RANKING[purpose]` (best substring first) and
+  returns the first capable name containing it; when nothing in the
+  ranking matches, falls back to the NEWEST by name (sorted
+  descending — an honest, undocumented-but-logged proxy, never a
+  guess at a specific unlisted name); `None` when nothing is capable
+  at all. PURE.
+- `model_for(purpose) -> str` — the model actually used by every call
+  above when its own `model=` is left `None`: `settings.json`'s
+  `MODELS_SETTING` (`"models"`) per-purpose override when present and
+  non-blank, else the matching hardcoded `GEMINI_*_MODEL` constant
+  (now a FALLBACK only). EVERY internal call site that used to
+  default to one of those three constants routes through here (Rule
+  #6) — the constants themselves are unchanged.
+- The "Models…" picker in [GUI](../gui.md)'s `ApiImageGenPanel`
+  (`gui/api_panel.py`) drives `list_models`/`capable_models`/
+  `recommend_model` on a background thread and writes a pick straight
+  to `settings.json` via `painter.settings` (immediate, like
+  `PainterGui.set_gemini_key` — see that panel's own Design
+  Decisions).
 
 ## Functions — the sheet-generator flow (owner's #2)
 
@@ -265,9 +325,46 @@ requested model. PERMANENT: raised on the FIRST attempt inside
   details"`). An ambiguous 429 (matches neither) defaults to
   transient — retrying a permanent error wastes a few calls, but
   giving up on a genuinely transient one is worse.
-- **`_call_raw` is the ONE shell.** Extracting the retry/pace/HTTP
-  plumbing out of `_call` (which now only adds `_response_text`) lets
-  the paid image calls reuse the exact same shell — including the
-  paid-quota short-circuit — instead of a second near-copy of the
-  retry loop (Rule #5). The split is behavior-preserving BY
-  CONSTRUCTION: `_call`'s body is unchanged in spirit, just delegated.
+- **Rule #20 debt, flagged not fixed.** F5's additions (model
+  discovery + the reference-image path) pushed `ai.py` from 955 to
+  ~1,175 lines — past the ~1,000-line Rule #20 threshold. F5's own
+  scope lock permitted editing this file but NOT creating a new
+  module, and the file already documents FOUR cohesive parts (the
+  REST client, model discovery, the sheet-generator flow, the flag
+  memory) that a dedicated split session could peel apart (mirrors
+  `gui/viewers.py`'s own recorded Rule #20 debt, GUI rework Phase F4).
+  Flagged here rather than split mid-flight, since F1–F4 sessions were
+  touching adjacent files in parallel and a structural split is real
+  refactor work, not an F5 side effect.
+- **`_call_raw` is the ONE shell — and `_send_request` (F5) is now
+  the shell UNDER it.** Extracting the retry/pace/HTTP plumbing out of
+  `_call` (which now only adds `_response_text`) let the paid image
+  calls reuse the exact same shell — including the paid-quota short-
+  circuit — instead of a second near-copy of the retry loop (Rule
+  #5). F5 pushed the split one layer further: `_call_raw` now only
+  BUILDS the POST request and hands it to `_send_request`, which owns
+  the actual attempt loop — so `list_models`'s GET request (a
+  DIFFERENT method/URL, no JSON body) shares the identical retry/pace/
+  classification behavior by building its own request and calling the
+  same function, rather than a THIRD near-copy of the loop. Both
+  splits are behavior-preserving BY CONSTRUCTION: every existing
+  `_call`/`_call_raw` test still passes unchanged.
+- **Model resolution is ONE function, read at CALL time, never baked
+  into a default argument (F5).** A `model: str = GEMINI_TEXT_MODEL`
+  default would freeze the constant at IMPORT time — reading
+  settings.json's override needs to happen on every call, since the
+  owner can change the pick between two calls in the same run. Every
+  public call's `model` parameter is therefore `None` by default, and
+  the function body resolves `model or model_for(purpose)` itself.
+  `check_one_image` resolves it ONE line earlier than its own `check`
+  call specifically so the RESOLVED name (not the literal string
+  `"None"`) is what `record_flag` persists.
+- **The reference-image part order is the ONE deliberate asymmetry.**
+  `_payload_image` (the checker/`edit_image` convention: TEXT then
+  the picture) and `_payload_reference_and_prompt` (`generate_image`'s
+  new `image_path`: the picture then TEXT) share their per-part
+  builders (`_text_part`/`_inline_data_part`, Rule #5) but keep
+  DIFFERENT orders on purpose — the new path mirrors the website's own
+  `driver.submit_with_image`, which attaches the picture into the
+  composer before the prompt is typed and sent; changing `_payload_
+  image`'s existing order would have been unrelated scope creep.

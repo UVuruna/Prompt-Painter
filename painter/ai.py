@@ -14,7 +14,22 @@ Three cohesive parts, all offline-testable with a mocked HTTP layer
   specific ``PaidFeatureRequired`` instead of retrying (the owner's
   key has ZERO free quota for the image model today). Consecutive
   calls are PACED ``AI_CALL_PAUSE_S`` apart (the free tier is ~10
-  requests/minute).
+  requests/minute). ``generate_image`` optionally attaches a
+  REFERENCE image (F5, owner D3) as an ``inlineData`` part BEFORE the
+  prompt text.
+* MODEL DISCOVERY + per-purpose recommendation (F5, owner D1/D2):
+  ``list_models`` GETs the ListModels endpoint (paged);
+  ``capable_models``/``recommend_model`` filter and rank the result
+  per PURPOSE ("image"/"vision"/"text") against
+  ``config.MODEL_PURPOSE_RANKING``; ``model_for`` resolves the model
+  actually used by every call above — settings.json's ``"models"``
+  per-purpose override when set, else the matching hardcoded
+  ``GEMINI_*_MODEL`` constant (now a FALLBACK only).
+* the SHEET-GENERATOR flow helpers (owner's #2): parse the model's
+  numbered clarifying questions, build the two calls from the sheet
+  contract (instructions.md), validate a produced ``.md`` with the
+  REAL sheet parser and drive ONE automatic repair round, then save
+  the clean sheet under ``sheets/`` with a slugged filename.
 * the SHEET-GENERATOR flow helpers (owner's #2): parse the model's
   numbered clarifying questions, build the two calls from the sheet
   contract (instructions.md), validate a produced ``.md`` with the
@@ -62,6 +77,8 @@ from painter.config import (
     GEMINI_KEY_SETTING,
     GEMINI_TEXT_MODEL,
     GEMINI_VISION_MODEL,
+    MODEL_PURPOSE_RANKING,
+    MODELS_SETTING,
     PROJECT_ROOT,
     SITES,
     STATE_DIRNAME,
@@ -162,22 +179,50 @@ def _payload_text(prompt: str, system: str | None) -> dict:
     return payload
 
 
+def _text_part(text: str) -> dict:
+    return {"text": text}
+
+
+def _inline_data_part(image_bytes: bytes, mime: str) -> dict:
+    return {
+        "inlineData": {
+            "mimeType": mime,
+            "data": base64.b64encode(image_bytes).decode("ascii"),
+        }
+    }
+
+
 def _payload_image(image_bytes: bytes, mime: str, instructions: str) -> dict:
+    """TEXT part first, then the image — the checker/``edit_image``
+    convention (read the instructions, then look at the picture).
+    Shares the per-part builders with ``_payload_reference_and_prompt``
+    (Rule #5) but keeps its OWN part order; UNCHANGED by F5 (existing
+    callers/tests keep this exact shape)."""
     return {
         "contents": [
-            {
-                "parts": [
-                    {"text": instructions},
-                    {
-                        "inlineData": {
-                            "mimeType": mime,
-                            "data": base64.b64encode(image_bytes).decode(
-                                "ascii"
-                            ),
-                        }
-                    },
-                ]
-            }
+            {"parts": [
+                _text_part(instructions),
+                _inline_data_part(image_bytes, mime),
+            ]}
+        ]
+    }
+
+
+def _payload_reference_and_prompt(
+    image_bytes: bytes, mime: str, prompt: str
+) -> dict:
+    """``generate_image``'s OPTIONAL reference-image path (F5, owner
+    D3): the IMAGE part comes FIRST, the prompt text SECOND — mirrors
+    the website flow's own order (``driver.submit_with_image`` attaches
+    the picture into the composer BEFORE the prompt text is typed and
+    sent), unlike ``_payload_image`` above (text first, the checker/
+    edit convention). Shares the per-part builders with it (Rule #5)."""
+    return {
+        "contents": [
+            {"parts": [
+                _inline_data_part(image_bytes, mime),
+                _text_part(prompt),
+            ]}
         ]
     }
 
@@ -337,13 +382,19 @@ def _raise_paid_quota(
     raise err from exc
 
 
-def _call_raw(model: str, payload: dict, key: str, *, log=print) -> dict:
-    """POST one generateContent request; returns the PARSED JSON body —
-    the retry/pace/HTTP SHELL shared by every caller: ``_call`` (a thin
-    wrapper applying ``_response_text``, for ``generate_text``/
-    ``check_image``) and the PAID image calls ``generate_image``/
-    ``edit_image`` (which apply ``_response_image`` themselves) — Rule
-    #5, one shell instead of two near-identical copies.
+def _send_request(
+    req: urllib.request.Request, label: str, *, log=print
+) -> dict:
+    """Drive an ALREADY-BUILT request through the retry/pace/HTTP SHELL
+    shared by every caller (Rule #5, F5): ``_call_raw`` (POST
+    generateContent, for ``generate_text``/``check_image``/
+    ``generate_image``/``edit_image``) and ``list_models`` (GET
+    models) both build their own request and hand it here instead of
+    each carrying a near-identical copy of this loop. ``label`` names
+    the call in every log/error line — a model name for a
+    generateContent call, ``"models.list"`` for ``list_models``; this
+    function has no opinion on the URL/method, only on the shared
+    retry machinery.
 
     TRANSIENT API failures (``AI_TRANSIENT_STATUS`` — 503 high-demand,
     429 rate-limit, 500) are RETRIED up to ``AI_RETRY_MAX`` attempts,
@@ -361,15 +412,6 @@ def _call_raw(model: str, payload: dict, key: str, *, log=print) -> dict:
     ordinary rate limit and retries exactly as before.
 
     Every attempt is PACED like any other call (``_pace``)."""
-    req = urllib.request.Request(
-        f"{GEMINI_API_BASE}/models/{model}:generateContent",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "x-goog-api-key": key,
-        },
-        method="POST",
-    )
     for attempt in range(1, AI_RETRY_MAX + 1):
         _pace()
         try:
@@ -378,12 +420,12 @@ def _call_raw(model: str, payload: dict, key: str, *, log=print) -> dict:
         except urllib.error.HTTPError as exc:
             message, retry_s = _http_error(exc)
             if _is_paid_quota_error(exc.code, message):
-                _raise_paid_quota(model, exc, message)
+                _raise_paid_quota(label, exc, message)
             if exc.code not in AI_TRANSIENT_STATUS or attempt >= AI_RETRY_MAX:
-                _raise_http(model, exc, message)
+                _raise_http(label, exc, message)
             wait = _retry_wait(exc.code, retry_s)
             log(
-                f"Gemini API HTTP {exc.code} on {model} ({message}) —"
+                f"Gemini API HTTP {exc.code} on {label} ({message}) —"
                 f" retry {attempt + 1}/{AI_RETRY_MAX} in {wait:.0f}s"
             )
             time.sleep(wait)
@@ -397,7 +439,152 @@ def _call_raw(model: str, payload: dict, key: str, *, log=print) -> dict:
                 f"Gemini API returned non-JSON: {raw[:200]!r}"
             ) from exc
     # unreachable: the final transient attempt raises above (Rule #7)
-    raise AiError(f"{model}: retries exhausted")
+    raise AiError(f"{label}: retries exhausted")
+
+
+def _call_raw(model: str, payload: dict, key: str, *, log=print) -> dict:
+    """POST one generateContent request; returns the PARSED JSON body —
+    builds the request and delegates the retry/pace/HTTP SHELL to
+    ``_send_request`` (shared with ``list_models``'s GET calls). See
+    ``_send_request`` for the retry/pace/HTTP-classification
+    behavior."""
+    req = urllib.request.Request(
+        f"{GEMINI_API_BASE}/models/{model}:generateContent",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": key,
+        },
+        method="POST",
+    )
+    return _send_request(req, model, log=log)
+
+
+def list_models(*, key: str | None = None, log=print) -> list[dict]:
+    """GET the ListModels endpoint (owner D1, F5), following
+    ``nextPageToken`` across every page, and return one dict per
+    model: ``{"name": <id without the "models/" prefix>, "methods":
+    <tuple of supportedGenerationMethods>, "display": <displayName>}``.
+    Reuses the SAME auth header + retry/backoff shell as every POST
+    call (``_send_request``, Rule #5 — one retry loop, not two).
+    ``key=None`` reads settings.json (``NoKey`` when absent), like
+    every other call in this module. A malformed/missing ``models``
+    list on a page is tolerated (treated as empty for that page,
+    matching ``_response_text``'s own "skip what does not parse"
+    stance); any HTTP failure raises the loud ``AiError`` taxonomy."""
+    resolved_key = key or api_key()
+    models: list[dict] = []
+    page_token: str | None = None
+    while True:
+        url = f"{GEMINI_API_BASE}/models"
+        if page_token:
+            url += f"?pageToken={page_token}"
+        req = urllib.request.Request(
+            url, headers={"x-goog-api-key": resolved_key}, method="GET",
+        )
+        data = _send_request(req, "models.list", log=log)
+        for entry in data.get("models") or ():
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", ""))
+            models.append({
+                "name": name.removeprefix("models/"),
+                "methods": tuple(
+                    entry.get("supportedGenerationMethods") or ()
+                ),
+                "display": str(entry.get("displayName") or name),
+            })
+        page_token = data.get("nextPageToken") or None
+        if not page_token:
+            return models
+
+
+# purposes recommend_model/model_for/capable_models understand — every
+# OTHER string raises loudly (a caller typo, never guessed at)
+_MODEL_PURPOSES = ("image", "vision", "text")
+# a model whose NAME carries one of these is never a plain text/vision
+# candidate (image generation, embeddings, TTS, audio/video-only) —
+# used to EXCLUDE such models from the "vision"/"text" capability filter
+_NON_TEXT_NAME_MARKERS = ("image", "embed", "tts", "audio", "video")
+
+
+def capable_models(models: list[dict], purpose: str) -> list[dict]:
+    """The subset of ``models`` (as ``list_models`` returns them)
+    CAPABLE of ``purpose`` — "image" (generation), "vision" (image
+    checking) or "text" (sheet generation). PURE, offline-testable;
+    ``recommend_model`` applies this SAME filter before walking the
+    ranking (Rule #5), and the "Models…" picker (``gui/api_panel.py``)
+    calls it directly to list every capable option per dropdown, not
+    just the top pick.
+
+    "image": the model's name contains "image" OR one of its
+    ``supportedGenerationMethods`` names does (the API names no
+    single canonical "image output" method, so both signals count).
+    "vision"/"text": ``"generateContent"`` is among its methods AND
+    its name carries none of ``_NON_TEXT_NAME_MARKERS`` — a text-
+    capable model that is explicitly NOT an image-generation/
+    embedding/TTS/audio-video-only model."""
+    if purpose not in _MODEL_PURPOSES:
+        raise ValueError(f"unknown model purpose: {purpose!r}")
+    if purpose == "image":
+        return [
+            m for m in models
+            if "image" in m["name"].lower()
+            or any("image" in method.lower() for method in m["methods"])
+        ]
+    return [
+        m for m in models
+        if any(method.lower() == "generatecontent" for method in m["methods"])
+        and not any(
+            marker in m["name"].lower() for marker in _NON_TEXT_NAME_MARKERS
+        )
+    ]
+
+
+def recommend_model(models: list[dict], purpose: str) -> str | None:
+    """The BEST-FOR-THE-JOB model name for one purpose (owner D2:
+    never one model for every job) — filters ``models`` down to those
+    CAPABLE of ``purpose`` (``capable_models``), then walks
+    ``MODEL_PURPOSE_RANKING[purpose]`` (best substring first) and
+    returns the first capable model whose name contains it. When no
+    ranking entry matches ANY capable model, falls back to the NEWEST
+    by name (sorted descending — an honest proxy for "most recent",
+    see the config comment on ``MODEL_PURPOSE_RANKING``). ``None``
+    when NOTHING in ``models`` is capable of ``purpose`` at all. PURE
+    — no I/O, offline-testable."""
+    capable = capable_models(models, purpose)
+    if not capable:
+        return None
+    for substring in MODEL_PURPOSE_RANKING.get(purpose, ()):
+        for entry in capable:
+            if substring in entry["name"].lower():
+                return entry["name"]
+    return max(capable, key=lambda m: m["name"])["name"]
+
+
+# purpose -> the hardcoded constant used when settings.json carries no
+# override — F5: these three constants are now FALLBACKS ONLY
+_PURPOSE_FALLBACK = {
+    "image": GEMINI_IMAGE_MODEL,
+    "vision": GEMINI_VISION_MODEL,
+    "text": GEMINI_TEXT_MODEL,
+}
+
+
+def model_for(purpose: str) -> str:
+    """The model name to use for ``purpose`` ("image"/"vision"/
+    "text"): settings.json's ``MODELS_SETTING`` ("models") override
+    when present and non-blank, else the matching hardcoded constant
+    (``_PURPOSE_FALLBACK`` — F5, owner D1/D3). EVERY internal call
+    site in this module that used to default to one of
+    ``GEMINI_IMAGE_MODEL``/``GEMINI_VISION_MODEL``/``GEMINI_TEXT_MODEL``
+    now routes through here (Rule #6) — the constants themselves are
+    UNCHANGED and still the fallback of first resort."""
+    if purpose not in _PURPOSE_FALLBACK:
+        raise ValueError(f"unknown model purpose: {purpose!r}")
+    overrides = load_settings().get(MODELS_SETTING) or {}
+    value = str(overrides.get(purpose, "") or "").strip()
+    return value or _PURPOSE_FALLBACK[purpose]
 
 
 def _call(model: str, payload: dict, key: str, *, log=print) -> str:
@@ -412,14 +599,17 @@ def generate_text(
     system: str | None = None,
     *,
     key: str | None = None,
-    model: str = GEMINI_TEXT_MODEL,
+    model: str | None = None,
     log=print,
 ) -> str:
     """One text generation; ``key=None`` reads settings.json (NoKey
     when absent) — the wizard's Test passes its candidate explicitly.
-    ``log`` receives any transient-retry lines (see ``_call``)."""
+    ``model=None`` resolves via ``model_for("text")`` (F5, owner D1/
+    D3): settings.json's override, else ``GEMINI_TEXT_MODEL``. ``log``
+    receives any transient-retry lines (see ``_call``)."""
     return _call(
-        model, _payload_text(prompt, system), key or api_key(), log=log
+        model or model_for("text"), _payload_text(prompt, system),
+        key or api_key(), log=log,
     )
 
 
@@ -428,38 +618,60 @@ def check_image(
     instructions: str,
     *,
     key: str | None = None,
-    model: str = GEMINI_VISION_MODEL,
+    model: str | None = None,
     log=print,
 ) -> str:
     """One vision call over a saved image file; returns the raw text.
-    ``log`` receives any transient-retry lines (see ``_call``)."""
+    ``model=None`` resolves via ``model_for("vision")`` (F5). ``log``
+    receives any transient-retry lines (see ``_call``)."""
     image_path = Path(image_path)
     mime = _mime_for(image_path, purpose="the checker")
     payload = _payload_image(image_path.read_bytes(), mime, instructions)
-    return _call(model, payload, key or api_key(), log=log)
+    return _call(model or model_for("vision"), payload, key or api_key(), log=log)
 
 
 def generate_image(
     prompt: str,
     *,
+    image_path: Path | None = None,
     key: str | None = None,
-    model: str = GEMINI_IMAGE_MODEL,
+    model: str | None = None,
     log=print,
 ) -> bytes:
     """One IMAGE GENERATION call (the PAID image model — see
-    ``GEMINI_IMAGE_MODEL``'s config comment). Reuses ``_payload_text``
-    (the prompt, no system instruction) widened with
+    ``GEMINI_IMAGE_MODEL``'s config comment). ``model=None`` resolves
+    via ``model_for("image")`` (F5, owner D1/D3): settings.json's
+    override, else ``GEMINI_IMAGE_MODEL``.
+
+    ``image_path`` (owner D3, F5) — OPTIONAL: when given, the saved
+    image at this path rides along as an ``inlineData`` part BEFORE
+    the prompt text (``_payload_reference_and_prompt`` — mirrors the
+    website flow's own order, ``driver.submit_with_image`` attaches
+    the picture into the composer before the prompt is sent). This
+    closes the audited gap where an API-mode sheet item carrying a
+    "← ref" input image had no method to call
+    (``ApiImageAdapter.submit_with_image``, see ``gui/api_panel.py``).
+    With no ``image_path`` this reuses ``_payload_text`` (the prompt,
+    no system instruction) exactly as before, widened with
     ``responseModalities: ["TEXT", "IMAGE"]`` so the model returns an
-    inline image part instead of (or alongside) text — the SAME REST
-    shape ``generate_text`` uses otherwise. Returns the decoded image
-    BYTES; ``_response_image`` raises loudly when none comes back. A
-    free-tier-exhausted 429 raises ``PaidFeatureRequired`` instead of
-    retrying (see ``_call_raw``). ``key=None`` reads settings.json
-    (``NoKey`` when absent), like every other call in this module."""
-    payload = _payload_text(prompt, None)
+    inline image part instead of (or alongside) text. Returns the
+    decoded image BYTES; ``_response_image`` raises loudly when none
+    comes back. A free-tier-exhausted 429 raises ``PaidFeatureRequired``
+    instead of retrying (see ``_call_raw``). ``key=None`` reads
+    settings.json (``NoKey`` when absent), like every other call in
+    this module."""
+    resolved_model = model or model_for("image")
+    if image_path is not None:
+        image_path = Path(image_path)
+        mime = _mime_for(image_path, purpose="the reference image")
+        payload = _payload_reference_and_prompt(
+            image_path.read_bytes(), mime, prompt
+        )
+    else:
+        payload = _payload_text(prompt, None)
     payload["generationConfig"] = {"responseModalities": ["TEXT", "IMAGE"]}
-    data = _call_raw(model, payload, key or api_key(), log=log)
-    return _response_image(data, model)
+    data = _call_raw(resolved_model, payload, key or api_key(), log=log)
+    return _response_image(data, resolved_model)
 
 
 def edit_image(
@@ -467,19 +679,21 @@ def edit_image(
     prompt: str,
     *,
     key: str | None = None,
-    model: str = GEMINI_IMAGE_MODEL,
+    model: str | None = None,
     log=print,
 ) -> bytes:
     """One IMAGE EDIT call: reuses ``_payload_image`` (the source image
     as inline base64 + the edit instruction text) widened with the
-    same ``responseModalities`` as ``generate_image``. Returns the
-    decoded edited image BYTES."""
+    same ``responseModalities`` as ``generate_image``. ``model=None``
+    resolves via ``model_for("image")`` (F5). Returns the decoded
+    edited image BYTES."""
+    resolved_model = model or model_for("image")
     image_path = Path(image_path)
     mime = _mime_for(image_path, purpose="editing")
     payload = _payload_image(image_path.read_bytes(), mime, prompt)
     payload["generationConfig"] = {"responseModalities": ["TEXT", "IMAGE"]}
-    data = _call_raw(model, payload, key or api_key(), log=log)
-    return _response_image(data, model)
+    data = _call_raw(resolved_model, payload, key or api_key(), log=log)
+    return _response_image(data, resolved_model)
 
 
 # ---------------------------------------------------------------------
@@ -835,7 +1049,7 @@ def check_one_image(
     out_base: Path,
     instructions: str,
     *,
-    model: str = GEMINI_VISION_MODEL,
+    model: str | None = None,
     log=print,
     check=None,
 ) -> dict:
@@ -843,6 +1057,11 @@ def check_one_image(
     the pure core the GUI worker loops over (Rule #5, and offline-
     testable: ``check`` defaults to this module's ``check_image``, so a
     test injects a per-image mock).
+
+    ``model=None`` resolves via ``model_for("vision")`` (F5) BEFORE
+    the call, not left for ``check_image`` to default itself — the
+    RESOLVED name is what ``record_flag`` persists, so a flag entry
+    never stores the literal string "None".
 
     Times the call, parses the strict OK/DEFECTS answer, MERGES a flag
     (or CLEARS a fixed image's old flag) and returns the row the panel
@@ -856,6 +1075,7 @@ def check_one_image(
     answer when we got one (a parse failure) or the error text (a
     network/HTTP failure), so the viewer always shows what happened."""
     check = check or check_image
+    model = model or model_for("vision")
     key = flag_key(src, out_base)
     t0 = time.monotonic()
     raw: str | None = None

@@ -22,6 +22,7 @@ import queue
 import threading
 import tkinter as tk
 from functools import partial
+from pathlib import Path
 from tkinter import ttk
 from types import SimpleNamespace
 from typing import Callable
@@ -37,7 +38,6 @@ from painter.config import (
     BACKGROUND_CHOICES,
     FILTER_KIND_ASPECT_RANGE,
     FILTER_POLARITY_IF,
-    GEMINI_IMAGE_MODEL,
     JOBTEMP_KEEP_ALL_STEPS_DEFAULT,
     JOB_LABEL,
     JOB_LOGO,
@@ -240,6 +240,57 @@ class ApiImageGenPanel(ttk.Frame):
         self._probe_q: queue.Queue = queue.Queue()
         self._probe_poll_job: str | None = None
 
+        # --- MODEL PICKS: "Models…" discovery + per-purpose override --
+        # (F5, owner D1/D2/D4) — "Refresh models" mirrors the gating
+        # probe above (its own private queue+poll, same background-
+        # thread convention) and fills THREE capability-filtered
+        # dropdowns (image/vision/text — "vision"/"text" ride along so
+        # the SAME picker also configures the checker/sheet-generator,
+        # which share settings.json's one "models" override). Each
+        # combo PRESELECTS via ``CTkComboBox.set()`` — which does NOT
+        # fire ``command`` — so only a GENUINE user pick (the combo's
+        # own ``command=``, wired to ``_on_model_pick``) ever writes
+        # settings.json; merely displaying the current override or the
+        # ranked recommendation never does.
+        models_row = ttk.Frame(left)
+        models_row.pack(fill="x", pady=(4, 2))
+        self._models_btn = rounded_button(
+            models_row, "Refresh models", command=self._refresh_models,
+            kind="info",
+        )
+        self._models_btn.pack(side="left")
+        self._models_status_var = tk.StringVar(value="")
+        ttk.Label(
+            models_row, textvariable=self._models_status_var,
+            style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
+        ).pack(side="left", padx=(8, 0))
+        self._models_q: queue.Queue = queue.Queue()
+        self._models_poll_job: str | None = None
+        self._discovered_models: list[dict] = []  # cached for the session
+
+        picks_row = ttk.Frame(left)
+        picks_row.pack(fill="x", pady=2)
+        self.model_image_var = tk.StringVar(value="")
+        self.model_vision_var = tk.StringVar(value="")
+        self.model_text_var = tk.StringVar(value="")
+        self._model_vars = {
+            "image": self.model_image_var,
+            "vision": self.model_vision_var,
+            "text": self.model_text_var,
+        }
+        self._model_combos: dict[str, ctk.CTkComboBox] = {}
+        for purpose, label in (
+            ("image", "Image"), ("vision", "Vision"), ("text", "Text"),
+        ):
+            ttk.Label(picks_row, text=f"{label}:").pack(side="left")
+            combo = rounded_combo(
+                picks_row, (), self._model_vars[purpose], width=160,
+                state="disabled",
+                command=partial(self._on_model_pick, purpose),
+            )
+            combo.pack(side="left", padx=(2, 10))
+            self._model_combos[purpose] = combo
+
         # Force Aspect Ratio target — the SAME AspectRatioCanvas two-way
         # sync AgentPanel's own Force-Aspect block / AspectSettingsPanel
         # already use (Rule #5)
@@ -390,7 +441,11 @@ class ApiImageGenPanel(ttk.Frame):
         shown but leaves the gate exactly as it was — inconclusive, not
         proof either way. Mirrors ``AiKeyWizard._test``'s own worker
         (no ``log=`` override — the default ``print`` is enough for an
-        occasional manual probe, same precedent)."""
+        occasional manual probe, same precedent). No ``model=`` is
+        passed (F5): ``generate_image`` resolves it itself via
+        ``model_for("image")``, so the probe tests the SAME model
+        (override or fallback) an actual run would use, never a
+        hardcoded one."""
         self._gate_btn.configure(state="disabled")
         self._gate_var.set("Checking API access …")
 
@@ -398,9 +453,7 @@ class ApiImageGenPanel(ttk.Frame):
             from painter import ai
 
             try:
-                ai.generate_image(
-                    AI_IMAGE_PROBE_PROMPT, model=GEMINI_IMAGE_MODEL,
-                )
+                ai.generate_image(AI_IMAGE_PROBE_PROMPT)
             except ai.PaidFeatureRequired as exc:
                 self._probe_q.put(("gated", str(exc)))
             except ai.AiError as exc:
@@ -446,6 +499,107 @@ class ApiImageGenPanel(ttk.Frame):
         else:
             self._gate_var.set(f"Check inconclusive: {text}")
         self._refresh_start_state()
+
+    # --- Model discovery + per-purpose picks (F5, owner D1/D2) ---------
+
+    def _refresh_models(self) -> None:
+        """One ``ai.list_models`` call on a background thread — mirrors
+        ``_probe_access``'s own private queue+poll above (this panel is
+        a ``ttk.Frame``, not the ``_AiDialog`` Toplevel that owns ITS
+        poll loop)."""
+        self._models_btn.configure(state="disabled")
+        self._models_status_var.set("Discovering models …")
+
+        def work() -> None:
+            from painter import ai
+
+            try:
+                models = ai.list_models()
+            except ai.AiError as exc:
+                # a NoKey (or any other AiError) message IS the
+                # existing key-gate text (spec item 4) — shown
+                # verbatim, no separate copy to keep in sync
+                self._models_q.put(("error", str(exc)))
+            else:
+                self._models_q.put(("ok", models))
+
+        threading.Thread(target=work, daemon=True).start()
+        self._arm_models_poll()
+
+    def _arm_models_poll(self) -> None:
+        # same late-binding AI_POLL_MS read as _arm_probe_poll above
+        import gui
+        self._models_poll_job = self.after(gui.AI_POLL_MS, self._poll_models)
+
+    def _poll_models(self) -> None:
+        self._models_poll_job = None
+        if not self.winfo_exists():
+            return  # closed mid-discovery — the worker's message is moot
+        try:
+            msg = self._models_q.get_nowait()
+        except queue.Empty:
+            self._arm_models_poll()
+            return
+        self._apply_models_result(msg)
+
+    def _apply_models_result(self, msg: tuple) -> None:
+        self._models_btn.configure(state="normal")
+        kind, payload = msg
+        if kind == "error":
+            self._models_status_var.set(payload)
+            return
+        self._discovered_models = payload
+        self._models_status_var.set(f"{len(payload)} model(s) discovered.")
+        self._populate_model_dropdowns()
+
+    def _populate_model_dropdowns(self) -> None:
+        """Fill each purpose's dropdown with its CAPABLE discovered
+        models (``ai.capable_models``), preselected to the stored
+        override (else ``ai.recommend_model``'s ranked pick) via
+        ``combo.set()`` — the widget's OWN method, which edits the
+        entry directly and does NOT go through the bound variable's
+        ``command`` callback (see this class's own note on the row's
+        construction) — so populating the list never itself persists
+        anything."""
+        from painter import ai
+        from painter.config import MODELS_SETTING
+        from painter.settings import load_settings
+
+        overrides = load_settings().get(MODELS_SETTING) or {}
+        for purpose, combo in self._model_combos.items():
+            names = [
+                m["name"]
+                for m in ai.capable_models(self._discovered_models, purpose)
+            ]
+            combo.configure(
+                values=names, state="readonly" if names else "disabled",
+            )
+            override = str(overrides.get(purpose, "") or "").strip()
+            pick = (
+                override if override in names
+                else ai.recommend_model(self._discovered_models, purpose)
+            )
+            if pick:
+                combo.set(pick)
+
+    def _on_model_pick(self, purpose: str, choice: str) -> None:
+        """A GENUINE user selection (the combo's ``command=`` fires
+        only from a dropdown click, never from a programmatic
+        preselect — see ``_populate_model_dropdowns``): persist the
+        override IMMEDIATELY, like ``PainterGui.set_gemini_key`` (spec
+        item 4) — this panel has no debounced settings hook of its own
+        to route through (the generic ``get_settings``/
+        ``apply_settings`` round-trip only saves when the OWNER
+        explicitly triggers a save/close), and the model the NEXT
+        generation actually calls must reflect the pick right away."""
+        from painter.config import MODELS_SETTING
+        from painter.settings import load_settings, save_settings
+
+        settings = load_settings()
+        models = dict(settings.get(MODELS_SETTING) or {})
+        models[purpose] = choice
+        settings[MODELS_SETTING] = models
+        save_settings(settings)
 
     def _refresh_start_state(self) -> None:
         style_action_button(
@@ -550,11 +704,23 @@ class ApiImageAdapter:
     billing — so ``retry_after_s`` is always None: unlike a website
     quota with a known reset time, this job never schedules an
     auto-restart timer, exactly like a quota message that named no
-    parseable reset time."""
+    parseable reset time.
+
+    ``submit_with_image`` (F5, owner D3) is the API-mode counterpart
+    of ``driver.submit_with_image`` — an item carrying a "← ref" input
+    image (``sheet_parser``'s ``input_image`` field, resolved by
+    ``run_sheet``'s ``generate_one``) attaches it exactly like
+    ``submit_prompt`` remembers a plain prompt; the ACTUAL call still
+    happens in ``extract_image``, same submit-then-await-then-extract
+    shape. Closes the audited F5 gap: without this method, an API-mode
+    run through a sheet item carrying an input image called a method
+    the adapter did not have (``AttributeError`` — a crash-in-waiting,
+    never yet hit only because no such run had happened)."""
 
     def __init__(self, log: Callable[[str], None] = print):
         self._log = log
         self._prompt: str = ""
+        self._image_path: Path | None = None
         # run_sheet reads driver.site.name for the report header
         # (RunReport's constructor, only when report=True) — a tiny
         # stand-in, never a real SiteConfig (no DOM field on it is
@@ -569,6 +735,17 @@ class ApiImageAdapter:
 
     def submit_prompt(self, prompt: str) -> None:
         self._prompt = prompt
+        # a plain text submit never carries a stale attach forward —
+        # without this, a PREVIOUS item's submit_with_image would leak
+        # its image into the NEXT plain-text item's extract_image call
+        self._image_path = None
+
+    def submit_with_image(
+        self, image_path: str | Path, prompt: str,
+        log: Callable[[str], None] = print,
+    ) -> None:
+        self._prompt = prompt
+        self._image_path = Path(image_path)
 
     def await_done(self, log: Callable[[str], None] = print) -> None:
         pass
@@ -577,9 +754,10 @@ class ApiImageAdapter:
         from painter import ai
         from painter.driver import TerminalState
 
+        image_path, self._image_path = self._image_path, None  # clear-after-read
         try:
             return ai.generate_image(
-                self._prompt, model=GEMINI_IMAGE_MODEL, log=self._log,
+                self._prompt, image_path=image_path, log=self._log,
             )
         except ai.PaidFeatureRequired as exc:
             raise TerminalState(str(exc), retry_after_s=None) from exc

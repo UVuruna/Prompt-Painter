@@ -443,6 +443,45 @@ def test_response_image_raises_when_no_inlinedata_part(monkeypatch):
         ai.generate_image("p", key="k")
 
 
+# --- generate_image's optional reference image (F5, owner D3) ----------
+
+
+def test_generate_image_with_image_path_attaches_the_reference_before_the_prompt(
+    monkeypatch, tmp_path,
+):
+    ref = tmp_path / "photo.png"
+    ref.write_bytes(PNG_1PX)
+    requests = capture_call(monkeypatch, image_response(PNG_1PX))
+    result = ai.generate_image(
+        "put this figure into the scene", image_path=ref, key="k",
+    )
+    assert result == PNG_1PX
+    req = requests[0][0]
+    assert req.full_url == (
+        f"{GEMINI_API_BASE}/models/{GEMINI_IMAGE_MODEL}:generateContent"
+    )
+    body = json.loads(req.data)
+    parts = body["contents"][0]["parts"]
+    # the IMAGE comes FIRST, the prompt text SECOND — the opposite order
+    # of _payload_image (edit_image/check_image, text-first) — mirrors
+    # the website flow's own submit_with_image (attach before send)
+    inline = parts[0]["inlineData"]
+    assert inline["mimeType"] == "image/png"
+    assert base64.b64decode(inline["data"]) == PNG_1PX
+    assert parts[1]["text"] == "put this figure into the scene"
+    assert body["generationConfig"]["responseModalities"] == ["TEXT", "IMAGE"]
+
+
+def test_generate_image_without_image_path_stays_text_only(monkeypatch):
+    """No ``image_path`` -> the plain text-only payload, exactly as
+    before F5 (regression guard against the new parameter changing the
+    default path): exactly ONE part, no ``inlineData``."""
+    requests = capture_call(monkeypatch, image_response(PNG_1PX))
+    ai.generate_image("a stained-glass rondel", key="k")
+    parts = json.loads(requests[0][0].data)["contents"][0]["parts"]
+    assert parts == [{"text": "a stained-glass rondel"}]
+
+
 def test_paid_quota_429_raises_PaidFeatureRequired_immediately_without_retry(
     monkeypatch, backoff_sleeps
 ):
@@ -475,6 +514,206 @@ def test_transient_429_without_free_tier_zero_still_retries(
     assert result == PNG_1PX
     assert len(calls) == 2
     assert backoff_sleeps == [4.0]
+
+
+# --- model discovery + purpose-based recommendation (F5) ---------------
+
+
+def two_page_models_response() -> tuple[dict, dict]:
+    """Page 1 carries a ``nextPageToken``; page 2 does not — the shape
+    ``list_models`` must follow to the end and stop at."""
+    page1 = {
+        "models": [
+            {
+                "name": "models/gemini-2.5-flash-image",
+                "supportedGenerationMethods": ["generateContent"],
+                "displayName": "Gemini 2.5 Flash Image",
+            },
+            {
+                "name": "models/gemini-flash-latest",
+                "supportedGenerationMethods": ["generateContent"],
+                "displayName": "Gemini Flash",
+            },
+        ],
+        "nextPageToken": "PAGE2TOKEN",
+    }
+    page2 = {
+        "models": [
+            {
+                "name": "models/text-embedding-004",
+                "supportedGenerationMethods": ["embedContent"],
+                "displayName": "Embedding 004",
+            },
+        ],
+    }
+    return page1, page2
+
+
+def test_list_models_follows_the_next_page_token(monkeypatch):
+    page1, page2 = two_page_models_response()
+    calls = urlopen_sequence(monkeypatch, page1, page2)
+    models = ai.list_models(key="k")
+    assert len(calls) == 2
+    # page 1 has no pageToken; page 2's URL carries the one page 1 named
+    assert "pageToken" not in calls[0][0].full_url
+    assert "PAGE2TOKEN" in calls[1][0].full_url
+    # the "models/" prefix is stripped; methods/display carried through
+    assert models == [
+        {
+            "name": "gemini-2.5-flash-image",
+            "methods": ("generateContent",),
+            "display": "Gemini 2.5 Flash Image",
+        },
+        {
+            "name": "gemini-flash-latest",
+            "methods": ("generateContent",),
+            "display": "Gemini Flash",
+        },
+        {
+            "name": "text-embedding-004",
+            "methods": ("embedContent",),
+            "display": "Embedding 004",
+        },
+    ]
+    # the key rides in the SAME auth header as every other call
+    assert calls[0][0].get_header("X-goog-api-key") == "k"
+
+
+def test_list_models_without_key_raises_nokey_before_any_http(monkeypatch):
+    called = []
+    monkeypatch.setattr(ai, "_urlopen", lambda *a, **k: called.append(1))
+    with pytest.raises(ai.NoKey):
+        ai.list_models()
+    assert called == []
+
+
+def test_list_models_retries_transient_like_every_other_call(
+    monkeypatch, backoff_sleeps,
+):
+    calls = urlopen_sequence(
+        monkeypatch, http_error(503, "high demand"), {"models": []},
+    )
+    ai.list_models(key="k")
+    assert len(calls) == 2
+    assert len(backoff_sleeps) == 1
+
+
+CAPABLE_FIXTURE = [
+    {"name": "gemini-2.5-flash-image", "methods": ("generateContent",), "display": ""},
+    {"name": "gemini-3.1-flash-image", "methods": ("generateContent",), "display": ""},
+    {"name": "gemini-flash-latest", "methods": ("generateContent",), "display": ""},
+    {"name": "gemini-3.1-pro", "methods": ("generateContent",), "display": ""},
+    {"name": "text-embedding-004", "methods": ("embedContent",), "display": ""},
+    {"name": "gemini-tts-preview", "methods": ("generateContent",), "display": ""},
+]
+
+
+def test_capable_models_filters_image_purpose_by_name_or_method():
+    capable = ai.capable_models(CAPABLE_FIXTURE, "image")
+    assert {m["name"] for m in capable} == {
+        "gemini-2.5-flash-image", "gemini-3.1-flash-image",
+    }
+    # a model whose METHOD (not name) names image output also counts
+    method_only = [
+        {"name": "some-model", "methods": ("generateImage",), "display": ""},
+    ]
+    assert ai.capable_models(method_only, "image") == method_only
+
+
+def test_capable_models_filters_vision_and_text_purposes_identically():
+    for purpose in ("vision", "text"):
+        capable = ai.capable_models(CAPABLE_FIXTURE, purpose)
+        names = {m["name"] for m in capable}
+        # excludes image-generation, embedding AND tts-named models
+        assert names == {"gemini-flash-latest", "gemini-3.1-pro"}
+
+
+def test_capable_models_unknown_purpose_is_loud():
+    with pytest.raises(ValueError, match="unknown model purpose"):
+        ai.capable_models(CAPABLE_FIXTURE, "audio")
+
+
+def test_recommend_model_picks_the_best_ranked_capable_model():
+    # image: "gemini-3.1-flash-image" outranks "gemini-2.5-flash-image"
+    # in MODEL_PURPOSE_RANKING (best-first)
+    assert ai.recommend_model(CAPABLE_FIXTURE, "image") == "gemini-3.1-flash-image"
+    # vision: "gemini-3.1-pro" outranks "gemini-flash-latest"
+    assert ai.recommend_model(CAPABLE_FIXTURE, "vision") == "gemini-3.1-pro"
+    assert ai.recommend_model(CAPABLE_FIXTURE, "text") == "gemini-3.1-pro"
+
+
+def test_recommend_model_falls_back_to_newest_by_name_when_ranking_matches_nothing():
+    unranked = [
+        {"name": "zz-future-model", "methods": ("generateContent",), "display": ""},
+        {"name": "aa-older-model", "methods": ("generateContent",), "display": ""},
+    ]
+    # neither name matches any MODEL_PURPOSE_RANKING["text"] substring —
+    # falls back to the NEWEST by name, sorted descending
+    assert ai.recommend_model(unranked, "text") == "zz-future-model"
+
+
+def test_recommend_model_none_when_nothing_is_capable():
+    only_embeddings = [
+        {"name": "text-embedding-004", "methods": ("embedContent",), "display": ""},
+    ]
+    assert ai.recommend_model(only_embeddings, "image") is None
+    assert ai.recommend_model(only_embeddings, "vision") is None
+    assert ai.recommend_model([], "text") is None
+
+
+def test_model_for_falls_back_to_the_hardcoded_constant_when_no_override(
+    monkeypatch,
+):
+    monkeypatch.setattr(ai, "load_settings", lambda: {})
+    assert ai.model_for("image") == GEMINI_IMAGE_MODEL
+    assert ai.model_for("vision") == GEMINI_VISION_MODEL
+    assert ai.model_for("text") == GEMINI_TEXT_MODEL
+
+
+def test_model_for_reads_the_stored_override(monkeypatch):
+    from painter.config import MODELS_SETTING
+
+    monkeypatch.setattr(
+        ai, "load_settings",
+        lambda: {MODELS_SETTING: {"image": "gemini-3.1-flash-image"}},
+    )
+    assert ai.model_for("image") == "gemini-3.1-flash-image"
+    # a purpose with NO stored override still falls back
+    assert ai.model_for("vision") == GEMINI_VISION_MODEL
+
+
+def test_model_for_blank_override_falls_back_like_a_missing_one(monkeypatch):
+    from painter.config import MODELS_SETTING
+
+    monkeypatch.setattr(
+        ai, "load_settings",
+        lambda: {MODELS_SETTING: {"text": "   "}},
+    )
+    assert ai.model_for("text") == GEMINI_TEXT_MODEL
+
+
+def test_model_for_unknown_purpose_is_loud(monkeypatch):
+    monkeypatch.setattr(ai, "load_settings", lambda: {})
+    with pytest.raises(ValueError, match="unknown model purpose"):
+        ai.model_for("audio")
+
+
+def test_generate_text_routes_the_default_model_through_model_for(monkeypatch):
+    """A caller that never passes ``model=`` gets settings.json's
+    override when one is stored — proving the internal call sites
+    really route through ``model_for`` (Rule #6), not just the
+    function existing in isolation."""
+    from painter.config import MODELS_SETTING
+
+    monkeypatch.setattr(
+        ai, "load_settings",
+        lambda: {MODELS_SETTING: {"text": "gemini-3.1-pro"}},
+    )
+    requests = capture_call(monkeypatch, text_response("hi"))
+    ai.generate_text("p", key="k")
+    assert requests[0][0].full_url == (
+        f"{GEMINI_API_BASE}/models/gemini-3.1-pro:generateContent"
+    )
 
 
 # --- the sheet-generator flow ------------------------------------------

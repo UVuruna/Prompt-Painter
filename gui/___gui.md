@@ -130,9 +130,14 @@ fine-tune, and its own Start/Pause/Stop. See
 ### `api_panel.py` — API Panel
 `ApiImageGenPanel` (the paid Gemini image-API job's settings panel —
 mirrors `AgentPanel` since its input is the shared queued Collections
-list, not a folder of images) and `ApiImageAdapter` (a `SiteDriver`-
-shaped stand-in so that job reuses `_drive_site`/`run_sheet`
-unchanged). See [API Panel](api_panel.md).
+list, not a folder of images; F5 adds a "Models…" row — a `Refresh
+models` probe filling three CAPABLE-only image/vision/text dropdowns,
+preselected to the stored override or the ranked recommendation, a
+genuine pick persisted to `settings.json` immediately) and
+`ApiImageAdapter` (a `SiteDriver`-shaped stand-in so that job reuses
+`_drive_site`/`run_sheet` unchanged; F5 adds `submit_with_image`,
+closing the gap where a sheet item carrying a "← ref" input image had
+no method to call in API mode). See [API Panel](api_panel.md).
 
 ### `tool_panels.py` — Standalone-Tool Settings Panels
 `ToolSettingsPanel` (the shared base: input picker, embedded

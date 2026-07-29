@@ -298,6 +298,37 @@ GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
 GEMINI_KEY_SETTING = "gemini_api_key"     # the settings.json key name
 # where the wizard's step-1 button sends the browser (the key page)
 AI_STUDIO_URL = "https://aistudio.google.com/apikey"
+
+# --- Model discovery + purpose-based recommendation (F5, owner 2026-07-29) --
+#
+# ai.list_models() calls the ListModels endpoint; ai.recommend_model()
+# and ai.model_for() pick the best CAPABLE model per PURPOSE ("image"
+# generation / "vision" checking / "text" sheet generation) instead of
+# one model for every job (owner D2: "best model za posao, ne jedan za
+# sve"). settings.json's "models" key ({"image": ..., "vision": ...,
+# "text": ...}) is the per-purpose OVERRIDE the owner sets from the
+# "Models…" picker (gui/api_panel.py); the three GEMINI_*_MODEL
+# constants above are now FALLBACKS ONLY, read when no override is
+# stored (see ai.model_for).
+MODELS_SETTING = "models"
+
+# Ordered substrings per purpose, BEST first — ai.recommend_model()
+# walks this AFTER filtering to CAPABLE models (ai.capable_models) and
+# returns the first name containing a substring. Google's model
+# lineup ROTATES with new releases exactly like GEMINI_IMAGE_MODEL/
+# GEMINI_TEXT_MODEL/GEMINI_VISION_MODEL above — this table is DATA the
+# owner retunes as new models land, never hardcoded logic. When NONE
+# of a purpose's substrings match anything CAPABLE in the fetched
+# list, recommend_model() falls back to the NEWEST model by NAME
+# (sorted descending) — an honest, logged-as-such proxy for "most
+# recent", never a guess at a specific unlisted name.
+MODEL_PURPOSE_RANKING: dict[str, tuple[str, ...]] = {
+    "image": ("gemini-3.1-flash-image", "gemini-2.5-flash-image", "image"),
+    "vision": (
+        "gemini-3.1-pro", "gemini-3.1-flash", "gemini-flash-latest", "flash",
+    ),
+    "text": ("gemini-3.1-pro", "gemini-flash-latest", "flash"),
+}
 # free-tier pacing: the flash free tier allows ~10 requests/minute, so
 # consecutive calls keep at least this many seconds apart (6.0 would sit
 # exactly on the limit; 6.5 leaves headroom for clock skew)

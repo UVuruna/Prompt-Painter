@@ -58,7 +58,7 @@ from painter.config import (
     AI_IMAGE_GATE_MESSAGE,
     FILTER_KIND_ASPECT_RANGE,
     FILTER_POLARITY_IF,
-    GEMINI_IMAGE_MODEL,
+    MODELS_SETTING,
     TIMING,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
@@ -132,8 +132,9 @@ def test_site_name_is_set_for_the_run_reports_header():
 def test_extract_image_calls_generate_image_with_the_stored_prompt(monkeypatch):
     captured = {}
 
-    def fake_generate_image(prompt, *, key=None, model=None, log=print):
+    def fake_generate_image(prompt, *, image_path=None, key=None, model=None, log=print):
         captured["prompt"] = prompt
+        captured["image_path"] = image_path
         captured["model"] = model
         return PNG_1PX
 
@@ -143,11 +144,15 @@ def test_extract_image_calls_generate_image_with_the_stored_prompt(monkeypatch):
     result = adapter.extract_image()
     assert result == PNG_1PX
     assert captured["prompt"] == "a badge of glory"
-    assert captured["model"] == GEMINI_IMAGE_MODEL
+    assert captured["image_path"] is None  # a plain submit carries no attach
+    # F5: the adapter no longer force-passes a model — generate_image
+    # resolves it itself via model_for("image") (see test_ai.py's own
+    # model_for tests), so the fake sees exactly what was passed: None
+    assert captured["model"] is None
 
 
 def test_extract_image_maps_paid_feature_required_to_terminal_state(monkeypatch):
-    def fake_generate_image(prompt, *, key=None, model=None, log=print):
+    def fake_generate_image(prompt, *, image_path=None, key=None, model=None, log=print):
         raise ai_module.PaidFeatureRequired("gemini-2.5-flash-image: paid feature required")
 
     monkeypatch.setattr(ai_module, "generate_image", fake_generate_image)
@@ -166,13 +171,72 @@ def test_extract_image_lets_other_ai_errors_propagate_unmapped(monkeypatch):
     wording) — a plain AiError (e.g. a malformed response) is NOT
     silently turned into a TerminalState; it propagates as-is so
     _drive_site's generic catch-all reports it loudly (Rule #1)."""
-    def fake_generate_image(prompt, *, key=None, model=None, log=print):
+    def fake_generate_image(prompt, *, image_path=None, key=None, model=None, log=print):
         raise ai_module.AiError("some other failure")
 
     monkeypatch.setattr(ai_module, "generate_image", fake_generate_image)
     adapter = gui.ApiImageAdapter()
     with pytest.raises(ai_module.AiError):
         adapter.extract_image()
+
+
+# --- submit_with_image (F5, owner D3 — the audited image-attach gap) ---
+
+
+def test_submit_with_image_stores_both_prompt_and_path(tmp_path):
+    ref = tmp_path / "photo.png"
+    ref.write_bytes(PNG_1PX)
+    adapter = gui.ApiImageAdapter()
+    adapter.submit_with_image(ref, "put this figure into the scene")
+    assert adapter._prompt == "put this figure into the scene"
+    assert adapter._image_path == ref
+
+
+def test_extract_image_passes_the_stored_image_path_and_clears_it(
+    monkeypatch, tmp_path,
+):
+    ref = tmp_path / "photo.png"
+    ref.write_bytes(PNG_1PX)
+    captured = []
+
+    def fake_generate_image(prompt, *, image_path=None, key=None, model=None, log=print):
+        captured.append((prompt, image_path))
+        return PNG_1PX
+
+    monkeypatch.setattr(ai_module, "generate_image", fake_generate_image)
+    adapter = gui.ApiImageAdapter()
+    adapter.submit_with_image(ref, "put this figure into the scene")
+    result = adapter.extract_image()
+    assert result == PNG_1PX
+    assert captured == [("put this figure into the scene", ref)]
+    # cleared after the read — a FOLLOW-UP plain submit_prompt/extract
+    # never leaks the same attach into an unrelated later item
+    assert adapter._image_path is None
+    captured.clear()
+    adapter.submit_prompt("a different, plain item")
+    adapter.extract_image()
+    assert captured == [("a different, plain item", None)]
+
+
+def test_submit_prompt_clears_a_previous_attach(monkeypatch, tmp_path):
+    """A driver-shaped adapter is reused across MANY items in one run
+    (run_sheet's queue loop) — without clearing, a PREVIOUS item's
+    submit_with_image would leak its reference image into the NEXT
+    plain-text item's extract_image call."""
+    ref = tmp_path / "photo.png"
+    ref.write_bytes(PNG_1PX)
+    captured = []
+
+    def fake_generate_image(prompt, *, image_path=None, key=None, model=None, log=print):
+        captured.append(image_path)
+        return PNG_1PX
+
+    monkeypatch.setattr(ai_module, "generate_image", fake_generate_image)
+    adapter = gui.ApiImageAdapter()
+    adapter.submit_with_image(ref, "with a reference")
+    adapter.submit_prompt("plain, no reference")
+    adapter.extract_image()
+    assert captured == [None]
 
 
 # ---------------------------------------------------------------------
@@ -503,6 +567,162 @@ def test_probe_access_other_ai_error_is_shown_but_leaves_the_gate_unchanged(
     assert panel.access_gated is False
     assert "inconclusive" in panel._gate_var.get().lower()
     assert panel.btn_start.cget("state") == "normal"
+
+
+# ---------------------------------------------------------------------
+# "Models…" discovery + per-purpose picks (F5, owner D1/D2/D4)
+# ---------------------------------------------------------------------
+
+FAKE_DISCOVERED_MODELS = [
+    {
+        "name": "gemini-2.5-flash-image", "methods": ("generateContent",),
+        "display": "Flash Image",
+    },
+    {
+        "name": "gemini-flash-latest", "methods": ("generateContent",),
+        "display": "Flash",
+    },
+    {
+        "name": "gemini-3.1-pro", "methods": ("generateContent",),
+        "display": "Pro",
+    },
+    {
+        "name": "text-embedding-004", "methods": ("embedContent",),
+        "display": "Embedding",
+    },
+]
+
+
+def _run_refresh_models_synchronously(monkeypatch, panel) -> None:
+    """Same convention as ``_run_probe_synchronously`` above: the
+    worker thread runs immediately and its ONE queued result is
+    applied directly, bypassing Tk's event loop for a fast,
+    deterministic test."""
+    monkeypatch.setattr(gui.threading, "Thread", _ImmediateThread)
+    panel._refresh_models()
+    msg = panel._models_q.get_nowait()
+    panel._apply_models_result(msg)
+
+
+def test_refresh_models_populates_capable_dropdowns_ranked_by_purpose(
+    root, monkeypatch,
+):
+    from painter import settings as settings_module
+
+    monkeypatch.setattr(ai_module, "list_models", lambda **k: FAKE_DISCOVERED_MODELS)
+    monkeypatch.setattr(settings_module, "load_settings", lambda: {})
+    panel = make_panel(root)
+
+    _run_refresh_models_synchronously(monkeypatch, panel)
+
+    assert panel._discovered_models == FAKE_DISCOVERED_MODELS
+    # "image": only the image-named model is CAPABLE
+    assert panel._model_combos["image"].cget("values") == [
+        "gemini-2.5-flash-image"
+    ]
+    assert panel.model_image_var.get() == "gemini-2.5-flash-image"
+    # "vision"/"text": every generateContent model EXCEPT the
+    # image-generation and embedding ones
+    assert set(panel._model_combos["vision"].cget("values")) == {
+        "gemini-flash-latest", "gemini-3.1-pro",
+    }
+    # both purposes' ranking puts "gemini-3.1-pro" first among the
+    # capable set (MODEL_PURPOSE_RANKING)
+    assert panel.model_vision_var.get() == "gemini-3.1-pro"
+    assert panel.model_text_var.get() == "gemini-3.1-pro"
+
+
+def test_refresh_models_preselects_the_stored_override_over_the_recommendation(
+    root, monkeypatch,
+):
+    from painter import settings as settings_module
+
+    monkeypatch.setattr(ai_module, "list_models", lambda **k: FAKE_DISCOVERED_MODELS)
+    monkeypatch.setattr(
+        settings_module, "load_settings",
+        lambda: {MODELS_SETTING: {"vision": "gemini-flash-latest"}},
+    )
+    panel = make_panel(root)
+
+    _run_refresh_models_synchronously(monkeypatch, panel)
+
+    assert panel.model_vision_var.get() == "gemini-flash-latest"    # the override
+    assert panel.model_image_var.get() == "gemini-2.5-flash-image"  # unaffected
+
+
+def test_refresh_models_nokey_shows_the_key_gate_message(root, monkeypatch):
+    """A NoKey (or any AiError) surfaces its OWN message verbatim —
+    NoKey's text already IS the key-gate pattern used elsewhere (spec
+    item 4), so there is no separate copy to keep in sync."""
+    def boom(**k):
+        raise ai_module.NoKey(
+            "no Gemini API key in settings.json — run the 'AI key…' wizard"
+        )
+
+    monkeypatch.setattr(ai_module, "list_models", boom)
+    panel = make_panel(root)
+
+    _run_refresh_models_synchronously(monkeypatch, panel)
+
+    assert "no Gemini API key" in panel._models_status_var.get()
+    assert panel._discovered_models == []
+
+
+def test_on_model_pick_writes_settings_immediately(root, monkeypatch):
+    from painter import settings as settings_module
+
+    saved: dict = {}
+    monkeypatch.setattr(settings_module, "load_settings", lambda: {})
+    monkeypatch.setattr(
+        settings_module, "save_settings", lambda d: saved.update(d),
+    )
+    panel = make_panel(root)
+
+    panel._on_model_pick("image", "gemini-3.1-flash-image")
+
+    assert saved[MODELS_SETTING] == {"image": "gemini-3.1-flash-image"}
+
+
+def test_on_model_pick_merges_with_existing_overrides(root, monkeypatch):
+    from painter import settings as settings_module
+
+    monkeypatch.setattr(
+        settings_module, "load_settings",
+        lambda: {MODELS_SETTING: {"text": "gemini-flash-latest"}},
+    )
+    saved: dict = {}
+    monkeypatch.setattr(
+        settings_module, "save_settings", lambda d: saved.update(d),
+    )
+    panel = make_panel(root)
+
+    panel._on_model_pick("image", "gemini-2.5-flash-image")
+
+    assert saved[MODELS_SETTING] == {
+        "text": "gemini-flash-latest", "image": "gemini-2.5-flash-image",
+    }
+
+
+def test_populating_the_dropdown_via_refresh_never_writes_settings(
+    root, monkeypatch,
+):
+    """``combo.set()`` (the preselect) must NOT go through
+    ``_on_model_pick`` — only a GENUINE dropdown click (the combo's own
+    ``command=``) may persist an override; merely displaying the
+    current override/recommendation must never write."""
+    from painter import settings as settings_module
+
+    monkeypatch.setattr(ai_module, "list_models", lambda **k: FAKE_DISCOVERED_MODELS)
+    monkeypatch.setattr(settings_module, "load_settings", lambda: {})
+    save_calls: list = []
+    monkeypatch.setattr(
+        settings_module, "save_settings", lambda d: save_calls.append(d),
+    )
+    panel = make_panel(root)
+
+    _run_refresh_models_synchronously(monkeypatch, panel)
+
+    assert save_calls == []
 
 
 # ---------------------------------------------------------------------

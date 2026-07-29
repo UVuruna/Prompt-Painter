@@ -11,9 +11,15 @@ folder…/Remove/Clear — `_queue_sheets`/`_add_sheets`/
 `_add_sheets_folder`/`_remove_sheet`/`_clear_sheets`), the sheet
 parsing/planning helpers shared by the site jobs (`_parse_all`/
 `_out_base`/`_done_on_disk`/`_plan`), the dashboard row "Show" viewers
-(`_show_node`/`_show_folder_excerpt`), the top-strip PREREQUISITE
-button handlers (`_open_chrome`/`_check_sheets`/`_select_images`/
-`_open_instructions`/`_new_collection_ai`/`_open_key_wizard`), the AI
+(`_show_node` — F4h-guarded: a viewer failure logs its full traceback
+and shows a dialog instead of killing the app; an IMAGE row opens the
+F4f `ImageViewer` with prev/next over the whole collection, the
+collection/folder levels keep `DocWindow`; `_show_folder_excerpt`),
+the top-strip PREREQUISITE
+button handlers (`_check_sheets`/`_select_images` — F4d: passes the
+ticked sites only/`_open_instructions`/`_new_collection_ai`/
+`_open_key_wizard`; `_open_chrome` was RETIRED in F4g — Chrome is
+ensured automatically at Start), the AI
 features' key gate (`gemini_key`/`set_gemini_key`/`_ensure_ai_key`/
 `add_generated_sheet`) and the whole settings round-trip
 (`_collect_settings`/`_apply_settings`/the two one-time settings
