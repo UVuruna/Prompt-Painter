@@ -151,7 +151,7 @@ run is the other. Pinned by
 - [Postprocess](postprocess.md) — uses the internals (`plan`,
   `apply_plan`, `parse_hex_color`, `content_bbox`, `clean_edge_halo`)
   for its two split, composable steps
-- [Standalone-Tool Settings Panels](../gui/tool_panels.md) —
+- [BG Settings Panel](../gui/tool_panels/bg.md) —
   `BgSettingsPanel` calls `parse_hex_color` to validate the typed
   colour at Start and to drive the live swatch
 - The owner, standalone:
