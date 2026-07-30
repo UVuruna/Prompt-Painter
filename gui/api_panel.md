@@ -48,7 +48,7 @@ website quota with a known reset time).
 - [Themed Widget Toolkit](widgets.md) — `Spinner`,
   `rounded_button`/`rounded_combo`/`rounded_entry`/`rounded_switch`,
   `style_action_button`, `tk_font`
-- [Standalone-Tool Settings Panels](tool_panels.md) —
+- [Layout Constants](tool_panels/layout.md) —
   `DENSE_COL_GAP_PX`/`DENSE_COL_WRAP_PX`/`ASPECT_DIALOG_ENTRY_W` (the
   two-column-dense layout constants every control-panel family
   shares — imported from THERE, not `gui/__init__.py`)

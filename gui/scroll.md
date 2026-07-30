@@ -50,7 +50,7 @@ refactor, step 2/8).
   `SelectWindow`'s tree
 - [Agent Panel](agent_panel.md) — `AgentPanel`'s `on_layout_change`
   calls `refresh()` after the Settings-gear reveal
-- [Tool Panels](tool_panels.md) — `ToolSettingsPanel`'s
+- [Base Tool Settings Panel](tool_panels/base.md) — `ToolSettingsPanel`'s
   `on_layout_change` calls `refresh()` after the Advanced-section reveal
 
 ## Design Decisions

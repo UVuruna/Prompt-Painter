@@ -67,7 +67,7 @@ duplicated, Rule #5).
   as `gui/theme.py`'s own read, see [GUI (folder)](___gui.md))
 - [Tool + AI-Checker Dashboard Panels + Grid](tool_dash.md) —
   `AiCheckPanel`, `DashGrid`, `ToolPanel`
-- [Standalone-Tool Settings Panels](tool_panels.md) — the base +
+- [Tool Panels (subfolder)](tool_panels/___tool_panels.md) — the base +
   five concrete panels
 - [The Theme Engine](theme.md) — `apply_theme`, `register_painter_day`,
   `skin_listbox`, `skin_text` (NOT `smooth_transition` — removed

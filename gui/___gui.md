@@ -182,7 +182,7 @@ constants every control-panel family (this one, `AgentPanel`,
 (`sheets_path()`) — a prompt-sheet `.md` file or a folder of them —
 that `PainterGui._run_ai_check_job` uses to pair each checked image
 with its own sheet prompt. See
-[Standalone-Tool Settings Panels](tool_panels.md).
+[Tool Panels (subfolder)](tool_panels/___tool_panels.md).
 
 ### `widgets.py` — Themed Widget Toolkit
 Status/job-colour lookups (`status`, `job_color`), the font-zoom
