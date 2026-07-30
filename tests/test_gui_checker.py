@@ -190,15 +190,19 @@ def test_apply_settings_missing_checker_prompt_key_keeps_the_default(root):
 
 
 def test_checker_prompt_subblock_visible_only_while_checker_is_on(root):
-    """Mirrors the Fixer-AI sub-block's own visibility contract
-    (_apply_fixer_visibility) — _checker_box shows/hides on checker_var,
-    independent of the Settings-gear collapse state."""
+    """UI-SKETCH (owner 2026-07-29): the prompt-match toggle (and the
+    Fixer AI beside it) live in the AI-checker switch's OWN expander,
+    so they are reachable only while the checker itself is on —
+    turning it ON auto-expands, turning it OFF hides the sub-panel
+    again. Checked via winfo_manager() (empty = pack_forget'd) rather
+    than winfo_ismapped(), since the shared tk_root is withdrawn."""
     panel = make_panel(root)
-    assert not panel._checker_box.winfo_manager()  # checker OFF by default
+    sub = panel._sw_checker.sub
+    assert not sub.winfo_manager()  # checker OFF by default
     panel.checker_var.set(True)
-    assert panel._checker_box.winfo_manager() == "pack"
+    assert sub.winfo_manager() == "pack"
     panel.checker_var.set(False)
-    assert not panel._checker_box.winfo_manager()
+    assert not sub.winfo_manager()
 
 
 # ---------------------------------------------------------------------

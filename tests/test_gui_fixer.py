@@ -11,10 +11,10 @@ wiring gets a screenshot" split:
 
 * ``ai.build_fix_prompt`` — covered in test_ai.py, not repeated here.
 * ``AgentPanel``'s new ``fixer_var``/``fixer_mode_var`` — defaults,
-  persistence round-trip, and visibility TIED to ``checker_var``
-  (``_apply_fixer_visibility``'s pack state), the same "hidden until
-  its own gate switch is on" contract the Upscale gate sub-block
-  already established.
+  persistence round-trip, and visibility TIED to ``checker_var`` (the
+  AI-checker ``ExpandableSwitch``'s own sub-panel pack state), the
+  same "hidden until its own gate switch is on" contract the Upscale
+  gate sub-block already established.
 * ``gui._fixer_decision`` — the auto-dispatch's pure branch table
   (fixer off; not flagged; empty defects; api mode; website mode),
   headless, no Tk.
@@ -152,22 +152,26 @@ def test_apply_settings_missing_fixer_keys_keep_the_defaults(root):
 
 
 def test_fixer_box_hidden_until_checker_is_on(root):
-    """_apply_fixer_visibility mirrors _apply_upscale_gate_visibility
-    exactly: the sub-block is packed only while checker_var is True,
-    independently of the Settings gear's own collapse state. Checked
-    via winfo_manager() (empty = unmanaged/pack_forget'd, "pack" = under
-    pack management) rather than winfo_ismapped() — the shared tk_root
-    fixture is withdrawn, so nothing in this panel's ancestor chain is
-    ever actually mapped on screen, which winfo_ismapped() requires."""
+    """UI-SKETCH (owner 2026-07-29): the Fixer-AI switch + its api/
+    website mode live INSIDE the AI-checker switch's own expander
+    (``_build_checker_sub``), so the whole block is reachable only
+    while ``checker_var`` is on — the same "hidden until its own gate
+    switch is on" contract the retired ``_fixer_box`` used to carry,
+    now expressed by the shared ``ExpandableSwitch`` primitive.
+    Checked via winfo_manager() (empty = unmanaged/pack_forget'd,
+    "pack" = under pack management) rather than winfo_ismapped() — the
+    shared tk_root fixture is withdrawn, so nothing in this panel's
+    ancestor chain is ever actually mapped on screen, which
+    winfo_ismapped() requires."""
     panel = make_panel(root)
     assert panel.checker_var.get() is False
-    assert panel._fixer_box.winfo_manager() == ""
+    assert panel._sw_checker.sub.winfo_manager() == ""
 
     panel.checker_var.set(True)
-    assert panel._fixer_box.winfo_manager() == "pack"
+    assert panel._sw_checker.sub.winfo_manager() == "pack"
 
     panel.checker_var.set(False)
-    assert panel._fixer_box.winfo_manager() == ""
+    assert panel._sw_checker.sub.winfo_manager() == ""
 
 
 # ---------------------------------------------------------------------

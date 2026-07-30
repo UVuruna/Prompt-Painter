@@ -380,13 +380,15 @@ tile-id/slot bridge for real (the pre-Phase-15 stub that called a fake
 `_start_ai_check()` directly on a tile click is deleted along with the
 production behaviour it stood in for).
 
-### `test_gui_agent_visibility.py` — Per-Site Show/Hide + Upscale-Gate Visibility
-GUI rework Phase 12. `gui._visible_agent_columns(order, visible)` is the
-pure, Tk-free column resolver behind `PainterGui._relayout_agents`: both
-visible keep their order, hiding either one leaves the survivor
-compacted into column 0 (never stuck in column 1 with a dead gap
-beside it), both hidden is a legal empty result, and a missing key
-defaults visible (matches everything). `AgentPanel`'s new
+### `test_gui_agent_visibility.py` — Per-Site Show/Hide + the Fine-Tune Expanders
+GUI rework Phase 12 + the UI-SKETCH rework (owner 2026-07-29).
+`gui._visible_agent_slots(order, visible)` is the pure, Tk-free slot
+resolver behind `PainterGui._relayout_agents`: both visible keep their
+order, hiding either one leaves the survivor compacted into slot 0
+(never stranded in slot 1 with a dead gap beside it), both hidden is a
+legal empty result, and a missing key defaults visible (matches
+everything). A slot is a ROW since the sketch's left-settings/
+right-input split. `AgentPanel`'s new
 `visible_var`/`build_visibility_toggle`/`set_run_state` get a real
 (withdrawn) Tk root (the SAME `make_panel` convention
 test_gui_upscale.py/test_gui_pipeline.py already established): the var
@@ -401,19 +403,45 @@ panel's `visible_var` back to True and calls `on_log` exactly once on
 the False→True transition (never on an already-visible run, never
 without `on_log` passed — defaults to a harmless no-op, so every OTHER
 test file's own headless `make_panel` stays unaffected). The
-Upscale-gate sub-block (`_upscale_gate_box`, Phase 6's min-side
-Spinner + `FilterEditor`) is proven to track `upscale_var` live via its
-`winfo_manager()` (packed/`""`) independently of
-`settings_collapsed_var` — a settings-restore `.set()` fires the same
-trace as an interactive click. `PainterGui._relayout_agents` itself
-runs unbound against a small duck-typed `FakeGui` carrying REAL
-`AgentPanel`/`ttk.Frame` widgets in the SAME two-container shape
-production uses (a grid-managed `_agents_frame` and a pack-managed
-compact strip — Tk refuses to mix managers on one parent): both
-visible grids/packs both, hiding either removes ONLY that one (panel
-AND its collapsed-strip cluster) and leaves the survivor's column
-untouched or compacted to 0 as appropriate, and re-showing restores
-both original columns.
+retired Settings gear is proven GONE (no `settings_collapsed_var`, no
+`_toggle_settings`, no `_finetune_box`, no `settings_collapsed` in
+`_PERSIST` — Rule #6 leaves no stump), and the WIRING of the
+per-switch expanders is pinned here (the primitive's own mechanics
+live in test_gui_widgets.py): BG removal / Force aspect ratio /
+Upscale / AI checker each own their sub-panel and the switch-less
+Pacing section exists, all start collapsed, an eager sub-panel's state
+(`upscale_params()`, `force_aspect_ratio()`) works before the first
+expand, an OFF→ON click auto-expands, OFF hides, and `apply_settings`
+never auto-expands a restored-ON switch (the live-window defect:
+without `quiet_restore` the app opened with every ON switch unfolded).
+`on_layout_change` fires once per toggle AFTER the pack/forget, for
+both the switch and the Pacing section, and defaults to a harmless
+no-op. `PainterGui._relayout_agents` itself runs unbound against a
+small duck-typed `FakeGui` carrying REAL `AgentPanel`/`ttk.Frame`
+widgets in the SAME two-container shape production uses (a
+grid-managed `_agents_frame` and a pack-managed compact strip — Tk
+refuses to mix managers on one parent): both visible grids/packs both,
+hiding either removes ONLY that one (panel AND its collapsed-strip
+cluster) and leaves the survivor's row untouched or compacted to 0 as
+appropriate, and re-showing both re-enters the F4c shared editor.
+
+### `test_gui_widgets.py` — ExpandableSwitch / ExpandableSection / quiet_restore
+The UI-SKETCH primitives in `gui/widgets.py` (owner 2026-07-29) — the
+only widgets in that file with behaviour of their own (the rest are
+colour/geometry factories, screenshot-verified). `ExpandableSwitch`:
+an OFF switch has no sub-panel and no caret; an already-ON one starts
+COLLAPSED (a restored setting must open compact); a live OFF→ON
+auto-expands ONCE; the caret folds/unfolds without touching the
+switch; OFF hides the sub-panel and the caret; expanding while OFF is
+refused; a redundant expand is a no-op (no second `on_layout_change`),
+as is turning an already-collapsed switch off; `build_sub=None` is a
+plain switch; the sub-panel builds LAZILY on the first expand, or at
+construction with `eager=True` and is never rebuilt.
+`ExpandableSection` (the switch-less Pacing row) toggles both ways,
+swaps its ▸/▾ head text and reports each change. `quiet_restore` keeps
+a restored-ON switch folded, still hides a sub-panel whose switch is
+restored OFF, releases after the block — and releases even when the
+block raises.
 
 ### `test_gui_tool_panels.py` — Standalone-Tool Settings Panels + Stop
 GUI rework Phase 13 (`BgSettingsPanel`/`CropSettingsPanel`) through

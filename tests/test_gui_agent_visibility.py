@@ -5,12 +5,14 @@ Upscale se pali samo ako je UPSCALE stikliran"). Three halves, matching
 gui.py's own "pure helpers get pytest, real Tk/UI wiring gets a
 screenshot" split (___tests.md):
 
-* ``gui._visible_agent_columns`` is the pure, Tk-free column resolver
+* ``gui._visible_agent_slots`` is the pure, Tk-free slot (row) resolver
   behind ``PainterGui._relayout_agents`` — no widget construction at
   all.
-* ``AgentPanel``'s new ``visible_var``/``build_visibility_toggle``/
-  ``set_run_state`` behaviour and the ``upscale_var``-gated fine-tune
-  sub-block need a real (withdrawn) Tk root — the SAME ``tk_root``
+* ``AgentPanel``'s ``visible_var``/``build_visibility_toggle``/
+  ``set_run_state`` behaviour and the per-switch fine-tune expanders
+  (UI-SKETCH 2026-07-29, which retired the global Settings gear — the
+  ``ExpandableSwitch`` primitive itself is pinned in
+  test_gui_widgets.py) need a real (withdrawn) Tk root — the SAME ``tk_root``
   fixture and bare-``AgentPanel`` ``make_panel`` convention
   test_gui_upscale.py/test_gui_pipeline.py already established (never a
   full ``PainterGui`` — see those files' own docstrings on why).
@@ -28,46 +30,46 @@ from types import SimpleNamespace
 import pytest
 
 import gui
-from painter.config import SITES
+from painter.config import ASPECT_DEFAULT_H, ASPECT_DEFAULT_W, SITES
 
 
 # ---------------------------------------------------------------------
-# gui._visible_agent_columns — pure, no Tk
+# gui._visible_agent_slots — pure, no Tk
 # ---------------------------------------------------------------------
 
 
-def test_visible_agent_columns_both_visible_keep_their_order():
-    cols = gui._visible_agent_columns(
+def test_visible_agent_slots_both_visible_keep_their_order():
+    cols = gui._visible_agent_slots(
         ["chatgpt", "gemini"], {"chatgpt": True, "gemini": True}
     )
     assert cols == {"chatgpt": 0, "gemini": 1}
 
 
-def test_visible_agent_columns_hidden_second_site_leaves_no_gap():
-    cols = gui._visible_agent_columns(
+def test_visible_agent_slots_hidden_second_site_leaves_no_gap():
+    cols = gui._visible_agent_slots(
         ["chatgpt", "gemini"], {"chatgpt": True, "gemini": False}
     )
     assert cols == {"chatgpt": 0}
 
 
-def test_visible_agent_columns_hidden_first_site_compacts_the_survivor():
+def test_visible_agent_slots_hidden_first_site_compacts_the_survivor():
     """The interesting case: hiding the FIRST site must not strand the
-    lone survivor in column 1 with a dead column 0 beside it."""
-    cols = gui._visible_agent_columns(
+    lone survivor in slot 1 with a dead slot 0 beside it."""
+    cols = gui._visible_agent_slots(
         ["chatgpt", "gemini"], {"chatgpt": False, "gemini": True}
     )
     assert cols == {"gemini": 0}
 
 
-def test_visible_agent_columns_both_hidden_is_a_legal_empty_result():
-    cols = gui._visible_agent_columns(
+def test_visible_agent_slots_both_hidden_is_a_legal_empty_result():
+    cols = gui._visible_agent_slots(
         ["chatgpt", "gemini"], {"chatgpt": False, "gemini": False}
     )
     assert cols == {}
 
 
-def test_visible_agent_columns_missing_key_defaults_visible():
-    cols = gui._visible_agent_columns(["chatgpt", "gemini"], {})
+def test_visible_agent_slots_missing_key_defaults_visible():
+    cols = gui._visible_agent_slots(["chatgpt", "gemini"], {})
     assert cols == {"chatgpt": 0, "gemini": 1}
 
 
@@ -81,15 +83,21 @@ def root(tk_root):
     return tk_root
 
 
-def make_panel(root, site: str = "gemini", on_log=None) -> gui.AgentPanel:
+def make_panel(
+    root, site: str = "gemini", on_log=None, on_layout_change=None
+) -> gui.AgentPanel:
     """A bare AgentPanel, parented directly on the shared root (never
     packed/mapped — same convention test_gui_upscale.py/
     test_gui_pipeline.py already use) with no-op callbacks — never a
-    full PainterGui."""
+    full PainterGui. ``on_layout_change`` has to be passed HERE (not
+    assigned onto the panel afterwards): every ExpandableSwitch takes
+    the callable by value at construction, exactly like the real
+    PainterGui wiring hands it its ScrollFrame.refresh."""
     return gui.AgentPanel(
         root, site,
         on_start=lambda *_a: None, on_stop=lambda *_a: None,
         on_pause=lambda *_a: None, on_log=on_log,
+        on_layout_change=on_layout_change,
     )
 
 
@@ -199,82 +207,148 @@ def test_on_log_defaults_to_a_harmless_noop(root):
     assert panel.visible_var.get() is True
 
 
-# --- upscale-gate sub-block gated on upscale_var -----------------------
+# --- the per-switch expanders (UI-SKETCH, owner 2026-07-29) -----------
+# The global Settings gear is GONE: every fine-tune lives in its own
+# switch's ExpandableSwitch sub-panel. These tests pin the AgentPanel
+# WIRING of that primitive (which switch owns which sub-panel, and that
+# the eager sub-panels' state exists from construction); the primitive's
+# own open/collapse mechanics are pinned in test_gui_widgets.py.
 
 
-def test_upscale_gate_box_visible_by_default(root):
+def test_the_gear_is_gone(root):
+    """Rule #6: the retired gear left NO stump behind — no collapse
+    var, no toggle method, no fine-tune box."""
+    panel = make_panel(root)
+    assert not hasattr(panel, "settings_collapsed_var")
+    assert not hasattr(panel, "_toggle_settings")
+    assert not hasattr(panel, "_finetune_box")
+    assert "settings_collapsed" not in panel._PERSIST
+
+
+def test_upscale_sub_starts_collapsed_even_though_upscale_is_on(root):
+    """A panel built with Upscale already ON (its default, and every
+    restored settings.json) opens COMPACT — the auto-expand fires only
+    on a live OFF->ON click, see ExpandableSwitch's own docstring."""
     panel = make_panel(root)
     assert panel.upscale_var.get() is True
-    assert panel._upscale_gate_box.winfo_manager() == "pack"
+    assert panel._sw_upscale.sub.winfo_manager() == ""
 
 
-def test_upscale_off_hides_the_gate_box_live(root):
+def test_turning_upscale_off_then_on_auto_expands_its_sub(root):
     panel = make_panel(root)
     panel.upscale_var.set(False)
-    assert panel._upscale_gate_box.winfo_manager() == ""
+    assert panel._sw_upscale.sub.winfo_manager() == ""
+    panel.upscale_var.set(True)  # a live turn-ON auto-expands
+    assert panel._sw_upscale.sub.winfo_manager() == "pack"
 
 
-def test_upscale_back_on_reshows_the_gate_box(root):
+def test_upscale_off_hides_an_expanded_sub_live(root):
     panel = make_panel(root)
+    panel._sw_upscale.toggle(open_=True)  # the caret click
+    assert panel._sw_upscale.sub.winfo_manager() == "pack"
     panel.upscale_var.set(False)
-    panel.upscale_var.set(True)
-    assert panel._upscale_gate_box.winfo_manager() == "pack"
+    assert panel._sw_upscale.sub.winfo_manager() == ""
 
 
-def test_upscale_gate_visibility_independent_of_the_settings_gear(root):
-    """The trace fires (and the sub-block's OWN pack state updates)
-    regardless of whether the outer Settings-gear box is expanded —
-    packing a child never depends on its parent's own manager state."""
+def test_eager_upscale_sub_carries_its_filter_before_any_expand(root):
+    """The upscale gate's FilterEditor stack (and the aspect canvas's
+    two-way binding) outlive the expander's visibility — they are built
+    EAGERLY at construction, so upscale_params() works on a panel whose
+    sub-panel was never opened."""
     panel = make_panel(root)
-    assert panel.settings_collapsed_var.get() is True  # gear starts collapsed
-    panel.upscale_var.set(False)
-    assert panel._upscale_gate_box.winfo_manager() == ""
-    panel.upscale_var.set(True)
-    assert panel._upscale_gate_box.winfo_manager() == "pack"
+    assert panel._sw_upscale.sub.winfo_manager() == ""  # never opened
+    params = panel.upscale_params()
+    assert params["min_width"] == params["min_height"] == 800
+    assert panel.upscale_conditions()  # the seeded aspect gate is there
+    assert panel.force_aspect_ratio() == (ASPECT_DEFAULT_W, ASPECT_DEFAULT_H)
 
 
-def test_apply_settings_restoring_upscale_false_hides_the_gate_box(root):
+def test_apply_settings_restoring_upscale_false_leaves_the_sub_hidden(root):
     """A settings-restore .set() fires the SAME trace as an interactive
-    click (Tk write-traces do not distinguish the two)."""
+    click (Tk write-traces do not distinguish the two) — restoring OFF
+    must never leave an orphan sub-panel packed."""
     panel = make_panel(root)
+    panel._sw_upscale.toggle(open_=True)
     panel.apply_settings({"upscale": False})
     assert panel.upscale_var.get() is False
-    assert panel._upscale_gate_box.winfo_manager() == ""
+    assert panel._sw_upscale.sub.winfo_manager() == ""
 
 
-# --- Settings gear -> on_layout_change (owner 2026-07-21 perf fix) ------
+def test_apply_settings_never_auto_expands_a_restored_on_switch(root):
+    """The live-window defect (owner's settings.json, 2026-07-29): the
+    app applies the stored settings AFTER building the panel, so every
+    ON switch used to auto-expand and the setup screen opened as a wall
+    of fine-tune. apply_settings runs under quiet_restore — the panel
+    opens COMPACT, whatever is stored."""
+    panel = make_panel(root)
+    panel.apply_settings({
+        "bg_removal": True, "upscale": True, "force_aspect": True,
+        "checker": True,
+    })
+    for switch in panel._expanders():
+        assert switch.sub.winfo_manager() == ""
 
 
-def test_toggle_settings_calls_on_layout_change_after_the_reveal(root):
-    """The real click path (_toggle_settings, not the bare
-    _apply_finetune_visibility): the outer ScrollFrame's refresh hook
-    (owner 2026-07-21 perf fix, replacing the old perpetual self-heal
-    poll) must fire exactly once per toggle, AFTER the fine-tune box is
-    actually packed/forgotten — on a withdrawn root smooth_transition's
-    own mapped/viewable guard fails, so mutate runs instantly and
-    synchronously, making the ordering directly observable here."""
+def test_every_finetune_switch_owns_its_own_expander(root):
+    """The UI-SKETCH map: BG removal / Force aspect ratio / Upscale /
+    AI checker each carry their own sub-panel, plus the switch-less
+    Pacing section. Crop and the plain Run-behavior switches carry
+    none — they have nothing to fine-tune."""
+    panel = make_panel(root)
+    owners = {
+        panel._sw_bg: panel.bg_removal_var,
+        panel._sw_aspect: panel.force_aspect_var,
+        panel._sw_upscale: panel.upscale_var,
+        panel._sw_checker: panel.checker_var,
+    }
+    for switch, var in owners.items():
+        assert switch._var is var
+        assert switch.sub.winfo_manager() == ""  # all start collapsed
+    assert panel._sec_pacing.sub.winfo_manager() == ""
+
+
+# --- expanders -> on_layout_change (owner 2026-07-21 perf fix) ---------
+
+
+def test_expanding_a_switch_calls_on_layout_change_after_the_reveal(root):
+    """The outer ScrollFrame's refresh hook (owner 2026-07-21 perf fix,
+    replacing the old perpetual self-heal poll) must fire exactly once
+    per toggle, AFTER the sub-panel is actually packed/forgotten — the
+    panel's own content height changes several parents below that
+    ScrollFrame, which has no other way to learn of it."""
     calls: list[str] = []
-    panel = make_panel(root, on_log=None)
-    panel._on_layout_change = lambda: calls.append(
-        panel._finetune_box.winfo_manager()
+    panel = make_panel(
+        root,
+        on_layout_change=lambda: calls.append(
+            panel._sw_upscale.sub.winfo_manager()
+        ),
     )
 
-    assert panel.settings_collapsed_var.get() is True  # starts collapsed
-    panel._toggle_settings()  # collapsed -> expanded
-    assert panel._finetune_box.winfo_manager() == "pack"
+    panel._sw_upscale.toggle()  # collapsed -> expanded
+    assert panel._sw_upscale.sub.winfo_manager() == "pack"
     assert calls == ["pack"]
 
-    panel._toggle_settings()  # expanded -> collapsed
-    assert panel._finetune_box.winfo_manager() == ""
+    panel._sw_upscale.toggle()  # expanded -> collapsed
+    assert panel._sw_upscale.sub.winfo_manager() == ""
     assert calls == ["pack", ""]
 
 
-def test_toggle_settings_on_layout_change_defaults_to_a_harmless_noop(root):
+def test_pacing_section_also_reports_its_layout_change(root):
+    """The switch-LESS Pacing section (ExpandableSection) is wired to
+    the same hook — a plain label + caret, no switch to gate it."""
+    calls: list[str] = []
+    panel = make_panel(root, on_layout_change=lambda: calls.append("x"))
+    panel._sec_pacing.toggle()
+    assert panel._sec_pacing.sub.winfo_manager() == "pack"
+    assert calls == ["x"]
+
+
+def test_expander_on_layout_change_defaults_to_a_harmless_noop(root):
     """Every OTHER make_panel() in this suite passes no on_layout_change
     at all — must not raise."""
     panel = make_panel(root)
-    panel._toggle_settings()  # must not raise
-    assert panel._finetune_box.winfo_manager() == "pack"
+    panel._sw_upscale.toggle()  # must not raise
+    assert panel._sw_upscale.sub.winfo_manager() == "pack"
 
 
 # ---------------------------------------------------------------------
@@ -304,8 +378,8 @@ class FakeGui:
             for key in sorted(SITES)
         }
         for i, key in enumerate(sorted(SITES)):
-            self.agents[key].grid(row=0, column=i, sticky="nsew", padx=4)
-            self._agents_frame.columnconfigure(i, weight=1)
+            self.agents[key].grid(row=i, column=0, sticky="new", pady=(0, 6))
+            self._agents_frame.columnconfigure(0, weight=1)
         compact_box = ttk.Frame(root)
         self._compact_clusters = {
             key: ttk.Frame(compact_box) for key in sorted(SITES)
@@ -355,25 +429,29 @@ def test_relayout_hiding_gemini_removes_its_panel_and_cluster(fake):
     assert fake._compact_clusters["gemini"].winfo_manager() == ""
     # ChatGPT stays exactly where it was
     assert fake.agents["chatgpt"].winfo_manager() == "grid"
-    assert fake.agents["chatgpt"].grid_info()["column"] == 0
+    assert fake.agents["chatgpt"].grid_info()["row"] == 0
 
 
-def test_relayout_hiding_chatgpt_compacts_gemini_into_column_zero(fake):
+def test_relayout_hiding_chatgpt_compacts_gemini_into_row_zero(fake):
+    """UI-SKETCH (owner 2026-07-29): the panels STACK in the setup
+    screen's left settings column, so the survivor compacts into ROW 0
+    — hiding the first site must not strand the other below an empty
+    row."""
     fake.agents["chatgpt"].visible_var.set(False)
     gui.PainterGui._relayout_agents(fake)
     assert fake.agents["chatgpt"].winfo_manager() == ""
     assert fake.agents["gemini"].winfo_manager() == "grid"
-    assert fake.agents["gemini"].grid_info()["column"] == 0
+    assert fake.agents["gemini"].grid_info()["row"] == 0
 
 
 def test_relayout_reshowing_both_reenters_the_shared_editor(fake):
     """Re-ticking the second site while idle goes back to the F4c
-    shared editor (primary only), never the old two-column layout."""
+    shared editor (primary only), never the old two-panel layout."""
     fake.agents["gemini"].visible_var.set(False)
     gui.PainterGui._relayout_agents(fake)
     assert fake._agent_mirror_on is False
     fake.agents["gemini"].visible_var.set(True)
     gui.PainterGui._relayout_agents(fake)
-    assert fake.agents["chatgpt"].grid_info()["column"] == 0
+    assert fake.agents["chatgpt"].grid_info()["row"] == 0
     assert fake.agents["gemini"].winfo_manager() == ""
     assert fake._agent_mirror_on is True
