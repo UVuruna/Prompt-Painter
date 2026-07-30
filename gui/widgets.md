@@ -51,6 +51,45 @@ Rule #5 — the pace/action-delay fields are its instances): direct
 typing stays allowed (validated on Start), the +/- buttons step the
 value by a configurable amount, never below 0.
 
+### ExpandableSwitch
+A switch whose FINE-TUNE lives in an indented sub-panel right below
+it (owner's UI-SKETCH, 2026-07-29 — the primitive that replaced the
+per-agent Settings gear). The mechanic, in the owner's own words:
+
+```
+switch OFF          -> the sub-panel does not exist (no caret)
+switch turned ON    -> auto-expands ONCE, indented below (caret ▾)
+caret ▸/▾ clicked   -> folds / unfolds by hand, switch untouched
+switch turned OFF   -> hides the sub-panel entirely
+```
+
+`build_sub(frame)` builds the content — LAZILY on the first expand,
+or at construction with `eager=True` for content whose STATE has to
+outlive its visibility (a `FilterEditor` condition stack, an
+`AspectRatioCanvas` two-way binding). `build_sub=None` renders a
+plain switch. Every expand/collapse calls `on_layout_change` AFTER
+the pack/forget, so an outer `ScrollFrame` can re-fit content whose
+height just changed several parents below it.
+
+An already-ON switch starts COLLAPSED — the auto-expand is a live
+click reaction. Since Tk write-traces cannot tell a settings-restore
+`.set()` from a click, the restoring host wraps its round-trip in
+`quiet_restore` (below).
+
+### ExpandableSection
+The switch-LESS variant — a clickable label + ▸/▾ caret over the same
+indented sub-panel — for fine-tune that belongs to no single switch
+(the UI-SKETCH's **Pacing** row: pause range, action delay,
+on-degrade). Starts collapsed, content built eagerly.
+
+### quiet_restore (context manager)
+Restores settings into any number of `ExpandableSwitch` variables
+without a single auto-expand: a restored-ON switch stays folded (so a
+panel always opens compact — the live-window defect it was written
+for had every ON switch unfolding at startup), while a restored-OFF
+switch still hides an open sub-panel. Released on the way out even if
+the restore raises.
+
 ### Field parsers
 One per numeric field SHAPE, all sharing the same "raise `ValueError`
 naming the field that failed" contract so a panel's Start reports

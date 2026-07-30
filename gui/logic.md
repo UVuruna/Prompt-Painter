@@ -12,7 +12,7 @@ pipeline runner (`_run_pipeline_steps`), the dashboard's per-scope
 stat formatter (`_scope_stats`), the fixer auto-dispatch decision
 (`_fixer_decision`), the manual-fix result-to-UI mapping
 (`_fix_result_ui`), and two small pure view-layout helpers
-(`_visible_agent_columns`, `_menu_tile_columns`, `_next_view`). Every
+(`_visible_agent_slots`, `_menu_tile_columns`, `_next_view`). Every
 function takes plain values (paths, dicts, duck-typed objects) and
 returns plain values — no widget is ever built or touched, so this
 module is directly unit-testable with no Tk display required (gui.py's

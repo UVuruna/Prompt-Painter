@@ -187,25 +187,27 @@ reachability fixes:
   a window snapshot, relayouts hidden behind it and fades the cover
   out over `TRANSITION_FADE_MS` (~260 ms) instead of one hard jump
   (see **Theming — the snapshot cover**).
-- **Per-agent Settings gear** (owner 2026-07-19) — each `AgentPanel`
-  owns its OWN `⚙ Settings` gear button (`assets/icons/settings.png`, on
-  the Start/Stop row) that shows/hides THAT agent's collapsible
-  **fine-tune** area — its **pause** range, its **action-delay** range,
-  AND its **Upscale gate (this site)** block (GUI rework Phase 6: ONE
-  min-side Spinner + an embedded `FilterEditor`, replacing the old min
-  W / min H / aspect FROM / aspect TO four-field layout) — independently
-  of the other site. HIDDEN by DEFAULT so
-  the panel stays compact; `_toggle_settings` flips the panel's own
-  `settings_collapsed_var` and `_apply_finetune_visibility` packs ↔
-  `pack_forget`s the panel's `_finetune_box` (built at the panel's bottom)
-  and swaps the `▾/▸ Settings` caret — the reveal runs behind the same
-  `smooth_transition` snapshot cover as the Controls toggle (owner
-  2026-07-20), since it moves everything below the panel. The state is
-  per agent, persisted in
-  that agent's settings (`settings_collapsed`, default collapsed) and
-  reflected on load. There is NO global Settings toggle (the 0.0.079
-  top-strip one was removed). Collapsing the whole Controls area hides
-  the panels — gear and all — as before.
+- **Per-switch expanders** (UI-SKETCH, owner 2026-07-29 — replacing
+  the per-agent `⚙ Settings` gear of 2026-07-19, which is GONE) —
+  every switch that owns fine-tune carries its OWN indented sub-panel
+  right under it (`ExpandableSwitch` in
+  [Widgets](gui/widgets.md)): **BG removal** (mode / tolerance / reach
+  + the colour wheel), **Force aspect ratio** (W : H + the canvas),
+  **Upscale** (min side + the `FilterEditor` gate) and **AI checker**
+  (prompt-match + the Fixer AI). Turning a switch ON auto-expands its
+  sub-panel once, the ▸/▾ caret folds and unfolds it by hand, turning
+  it OFF hides it entirely — the sub-panel exists only while its own
+  switch is on. The switch-LESS **Pacing** row (`ExpandableSection`:
+  pause range, action delay, on-degrade) is the one expander with no
+  gate switch. A panel always opens COMPACT: a settings restore is a
+  plain `.set()` Tk cannot tell from a click, so `apply_settings` runs
+  the whole round-trip under `widgets.quiet_restore`, which suppresses
+  the auto-expand (but still folds a sub-panel whose switch is
+  restored OFF). Every expand/collapse calls the panel's
+  `on_layout_change` (the outer `ScrollFrame.refresh`), since the
+  panel's own height changes several parents below it. Collapsing the
+  whole Controls area hides the panels — expanders and all — as
+  before.
 - **Whole-window vertical scroll** — the entire content lives in ONE
   `fill_height` `ScrollFrame` (the top strip is pinned OUTSIDE it, so
   the collapse toggle is always reachable). When the content exceeds
@@ -589,11 +591,14 @@ pre-running spots.
   `visible_var`, wired once both the panel grid and the collapsed
   strip's `build_compact` clusters exist — `grid()`/`grid_remove()`s
   each panel AND its collapsed-strip cluster together, and the pure
-  `_visible_agent_columns(order, visible)` helper compacts whichever
-  panel(s) remain toward column 0 (reset-then-reassign column weight,
-  the same technique `DashGrid.relayout` already uses) so hiding one
-  site never leaves the other stuck in a half-width column with a dead
-  gap beside it. Hiding a site whose job is RUNNING or has a pending
+  `_visible_agent_slots(order, visible)` helper compacts whichever
+  panel(s) remain toward slot 0 (reset-then-reassign row weight, the
+  same technique `DashGrid.relayout` already uses) so hiding one site
+  never leaves the other stranded below a dead empty row. A slot is a
+  ROW since the UI-SKETCH rework (owner 2026-07-29): the panels STACK
+  inside the setup screen's LEFT settings column — side by side they
+  needed ~1200 px of their own and pushed the right-hand input column
+  clean off a default-sized (1120 px) window. Hiding a site whose job is RUNNING or has a pending
   quota auto-restart is disallowed — `set_run_state` greys the toggle
   out for that same window (Stop/Pause live only on this panel, so
   hiding it then would strand the job) and, since a HIDDEN site can
@@ -637,17 +642,20 @@ pre-running spots.
   its own **Start / Pause / Stop** trio (owner 2026-07-21 adds
   **Pause** between them — a plain neutral `btn_pause` whose LABEL
   alone flips Pause ↔ Resume, wired to the shared `_toggle_pause_job`;
-  see **Pause** below), and its own **⚙ Settings gear**
-  (owner 2026-07-19). The gear reveals THIS agent's collapsible
-  **fine-tune** area (`_finetune_box`, hidden by default): the **pause**
-  Spinner range, the **action delay** Spinner range, the **Force
-  Aspect Ratio (this site)** block (GUI rework Phase 8 — see below),
-  the **Keep every pipeline step (uses more disk)** switch (see
-  **Pipeline reorder + per-step backups**), the **Upscale
-  gate (this site)** block, and — visible only while **AI checker** is
-  on — the **Fixer AI (this site)** block (GUI rework Phase 20: an
-  "Auto-fix flagged images" switch plus a via `api`/`website` dropdown;
-  see **Fixer AI wiring** below). GUI rework Phase 6 simplified the gate from
+  see **Pause** below). Its settings sit in THREE GROUPS (UI-SKETCH,
+  owner 2026-07-29): **Pipeline** (BG removal, Crop, Force aspect
+  ratio, Upscale, Keep every pipeline step), **Run behavior** (Report
+  txt, Safer retry, Continue nudge, AI checker, the Pacing section
+  holding the **pause** and **action delay** Spinner ranges and the
+  on-degrade choice) and **Prompt** (Background + custom colour,
+  Style, New chat, the helper toggles). Each fine-tune lives in its
+  owning switch's expander — the **Force Aspect Ratio** block (GUI
+  rework Phase 8 — see below) under Force aspect ratio, the **Upscale
+  gate** block under Upscale, and the **Fixer AI** block (GUI rework
+  Phase 20: an "Auto-fix flagged images" switch plus a via
+  `api`/`website` dropdown; see **Fixer AI wiring** below) inside the
+  AI checker's own sub-panel, so it is reachable only while the
+  checker is on. GUI rework Phase 6 simplified the gate from
   four scalar fields to ONE **min-side** Spinner (the smaller side's
   target minimum, px) plus an embedded stacked **`FilterEditor`**
   (deciding WHICH images qualify, pre-seeded with a single Aspect
@@ -667,27 +675,17 @@ pre-running spots.
   params)` helper, which checks `painter.filters.matches()` against
   the WHOLE stack BEFORE calling `upscale_if_small` — a match failure
   short-circuits to `"nothing"` without ever reaching the engine. Both
-  fields moved UNDER the gear (they were formerly always-visible /
-  global); `_toggle_settings` + `_apply_finetune_visibility` show/hide
-  them per agent, and Start still validates (min side positive; a
-  filter row's own FROM ≤ TO is already enforced by `FilterEditor`
-  itself, so no separate aspect-ordering check is needed here) before
-  spawning. The shipped default (min side 800, Aspect (range) 0.90–1.10
-  IF) reproduces the OLD locked/four-field gate byte-identically. GUI
-  rework Phase 12 additionally gates the WHOLE gate sub-block
-  (`_upscale_gate_box`: the "Upscale gate (this site):" heading, the
-  min-side Spinner row and the embedded `FilterEditor`) on the
-  **Upscale** switch itself, live, via a `trace_add("write", …)` on
-  `upscale_var` calling `_apply_upscale_gate_visibility` — turning
-  Upscale off hides the whole sub-block EVEN WHILE the Settings gear
-  stays expanded (it used to sit there always, gear-expanded or not);
-  turning it back on reshows it with whatever it was last configured
-  to. Composes as a plain AND with the gear's own collapse (a pack/
-  pack_forget on a CHILD of `_finetune_box` is independent of the
-  parent's own pack state), and the trace fires identically for an
-  interactive click and a settings-restore `.set()` — no separate
-  "apply on load" call needed, unlike `settings_collapsed_var`, which
-  has no trace of its own.
+  fields live in the **Upscale** switch's own expander
+  (`_build_upscale_sub`), so they exist only while Upscale is on, and
+  Start still validates (min side positive; a filter row's own FROM ≤
+  TO is already enforced by `FilterEditor` itself, so no separate
+  aspect-ordering check is needed here) before spawning. The shipped
+  default (min side 800, Aspect (range) 0.90–1.10 IF) reproduces the
+  OLD locked/four-field gate byte-identically. The sub-panel's content
+  is built EAGERLY (`ExpandableSwitch(..., eager=True)`) even though it
+  starts folded — the `FilterEditor`'s condition stack is state that
+  has to outlive the expander's visibility, so `upscale_params()`
+  works on a panel whose gate was never opened.
   **Force Aspect Ratio (this site)** (GUI rework Phase 8, default OFF)
   — a `Force to ratio` switch plus a target **W : H** pair, edited
   two-way with an embedded **`AspectRatioCanvas`** (the SAME Phase 5
@@ -712,30 +710,15 @@ pre-running spots.
 - **Two-column-dense settings-panel layout** (owner 2026-07-21 layout
   fix, LAYOUT ONLY — Rule #16: the owner's screenshots showed every
   control hugging the LEFT half of a settings panel with the entire
-  RIGHT half dead empty). `AgentPanel` is RESPONSIVE to the SAME
-  visible-count state Phase 12's show/hide already tracks: its four
-  content rows (Background/New-chat, Style, and the two switch rows)
-  now live in one grid container (`self._content`) that
-  `AgentPanel._apply_dense_columns`/`set_dense_columns` regrid between
-  the narrow single-column stack (today's order — correct while BOTH
-  sites share the row, each panel already only ~half width) and a
-  two-column-dense fill — the switch rows LEFT, the dropdown rows RIGHT
-  — used ONLY while a panel is the SOLE visible site (the panel then
-  spans the whole controls width). `PainterGui._relayout_agents`
-  computes `dense = len(cols) == 1` from `_visible_agent_columns`'s own
-  result — the SAME KNOWN visible-count state that already decides
-  panel/compact-cluster placement — and calls `panel.set_dense_columns
-  (dense)` for every agent right there, so a Show/Hide toggle click, a
-  settings restore and `set_run_state`'s own forced re-show all reach
-  the new layout the SAME way, with NO `<Configure>` width probe
-  (deterministic, not fragile). Start/Pause/Stop + the Settings gear
-  stay in their own always-full-width bottom row, unchanged (buttons
-  left, gear right already fills the row). The Settings-gear fine-tune
-  block (`_build_finetune` — pause/action-delay ranges, Force Aspect
-  Ratio, the Upscale gate) is DELIBERATELY untouched by this fix (out
-  of the owner's stated scope) — it keeps working (expand/collapse,
-  every field) but stays a single narrow column even in a wide panel;
-  a real caveat, not a regression.
+  RIGHT half dead empty). `AgentPanel` no longer takes part in this:
+  since the UI-SKETCH rework (owner 2026-07-29) it lives in the setup
+  screen's LEFT settings column, whose width is never the window's, so
+  its three groups always STACK (`_stack_groups`) — measured, three
+  groups abreast want 1322 px and pushed the whole right-hand
+  collections/output/Select column off a default 1120 px window. The
+  responsive `set_dense_columns` switch it used to carry is deleted
+  (Rule #6, no dead mode kept "just in case"), and `_relayout_agents`
+  no longer computes a `dense` flag.
 
   The `ToolSettingsPanel` family (`BgSettingsPanel`/`CropSettingsPanel`/
   `UpscaleSettingsPanel`/`AspectSettingsPanel`/
@@ -967,8 +950,8 @@ pre-running spots.
     `UpscaleParamsDialog` used; `AspectSettingsPanel` starts empty,
     matching the old `AspectRatioDialog`'s own "no conditions = every
     image" default;
-  * an **Advanced** collapsible (the SAME Settings-gear idiom
-    `AgentPanel._toggle_settings` established) — ONLY when the
+  * an **Advanced** collapsible (the same collapse idiom
+    `AgentPanel`'s per-switch expanders use) — ONLY when the
     subclass sets `HAS_ADVANCED = True` (the base default; `Upscale
     SettingsPanel`/`AspectSettingsPanel` set it False and skip
     building the collapsible ENTIRELY, Rule #16: a gear that reveals
@@ -1295,7 +1278,7 @@ pre-running spots.
     `_AiDialog`'s established pattern — duplicated rather than shared
     via a mixin, since this panel's base class (`ttk.Frame`) differs
     from `_AiDialog`'s (`tk.Toplevel`); the codebase already accepts
-    this trade-off elsewhere, e.g. `AgentPanel._toggle_settings`/
+    this trade-off elsewhere, e.g. `widgets.ExpandableSwitch`/
     `ToolSettingsPanel._toggle_advanced` are two independent near-
     identical collapse implementations for the same reason). A
     `PaidFeatureRequired` result sets `panel.access_gated = True`,
@@ -1630,22 +1613,23 @@ pre-running spots.
   instantly) and persists the choice, then a ~600 ms smoothstep
   slide runs as flourish. See **Theming**.
 - **Settings persistence** (`painter/settings.py`) — remembered
-  across starts: the output folder, EVERY per-agent panel setting
-  (including each agent's OWN Settings-gear collapse state), the font
-  zoom base, the **theme** (`day` / `night`), the window geometry, and
-  the **collapsed/expanded** controls state (selection ticks stay
-  per-run; the old dashboard `sash` is gone with the PanedWindow, and
-  the old TOP-LEVEL `settings_collapsed` from 0.0.079 is gone too — a
-  stale key is ignored). The **collection queue is NOT persisted** — the app
+  across starts: the output folder, EVERY per-agent panel setting,
+  the font zoom base, the **theme** (`day` / `night`), the window
+  geometry, and the **collapsed/expanded** controls state (selection
+  ticks stay per-run; the old dashboard `sash` is gone with the
+  PanedWindow, and BOTH `settings_collapsed` keys — the TOP-LEVEL one
+  from 0.0.079 and the per-agent gear state, retired with the gear
+  itself by the UI-SKETCH rework, owner 2026-07-29 — are gone; a stale
+  key is ignored. Expander open/closed state is deliberately NOT
+  persisted: a panel always opens compact). The **collection queue is NOT persisted** — the app
   starts with an empty list every launch (owner 2026-07-18); and a
   saved output folder that no longer exists is ignored in favour of
   the default `out/`, so done-detection checks the real output tree
-  instead of a stale path. Saves debounce on every meaningful change (var traces —
-  the per-agent gear collapse rides a BooleanVar so it saves like every
-  other field —, zoom, theme flip, the Controls collapse, the two
+  instead of a stale path. Saves debounce on every meaningful change (var traces,
+  zoom, theme flip, the Controls collapse, the two
   remembered dialogs) and always fire on close; loading applies missing
-  keys as current defaults (a missing `theme` = `night`, a missing agent
-  `settings_collapsed` = True) and drops queued files that no longer
+  keys as current defaults (a missing `theme` = `night`) and drops
+  queued files that no longer
   exist (reported in the log). The stored dict: `output`, `font_base`,
   `theme`, `geometry`, `controls_collapsed`, `gemini_api_key` (the AI
   features' credential, owner 2026-07-20 — held on the GUI so the
@@ -1694,8 +1678,8 @@ pre-running spots.
   Ratio switch + target ratio — plain `tk.Variable`s, so they DO go
   through the ordinary `_PERSIST` loop) and `keep_all_steps` (that
   agent's "keep every pipeline step" disk-usage toggle, default
-  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT`), and that agent's
-  `settings_collapsed`.
+  `JOBTEMP_KEEP_ALL_STEPS_DEFAULT`), and the UI-SKETCH BG-removal
+  fine-tune (`bg_mode`/`bg_color`/`bg_tolerance`/`bg_reach`).
 
   **The `aspect_filter` -> `aspect_filter_conditions` migration** (GUI
   rework Phase 4, owner decision 2026-07-21; Phase 14 moves the TARGET
@@ -2251,9 +2235,11 @@ the parsed bullets can lose (`AI_FIX_PROMPT_RAW_SUFFIX`).
 
 **Auto-dispatch** — `AgentPanel` gains `fixer_var` (default OFF) and
 `fixer_mode_var` (`config.FIXER_MODE_API`/`_WEBSITE`, default `api`),
-visible ONLY while `checker_var` is on (`_apply_fixer_visibility`, a
-`checker_var` trace — same "hidden until its own gate switch is on"
-composition `_apply_upscale_gate_visibility` already uses). On every
+both living INSIDE the AI-checker switch's own expander
+(`_build_checker_sub`, UI-SKETCH 2026-07-29) — so they are reachable
+ONLY while `checker_var` is on, the "hidden until its own gate switch
+is on" contract now carried by the shared `ExpandableSwitch`
+primitive rather than a hand-written trace. On every
 `item_checked` the parallel checker posts, `PainterGui._dispatch` now
 ALSO calls `_maybe_spawn_fixer(key, event)` (beside the EXISTING
 `_maybe_spawn_checker` call on `item_progress` — a sibling branch, not
@@ -2491,14 +2477,13 @@ screen) — ONLY THEN does the `mutate` callback run (the theme repaint
 / the relayout) UNDERNEATH the cover, one forced `update_idletasks`
 settles it invisibly, and `_fade_out_overlay` ramps the overlay's
 window `-alpha` 1.0 → 0.0 (ease-out) before destroying it. Wired to
-FOUR places: the **theme flip** (`apply_theme(animate=True)` passes
+THREE places: the **theme flip** (`apply_theme(animate=True)` passes
 `icon_factory` = the NEXT theme's big sun/moon via
 `_render_theme_cover_icon` at `SWITCH_COVER_ICON_FRAC` = 30 % of the
 window's min dimension, and the ceremonial `SWITCH_FADE_MS` ≈ 500 ms /
 `SWITCH_FADE_STEPS` 28 timing), the **▾ Controls collapse**
-(`_toggle_collapsed`), each agent's **Settings gear**
-(`_toggle_settings`) and the **maximize/restore** jump
-(`_on_root_configure`) — the last three icon-less on the snappier
+(`_toggle_collapsed`) and the **maximize/restore** jump
+(`_on_root_configure`) — the last two icon-less on the snappier
 default `TRANSITION_FADE_MS` (260 ms) / `TRANSITION_FADE_STEPS` (14).
 It is a pure visual nicety: with no window on screen
 (`winfo_ismapped`/`winfo_viewable`) or on ANY cover failure

@@ -14,9 +14,7 @@ app — the owner loses remembered choices, not work — and the next
 save overwrites it. Saves are atomic (temp file + replace).
 
 The dict SHAPE lives with the GUI (`_collect_settings` /
-`_apply_settings`, documented in [GUI](../gui.md)); as of owner
-2026-07-19 it also carries `settings_collapsed` (the per-agent
-fine-tune collapse), `upscale_tool` (the standalone Upscale dialog's
+`_apply_settings`, documented in [GUI](../gui.md)); it carries `upscale_tool` (the standalone Upscale dialog's
 last-used gate), `aspect_ratio` (the last W:H entered in
 the Aspect dialog), and a per-agent `style` (the rendering-style
 dropdown, under `agents.<site>`) — all plain JSON scalars

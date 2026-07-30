@@ -11,8 +11,9 @@ and [App (composition)](app.md)). The ONLY mixin that defines
 _tool_panels`, `self._workers`, `self._job_temps`, `self._view`,
 `self._collapsed`, ...) is set here, once, at construction. Also owns
 the `_build_*` widget-construction helpers it calls from `__init__`
-(`_build_queue`/`_build_options`/`_build_toolbar`/`_build_compact`/
-`_build_views`), the global font-zoom bindings (`_bind_zoom`/
+(`_build_queue`/`_build_inputs_tail`/`_build_options`/
+`_build_toolbar`/`_build_compact`/`_build_views`), the global
+font-zoom bindings (`_bind_zoom`/
 `_zoom_wheel`/`_zoom_key`/`_zoom_step`) and wheel routing
 (`_bind_wheel_routing`/`_inner_wheel`), `_relayout_agents` (the
 per-site visibility reconciler `_build_compact` wires onto every
@@ -27,6 +28,16 @@ old size on maximize, or renders a corrupted frame on restore) while
 Tk's own `state()`/`winfo_*` insist the change already happened. See
 `_on_root_configure`'s own docstring for the full mechanism and why the
 OS/DWM's native animation needs no help from us.
+
+**The setup screen's two columns** (UI-SKETCH, owner 2026-07-29):
+`__init__` grids `_controls_box`'s content as LEFT settings (the
+`Agents` labelframe — the Sites row + the per-site `AgentPanel`s,
+stacked by `_relayout_agents`) and RIGHT input (`_build_queue`'s
+Collections list + `_build_inputs_tail`'s Output folder and
+`Select images…` door), weights 3:2. The whole setup then requests
+~1030 px — it fits the default 1120 px window in every visible-count
+state, which the pre-sketch full-width panel layout did not (measured
+2020 px, with the entire input column off screen).
 
 Owns the window-sizing/collapse-glyph constants every other mixin that
 touches the same widgets needs: `WINDOW_MIN_W`/`WINDOW_MIN_H`/
@@ -46,7 +57,7 @@ duplicated, Rule #5).
 - [API Panel](api_panel.md) — `ApiImageGenPanel`
 - [Dashboard Job Panel Base + Site Panel](dash_panels.md) — `DashPanel`,
   `JobPanel`
-- [Pure Logic (script)](logic.md) — `_visible_agent_columns`
+- [Pure Logic (script)](logic.md) — `_visible_agent_slots`
 - [Main Menu + Icon Bar](menu.md) — `IconBar`, `MainMenu`
 - [ScrollFrame (script)](scroll.md) — `ScrollFrame`, `WHEEL_DELTA_UNIT`
 - [DayNightSwitch (script)](switch.md) — `DayNightSwitch`

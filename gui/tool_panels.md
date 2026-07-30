@@ -17,7 +17,7 @@ leaf-ish module: depends only on `painter.*` and the already-split
 itself.
 
 Also owns the two-column-dense settings-panel layout constants
-(`DENSE_COL_GAP_PX`/`DENSE_COL_WRAP_PX`, the Settings-gear caret
+(`DENSE_COL_GAP_PX`/`DENSE_COL_WRAP_PX`, the Advanced-section caret
 glyphs `SETTINGS_GLYPH_EXPANDED`/`SETTINGS_GLYPH_COLLAPSED`, and
 `ASPECT_DIALOG_ENTRY_W`) — they used to sit as bare module constants
 in `gui/__init__.py` right above `AgentPanel`, and all THREE control-
@@ -65,10 +65,11 @@ import ...`) with no circular import back into the still-monolithic
   `ToolSettingsPanel`/`BgSettingsPanel`/`CropSettingsPanel`/
   `UpscaleSettingsPanel`/`AspectSettingsPanel`/
   `ImageCheckerSettingsPanel`
-- [Agent Panel](agent_panel.md) / [API Panel](api_panel.md) — both
-  import this module's `DENSE_COL_GAP_PX`/`DENSE_COL_WRAP_PX`/
-  `ASPECT_DIALOG_ENTRY_W` (`AgentPanel` also imports the Settings-gear
-  glyphs)
+- [Agent Panel](agent_panel.md) / [API Panel](api_panel.md) — import
+  this module's layout constants (`ApiImageGenPanel` the full
+  `DENSE_COL_GAP_PX`/`DENSE_COL_WRAP_PX`/`ASPECT_DIALOG_ENTRY_W` set,
+  `AgentPanel` the wrap length + aspect entry width since its own
+  groups always stack)
 - `PainterGui` (still in `gui/__init__.py`) — builds one instance of
   each subclass per tool tile, drives `resolve_input()`/
   `get_conditions()`/`build_func()`/`set_run_state()`/`set_paused()`/

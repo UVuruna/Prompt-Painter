@@ -130,15 +130,21 @@ the whole settings round-trip (collect/apply/migrate/save). See
 [Settings Mixin](app_settings.md).
 
 ### `agent_panel.py` — Agent Panel
-`AgentPanel` — one site's (ChatGPT/Gemini) OWN control panel:
-background/style dropdowns, the three composable post-save switches,
-Report/Safer retry/Continue nudge/Checker AI/Fixer AI, the Force
-Aspect Ratio block, the collapsible pause/action-delay/upscale-gate
-fine-tune, and its own Start/Pause/Stop. F6 (REWORK.md) adds
-`checker_prompt_var` ("Check prompt match too", ON by default) — a
-small sub-toggle beside the Fixer-AI block, visible only while the
-parallel Checker AI is on, that drops the checker back to yesterday's
-quality-only check when turned off. See
+`AgentPanel` — one site's (ChatGPT/Gemini) OWN control panel.
+UI-SKETCH rework (owner 2026-07-29): the settings are THREE GROUPS —
+**Pipeline** (BG removal with its mode/tolerance/reach sub-panel,
+Crop, Force aspect ratio with W:H + canvas, Upscale with min-side +
+FilterEditor, keep-steps), **Run behavior** (Report/Safer retry/
+Continue nudge; AI checker with the F6 prompt-match toggle + the
+Fixer AI in its sub-panel; the Pacing section: pause/action-delay/
+on-degrade) and **Prompt** (Background with the custom color wheel,
+Style, New chat, the F7 helpers) — every switch that owns fine-tune
+carries its own `ExpandableSwitch` sub-panel (turning ON
+auto-expands; the caret folds; OFF hides it). The old global
+Settings gear is GONE. The three groups are ONE vertical stack
+(`_stack_groups`) — the panel lives in the setup screen's LEFT
+settings column now, and `apply_settings` restores under
+`quiet_restore` so the panel always opens compact. See
 [Agent Panel](agent_panel.md).
 
 ### `api_panel.py` — API Panel
@@ -172,7 +178,10 @@ Status/job-colour lookups (`status`, `job_color`), the font-zoom
 registry (`font_size`/`tk_font`/`ctk_font`/`set_font_base`,
 `FONT_ROLES`), the dark-palette rounded CTk control factories
 (`rounded_button`/`rounded_entry`/`rounded_combo`/`rounded_switch`,
-`Spinner`, `EdgeIconButton`), Start/Stop button styling
+`Spinner`, `EdgeIconButton`), the UI-SKETCH fine-tune expanders
+(`ExpandableSwitch`/`ExpandableSection` + the `quiet_restore` context
+manager that keeps a settings restore from unfolding them),
+Start/Stop button styling
 (`style_action_button`/`_style_icon_bar_button`), the folder-grouping
 helpers shared by the dashboard tree and the Select window
 (`folder_of`/`rels_in_folder`), and the Advanced-override numeric
@@ -205,8 +214,8 @@ The coordinated ttk/CTk/plain-tk Day/Night flip (`apply_theme`/
 `recolor_tk_registry`, for the Text/Listbox/Canvas/Toplevel colours
 CTk's automatic tuple resolution can't reach), and the shared
 snapshot-cover transition (`smooth_transition`) that hides every big
-repaint — the theme flip itself, the Controls collapse, each agent's
-Settings gear, a window maximize/restore. Depends on `gui.widgets`
+repaint — the theme flip itself, the Controls collapse, a window
+maximize/restore. Depends on `gui.widgets`
 (`status`, `tk_font`/`TREE_ROW_FACTOR` for `setup_style`, and the live
 `ACTIVE_THEME`/`FONT_BASE` globals) and `gui.icons` (the big sun/moon
 cover icon rendered behind the flip).
@@ -251,7 +260,7 @@ pipeline runner (`_run_pipeline_steps`), the dashboard's per-scope stat
 formatter (`_scope_stats`), the fixer auto-dispatch decision
 (`_fixer_decision`), the manual-fix result-to-UI mapping
 (`_fix_result_ui`), and small pure view-layout helpers
-(`_visible_agent_columns`, `_menu_tile_columns`, `_next_view`). No Tk
+(`_visible_agent_slots`, `_menu_tile_columns`, `_next_view`). No Tk
 dependency at all — every function is directly unit-testable.
 
 ### `dash_helpers.py` — Dashboard Support Helpers
@@ -371,9 +380,9 @@ same function object unless a test overrides one of them.
 
 **Step 4/8 — shared layout constants live in `tool_panels.py`, not
 `__init__.py`.** `AgentPanel`, the `ToolSettingsPanel` family and
-`ApiImageGenPanel` all read the SAME two-column-dense layout constants
+`ApiImageGenPanel` all read the SAME layout constants
 (`DENSE_COL_GAP_PX`/`DENSE_COL_WRAP_PX`/`ASPECT_DIALOG_ENTRY_W`, plus
-the Settings-gear caret glyphs `AgentPanel`/`ToolSettingsPanel` share).
+the caret glyphs the collapsible sections share).
 Rather than leave them as bare `gui/__init__.py` module constants
 (which `gui.agent_panel`/`gui.api_panel` could only reach through a
 circular `from . import X`, since `__init__.py` imports THEM), they

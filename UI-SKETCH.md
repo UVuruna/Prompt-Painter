@@ -1,5 +1,17 @@
 # UI SKETCH — Setup ekran (za odobrenje, pre implementacije)
 
+**STATUS 2026-07-30: implementirano I VERIFIKOVANO na živom prozoru —
+Etapa A (ExpandableSwitch + BG podmeni parametri), Etapa B (tri
+grupe sa expanderima, gear uklonjen), Etapa C (levo podešavanja /
+desno kolekcije+output+Select). Živi smoke je našao i popravio dva
+defekta: (1) restore podešavanja je otvarao SVE upaljene podmenije na
+startu — sad ide kroz `quiet_restore`, panel se otvara kompaktno;
+(2) tri grupe rame-uz-rame su tražile 1322 px i izbacivale desnu
+kolonu sa ekrana — grupe se sada uvek slažu vertikalno, a i dva
+panela (oba sajta) idu jedan POD drugi, pa ceo setup traži ~1030 px
+(default prozor je 1120). Ovaj fajl ostaje kao referenca dok vlasnik
+ne pregleda live izgled.**
+
 *(Radni dokument za dogovor — briše se / prelazi u REWORK.md kad
 odobriš. Odgovori: "da", "da ali izmeni X", ili nacrtaj preko.)*
 
