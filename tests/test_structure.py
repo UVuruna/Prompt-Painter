@@ -58,9 +58,10 @@ RATCHET: dict[str, str] = {
         " their own module, or this documents itself as irreducible."
     ),
     "tests/test_gui_tool_panels.py": (
-        "The standalone-tool settings panels' whole suite. Splits WITH"
-        " gui/tool_panels.py's own package split — one test module per"
-        " panel module (owner approved, 2026-07-30, second round)."
+        "The standalone-tool settings panels' whole suite. Its SOURCE"
+        " split into the gui/tool_panels/ package 2026-07-30; this"
+        " module follows in the second round — one test module per"
+        " panel module (base / bg / geometry / image_checker)."
     ),
     "tests/test_runner.py": (
         "The run-loop suite (F1 turn protocol, refusals, quota, the"
@@ -68,8 +69,9 @@ RATCHET: dict[str, str] = {
     ),
     "tests/test_ai.py": (
         "The AI suite (client/transport, sheet flow, checks, flags)."
-        " Splits WITH painter/ai.py's own package split — one test"
-        " module per package module (owner approved, 2026-07-30)."
+        " Its SOURCE split into the painter/ai/ package 2026-07-30"
+        " (the patch targets moved with it); this module follows in the"
+        " second round — one test module per package module."
     ),
     "tests/test_driver.py": (
         "The CDP-driver suite. Splits WITH painter/driver.py in the"
