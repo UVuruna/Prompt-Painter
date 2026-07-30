@@ -95,12 +95,12 @@ SETTINGS_GLYPH_COLLAPSED = "▸  Settings"  # gear label while hidden
 # --- Two-column-dense settings-panel layout (owner 2026-07-21 layout
 # fix — Rule #16: a settings panel with room to spare fills the width in
 # TWO logical columns instead of cramming everything into the left half
-# with the right sitting dead). AgentPanel switches to this arrangement
-# ONLY while it is the SOLE visible site (PainterGui._relayout_agents,
-# driven off the KNOWN visible-count state — see
-# AgentPanel.set_dense_columns — never a fragile <Configure> width
-# probe); the ToolSettingsPanel family and ApiImageGenPanel are ALWAYS
-# full-width single panels, so they use it unconditionally.
+# with the right sitting dead). The ToolSettingsPanel family and
+# ApiImageGenPanel are ALWAYS full-width single panels, so they use it
+# unconditionally. (AgentPanel used to switch into it while it was the
+# sole visible site; since the UI-SKETCH rework, owner 2026-07-29, it
+# lives in the setup screen's LEFT settings column and always stacks —
+# see AgentPanel._stack_groups.)
 DENSE_COL_GAP_PX = 16    # gap between the two columns (DESIGN.md 8pt grid,
 #                          same 2-unit gap MENU_TILE_GAP_PX already uses)
 DENSE_COL_WRAP_PX = 320  # wraplength for a caption/note living in ONE

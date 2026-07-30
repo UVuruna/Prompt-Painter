@@ -7,8 +7,7 @@ retry, Continue nudge, the parallel Checker/Fixer AI toggles, the
 Force Aspect Ratio block and the pause/action-delay fine-tune, plus
 its own Start/Pause/Stop.
 
-The two-column-dense layout constants (``DENSE_COL_GAP_PX``/
-``DENSE_COL_WRAP_PX``, the Settings-gear caret glyphs,
+The shared layout constants (``DENSE_COL_WRAP_PX``,
 ``ASPECT_DIALOG_ENTRY_W``) come from ``gui.tool_panels`` — the
 ToolSettingsPanel family and ``ApiImageGenPanel`` share the exact same
 constants (Rule #5), and importing them from that leaf module (rather
@@ -62,16 +61,13 @@ from .aspect_canvas import AspectRatioCanvas
 from .filter_editor import FilterEditor
 from .icons import icon
 from .logic import _upscale_params_from_side_and_filter
-from .theme import THEME_TOPLEVELS, smooth_transition
-from .tool_panels import (
-    ASPECT_DIALOG_ENTRY_W,
-    DENSE_COL_GAP_PX,
-    DENSE_COL_WRAP_PX,
-    SETTINGS_GLYPH_COLLAPSED,
-    SETTINGS_GLYPH_EXPANDED,
-)
+from .theme import THEME_TOPLEVELS
+from .tool_panels import ASPECT_DIALOG_ENTRY_W, DENSE_COL_WRAP_PX
 from .widgets import (
+    ExpandableSection,
+    ExpandableSwitch,
     Spinner,
+    quiet_restore,
     rounded_button,
     rounded_combo,
     rounded_entry,
@@ -109,6 +105,9 @@ class AgentPanel(ttk.Labelframe):
         "bg_mode", "bg_color", "bg_tolerance", "bg_reach",
         "new_chat", "pause_min",
         "pause_max", "act_min", "act_max",
+        # ("settings_collapsed" retired with the gear, UI-SKETCH
+        # 2026-07-29 — every fine-tune lives under its own switch's
+        # expander now; an old stored key is simply ignored)
         # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
         # Phase 6: the old up_minw/up_minh/up_aspmin/up_aspmax four-field
         # gate collapsed into ONE min-side spinner — the embedded
@@ -117,8 +116,6 @@ class AgentPanel(ttk.Labelframe):
         # handled explicitly in get_settings/apply_settings below, not
         # through this tuple)
         "up_minside",
-        # this agent's own Settings-gear collapse state (owner 2026-07-19)
-        "settings_collapsed",
         # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — OFF
         # by default; W/H are the target ratio the AspectRatioCanvas
         # edits. "keep_all_steps" is the per-agent "keep every pipeline
@@ -220,8 +217,9 @@ class AgentPanel(ttk.Labelframe):
         # "ako ustanovi gresku salje fikseru da ispravi ... u situaciji ako
         # su oba ukljucena" — "both" being the checker AND the fixer). OFF
         # by default (an opt-in COST layered on TOP of the checker's own
-        # opt-in cost); visible only while checker_var is on (see
-        # _apply_fixer_visibility, built in _build_finetune). "api" mode
+        # opt-in cost); it lives INSIDE the AI-checker switch's own
+        # expander (_build_checker_sub), so it is reachable only while
+        # the checker itself is on — UI-SKETCH 2026-07-29. "api" mode
         # dispatches ai.edit_image on a background thread the instant a
         # checked image comes back flagged — a plain REST call, so it
         # genuinely runs IN PARALLEL with this site's own next-image
@@ -268,13 +266,13 @@ class AgentPanel(ttk.Labelframe):
         # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
         # Phase 6: ONE min-SIDE spinner — the shipped default reproduces
         # the old locked rule (800px) — plus an embedded FilterEditor
-        # (built in _build_finetune, seeded with today's aspect gate as
-        # a single Aspect (range) condition) deciding WHICH images
-        # qualify. Shown only when the Settings collapse is expanded.
+        # (built in _build_upscale_sub, seeded with today's aspect gate
+        # as a single Aspect (range) condition) deciding WHICH images
+        # qualify. Lives in the Upscale switch's own expander.
         self.up_minside_var = tk.StringVar(value=str(UPSCALE_MIN_SIDE_DEFAULT))
         # the upscale FilterEditor's SEED conditions — built once here so
-        # _build_finetune (called at the end of __init__) and a future
-        # re-seed both read the SAME default; not itself persisted (the
+        # _build_upscale_sub (called from the ExpandableSwitch below) and
+        # a future re-seed both read the SAME default; not persisted (the
         # widget's live get_conditions() is what get_settings() reads).
         self._default_upscale_conditions = [
             filters.FilterCondition(
@@ -282,10 +280,8 @@ class AgentPanel(ttk.Labelframe):
                 lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
             )
         ]
-        # this agent's OWN Settings-gear collapse state (owner 2026-07-19):
-        # True = fine-tune hidden (default). A BooleanVar so it persists and
-        # auto-saves through the same per-agent trace as every other field.
-        self.settings_collapsed_var = tk.BooleanVar(value=True)
+        # (the Settings-gear collapse state is GONE — UI-SKETCH
+        # 2026-07-29: per-switch expanders replaced the gear)
 
         # this site's SHOW/HIDE toggle (GUI rework Phase 12, spec item 3A:
         # "moze da se prikaze/sakrije bilo koji ... da ostane samo jedan
@@ -312,9 +308,9 @@ class AgentPanel(ttk.Labelframe):
         # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — OFF
         # by default (a deliberate DEFORM, not everyone's images need
         # one); W/H are the target ratio, mirrored two-way with the
-        # embedded AspectRatioCanvas (built in _build_finetune, reusing
-        # Phase 5's editor) exactly like AspectRatioDialog's own W/H
-        # entries + canvas.
+        # embedded AspectRatioCanvas (built in _build_aspect_sub,
+        # reusing Phase 5's editor) exactly like AspectRatioDialog's own
+        # W/H entries + canvas.
         self.force_aspect_var = tk.BooleanVar(value=False)
         self.force_aspect_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
         self.force_aspect_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
@@ -328,94 +324,114 @@ class AgentPanel(ttk.Labelframe):
             value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
         )
 
-        # the four content rows below live in ONE grid container so their
-        # order can flip between the narrow single-column stack (today's
-        # order — correct while both AgentPanels share the row, GUI rework
-        # Phase 12's ~half-width columns) and a two-column-dense fill —
-        # switches LEFT, dropdowns RIGHT — used while THIS is the sole
-        # visible panel (owner 2026-07-21 layout fix). See
-        # _apply_dense_columns/set_dense_columns below: only grid() calls
-        # move these FOUR EXISTING frames — every widget inside keeps its
-        # exact parent row, variable and command.
+        # the three groups below live in ONE grid container, stacked —
+        # see _stack_groups (the pre-sketch side-by-side "dense" mode is
+        # gone: this panel now sits in the setup screen's LEFT settings
+        # column, which is never the full window width)
         self._content = ttk.Frame(self)
         self._content.pack(fill="x")
+        self._groups: list[ttk.Frame] = []  # Pipeline / Run / Prompt
 
-        self._row_dropdowns = ttk.Frame(self._content)
-        ttk.Label(self._row_dropdowns, text="Background:").pack(side="left")
-        rounded_combo(
-            self._row_dropdowns, BACKGROUND_CHOICES, self.background_var,
-            width=105,
-        ).pack(side="left", padx=(2, 10))
-        ttk.Label(self._row_dropdowns, text="New chat:").pack(side="left")
-        rounded_combo(
-            self._row_dropdowns, NEW_CHAT_CHOICES, self.new_chat_var,
-            width=100,
-        ).pack(side="left", padx=(2, 0))
-
-        # the Style dropdown — a primary per-generation choice like
-        # Background, so it lives in the ALWAYS-VISIBLE area, not under the
-        # Settings gear (owner 2026-07-19)
-        self._row_style = ttk.Frame(self._content)
-        ttk.Label(self._row_style, text="Style:").pack(side="left")
-        rounded_combo(
-            self._row_style, STYLE_CHOICES, self.style_var, width=150,
-        ).pack(side="left", padx=(2, 0))
-
-        self._row_switches1 = ttk.Frame(self._content)
-        rounded_switch(
-            self._row_switches1, "BG removal", self.bg_removal_var,
-        ).pack(side="left")
-        rounded_switch(self._row_switches1, "Crop", self.crop_var).pack(
-            side="left", padx=8
+        # UI-SKETCH (owner 2026-07-29): the settings are THREE GROUPS —
+        # Pipeline / Run behavior / Prompt — each switch that owns
+        # fine-tune carrying its OWN indented expand/collapse sub-panel
+        # (ExpandableSwitch: turning ON auto-expands, the caret folds).
+        # The old global Settings gear is GONE; everything it held now
+        # lives under its owning switch (or the Pacing section).
+        # every ExpandableSwitch/Section is kept as a named field — the
+        # expander IS this panel's fine-tune surface now that the gear
+        # is gone, so its open/closed state has to stay reachable (the
+        # settings round-trip, a future "expand all", and the tests
+        # that pin the auto-expand contract all read these).
+        self._group_pipeline = self._build_group(self._content, "Pipeline")
+        self._sw_bg = ExpandableSwitch(
+            self._group_pipeline, "BG removal", self.bg_removal_var,
+            build_sub=self._build_bg_sub, eager=True,
+            on_layout_change=self._on_layout_change,
         )
+        self._sw_bg.pack(fill="x", pady=1)
         rounded_switch(
-            self._row_switches1, "Upscale", self.upscale_var,
-        ).pack(side="left")
+            self._group_pipeline, "Crop", self.crop_var,
+        ).pack(anchor="w", pady=1)
+        self._sw_aspect = ExpandableSwitch(
+            self._group_pipeline, "Force aspect ratio",
+            self.force_aspect_var,
+            build_sub=self._build_aspect_sub, eager=True,
+            on_layout_change=self._on_layout_change,
+        )
+        self._sw_aspect.pack(fill="x", pady=1)
+        self._sw_upscale = ExpandableSwitch(
+            self._group_pipeline, "Upscale", self.upscale_var,
+            build_sub=self._build_upscale_sub, eager=True,
+            on_layout_change=self._on_layout_change,
+        )
+        self._sw_upscale.pack(fill="x", pady=1)
+        rounded_switch(
+            self._group_pipeline, "Keep every pipeline step (more disk)",
+            self.keep_all_steps_var,
+        ).pack(anchor="w", pady=(3, 1))
 
-        self._row_switches2 = ttk.Frame(self._content)
+        self._group_run = self._build_group(self._content, "Run behavior")
         rounded_switch(
-            self._row_switches2, "Report txt", self.report_var,
-        ).pack(side="left")
+            self._group_run, "Report txt", self.report_var,
+        ).pack(anchor="w", pady=1)
         rounded_switch(
-            self._row_switches2, "Safer retry", self.safer_var,
-        ).pack(side="left", padx=8)
+            self._group_run, "Safer retry", self.safer_var,
+        ).pack(anchor="w", pady=1)
         rounded_switch(
-            self._row_switches2, "Continue nudge", self.continue_nudge_var,
-        ).pack(side="left")
-        # the parallel Checker AI (GUI rework Phase 16) sits right beside
-        # Safer retry/Continue nudge — the owner's other "watch this run
-        # and self-correct" switches — even though it works differently
-        # (checks the SAVED image on a background thread instead of
-        # reacting to a refusal/stall; see PainterGui._maybe_spawn_checker)
-        rounded_switch(
-            self._row_switches2, "AI checker", self.checker_var,
-        ).pack(side="left", padx=8)
+            self._group_run, "Continue nudge", self.continue_nudge_var,
+        ).pack(anchor="w", pady=1)
+        self._sw_checker = ExpandableSwitch(
+            self._group_run, "AI checker", self.checker_var,
+            build_sub=self._build_checker_sub, eager=True,
+            on_layout_change=self._on_layout_change,
+        )
+        self._sw_checker.pack(fill="x", pady=1)
+        self._sec_pacing = ExpandableSection(
+            self._group_run, "Pacing", self._build_pacing_sub,
+            on_layout_change=self._on_layout_change,
+        )
+        self._sec_pacing.pack(fill="x", pady=(3, 1))
 
-        # F7 (owner 2026-07-29): the per-agent PROMPT-HELPER toggles —
-        # primary per-generation choices like Background/Style, so they
-        # live in the always-visible area; texts are config data
-        # (PROMPT_HELPERS)
-        self._row_helpers = ttk.Frame(self._content)
-        ttk.Label(self._row_helpers, text="Helpers:").pack(side="left")
+        self._group_prompt = self._build_group(self._content, "Prompt")
+        row = ttk.Frame(self._group_prompt)
+        row.pack(fill="x", pady=1)
+        ttk.Label(row, text="Background:", width=12).pack(side="left")
+        rounded_combo(
+            row, BACKGROUND_CHOICES, self.background_var, width=105,
+        ).pack(side="left", padx=(2, 0))
+        # F7: the "custom" background color — picking "custom" opens
+        # the color wheel; the swatch shows the hex, click reopens
+        self._custom_swatch = tk.Label(row, text="", width=8, cursor="hand2")
+        self._custom_swatch.bind(
+            "<Button-1>", lambda _e: self._pick_custom_background()
+        )
+        row = ttk.Frame(self._group_prompt)
+        row.pack(fill="x", pady=1)
+        ttk.Label(row, text="Style:", width=12).pack(side="left")
+        rounded_combo(
+            row, STYLE_CHOICES, self.style_var, width=150,
+        ).pack(side="left", padx=(2, 0))
+        row = ttk.Frame(self._group_prompt)
+        row.pack(fill="x", pady=1)
+        ttk.Label(row, text="New chat:", width=12).pack(side="left")
+        rounded_combo(
+            row, NEW_CHAT_CHOICES, self.new_chat_var, width=100,
+        ).pack(side="left", padx=(2, 0))
         _HELPER_LABEL = {
             "no_mirror": "no mirror",
             "no_empty_space": "no empty space",
             "no_grainy": "no grainy",
         }
+        helpers_row = ttk.Frame(self._group_prompt)
+        helpers_row.pack(fill="x", pady=(3, 1))
+        ttk.Label(helpers_row, text="Helpers:", width=12).pack(side="left")
         for i, key in enumerate(HELPER_CHOICES):
             rounded_switch(
-                self._row_helpers, _HELPER_LABEL.get(key, key),
+                helpers_row, _HELPER_LABEL.get(key, key),
                 self.helper_vars[key],
-            ).pack(side="left", padx=(8 if i == 0 else 6, 0))
-        # F7: the "custom" background color — picking "custom" in the
-        # Background dropdown opens the color wheel; the swatch shows
-        # the chosen hex and reopens the picker on click
-        self._custom_swatch = tk.Label(
-            self._row_helpers, text="", width=8, cursor="hand2",
-        )
-        self._custom_swatch.bind(
-            "<Button-1>", lambda _e: self._pick_custom_background()
-        )
+            ).pack(side="left", padx=(2 if i == 0 else 6, 0))
+
         self.background_var.trace_add(
             "write", lambda *_a: self._on_background_change()
         )
@@ -424,12 +440,7 @@ class AgentPanel(ttk.Labelframe):
         )
         self._render_custom_swatch()
 
-        # narrow (both sites visible) by default — matches the grid this
-        # constructor just built above byte-for-byte; PainterGui.
-        # _relayout_agents flips this the moment a visibility change makes
-        # this the sole visible panel (or restores both).
-        self._dense = False
-        self._apply_dense_columns()
+        self._stack_groups()
 
         row = ttk.Frame(self)
         row.pack(fill="x", pady=(6, 2))
@@ -451,25 +462,14 @@ class AgentPanel(ttk.Labelframe):
             kind="danger-outline", width=70,
         )
         self.btn_stop.pack(side="left", padx=6)
-        # this agent's OWN Settings gear (owner 2026-07-19): the gear icon
-        # + a state caret; it shows/hides THIS panel's fine-tune (pause +
-        # action delay + upscale gate) independently of the other site.
-        self._settings_btn = rounded_button(
-            row, SETTINGS_GLYPH_COLLAPSED, command=self._toggle_settings,
-            icon_name="settings",
-        )
-        self._settings_btn.pack(side="right")
+        # UI-SKETCH (owner 2026-07-29): the global Settings gear is
+        # GONE — every fine-tune lives under its owning switch's
+        # expander (or the Pacing section) above.
         # every Start/Stop pair this agent owns (the panel's own pair plus
         # the collapsed-strip pair added by build_compact); set_run_state
         # styles ALL of them so both views always agree on availability
         self._button_pairs = [(self.btn_start, self.btn_stop)]
         self.set_run_state(running=False)
-
-        # the collapsible fine-tune block (pause + action delay + upscale
-        # gate) — built last so it sits at the panel's bottom; hidden until
-        # this agent's own Settings gear expands it
-        self._build_finetune()
-        self._apply_finetune_visibility()
 
         # this panel's embedded AspectRatioCanvas needs redraw_theme() on
         # every live Day/Night flip (GUI rework Phase 8 — see apply_theme's
@@ -479,121 +479,75 @@ class AgentPanel(ttk.Labelframe):
         THEME_TOPLEVELS.append(self)
         self.bind("<Destroy>", self._on_destroy)
 
-    def _apply_dense_columns(self) -> None:
-        """Regrid the four content rows (``_row_dropdowns``,
-        ``_row_style``, ``_row_switches1``, ``_row_switches2``) between
-        the narrow single-column stack (today's order — correct while
-        both AgentPanels share the row, GUI rework Phase 12's
-        ~half-width columns) and a two-column-dense fill — switches
-        LEFT, dropdowns RIGHT — used while this is the SOLE visible
-        panel (owner 2026-07-21 layout fix: the panel then spans the
-        WHOLE controls width, and the old single stack left it half
-        empty). Only ``grid()`` calls on these four EXISTING frames —
-        nothing is created, destroyed or reparented, so every
-        switch/combo inside keeps its exact variable and command."""
-        rows = (
-            self._row_dropdowns, self._row_style,
-            self._row_switches1, self._row_switches2, self._row_helpers,
+    def _build_group(self, parent, title: str) -> ttk.Frame:
+        """One UI-SKETCH settings GROUP: a heading + its body frame.
+        Returns the BODY (children pack into it); the outer frame is
+        gridded by ``_stack_groups``."""
+        outer = ttk.Frame(parent)
+        ttk.Label(outer, text=title, style="Head.TLabel").pack(
+            anchor="w", pady=(2, 2)
         )
-        for w in rows:
-            w.grid_forget()
-        if self._dense:
-            self._row_switches1.grid(row=0, column=0, sticky="ew", pady=2)
-            self._row_switches2.grid(row=1, column=0, sticky="ew", pady=2)
-            self._row_helpers.grid(row=2, column=0, sticky="ew", pady=2)
-            self._row_dropdowns.grid(
-                row=0, column=1, sticky="ew", pady=2,
-                padx=(DENSE_COL_GAP_PX, 0),
-            )
-            self._row_style.grid(
-                row=1, column=1, sticky="ew", pady=2,
-                padx=(DENSE_COL_GAP_PX, 0),
-            )
-            self._content.columnconfigure(0, weight=1)
-            self._content.columnconfigure(1, weight=1)
-        else:
-            self._row_dropdowns.grid(row=0, column=0, sticky="ew", pady=2)
-            self._row_style.grid(row=1, column=0, sticky="ew", pady=2)
-            self._row_switches1.grid(row=2, column=0, sticky="ew", pady=2)
-            self._row_switches2.grid(row=3, column=0, sticky="ew", pady=2)
-            self._row_helpers.grid(row=4, column=0, sticky="ew", pady=2)
-            self._content.columnconfigure(0, weight=1)
-            self._content.columnconfigure(1, weight=0)
+        body = ttk.Frame(outer)
+        body.pack(fill="x")
+        self._groups.append(outer)
+        return body
 
-    def set_dense_columns(self, dense: bool) -> None:
-        """``PainterGui._relayout_agents`` drives this off the KNOWN
-        visible-count state (GUI rework Phase 12's own
-        ``_visible_agent_columns``) — ``dense=True`` only while this is
-        the SOLE visible AgentPanel (the panel then spans the full
-        controls width); ``dense=False`` — the original stacked order —
-        while both sites share the row (each panel is already only
-        ~half width there, so the old left-hugging layout is not a
-        Rule #16 problem). A deliberate visible-COUNT switch, never a
-        ``<Configure>`` width probe (fragile, and this state is already
-        known exactly)."""
-        if dense == self._dense:
-            return
-        self._dense = dense
-        self._apply_dense_columns()
+    def _stack_groups(self) -> None:
+        """Grid the three GROUPS (Pipeline / Run behavior / Prompt,
+        UI-SKETCH 2026-07-29) as ONE vertical stack — this panel lives
+        in the setup screen's LEFT settings column, so its width is the
+        column's, not the window's, in every visible-count state.
 
-    def _build_finetune(self) -> None:
-        """This agent's collapsible FINE-TUNE area (owner 2026-07-19),
-        hidden behind its Settings gear: the PAUSE range, the ACTION-DELAY
-        range, and the UPSCALE GATE. Built into ``self._finetune_box`` and
-        left UNPACKED — ``_apply_finetune_visibility`` packs it in when
-        the gear expands.
+        (The pre-sketch layout also had a "dense" side-by-side mode for
+        a sole visible panel spanning the FULL controls width; the
+        two-column setup screen has no such width to give — three
+        groups abreast measure 1322 px and pushed the right-hand
+        collections/output/Select column clean off a default-sized
+        window. Retired with the gear, Rule #6: no dead mode kept
+        "just in case".)"""
+        for r, w in enumerate(self._groups):
+            w.grid(row=r, column=0, sticky="ew", pady=2)
+        self._content.columnconfigure(0, weight=1)
 
-        The upscale gate (GUI rework Phase 6) is ONE min-SIDE spinner —
-        the smaller side's target minimum in px, replacing the old
-        separate min-W/min-H fields — plus an embedded ``FilterEditor``
-        deciding WHICH images qualify, pre-seeded with today's aspect
-        gate as a single Aspect (range) condition. ``upscale_params()``
-        resolves the two into ``upscale_if_small``'s kwargs."""
-        box = ttk.Frame(self)
-        self._finetune_box = box
+    # --- UI-SKETCH sub-panel builders (owner 2026-07-29) --------------
+    # Each builds ONE switch's fine-tune into its ExpandableSwitch.sub
+    # (eager: state like the FilterEditor stack and the aspect canvas
+    # binding outlives the expander's visibility).
 
+    def _build_bg_sub(self, box) -> None:
+        """BG removal's own knobs — the SAME set the standalone BG tool
+        exposes, passed into ``remove_background`` (see ``bg_params``)."""
         row = ttk.Frame(box)
         row.pack(fill="x", pady=2)
-        ttk.Label(row, text="pause", width=12).pack(side="left")
-        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="action delay", width=12).pack(side="left")
-        Spinner(row, self.act_min_var, step=0.1).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.act_max_var, step=0.1).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-
-        # F2 (owner 2026-07-29): what to do when the site continues on
-        # a WEAKER model after the image quota (Gemini's Flash-Lite
-        # banner): ask once per run / continue on it / wait for reset
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="on degrade", width=12).pack(side="left")
+        ttk.Label(row, text="mode", width=10).pack(side="left")
         rounded_combo(
-            row, DEGRADE_CHOICES, self.degrade_var, width=110,
+            row, tuple(BG_MODE_LABEL), self.bg_mode_var, width=100,
         ).pack(side="left")
-
-        # the Force Aspect Ratio pipeline step (GUI rework Phase 8) — a
-        # deliberate DEFORM to an exact target ratio, run AFTER Crop and
-        # BEFORE Upscale (PainterGui._compose_post_save's new order:
-        # BG -> Crop -> Aspect -> Upscale). Default OFF. The target W/H
-        # is edited two-way with the SAME AspectRatioCanvas the
-        # standalone 'Aspect ratio…' tool's dialog uses (Phase 5) — the
-        # entries drive the canvas, dragging an edge drives them back.
-        ttk.Label(
-            box, text="Force Aspect Ratio (this site):", style="Head.TLabel"
-        ).pack(anchor="w", pady=(4, 0))
+        self._bg_swatch = tk.Label(row, text="", width=8, cursor="hand2")
+        self._bg_swatch.pack(side="left", padx=(8, 0))
+        self._bg_swatch.bind("<Button-1>", lambda _e: self._pick_bg_color())
         row = ttk.Frame(box)
         row.pack(fill="x", pady=2)
-        rounded_switch(row, "Force to ratio", self.force_aspect_var).pack(
-            side="left"
+        ttk.Label(row, text="tolerance", width=10).pack(side="left")
+        Spinner(row, self.bg_tolerance_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="% per channel").pack(side="left", padx=(4, 0))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="reach", width=10).pack(side="left")
+        rounded_combo(
+            row, tuple(BG_REACH_LABEL), self.bg_reach_var, width=110,
+        ).pack(side="left")
+        self.bg_mode_var.trace_add(
+            "write", lambda *_a: self._render_bg_swatch()
         )
+        self.bg_color_var.trace_add(
+            "write", lambda *_a: self._render_bg_swatch()
+        )
+        self._render_bg_swatch()
 
+    def _build_aspect_sub(self, box) -> None:
+        """Force Aspect Ratio's target — W/H entries mirrored two-way
+        with the SAME AspectRatioCanvas the standalone tool uses."""
         fa_fields = ttk.Frame(box)
         fa_fields.pack(fill="x", pady=2)
         ttk.Label(fa_fields, text="W").pack(side="left", padx=(0, 4))
@@ -611,10 +565,6 @@ class AgentPanel(ttk.Labelframe):
             textvariable=self.force_aspect_h_var, justify="center",
         )
         self._force_aspect_h_entry.pack(side="left")
-
-        # its own row below the W/H fields (not beside them, like the
-        # standalone dialog can afford) — this panel's column is
-        # narrower than a free-standing modal
         canvas_row = ttk.Frame(box)
         canvas_row.pack(fill="x", pady=(2, 0))
         self._force_aspect_canvas = AspectRatioCanvas(
@@ -631,96 +581,37 @@ class AgentPanel(ttk.Labelframe):
             "write", self._on_force_aspect_wh_typed
         )
 
-        # per-agent disk-usage choice for the pipeline's per-step backups
-        # (GUI rework Phase 8) — see gui._run_pipeline_steps.
+    def _build_upscale_sub(self, box) -> None:
+        """The upscale gate (GUI rework Phase 6): one min-SIDE spinner
+        + the FilterEditor stack deciding WHICH images qualify;
+        ``upscale_params()`` resolves both into ``upscale_if_small``'s
+        kwargs."""
         row = ttk.Frame(box)
-        row.pack(fill="x", pady=(6, 2))
-        rounded_switch(
-            row, "Keep every pipeline step (uses more disk)",
-            self.keep_all_steps_var,
-        ).pack(side="left")
-
-        # the whole Upscale-gate sub-block (GUI rework Phase 12): makes
-        # sense ONLY while the Upscale switch itself is on, so it lives
-        # in its OWN sub-frame, packed/unpacked by
-        # _apply_upscale_gate_visibility — independently of
-        # settings_collapsed_var (this sub-frame is a CHILD of ``box``;
-        # hiding/showing ``box`` itself never touches a child's own
-        # pack state, so the two toggles compose like a plain AND: only
-        # visible when BOTH the Settings gear is expanded AND Upscale
-        # is on).
-        self._upscale_gate_box = ttk.Frame(box)
-
-        ttk.Label(
-            self._upscale_gate_box, text="Upscale gate (this site):",
-            style="Head.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
-
-        row = ttk.Frame(self._upscale_gate_box)
         row.pack(fill="x", pady=2)
-        ttk.Label(row, text="min side", width=8).pack(side="left")
+        ttk.Label(row, text="min side", width=10).pack(side="left")
         Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
             side="left"
         )
         ttk.Label(
             row, text="px (the smaller side reaches this)"
         ).pack(side="left", padx=(4, 0))
-
-        # WHICH images qualify — a stacked FilterEditor (Phase 4) sharing
-        # the app-wide preset library, seeded with today's aspect gate
         self.upscale_filter = FilterEditor(
-            self._upscale_gate_box,
+            box,
             conditions=self._default_upscale_conditions,
             presets=self._filter_presets,
             on_presets_changed=self._on_filter_presets_changed,
         )
         self.upscale_filter.pack(fill="x", pady=(2, 0))
 
-        # live show/hide as Upscale itself is flipped — even while the
-        # Settings gear stays expanded (GUI rework Phase 12); also
-        # covers a settings-restore .set() (apply_settings, via _vars())
-        # since a trace fires on every write, not only interactive ones
-        self.upscale_var.trace_add(
-            "write", lambda *_a: self._apply_upscale_gate_visibility()
-        )
-        self._apply_upscale_gate_visibility()  # correct initial state
-
-        # F6 (REWORK.md, owner 2026-07-29): the parallel Checker AI's own
-        # fine-tune — DEFAULT ON, so the checker ALSO asks "does the
-        # image match its sheet PROMPT" (config.AI_CHECK_PROMPT_MATCH) on
-        # top of the banal-defects check; OFF drops back to the previous
-        # quality-only check (prompt=None). Lives in its OWN sub-frame,
-        # packed/unpacked by _apply_checker_extra_visibility on the SAME
-        # checker_var trace pattern as the Fixer-AI block right below it
-        # — nothing to fine-tune about a check that is not running.
-        self._checker_box = ttk.Frame(box)
-        ttk.Label(
-            self._checker_box, text="Checker AI (this site):",
-            style="Head.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
-        row = ttk.Frame(self._checker_box)
+    def _build_checker_sub(self, box) -> None:
+        """The parallel Checker AI's fine-tune (F6): the prompt-match
+        toggle + the Fixer AI (auto-fix + api/website mode)."""
+        row = ttk.Frame(box)
         row.pack(fill="x", pady=2)
         rounded_switch(
             row, "Check prompt match too", self.checker_prompt_var,
         ).pack(side="left")
-
-        self.checker_var.trace_add(
-            "write", lambda *_a: self._apply_checker_extra_visibility()
-        )
-        self._apply_checker_extra_visibility()  # correct initial state
-
-        # the Fixer AI (GUI rework Phase 20) — makes sense only while the
-        # parallel Checker AI is on (nothing to fix without a check), so
-        # it lives in its OWN sub-frame, packed/unpacked by
-        # _apply_fixer_visibility on a checker_var trace — the SAME
-        # "independent of the gear's own collapse" composition the
-        # Upscale gate sub-block above already uses.
-        self._fixer_box = ttk.Frame(box)
-        ttk.Label(
-            self._fixer_box, text="Fixer AI (this site):",
-            style="Head.TLabel",
-        ).pack(anchor="w", pady=(4, 0))
-        row = ttk.Frame(self._fixer_box)
+        row = ttk.Frame(box)
         row.pack(fill="x", pady=2)
         rounded_switch(row, "Auto-fix flagged images", self.fixer_var).pack(
             side="left"
@@ -730,90 +621,68 @@ class AgentPanel(ttk.Labelframe):
             row, FIXER_MODE_CHOICES, self.fixer_mode_var, width=90,
         ).pack(side="left")
         ttk.Label(
-            self._fixer_box,
-            text="API runs alongside the next generation; Website is"
-            " QUEUED for 'Send flagged to generator' (the tab is busy"
-            " generating).",
+            box,
+            text="API fix runs alongside the next generation; Website"
+            " is QUEUED for 'Send flagged to generator'.",
             style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
         ).pack(anchor="w", pady=(0, 2))
 
-        self.checker_var.trace_add(
-            "write", lambda *_a: self._apply_fixer_visibility()
+    def _build_pacing_sub(self, box) -> None:
+        """Run pacing (the old gear's top rows): the paced pause range,
+        the human action-delay range, and the F2 on-degrade choice."""
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="pause", width=12).pack(side="left")
+        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="action delay", width=12).pack(side="left")
+        Spinner(row, self.act_min_var, step=0.1).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(row, self.act_max_var, step=0.1).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+        row = ttk.Frame(box)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="on degrade", width=12).pack(side="left")
+        rounded_combo(
+            row, DEGRADE_CHOICES, self.degrade_var, width=110,
+        ).pack(side="left")
+
+    def _pick_bg_color(self) -> None:
+        from tkinter import colorchooser
+
+        picked = colorchooser.askcolor(
+            initialcolor=self.bg_color_var.get() or BG_COLOR_DEFAULT,
+            parent=self,
+            title=f"{SITES[self.site_key].name} — BG color to remove",
         )
-        self._apply_fixer_visibility()  # correct initial state
+        if picked and picked[1]:
+            self.bg_color_var.set(picked[1])
 
-    def _apply_checker_extra_visibility(self) -> None:
-        """Reflect ``checker_var`` onto the Checker-AI fine-tune sub-block
-        (F6, REWORK.md) — mirrors ``_apply_fixer_visibility``/
-        ``_apply_upscale_gate_visibility`` exactly: plain pack/pack_forget
-        on every trace fire (an interactive click through the checker
-        switch AND a silent settings restore alike), independent of the
-        gear's own collapse state. Nothing to fine-tune about a check
-        that is not running."""
-        if self.checker_var.get():
-            self._checker_box.pack(fill="x")
-        else:
-            self._checker_box.pack_forget()
-
-    def _apply_fixer_visibility(self) -> None:
-        """Reflect ``checker_var`` onto the Fixer-AI sub-block (GUI
-        rework Phase 20) — mirrors ``_apply_upscale_gate_visibility``
-        exactly: plain pack/pack_forget on every trace fire (an
-        interactive click through the checker switch AND a silent
-        settings restore alike), independent of the gear's own
-        collapse state."""
-        if self.checker_var.get():
-            self._fixer_box.pack(fill="x")
-        else:
-            self._fixer_box.pack_forget()
-
-    def _apply_upscale_gate_visibility(self) -> None:
-        """Reflect ``upscale_var`` onto the Upscale-gate sub-block (GUI
-        rework Phase 12): the min-side spinner + its FilterEditor are
-        meaningless once Upscale itself is off, so they disappear even
-        if the Settings gear stays expanded. Plain pack/pack_forget, no
-        smooth_transition — unlike _toggle_settings's own deliberate
-        owner-click animation, this fires from a trace on EVERY write
-        (an interactive click through the switch AND a silent settings
-        restore alike), so it stays as unobtrusive as
-        _apply_finetune_visibility's own plain reflect."""
-        if self.upscale_var.get():
-            self._upscale_gate_box.pack(fill="x")
-        else:
-            self._upscale_gate_box.pack_forget()
-
-    def _apply_finetune_visibility(self) -> None:
-        """Reflect ``settings_collapsed_var``: pack or unpack this agent's
-        fine-tune block and set the gear's state caret. The nested body's
-        size change lets the outer ScrollFrame recompute its region."""
-        collapsed = self.settings_collapsed_var.get()
-        if collapsed:
-            self._finetune_box.pack_forget()
-        else:
-            self._finetune_box.pack(fill="x", pady=(2, 0))
-        self._settings_btn.configure(
-            text=SETTINGS_GLYPH_COLLAPSED if collapsed
-            else SETTINGS_GLYPH_EXPANDED
+    def _render_bg_swatch(self) -> None:
+        """The removal-color swatch shows only in COLOR mode."""
+        if self.bg_mode_var.get() != BG_MODE_COLOR:
+            self._bg_swatch.pack_forget()
+            return
+        hex_color = self.bg_color_var.get() or BG_COLOR_DEFAULT
+        try:
+            r, g, b = (
+                int(hex_color[1:3], 16),
+                int(hex_color[3:5], 16),
+                int(hex_color[5:7], 16),
+            )
+        except (ValueError, IndexError):
+            hex_color, (r, g, b) = BG_COLOR_DEFAULT, (255, 255, 255)
+        luma = 0.299 * r + 0.587 * g + 0.114 * b
+        self._bg_swatch.configure(
+            text=hex_color, bg=hex_color,
+            fg="#000000" if luma > 140 else "#ffffff",
         )
-
-    def _toggle_settings(self) -> None:
-        """The gear: flip THIS agent's fine-tune visibility, independently
-        of the other site, behind the shared snapshot cover (the reveal
-        moves everything below the panel — bare, it lands as one hard
-        jump). The var change persists via its own trace. The re-fit
-        (``_on_layout_change``) runs INSIDE the covered mutate, alongside
-        the pack/pack_forget itself, so the outer ScrollFrame's
-        scrollregion settles hidden behind the same cover — never a
-        visible post-fade jump."""
-        self.settings_collapsed_var.set(
-            not self.settings_collapsed_var.get()
-        )
-
-        def mutate() -> None:
-            self._apply_finetune_visibility()
-            self._on_layout_change()
-
-        smooth_transition(self.winfo_toplevel(), mutate)
+        if not self._bg_swatch.winfo_manager():
+            self._bg_swatch.pack(side="left", padx=(8, 0))
 
     def _on_force_aspect_canvas_drag(self, w: int, h: int) -> None:
         """``AspectRatioCanvas.on_change`` — a drag mirrored into the W/H
@@ -1084,7 +953,6 @@ class AgentPanel(ttk.Labelframe):
             "act_min": self.act_min_var,
             "act_max": self.act_max_var,
             "up_minside": self.up_minside_var,
-            "settings_collapsed": self.settings_collapsed_var,
             "force_aspect": self.force_aspect_var,
             "force_aspect_w": self.force_aspect_w_var,
             "force_aspect_h": self.force_aspect_h_var,
@@ -1119,8 +987,14 @@ class AgentPanel(ttk.Labelframe):
         self, stored: dict,
         upscale_conditions: list[filters.FilterCondition] | None = None,
     ) -> None:
-        """Missing keys keep the current defaults; the restored collapse
-        state is reflected into the panel.
+        """Missing keys keep the current defaults.
+
+        The whole round-trip runs under ``quiet_restore`` (UI-SKETCH,
+        owner 2026-07-29): a restored-ON switch must NOT auto-expand its
+        fine-tune — Tk write-traces cannot tell a restore ``.set()``
+        from a click, and without this the app would open with every ON
+        switch's sub-panel unfolded instead of the compact panel the
+        sketch asks for. A restored-OFF switch still folds an open one.
 
         ``upscale_conditions`` (GUI rework Phase 6) is the ALREADY-
         PARSED replacement for the upscale FilterEditor's seeded
@@ -1132,10 +1006,18 @@ class AgentPanel(ttk.Labelframe):
         the raw JSON — see ``_migrate_legacy_upscale_gate`` and
         ``_parse_condition_dicts`` — because that needs a log sink this
         widget does not carry."""
-        variables = self._vars()
-        for key in self._PERSIST:
-            if key in stored:
-                variables[key].set(stored[key])
+        with quiet_restore(*self._expanders()):
+            variables = self._vars()
+            for key in self._PERSIST:
+                if key in stored:
+                    variables[key].set(stored[key])
         if upscale_conditions is not None:
             self.upscale_filter.set_conditions(upscale_conditions)
-        self._apply_finetune_visibility()
+
+    def _expanders(self) -> tuple[ExpandableSwitch, ...]:
+        """Every switch that owns a fine-tune sub-panel (the UI-SKETCH
+        table) — the restore-time auto-expand suppression reaches all
+        of them through this ONE list, never four hand-written names."""
+        return (
+            self._sw_bg, self._sw_aspect, self._sw_upscale, self._sw_checker,
+        )

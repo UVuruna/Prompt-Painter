@@ -43,7 +43,7 @@ from . import widgets
 from .agent_panel import AgentPanel
 from .api_panel import ApiImageGenPanel
 from .dash_panels import DashPanel, JobPanel
-from .logic import _visible_agent_columns
+from .logic import _visible_agent_slots
 from .menu import IconBar, MainMenu
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
 from .switch import DayNightSwitch
@@ -235,8 +235,21 @@ class BuildMixin:
         # order is deterministic regardless of build order)
         self._collapsed = False
         self._controls_box = ttk.Frame(self._main_view)
-        self._build_queue(self._controls_box)
-        self._build_options(self._controls_box)
+        # UI-SKETCH (owner 2026-07-29): the setup screen is LEFT
+        # settings / RIGHT input — the agent panels (with their
+        # per-switch expanders) on the left, the collections drop list
+        # + output folder + Select on the right.
+        setup = ttk.Frame(self._controls_box)
+        setup.pack(fill="both", expand=True, pady=(0, 6))
+        setup.columnconfigure(0, weight=3)
+        setup.columnconfigure(1, weight=2)
+        setup_left = ttk.Frame(setup)
+        setup_left.grid(row=0, column=0, sticky="new")
+        setup_right = ttk.Frame(setup)
+        setup_right.grid(row=0, column=1, sticky="new", padx=(12, 0))
+        self._build_options(setup_left)
+        self._build_queue(setup_right)
+        self._build_inputs_tail(setup_right)
         self._build_toolbar(self._controls_box)
         self._build_compact(self._main_view)
         self._build_views(self._main_view)
@@ -518,25 +531,21 @@ class BuildMixin:
         going live) all reach here the SAME way — one reconciliation
         function, not three call sites re-deriving it.
 
-        ``_visible_agent_columns`` (pure, Tk-free) decides which column
-        each VISIBLE site lands in, compacting toward 0 so hiding one
-        site never leaves the other stuck in a half-width column with a
-        dead gap beside it — the unused column's weight drops to 0 (the
-        same reset-then-reassign technique ``DashGrid.relayout`` already
-        uses) so the remaining panel's column takes all the freed width.
-        The compact strip needs no such column bookkeeping: ``pack``
-        already closes the gap on its own when one cluster is
-        forgotten.
+        ``_visible_agent_slots`` (pure, Tk-free) decides which ROW each
+        VISIBLE site lands in, compacting toward 0 so hiding one site
+        never leaves the other stuck below a dead empty row — the
+        unused row's weight drops to 0 (the same reset-then-reassign
+        technique ``DashGrid.relayout`` already uses). The compact
+        strip needs no such bookkeeping: ``pack`` already closes the
+        gap on its own when one cluster is forgotten.
 
-        GUI rework (owner 2026-07-21 layout fix): the SAME ``cols``
-        result also drives each panel's OWN internal two-column-dense
-        layout (``AgentPanel.set_dense_columns``) — exactly one visible
-        panel means it spans the whole controls width, so its content
-        switches from the narrow stack to switches-left/dropdowns-right;
-        two visible panels keep today's narrow stack (each already only
-        ~half width). A hidden panel is told the same way (harmless —
-        it is not on screen) so it is already correctly laid out the
-        moment a later toggle re-shows it."""
+        UI-SKETCH (owner 2026-07-29): the panels STACK in the setup
+        screen's LEFT settings column — side by side they needed ~1200
+        px of their own, which pushed the collections/output/Select
+        input column clean off a default-sized window (measured 2020 px
+        of content in a 1120 px window). One panel per row keeps the
+        whole setup screen inside ~1050 px in every visible-count
+        state."""
         visible = {
             key: panel.visible_var.get() for key, panel in self.agents.items()
         }
@@ -554,23 +563,21 @@ class BuildMixin:
         self._set_agent_mirror(both_mode)
         if both_mode:
             primary = sorted(SITES)[0]
-            cols = {primary: 0}
-            dense = True
+            slots = {primary: 0}
         else:
-            cols = _visible_agent_columns(sorted(SITES), visible)
-            dense = len(cols) == 1
+            slots = _visible_agent_slots(sorted(SITES), visible)
         for key, panel in self.agents.items():
-            panel.set_shared_header(both_mode and key in cols)
-        for c in range(len(SITES)):
-            self._agents_frame.columnconfigure(c, weight=0)
+            panel.set_shared_header(both_mode and key in slots)
+        for r in range(len(SITES)):
+            self._agents_frame.rowconfigure(r, weight=0)
+        self._agents_frame.columnconfigure(0, weight=1)
         for key, panel in self.agents.items():
-            shown = key in cols
+            shown = key in slots
             if shown:
-                panel.grid(row=0, column=cols[key], sticky="nsew", padx=4)
-                self._agents_frame.columnconfigure(cols[key], weight=1)
+                panel.grid(row=slots[key], column=0, sticky="new", pady=(0, 6))
+                self._agents_frame.rowconfigure(slots[key], weight=1)
             else:
                 panel.grid_remove()
-            panel.set_dense_columns(dense)
             cluster = self._compact_clusters[key]
             if shown:
                 cluster.pack(side="left", padx=(0, COMPACT_CLUSTER_GAP_PX))
@@ -730,12 +737,12 @@ class BuildMixin:
             icon_name="add", width=110, icon_edge=True,
         ).pack(fill="x", pady=(4, 0))
 
-    def _build_options(self, parent) -> None:
-        lf = ttk.Labelframe(parent, text="Output & run options")
-        lf.pack(fill="x", pady=(0, 6))
-
-        row = ttk.Frame(lf)
-        row.pack(fill="x", pady=2)
+    def _build_inputs_tail(self, parent) -> None:
+        """The RIGHT column's tail (UI-SKETCH, owner 2026-07-29): the
+        Output folder + the Select-images door, right under the
+        collections list."""
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(4, 2))
         ttk.Label(row, text="Output:", width=8).pack(side="left")
         self.out_var = tk.StringVar(value=str(DEFAULT_OUT_DIR))
         rounded_entry(row, textvariable=self.out_var).pack(
@@ -744,21 +751,33 @@ class BuildMixin:
         rounded_button(
             row, "Browse…", command=self._pick_out,
         ).pack(side="left", padx=(8, 0))
+        self.btn_select = rounded_button(
+            parent, "Select images…", command=self._select_images,
+        )
+        self.btn_select.pack(anchor="w", pady=(4, 0))
 
-        # the shared "Show:" row (GUI rework Phase 12, spec item 3A) —
-        # ABOVE both panels, deliberately never INSIDE either one: a
-        # control that could hide itself would strand the owner with no
-        # way back. Built once both panels exist below (loop first, row
-        # second) since it needs each AgentPanel's build_visibility_
-        # toggle; relayout wiring (the trace that actually grids/hides
-        # the panels) is registered in _build_compact, once the
-        # collapsed-strip clusters it also drives exist too.
+    def _build_options(self, parent) -> None:
+        lf = ttk.Labelframe(parent, text="Agents")
+        lf.pack(fill="both", expand=True)
+
+        # the shared "Sites:" row (GUI rework Phase 12, spec item 3A;
+        # relabeled per UI-SKETCH) — ABOVE both panels, deliberately
+        # never INSIDE either one: a control that could hide itself
+        # would strand the owner with no way back. Built once both
+        # panels exist below (loop first, row second) since it needs
+        # each AgentPanel's build_visibility_toggle; relayout wiring
+        # (the trace that actually grids/hides the panels) is
+        # registered in _build_compact, once the collapsed-strip
+        # clusters it also drives exist too.
         show_row = ttk.Frame(lf)
         show_row.pack(fill="x", pady=(0, 2))
-        ttk.Label(show_row, text="Show:").pack(side="left")
+        ttk.Label(show_row, text="Sites:").pack(side="left")
 
-        # the two per-agent panels side by side — everything below the
-        # shared Output line is PER SITE (full agent separation)
+        # the per-agent panels, STACKED in this settings column
+        # (UI-SKETCH, owner 2026-07-29 — see _relayout_agents, which
+        # owns the live row assignment): everything inside a panel is
+        # PER SITE (full agent separation), only the collections queue
+        # and the output folder in the RIGHT column stay shared
         self._agents_frame = ttk.Frame(lf)
         self._agents_frame.pack(fill="x", pady=(4, 2))
         self.agents: dict[str, AgentPanel] = {}
@@ -772,8 +791,8 @@ class BuildMixin:
                 on_log=self._log,
                 on_layout_change=self._scroll.refresh,
             )
-            panel.grid(row=0, column=i, sticky="nsew", padx=4)
-            self._agents_frame.columnconfigure(i, weight=1)
+            panel.grid(row=i, column=0, sticky="new", pady=(0, 6))
+            self._agents_frame.columnconfigure(0, weight=1)
             self.agents[key] = panel
             panel.build_visibility_toggle(show_row).pack(
                 side="left", padx=(6, 0)
@@ -782,15 +801,10 @@ class BuildMixin:
     def _build_toolbar(self, parent) -> None:
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(0, 6))
-        # "Check" used to live here — PINNED into the always-visible
-        # _top_strip instead (owner 2026-07-21 workflow fix, Rule #5 —
-        # moved, not duplicated). "Open Chrome (login)" is GONE
-        # entirely (F4g, owner 2026-07-29): Chrome is ensured
-        # automatically at agent Start, including the wait-for-login.
-        self.btn_select = rounded_button(
-            row, "Select images…", command=self._select_images,
-        )
-        self.btn_select.pack(side="left")
+        # "Check" is PINNED in the always-visible _top_strip; "Open
+        # Chrome (login)" is GONE (F4g — Chrome is ensured at Start);
+        # "Select images…" moved into the RIGHT input column
+        # (UI-SKETCH, owner 2026-07-29 — see _build_inputs_tail).
         rounded_button(
             row, "Instructions", command=self._open_instructions,
         ).pack(side="right")

@@ -16,6 +16,7 @@ time."""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from functools import partial
 from pathlib import PurePosixPath
 from tkinter import font as tkfont
@@ -405,6 +406,40 @@ def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
     )
 
 
+class ExpandableSection(ttk.Frame):
+    """A plain expandable row — a clickable label + ▸/▾ caret over an
+    indented sub-panel (the UI-SKETCH's "Pacing" row: settings that
+    belong to no single switch). Starts collapsed; content built
+    eagerly (its vars are plain fields, no lazy state)."""
+
+    def __init__(self, parent, label: str, build_sub, on_layout_change=None):
+        super().__init__(parent)
+        self._on_layout_change = on_layout_change or (lambda: None)
+        self._open = False
+        row = ttk.Frame(self)
+        row.pack(fill="x")
+        self._head = ttk.Label(row, text=f"▸ {label}", cursor="hand2")
+        self._head.pack(side="left")
+        self._label = label
+        self._head.bind("<Button-1>", lambda _e: self.toggle())
+        self.sub = ttk.Frame(self)
+        build_sub(self.sub)
+
+    def toggle(self, open_: bool | None = None) -> None:
+        want = (not self._open) if open_ is None else open_
+        if want == self._open:
+            return
+        self._open = want
+        if want:
+            self.sub.pack(fill="x", padx=(28, 0), pady=(2, 4))
+        else:
+            self.sub.pack_forget()
+        self._head.configure(
+            text=f"{'▾' if want else '▸'} {self._label}"
+        )
+        self._on_layout_change()
+
+
 class ExpandableSwitch(ttk.Frame):
     """A switch whose FINE-TUNE lives in an indented sub-panel right
     below it (owner's UI-SKETCH, 2026-07-29): turning the switch ON
@@ -413,13 +448,17 @@ class ExpandableSwitch(ttk.Frame):
     builds the sub-panel's content LAZILY on the first expand.
     ``build_sub=None`` renders a plain switch (no caret, no sub).
 
-    At CONSTRUCTION an already-ON switch (a restored setting) starts
-    COLLAPSED — the auto-expand fires only on a live OFF->ON click, so
-    a restored panel opens compact."""
+    An already-ON switch starts COLLAPSED — the auto-expand fires only
+    on a live OFF->ON click, so a panel opens compact. That covers
+    construction; a SETTINGS RESTORE happens later, as a plain
+    ``variable.set()`` Tk cannot tell from a click, so the restoring
+    host wraps its round-trip in ``quiet`` (see ``AgentPanel.
+    apply_settings``) — restoring ON keeps the sub-panel folded, while
+    restoring OFF still hides an open one."""
 
     def __init__(
         self, parent, label: str, variable,
-        build_sub=None, on_layout_change=None,
+        build_sub=None, on_layout_change=None, eager: bool = False,
     ):
         super().__init__(parent)
         self._var = variable
@@ -427,6 +466,9 @@ class ExpandableSwitch(ttk.Frame):
         self._on_layout_change = on_layout_change or (lambda: None)
         self._open = False
         self._built = False
+        # while True a turn-ON does NOT auto-expand (a settings
+        # restore) — set through quiet_restore(), never by hand
+        self.quiet = False
         row = ttk.Frame(self)
         row.pack(fill="x")
         rounded_switch(row, label, variable).pack(side="left")
@@ -435,6 +477,12 @@ class ExpandableSwitch(ttk.Frame):
         self._caret.bind("<Button-1>", lambda _e: self.toggle())
         self.sub = ttk.Frame(self)
         if build_sub is not None:
+            if eager:
+                # content whose STATE outlives the widget's visibility
+                # (a FilterEditor stack, a canvas two-way binding) is
+                # built now; expand/collapse only ever packs/unpacks
+                build_sub(self.sub)
+                self._built = True
             variable.trace_add("write", lambda *_a: self._on_switch())
             self._render_caret()
 
@@ -446,9 +494,12 @@ class ExpandableSwitch(ttk.Frame):
 
     def _on_switch(self) -> None:
         if self._var.get():
-            self.toggle(open_=True)  # a live turn-ON auto-expands once
+            if self.quiet:
+                self._render_caret()  # a restore stays folded
+            else:
+                self.toggle(open_=True)  # a live turn-ON auto-expands once
         elif self._open:
-            self.toggle(open_=False)
+            self.toggle(open_=False)  # OFF always hides, restore or not
         else:
             self._render_caret()
 
@@ -471,6 +522,23 @@ class ExpandableSwitch(ttk.Frame):
             self.sub.pack_forget()
         self._render_caret()
         self._on_layout_change()
+
+
+@contextmanager
+def quiet_restore(*switches: ExpandableSwitch):
+    """Restore settings into ``switches``' variables without any of
+    them auto-expanding (see ``ExpandableSwitch``'s own docstring: Tk
+    write-traces cannot tell a restore ``.set()`` from a click, and a
+    restored panel must open compact). Turning a switch OFF still hides
+    an open sub-panel inside the block — only the auto-EXPAND is
+    suppressed."""
+    for switch in switches:
+        switch.quiet = True
+    try:
+        yield
+    finally:
+        for switch in switches:
+            switch.quiet = False
 
 
 

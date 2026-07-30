@@ -2,7 +2,7 @@
 (god-file refactor, Rule #20): the shared-filter engine helpers, the
 per-image post-save pipeline runner, legacy settings migrations, the
 fixer auto-dispatch decision, and small pure view-layout helpers
-(``_menu_tile_columns``/``_next_view``/``_visible_agent_columns``) plus
+(``_menu_tile_columns``/``_next_view``/``_visible_agent_slots``) plus
 the dashboard's ``_scope_stats``. Every function here takes plain
 values (paths, dicts, duck-typed objects) and returns plain values —
 no widget is ever built or touched, so this module is directly
@@ -389,34 +389,39 @@ def _migrate_legacy_upscale_gate(min_width, aspect_min, aspect_max) -> dict:
     }
 
 
-def _visible_agent_columns(
+def _visible_agent_slots(
     order: list[str], visible: dict[str, bool],
 ) -> dict[str, int]:
-    """Left-to-right column index for each VISIBLE key in ``order`` (GUI
-    rework Phase 12, spec item 3A: either site's AgentPanel can be
-    hidden so only the other stays on screen). A hidden key
-    (``visible.get(key, True)`` is False) is simply ABSENT from the
-    result — the remaining visible panel(s) compact toward column 0
-    instead of leaving a dead gap where the hidden one used to sit, e.g.
-    ChatGPT hidden, Gemini alone -> ``{"gemini": 0}``, never
-    ``{"gemini": 1}``. Both visible -> ``{"chatgpt": 0, "gemini": 1}``;
-    both hidden (never reached in practice — set_run_state forces a
-    running site back to visible, and a site that never ran can still
-    be hidden by hand, which IS a legal "nothing showing" state) ->
-    ``{}``.
+    """Slot index for each VISIBLE key in ``order`` (GUI rework Phase
+    12, spec item 3A: either site's AgentPanel can be hidden so only
+    the other stays on screen). A hidden key (``visible.get(key,
+    True)`` is False) is simply ABSENT from the result — the remaining
+    visible panel(s) compact toward slot 0 instead of leaving a dead
+    gap where the hidden one used to sit, e.g. ChatGPT hidden, Gemini
+    alone -> ``{"gemini": 0}``, never ``{"gemini": 1}``. Both visible
+    -> ``{"chatgpt": 0, "gemini": 1}``; both hidden (never reached in
+    practice — set_run_state forces a running site back to visible, and
+    a site that never ran can still be hidden by hand, which IS a legal
+    "nothing showing" state) -> ``{}``.
+
+    The slot is a ROW since the UI-SKETCH rework (owner 2026-07-29):
+    the agent panels live in the setup screen's LEFT settings column,
+    stacked, with the collections/output/Select input column beside
+    them — side-by-side panels used to be columns of the full window
+    width, which the two-column setup no longer has to give.
 
     Pure and Tk-free — ``PainterGui._relayout_agents`` is the only
     caller, applying the result to real ``grid()``/``grid_remove()``
-    calls plus each column's weight (0 for an unused column so the
-    visible one(s) expand into the freed width, the same reset-then-
-    reassign technique ``DashGrid.relayout`` already uses)."""
-    cols: dict[str, int] = {}
+    calls plus each row's weight (0 for an unused row, the same
+    reset-then-reassign technique ``DashGrid.relayout`` already
+    uses)."""
+    slots: dict[str, int] = {}
     i = 0
     for key in order:
         if visible.get(key, True):
-            cols[key] = i
+            slots[key] = i
             i += 1
-    return cols
+    return slots
 
 
 # ---------------------------------------------------------------------
@@ -508,7 +513,7 @@ def _menu_tile_columns(width_px: int, tile_count: int) -> int:
     than 1. ``width_px <= 0`` (no real measurement yet, e.g. the very
     first pack before any ``<Configure>`` fires) falls back to the
     ideal layout, exactly like today's fixed default. Pure, Tk-free —
-    mirrors ``_visible_agent_columns``/``_next_view``'s own split (the
+    mirrors ``_visible_agent_slots``/``_next_view``'s own split (the
     Tk-facing half, ``MainMenu._reflow``, is proven by a real-window
     screenshot, matching gui.py's established convention for widget
     geometry — see ___tests.md)."""

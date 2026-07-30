@@ -193,7 +193,7 @@ from .logic import (
     # AgentPanel/ApiImageGenPanel/UpscaleSettingsPanel each import their
     # OWN real-path copy straight from gui.logic instead (Rule #3).
     _upscale_params_from_side_and_filter,
-    _visible_agent_columns,
+    _visible_agent_slots,
 )
 from .menu import IconBar, MainMenu
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
