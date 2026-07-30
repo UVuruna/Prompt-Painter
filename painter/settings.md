@@ -21,7 +21,7 @@ dropdown, under `agents.<site>`) — all plain JSON scalars
 and small dicts, so this module round-trips them with zero special
 handling. Since owner 2026-07-20 it also carries `gemini_api_key` —
 the AI features' free AI Studio key, written by the GUI's guided
-wizard and read back by [AI Client & Flows](ai.md) on every call;
+wizard and read back by [AI (subfolder)](ai/___ai.md) on every call;
 it is a CREDENTIAL, one more reason this file stays gitignored. GUI
 rework Phase 4 (2026-07-21) replaced the Aspect dialog's old scalar
 `aspect_filter` (`from`/`to`/`mode`) with `aspect_filter_conditions` —

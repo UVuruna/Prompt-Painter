@@ -1,6 +1,8 @@
 """Offline tests for the Gemini client + AI flows — NO live API.
 
-The HTTP layer is one monkeypatchable alias (``painter.ai._urlopen``);
+The HTTP layer is one monkeypatchable alias
+(``painter.ai.client._urlopen`` — the module that OWNS it since the
+Rule #20 package split, 2026-07-30);
 every test feeds canned response dicts through it and asserts the
 REQUEST the client built (url, headers, payload) and the loud failure
 taxonomy (``AiError`` on HTTP/refusal/malformed, ``NoKey`` on a
@@ -85,9 +87,9 @@ def fast_and_keyless(monkeypatch):
     """No pacing sleeps and no reading of the OWNER'S settings.json:
     every test either passes ``key=`` explicitly or monkeypatches
     ``load_settings`` itself."""
-    monkeypatch.setattr(ai, "AI_CALL_PAUSE_S", 0.0)
-    monkeypatch.setattr(ai, "_last_call_t", None)
-    monkeypatch.setattr(ai, "load_settings", lambda: {})
+    monkeypatch.setattr(ai.client, "AI_CALL_PAUSE_S", 0.0)
+    monkeypatch.setattr(ai.client, "_last_call_t", None)
+    monkeypatch.setattr(ai.client, "load_settings", lambda: {})
 
 
 def capture_call(monkeypatch, response: dict) -> list:
@@ -98,7 +100,7 @@ def capture_call(monkeypatch, response: dict) -> list:
         requests.append((req, timeout))
         return FakeResponse(response)
 
-    monkeypatch.setattr(ai, "_urlopen", fake_urlopen)
+    monkeypatch.setattr(ai.client, "_urlopen", fake_urlopen)
     return requests
 
 
@@ -243,7 +245,7 @@ def test_http_error_carries_the_api_message(monkeypatch):
             ).encode()),
         )
 
-    monkeypatch.setattr(ai, "_urlopen", fake_urlopen)
+    monkeypatch.setattr(ai.client, "_urlopen", fake_urlopen)
     with pytest.raises(ai.AiError, match="HTTP 400.*API key not valid"):
         ai.generate_text("p", key="bad")
 
@@ -252,7 +254,7 @@ def test_network_error_is_loud(monkeypatch):
     def fake_urlopen(req, timeout):
         raise urllib.error.URLError("no route to host")
 
-    monkeypatch.setattr(ai, "_urlopen", fake_urlopen)
+    monkeypatch.setattr(ai.client, "_urlopen", fake_urlopen)
     with pytest.raises(ai.AiError, match="unreachable"):
         ai.generate_text("p", key="k")
 
@@ -289,7 +291,7 @@ def urlopen_sequence(monkeypatch, *outcomes):
             raise outcome
         return FakeResponse(outcome)
 
-    monkeypatch.setattr(ai, "_urlopen", fake)
+    monkeypatch.setattr(ai.client, "_urlopen", fake)
     return calls
 
 
@@ -299,7 +301,7 @@ def backoff_sleeps(monkeypatch):
     autouse fixture zeroes the free-tier pace, so every recorded sleep
     is a retry backoff (``_pace`` never sleeps here)."""
     sleeps: list[float] = []
-    monkeypatch.setattr(ai.time, "sleep", sleeps.append)
+    monkeypatch.setattr(ai.client.time, "sleep", sleeps.append)
     return sleeps
 
 
@@ -378,11 +380,11 @@ def test_check_image_retries_transient_too(monkeypatch, backoff_sleeps, tmp_path
 
 
 def test_missing_key_raises_nokey(monkeypatch):
-    monkeypatch.setattr(ai, "load_settings", lambda: {})
+    monkeypatch.setattr(ai.client, "load_settings", lambda: {})
     with pytest.raises(ai.NoKey):
         ai.api_key()
     monkeypatch.setattr(
-        ai, "load_settings", lambda: {"gemini_api_key": "   "}
+        ai.client, "load_settings", lambda: {"gemini_api_key": "   "}
     )
     with pytest.raises(ai.NoKey):
         ai.api_key()
@@ -390,7 +392,7 @@ def test_missing_key_raises_nokey(monkeypatch):
 
 def test_saved_key_is_read_from_settings(monkeypatch):
     monkeypatch.setattr(
-        ai, "load_settings", lambda: {"gemini_api_key": " abc "}
+        ai.client, "load_settings", lambda: {"gemini_api_key": " abc "}
     )
     assert ai.api_key() == "abc"
 
@@ -398,7 +400,7 @@ def test_saved_key_is_read_from_settings(monkeypatch):
 def test_generate_without_key_raises_nokey_before_any_http(monkeypatch):
     called = []
     monkeypatch.setattr(
-        ai, "_urlopen", lambda *a, **k: called.append(1)
+        ai.client, "_urlopen", lambda *a, **k: called.append(1)
     )
     with pytest.raises(ai.NoKey):
         ai.generate_text("p")
@@ -406,9 +408,9 @@ def test_generate_without_key_raises_nokey_before_any_http(monkeypatch):
 
 
 def test_pacing_sleeps_between_calls(monkeypatch):
-    monkeypatch.setattr(ai, "AI_CALL_PAUSE_S", 60.0)
+    monkeypatch.setattr(ai.client, "AI_CALL_PAUSE_S", 60.0)
     sleeps: list[float] = []
-    monkeypatch.setattr(ai.time, "sleep", sleeps.append)
+    monkeypatch.setattr(ai.client.time, "sleep", sleeps.append)
     capture_call(monkeypatch, text_response("x"))
     ai.generate_text("one", key="k")   # first call: no wait
     ai.generate_text("two", key="k")   # second: paced
@@ -621,7 +623,7 @@ def test_list_models_follows_the_next_page_token(monkeypatch):
 
 def test_list_models_without_key_raises_nokey_before_any_http(monkeypatch):
     called = []
-    monkeypatch.setattr(ai, "_urlopen", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(ai.client, "_urlopen", lambda *a, **k: called.append(1))
     with pytest.raises(ai.NoKey):
         ai.list_models()
     assert called == []
@@ -704,7 +706,7 @@ def test_recommend_model_none_when_nothing_is_capable():
 def test_model_for_falls_back_to_the_hardcoded_constant_when_no_override(
     monkeypatch,
 ):
-    monkeypatch.setattr(ai, "load_settings", lambda: {})
+    monkeypatch.setattr(ai.client, "load_settings", lambda: {})
     assert ai.model_for("image") == GEMINI_IMAGE_MODEL
     assert ai.model_for("vision") == GEMINI_VISION_MODEL
     assert ai.model_for("text") == GEMINI_TEXT_MODEL
@@ -714,7 +716,7 @@ def test_model_for_reads_the_stored_override(monkeypatch):
     from painter.config import MODELS_SETTING
 
     monkeypatch.setattr(
-        ai, "load_settings",
+        ai.client, "load_settings",
         lambda: {MODELS_SETTING: {"image": "gemini-3.1-flash-image"}},
     )
     assert ai.model_for("image") == "gemini-3.1-flash-image"
@@ -726,14 +728,14 @@ def test_model_for_blank_override_falls_back_like_a_missing_one(monkeypatch):
     from painter.config import MODELS_SETTING
 
     monkeypatch.setattr(
-        ai, "load_settings",
+        ai.client, "load_settings",
         lambda: {MODELS_SETTING: {"text": "   "}},
     )
     assert ai.model_for("text") == GEMINI_TEXT_MODEL
 
 
 def test_model_for_unknown_purpose_is_loud(monkeypatch):
-    monkeypatch.setattr(ai, "load_settings", lambda: {})
+    monkeypatch.setattr(ai.client, "load_settings", lambda: {})
     with pytest.raises(ValueError, match="unknown model purpose"):
         ai.model_for("audio")
 
@@ -746,7 +748,7 @@ def test_generate_text_routes_the_default_model_through_model_for(monkeypatch):
     from painter.config import MODELS_SETTING
 
     monkeypatch.setattr(
-        ai, "load_settings",
+        ai.client, "load_settings",
         lambda: {MODELS_SETTING: {"text": "gemini-3.1-pro"}},
     )
     requests = capture_call(monkeypatch, text_response("hi"))
@@ -1061,7 +1063,7 @@ def test_check_one_image_flags_records_raw_and_times(tmp_path, monkeypatch):
     out = tmp_path / "out"
     img = _make_image(out, "emblem/gemini/mood/Glory.png")
     clock = [100.0]
-    monkeypatch.setattr(ai.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(ai.client.time, "monotonic", lambda: clock[0])
     raw = "DEFECTS:\n- subject cut at the left edge"
 
     def fake_check(src, instructions, *, model=None, log=None):

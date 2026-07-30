@@ -1169,7 +1169,7 @@ pre-running spots.
 - **API Image Generation (GUI rework Phase 19)** — a THIRD generation
   job, `"api_image"`, alongside chatgpt/gemini: the SAME queued `.md`
   sheets Website GEN drives, generated through the PAID Gemini image
-  REST API (`GEMINI_IMAGE_MODEL`, [AI Client & Flows](painter/ai.md)'s
+  REST API (`GEMINI_IMAGE_MODEL`, [AI (subfolder)](painter/ai/___ai.md)'s
   `generate_image`, Phase 18) instead of a browser tab. Two new
   pieces, plus a widened `_drive_site`:
 
@@ -1271,7 +1271,7 @@ pre-running spots.
     **GATING** (owner decision, spec item 5) — the owner's key has
     ZERO free-tier quota for the paid image model TODAY
     (`ai.PaidFeatureRequired`, captured live 2026-07-21, see
-    [AI Client & Flows](painter/ai.md)): a **Check API access** button
+    [AI (subfolder)](painter/ai/___ai.md)): a **Check API access** button
     makes ONE cheap REAL `ai.generate_image(AI_IMAGE_PROBE_PROMPT, …)`
     call on a background thread (its OWN small private
     `queue.Queue`+`self.after(AI_POLL_MS, …)` poll, mirroring
@@ -1562,7 +1562,7 @@ pre-running spots.
   a tall medallion / long doc scrolls.
 - **The AI row** (owner 2026-07-20, a SECOND toolbar row so the tool
   row never clips at the window minimum) — TWO buttons over
-  [AI Client & Flows](painter/ai.md) (a THIRD, **AI check…**, used to
+  [AI (subfolder)](painter/ai/___ai.md) (a THIRD, **AI check…**, used to
   sit here directly popping its folder dialog + confirm — DELETED GUI
   rework Phase 15 alongside that inline flow itself, same reasoning as
   the four tools' own quick buttons before it: the Main Menu/IconBar's
@@ -2754,7 +2754,7 @@ without a panel to reveal any more; the check is a no-op only outside
   [Run Loop](painter/runner.md), [Chrome Launcher](painter/chrome.md),
   [Postprocess](painter/postprocess.md), [Upscale](painter/upscale.md),
   [Change Aspect Ratio](painter/aspect.md), [Job Temp](painter/jobtemp.md),
-  [AI Client & Flows](painter/ai.md),
+  [AI (subfolder)](painter/ai/___ai.md),
   [Shared Filter Framework](painter/filters.md),
   [Settings](painter/settings.md), [Config (subfolder)](painter/config/___config.md)
 

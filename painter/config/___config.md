@@ -258,7 +258,7 @@ only, empty elsewhere), the attach selectors) and `SITES`
   `FILTER_KIND_ASPECT_RANGE`, `FILTER_KIND_ANY_SIDE`,
   `FILTER_KIND_WIDTH`, `FILTER_KIND_HEIGHT`, `FILTER_POLARITY_IF`,
   `FILTER_POLARITY_IF_NOT`
-- [AI Client & Flows](../ai.md) — the `GEMINI_*` / `AI_*` block,
+- [AI (subfolder)](../ai/___ai.md) — the `GEMINI_*` / `AI_*` block,
   `SITES` (the re-send reverse map), `STATE_DIRNAME`, `PROJECT_ROOT`
 
 ## Design Decisions
