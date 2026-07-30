@@ -22,7 +22,7 @@ from painter.config import RESIZE_SETTLE_MS, SITES
 from painter.sheet_parser import Sheet
 from .scroll import ScrollFrame
 from .theme import THEME_TOPLEVELS, skin_toplevel
-from .viewers import DOC_HEIGHT_FRAC, DOC_MAX_FRAC
+from .viewer_shared import DOC_HEIGHT_FRAC, DOC_MAX_FRAC
 from .widgets import folder_of, rounded_button, status, tk_font
 
 # --- Select-images window geometry (Rule #4) --------------------------

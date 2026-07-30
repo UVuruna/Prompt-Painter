@@ -36,7 +36,7 @@ for every OTHER late-binding reader (see Design Decisions).
   mirrors the original file's own lazy-import convention)
 - [Theme (script)](theme.py) — `THEME_TOPLEVELS`, `skin_text`,
   `skin_toplevel`
-- [Viewers](viewers.md) — `DocWindow` (`AiSheetDialog._finish`'s
+- [Doc Window](doc_window.md) — `DocWindow` (`AiSheetDialog._finish`'s
   "fix manually, not loaded" viewer)
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`,
   `rounded_entry`, `status`, `tk_font`

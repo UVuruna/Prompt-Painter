@@ -34,9 +34,11 @@ transparency-checkerboard compositing helpers (`_checkerboard`,
 - [Tool + AI-Checker Dashboard Panels + Grid](tool_dash.md) —
   `ToolPanel`/`AiCheckPanel` import `build_job_tree`/`fmt_time_summary`/
   `ai_check_tag`/`ai_check_doc_md`/`ai_check_image_file` directly
-- [Read-Only Viewers](viewers.md) — `DocWindow`/`BeforeAfterWindow`
-  import `_scaled_photo` directly (which itself calls `_checkerboard`/
-  `_has_alpha`, kept private to this module)
+- [Doc Window](doc_window.md) / [Restore Viewers](restore_windows.md)
+  / [Image Viewer](image_viewer.md) — all import `_scaled_photo`
+  directly (which itself calls `_checkerboard`/`_has_alpha`, kept
+  private to this module); the image viewer also takes
+  `ai_check_doc_md`
 
 ## Design Decisions
 - **`_BADGE_DOTS` stays a private module-level cache, not re-exported.**

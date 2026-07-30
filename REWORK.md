@@ -396,11 +396,15 @@ successor), docs.
   classified SAFETY until a distinctly-copyright Gemini text is
   captured live; then a `REFUSAL_COPYRIGHT` marker group is added.
 - **F4 split decision:** shipped whole (2026-07-29).
-- **God-file split session (Rule #20):** `gui/viewers.py` (~1185),
-  `painter/ai.py` (~1198) and `gui/tool_panels.py` (~1283) are past
-  the budget after F4–F6 — one dedicated split session per
-  [REFACTOR-GODFILES.md](../../REFACTOR-GODFILES.md), no behavior
-  change.
+- **God-file split session (Rule #20): DONE 2026-07-30** (owner
+  approved "the three worst + the guard"). `gui/viewers.py` (1185) ->
+  `viewer_shared.py`/`doc_window.py`/`restore_windows.py`/
+  `image_viewer.py`; `painter/ai.py` (1198) and `gui/tool_panels.py`
+  (1283) -> their own packages; `tests/test_structure.py` now FAILS
+  the suite for any unlisted file over ~1000 lines, and the remaining
+  offenders (`gui/app_jobs.py`, `painter/driver.py`,
+  `gui/agent_panel.py` + five test modules) are documented RATCHET
+  entries owed a second round. No behavior change.
 - **`no_empty_space` helper wording:** ships DEFAULT OFF until the
   owner approves/retunes the text (`PROMPT_HELPERS`, pure data).
 - **First supervised run checklist:** confirm the F1 `user_turn`

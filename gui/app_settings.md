@@ -49,8 +49,12 @@ _filter_presets`, `self._settings`, `self._gemini_key`, ...) is set by
   `widgets.FONT_BASE`/`widgets.ACTIVE_THEME` globals persisted by
   `_collect_settings` (module-attribute access, never a frozen `from`
   import)
-- [Read-Only Viewers](viewers.md) — `DocWindow`, through a DEFERRED
+- [Doc Window](doc_window.md) — `DocWindow`, through a DEFERRED
   `import gui`, never a module-level import (see Design Decisions)
+- [Image Viewer](image_viewer.md) — `ImageViewer` (a plain real-path
+  import: no test monkeypatches it)
+- [Restore Viewers](restore_windows.md) — `_filmstrip_stages`
+- [Viewer Shared Rules](viewer_shared.md) — `_restore_step`
 
 ### Used by
 - [App (composition)](app.md) — `PainterGui(..., SettingsMixin)`

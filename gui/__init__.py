@@ -233,10 +233,10 @@ from .tool_panels import (
     ToolSettingsPanel,
     UpscaleSettingsPanel,
 )
-from .viewers import (
+from .doc_window import DocWindow
+from .image_viewer import ImageViewer
+from .restore_windows import (
     BeforeAfterWindow,
-    DocWindow,
-    ImageViewer,
     StepRestoreWindow,
     _filmstrip_stages,
 )

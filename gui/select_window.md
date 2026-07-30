@@ -20,11 +20,11 @@ services every tick/all-none click.
   (`RESIZE_SETTLE_MS`, `SITES`), `sheet_parser.Sheet`
 - [Scroll (script)](scroll.py) — `ScrollFrame`
 - [Theme (script)](theme.py) — `THEME_TOPLEVELS`, `skin_toplevel`
-- [Viewers](viewers.md) — `DOC_HEIGHT_FRAC`/`DOC_MAX_FRAC` (the shared
-  "tall open" / "never bigger than screen" clamps this window shares
-  with `DocWindow`/`BeforeAfterWindow`/`StepRestoreWindow` — imported
-  directly from `gui.viewers`, the module that owns the `DOC_*`
-  family; no circularity, `gui.viewers` has no dependency back here)
+- [Viewer Shared Rules](viewer_shared.md) — `DOC_HEIGHT_FRAC`/
+  `DOC_MAX_FRAC` (the shared "tall open" / "never bigger than screen"
+  clamps this window shares with every viewer Toplevel — imported from
+  the leaf module that owns the `DOC_*` family, which has no `gui`
+  dependency of its own, so no cycle is possible)
 - [Themed Widget Toolkit](widgets.md) — `folder_of`, `rounded_button`,
   `status`, `tk_font`
 

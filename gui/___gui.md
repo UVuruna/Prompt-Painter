@@ -63,12 +63,23 @@ imports from `gui/__init__.py` (`math`, `webbrowser`,
 used by the file, none referenced as `gui.X` anywhere in `gui/` or
 `tests/`, so none were re-export dependencies either) and ran the full
 cross-project verification pass this step exists for (see
-`REFACTOR-GODFILES.md`, the owner's binding plan, untracked): every
-`gui/*.py` and `painter/**/*.py` file now sits under the ~1000-line
-Rule #20 budget (`gui/app_jobs.py`, the largest, is 979).
+`REFACTOR-GODFILES.md`, the owner's binding plan, untracked).
 [gui.md](../gui.md) (the pre-existing FEATURE-by-feature script doc,
 one level up) points readers at these six modules for where the
 described behavior actually lives.
+
+**Second god-file round (owner approved 2026-07-30) — and the guard
+that keeps it honest.** Feature work had pushed several modules back
+over the budget (`gui/tool_panels.py` 1283, `gui/viewers.py` 1185,
+`gui/app_jobs.py` 1122, `gui/agent_panel.py` 1023). The owner approved
+splitting the three worst files in the codebase and adding the
+mandatory STRUCTURE LAW guard (root Rule #20 point 3) —
+`tests/test_structure.py`, which FAILS the suite for any file over
+~1000 lines that is not a documented, owner-approved RATCHET entry;
+the ratchet list may only shrink. `gui/viewers.py` split first, into
+[Viewer Shared Rules](viewer_shared.md), [Doc Window](doc_window.md),
+[Restore Viewers](restore_windows.md) and
+[Image Viewer](image_viewer.md).
 
 ## Files
 
@@ -305,19 +316,32 @@ Collections (3-level tree: collection -> folder -> image), with the
 chunked Expand-all and coalesced recount that keep a big queue
 responsive. See [Select-Images Window](select_window.md).
 
-### `viewers.py` — Read-Only Viewers
-`DocWindow` (the Markdown/prompt/image viewer, plus its optional
-Fixer-AI manual buttons — since GUI rework Phase F4f, sheet/folder-
-level dashboard rows only), `BeforeAfterWindow` (a tool job's
-before/after viewer), `_filmstrip_stages` (the pure per-image
-pipeline-stage list), `StepRestoreWindow` (the per-step restore
-filmstrip built from it) and `ImageViewer` (Phase F4f, owner G6/G7 —
-the PORTRAIT Prev/Next/Delete viewer that replaces `DocWindow` for
-IMAGE-level dashboard rows: the image's own file-stem title, the main
-image or its refusal reason, the prompt block, and two lookup-gated
-expandable sub-sections, Check and Steps). Also owns the shared
-`DOC_*`/`BEFORE_AFTER_*`/`STEP_RESTORE_*`/`IMAGE_VIEWER_*` sizing
-constants. See [Read-Only Viewers](viewers.md).
+### `viewer_shared.py` — Viewer Shared Rules
+The `DOC_*` window-sizing family (Rule #4 — the "never bigger than the
+screen" / "tall open" clamps every doc-shaped window, including the
+Select window, shares) plus the three tiny helpers all viewers use:
+`_copy_to_clipboard`, `_readonly_text_keys` and `_restore_step` (the
+ONE `JobTemp.restore_to` call site). A true leaf — plain tkinter, no
+`gui` sibling. See [Viewer Shared Rules](viewer_shared.md).
+
+### `doc_window.py` — Doc Window
+`DocWindow` — the Markdown/prompt/image viewer plus its optional
+Fixer-AI manual buttons; since GUI rework Phase F4f it backs the
+sheet/folder-level dashboard rows only. See [Doc Window](doc_window.md).
+
+### `restore_windows.py` — Restore Viewers
+`BeforeAfterWindow` (a tool job's before/after viewer),
+`_filmstrip_stages` (the pure per-image pipeline-stage list) and
+`StepRestoreWindow` (the per-step restore filmstrip built from it) —
+one cohesive pair plus their shared data. See
+[Restore Viewers](restore_windows.md).
+
+### `image_viewer.py` — Image Viewer
+`ImageViewer` (Phase F4f, owner G6/G7) — the PORTRAIT Prev/Next/Delete
+viewer that replaced `DocWindow` for IMAGE-level dashboard rows: the
+image's own file-stem title, the main image or its refusal reason, the
+prompt block, and two lookup-gated expandable sub-sections, Check and
+Steps. See [Image Viewer](image_viewer.md).
 
 ### `dialogs.py` — Modal Dialogs
 `_ModalToolDialog` (shared centre-on-parent placement), `_AiDialog`
@@ -397,25 +421,26 @@ left it behind in `gui/__init__.py` specifically because `_AiDialog`
 then would have just moved the same circular-import problem onto
 `ApiImageGenPanel` instead. Now that `_AiDialog` itself has moved (this
 step), the constant follows its real owner. Both `gui/api_panel.py`'s
-`_arm_probe_poll` AND `gui/viewers.py`'s `DocWindow._arm_fix_poll` (an
-unrelated Fixer-AI poll that happens to share the same cadence
+`_arm_probe_poll` AND `gui/doc_window.py`'s `DocWindow._arm_fix_poll`
+(an unrelated Fixer-AI poll that happens to share the same cadence
 constant) keep reaching it through a deferred `import gui; gui.
 AI_POLL_MS` inside the method body (never at module level) — the
 identical late-binding idiom `gui/theme.py`'s `_pkg()` established —
 rather than a real-path `from .dialogs import AI_POLL_MS`. For
-`gui.viewers` specifically a real-path import WOULD be circular:
-`gui.dialogs` imports `DocWindow` FROM `gui.viewers` (for
-`AiSheetDialog._finish`'s "not loaded" viewer), so `gui.viewers`
+`gui.doc_window` specifically a real-path import WOULD be circular:
+`gui.dialogs` imports `DocWindow` FROM `gui.doc_window` (for
+`AiSheetDialog._finish`'s "not loaded" viewer), so `gui.doc_window`
 cannot import back from `gui.dialogs` at module level. By the time
 either poll method actually runs (well after import time), the `gui`
 package has always finished initializing.
 
 **Step 5 — the viewer/dialog Toplevels' cross-import shape.**
 `gui/select_window.py` imports `DOC_HEIGHT_FRAC`/`DOC_MAX_FRAC`
-directly from `gui/viewers.py` (the module that names and owns the
-`DOC_*` sizing family) — safe because `gui.viewers` has no dependency
-back on `gui.select_window`. `gui/dialogs.py` imports `DocWindow`
-directly from `gui/viewers.py` for the same reason (one-directional).
+directly from `gui/viewer_shared.py` (the leaf that names and owns the
+`DOC_*` sizing family — since the 2026-07-30 split it has no `gui`
+imports at all, so it can never take part in a cycle).
+`gui/dialogs.py` imports `DocWindow` directly from
+`gui/doc_window.py`, one-directional for the same reason.
 The only cycle risk in this step was `AI_POLL_MS` (see above), solved
 with the same late-binding idiom rather than restructuring either
 module.

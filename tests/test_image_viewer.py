@@ -31,7 +31,7 @@ from tkinter import messagebox
 import pytest
 from PIL import Image
 
-from gui.viewers import ImageViewer
+from gui.image_viewer import ImageViewer
 
 
 @pytest.fixture

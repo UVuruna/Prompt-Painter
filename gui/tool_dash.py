@@ -48,7 +48,7 @@ from .dash_helpers import (
 )
 from .dash_panels import JobPanel
 from .theme import TOOL_CHANGED_TAG, TOOL_SKIP_TAG
-from .viewers import BeforeAfterWindow
+from .restore_windows import BeforeAfterWindow
 from .widgets import folder_of, rels_in_folder, rounded_button
 
 # --- AI checker (Rule #4) ---------------------------------------------

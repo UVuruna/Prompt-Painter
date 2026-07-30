@@ -32,10 +32,10 @@ header/close/pause chrome and the folder>image tree-node helpers.
   (the shared base, real-path import)
 - [Theme (script)](theme.md) — `TOOL_CHANGED_TAG`/`TOOL_SKIP_TAG` (the
   changed/skipped row tags)
-- [Viewers (script)](viewers.md) — `BeforeAfterWindow` (real-path,
-  `ToolPanel`'s before/after viewer), `DocWindow` (`AiCheckPanel`'s
-  defect viewer, through a DEFERRED `import gui` — see Design
-  Decisions)
+- [Restore Viewers](restore_windows.md) — `BeforeAfterWindow`
+  (real-path, `ToolPanel`'s before/after viewer)
+- [Doc Window](doc_window.md) — `DocWindow` (`AiCheckPanel`'s defect
+  viewer, through a DEFERRED `import gui` — see Design Decisions)
 - [Themed Widget Toolkit](widgets.md) — `folder_of`/`rels_in_folder`/
   `rounded_button`
 

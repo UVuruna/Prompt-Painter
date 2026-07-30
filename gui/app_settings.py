@@ -61,7 +61,9 @@ from .logic import (
     _parse_condition_dicts,
 )
 from .select_window import SelectWindow
-from .viewers import ImageViewer, _filmstrip_stages, _restore_step
+from .image_viewer import ImageViewer
+from .restore_windows import _filmstrip_stages
+from .viewer_shared import _restore_step
 from .widgets import folder_of
 
 # GUI rework Phase F4f: the reverse of JOBTEMP_STEP_LABEL — ImageViewer's

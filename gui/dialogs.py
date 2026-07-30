@@ -28,7 +28,7 @@ import ttkbootstrap as tb
 
 from painter.config import AI_STUDIO_URL, AI_TEST_PROMPT, SHEETS_DIR
 from .theme import THEME_TOPLEVELS, skin_text, skin_toplevel
-from .viewers import DocWindow
+from .doc_window import DocWindow
 from .widgets import rounded_button, rounded_entry, status, tk_font
 
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------

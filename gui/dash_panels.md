@@ -38,9 +38,10 @@ row). "Check…" already follows the checker's own `rel` result key.
 - [Pure Logic (script)](logic.md) — `_scope_stats`/`_STAT_KEYS`
 - [Themed Widget Toolkit](widgets.md) — `ctk_font`/`tk_font`/
   `folder_of`/`rounded_button`
-- [Viewers (script)](viewers.md) — `DocWindow` (`_show_check`),
-  `StepRestoreWindow` (`_show_steps`) — both through a DEFERRED
-  `import gui`, never a module-level import (see Design Decisions)
+- [Doc Window](doc_window.md) — `DocWindow` (`_show_check`) and
+  [Restore Viewers](restore_windows.md) — `StepRestoreWindow`
+  (`_show_steps`) — both through a DEFERRED `import gui`, never a
+  module-level import (see Design Decisions)
 
 ### Used by
 - [GUI (folder)](___gui.md) — `__init__.py` re-exports `JobPanel`/
