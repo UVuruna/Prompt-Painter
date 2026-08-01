@@ -57,16 +57,17 @@ and Fixer AI methods (`_maybe_spawn_checker`/`_run_checker_one`/
 the run loop, the queue pump/dispatch and the post-save composer.
 `PainterGui` is now `class PainterGui(BuildMixin, ViewMixin,
 SiteJobsMixin, CheckerFixerMixin, ToolJobsMixin, SettingsMixin):` (see
-[App (composition)](app.md)). Also removed four now-orphaned top-level
+[App (composition) (script)](app.py)). Also removed four now-orphaned top-level
 imports from `gui/__init__.py` (`math`, `webbrowser`,
 `from types import SimpleNamespace`, `from PIL import Image` — none
 used by the file, none referenced as `gui.X` anywhere in `gui/` or
 `tests/`, so none were re-export dependencies either) and ran the full
 cross-project verification pass this step exists for (see
-`REFACTOR-GODFILES.md`, the owner's binding plan, untracked).
-[gui.md](../gui.md) (the pre-existing FEATURE-by-feature script doc,
-one level up) points readers at these six modules for where the
-described behavior actually lives.
+`REFACTOR-GODFILES.md`, the owner's binding plan, untracked). (The
+pre-existing FEATURE-by-feature root `gui.md` this paragraph used to
+point readers at was folded into the per-file `__about/`/`__flow/`
+docs below and deleted in the 2026-08-01 MD-First 2.0 migration — see
+the Files table.)
 
 **Second god-file round (owner approved 2026-07-30) — and the guard
 that keeps it honest.** Feature work had pushed several modules back
@@ -74,281 +75,58 @@ over the budget (`gui/tool_panels.py` 1283, `gui/viewers.py` 1185,
 `gui/app_jobs.py` 1122, `gui/agent_panel.py` 1023). The owner approved
 splitting the three worst files in the codebase and adding the
 mandatory STRUCTURE LAW guard (root Rule #20 point 3) —
-`tests/test_structure.py`, which FAILS the suite for any file over
-~1000 lines that is not a documented, owner-approved RATCHET entry;
-the ratchet list may only shrink. `gui/viewers.py` split first, into
-[Viewer Shared Rules](viewer_shared.md), [Doc Window](doc_window.md),
-[Restore Viewers](restore_windows.md) and
-[Image Viewer](image_viewer.md).
+`tests/test_structure_law.py` (renamed from `test_structure.py` in the
+2026-08-01 MD-First 2.0 migration), which FAILS the suite for any file
+over ~1000 lines that is not a documented, owner-approved RATCHET
+entry; the ratchet list may only shrink. `gui/viewers.py` split first,
+into [Viewer Shared Rules](__about/viewer_shared.md),
+[Doc Window](__about/doc_window.md),
+[Restore Viewers](__about/restore_windows.md) and
+[Image Viewer](__about/image_viewer.md).
 
 ## Files
 
-### `app.py` — App (composition)
-`class PainterGui(BuildMixin, ViewMixin, SiteJobsMixin,
-CheckerFixerMixin, ToolJobsMixin, SettingsMixin):` — no method bodies
-of its own, just the MRO glue — plus `main()` and the
-`if __name__ == "__main__":` guard. See [App (composition)](app.md).
+| File | Tier | One line |
+|------|------|----------|
+| `__init__.py` | Standard | pure re-export shell (`from .app import PainterGui, main` + one block per submodule) — [about](__about/__init__.md) |
+| `app.py` | Trivial | `PainterGui`'s MRO glue over the six mixins, plus `main()` — [script](app.py) |
+| `app_build.py` | Algorithmic | Build Mixin — constructor, widget construction, font-zoom/wheel bindings, maximize/restore cover — [about](__about/app_build.md) · [flow](__flow/app_build.md) |
+| `app_views.py` | Algorithmic | View Mixin — Main Menu/running-view state machine, tile router, Controls collapse — [about](__about/app_views.md) · [flow](__flow/app_views.md) |
+| `app_jobs.py` | Algorithmic | Site Jobs Mixin — site + API-image run loop, worker pump/dispatch, quota auto-restart — [about](__about/app_jobs.md) · [flow](__flow/app_jobs.md) |
+| `app_checker_fixer.py` | Algorithmic | Checker/Fixer Mixin — parallel Checker AI + Fixer AI (auto-dispatch and manual) — [about](__about/app_checker_fixer.md) · [flow](__flow/app_checker_fixer.md) |
+| `app_tools.py` | Algorithmic | Tool Jobs Mixin — the four standalone tools + the AI image checker job — [about](__about/app_tools.md) · [flow](__flow/app_tools.md) |
+| `app_settings.py` | Algorithmic | Settings Mixin — Collections queue, prerequisite actions, settings round-trip — [about](__about/app_settings.md) · [flow](__flow/app_settings.md) |
+| `agent_panel.py` | Algorithmic | `AgentPanel` — one site's own control panel (Pipeline/Run behavior/Prompt groups) — [about](__about/agent_panel.md) · [flow](__flow/agent_panel.md) |
+| `api_panel.py` | Algorithmic | `ApiImageGenPanel` + `ApiImageAdapter` — the paid Gemini image-API job's panel — [about](__about/api_panel.md) · [flow](__flow/api_panel.md) |
+| `widgets.py` | Algorithmic | themed widget toolkit — rounded CTk factories, font-zoom registry, `ACTIVE_THEME`/`FONT_BASE` — [about](__about/widgets.md) · [flow](__flow/widgets.md) |
+| `icons.py` | Algorithmic | SVG-first icon loading + the Day/Night switch's hand-rendered sun/moon art — [about](__about/icons.md) · [flow](__flow/icons.md) |
+| `theme.py` | Algorithmic | the theme engine — ttk/CTk/plain-tk Day/Night flip, plain-tk skin registry, `smooth_transition` — [about](__about/theme.md) · [flow](__flow/theme.md) |
+| `scroll.py` | Algorithmic | `ScrollFrame` — self-healing fill-height, resize-debounced re-fit — [about](__about/scroll.md) · [flow](__flow/scroll.md) |
+| `switch.py` | Algorithmic | `DayNightSwitch` — the top-right toggle, PIL-composited art + smoothstep slide — [about](__about/switch.md) · [flow](__flow/switch.md) |
+| `filter_editor.py` | Algorithmic | `FilterEditor` — the reusable stacked-condition widget + preset row — [about](__about/filter_editor.md) · [flow](__flow/filter_editor.md) |
+| `aspect_canvas.py` | Algorithmic | `AspectRatioCanvas` — the live draggable target-ratio preview — [about](__about/aspect_canvas.md) · [flow](__flow/aspect_canvas.md) |
+| `logic.py` | Algorithmic | Tk-free module-level functions — filter engine glue, pipeline runner, fixer decision table — [about](__about/logic.md) · [flow](__flow/logic.md) |
+| `dash_helpers.py` | Standard | shared dashboard helpers — badge dots, AI-check report/tag helpers, checkerboard — [about](__about/dash_helpers.md) |
+| `dash_panels.py` | Algorithmic | `JobPanel` base + `DashPanel` — one generation site's live dashboard view — [about](__about/dash_panels.md) · [flow](__flow/dash_panels.md) |
+| `tool_dash.py` | Algorithmic | `ToolPanel` + `AiCheckPanel` + `DashGrid` — the tool/checker dashboard panels and grid — [about](__about/tool_dash.md) · [flow](__flow/tool_dash.md) |
+| `menu.py` | Algorithmic | `MainMenu` + `IconBar` — the startup tile grid and the running-view top strip — [about](__about/menu.md) · [flow](__flow/menu.md) |
+| `select_window.py` | Algorithmic | `SelectWindow` — the per-site tick-list Toplevel over the queued Collections — [about](__about/select_window.md) · [flow](__flow/select_window.md) |
+| `viewer_shared.py` | Standard | `DOC_*` window-sizing family + tiny shared viewer helpers — [about](__about/viewer_shared.md) |
+| `doc_window.py` | Algorithmic | `DocWindow` — the Markdown/prompt/image viewer + Fixer-AI manual buttons — [about](__about/doc_window.md) · [flow](__flow/doc_window.md) |
+| `restore_windows.py` | Algorithmic | `BeforeAfterWindow` + `StepRestoreWindow` — the before/after and per-step restore viewers — [about](__about/restore_windows.md) · [flow](__flow/restore_windows.md) |
+| `image_viewer.py` | Algorithmic | `ImageViewer` — the portrait Prev/Next/Delete viewer for image-level rows — [about](__about/image_viewer.md) · [flow](__flow/image_viewer.md) |
+| `dialogs.py` | Algorithmic | `_ModalToolDialog`/`_AiDialog`/`AiKeyWizard`/`AiSheetDialog` — modal dialogs — [about](__about/dialogs.md) · [flow](__flow/dialogs.md) |
+| `tool_panels/` | — | the standalone-tool settings panels package — [Tool Panels (subfolder)](tool_panels/___tool_panels.md) |
 
-### `app_build.py` — Build Mixin
-`BuildMixin` — `PainterGui`'s constructor (the ONLY mixin with
-`__init__`) and every `_build_*` widget-construction helper, the
-global font-zoom/wheel-routing bindings, `_relayout_agents`, and the
-maximize/restore cover + drag-resize event-buffering watcher. See
-[Build Mixin](app_build.md).
-
-### `app_views.py` — View Mixin
-`ViewMixin` — the Main Menu / "main" / "running" three-way view switch,
-the Main Menu tile router (shared with the running view's `IconBar`),
-the running-view layout reconciler, the "which jobs are active"
-queries, and the Controls collapse toggle. See [View Mixin](app_views.md).
-
-### `app_jobs.py` — Site Jobs Mixin
-`SiteJobsMixin` — the two browser-driven SITE jobs plus the paid-API
-image job's shared run loop, the worker-queue pump/dispatch, the
-per-job Pause toggle and dashboard-panel close, the quota auto-restart
-timers, and the post-save pipeline composer. See
-[Site Jobs Mixin](app_jobs.md).
-
-### `app_checker_fixer.py` — Checker/Fixer Mixin
-`CheckerFixerMixin` — split out of `app_jobs.py` in step 8/8 (that
-module had grown past the ~1000-line budget on its own). Owns the
-parallel Checker AI (fired off every saved image, overlapping the next
-item's generation) and the Fixer AI (both its auto-dispatch half and
-its manual-button worker builders shared with `AiCheckPanel`'s own
-report viewer). F6 (REWORK.md): when an `AgentPanel`'s
-`checker_prompt_var` is on, the checker's background thread ALSO
-resolves the item's own sheet PROMPT (`_prompt_for_drop`, scanning the
-queued sheets and caching each parse by mtime) and passes it into
-`ai.check_one_image` — the vision model then judges content match on
-top of the banal-defects check. See
-[Checker/Fixer Mixin](app_checker_fixer.md).
-
-### `app_tools.py` — Tool Jobs Mixin
-`ToolJobsMixin` — the four standalone tools' (BG removal / Crop /
-Upscale / Aspect ratio) Start/worker/Stop, the AI image checker's own
-job, and its two report-viewer actions (Send flagged to generator /
-Clear flags). F6 (REWORK.md): the checker's job also accepts an
-OPTIONAL prompt-sheet source (`ImageCheckerSettingsPanel.
-sheets_path()`) — when given, only images that match a sheet's drop
-path (via `ai.drop_and_site_for`) are checked, WITH that entry's
-prompt; the rest are loud-skipped. See [Tool Jobs Mixin](app_tools.md).
-
-### `app_settings.py` — Settings Mixin
-`SettingsMixin` — the Collections queue, the sheet parsing/planning
-helpers shared by the site jobs, the dashboard row "Show" viewers, the
-top-strip prerequisite button handlers, the AI features' key gate, and
-the whole settings round-trip (collect/apply/migrate/save). See
-[Settings Mixin](app_settings.md).
-
-### `agent_panel.py` — Agent Panel
-`AgentPanel` — one site's (ChatGPT/Gemini) OWN control panel.
-UI-SKETCH rework (owner 2026-07-29): the settings are THREE GROUPS —
-**Pipeline** (BG removal with its mode/tolerance/reach sub-panel,
-Crop, Force aspect ratio with W:H + canvas, Upscale with min-side +
-FilterEditor, keep-steps), **Run behavior** (Report/Safer retry/
-Continue nudge; AI checker with the F6 prompt-match toggle + the
-Fixer AI in its sub-panel; the Pacing section: pause/action-delay/
-on-degrade) and **Prompt** (Background with the custom color wheel,
-Style, New chat, the F7 helpers) — every switch that owns fine-tune
-carries its own `ExpandableSwitch` sub-panel (turning ON
-auto-expands; the caret folds; OFF hides it). The old global
-Settings gear is GONE. The three groups are ONE vertical stack
-(`_stack_groups`) — the panel lives in the setup screen's LEFT
-settings column now, and `apply_settings` restores under
-`quiet_restore` so the panel always opens compact. See
-[Agent Panel](agent_panel.md).
-
-### `api_panel.py` — API Panel
-`ApiImageGenPanel` (the paid Gemini image-API job's settings panel —
-mirrors `AgentPanel` since its input is the shared queued Collections
-list, not a folder of images; F5 adds a "Models…" row — a `Refresh
-models` probe filling three CAPABLE-only image/vision/text dropdowns,
-preselected to the stored override or the ranked recommendation, a
-genuine pick persisted to `settings.json` immediately) and
-`ApiImageAdapter` (a `SiteDriver`-shaped stand-in so that job reuses
-`_drive_site`/`run_sheet` unchanged; F5 adds `submit_with_image`,
-closing the gap where a sheet item carrying a "← ref" input image had
-no method to call in API mode). See [API Panel](api_panel.md).
-
-### `tool_panels.py` — Standalone-Tool Settings Panels
-`ToolSettingsPanel` (the shared base: input picker, embedded
-`FilterEditor`, an optional Advanced collapsible, Start/Pause/Stop)
-plus its five concrete subclasses — `BgSettingsPanel`/
-`CropSettingsPanel`/`UpscaleSettingsPanel`/`AspectSettingsPanel`/
-`ImageCheckerSettingsPanel`. Also owns the two-column-dense layout
-constants every control-panel family (this one, `AgentPanel`,
-`ApiImageGenPanel`) shares. F6 (REWORK.md, owner E2):
+`ToolSettingsPanel` and its five concrete subclasses
+(`BgSettingsPanel`/`CropSettingsPanel`/`UpscaleSettingsPanel`/
+`AspectSettingsPanel`/`ImageCheckerSettingsPanel`) live in the
+`tool_panels/` subpackage (its own god-file split, 2026-07-30) — see
+that folder's own doc for its file table. F6 (REWORK.md, owner E2):
 `ImageCheckerSettingsPanel` gains a SECOND, optional picker
 (`sheets_path()`) — a prompt-sheet `.md` file or a folder of them —
 that `PainterGui._run_ai_check_job` uses to pair each checked image
-with its own sheet prompt. See
-[Tool Panels (subfolder)](tool_panels/___tool_panels.md).
-
-### `widgets.py` — Themed Widget Toolkit
-Status/job-colour lookups (`status`, `job_color`), the font-zoom
-registry (`font_size`/`tk_font`/`ctk_font`/`set_font_base`,
-`FONT_ROLES`), the dark-palette rounded CTk control factories
-(`rounded_button`/`rounded_entry`/`rounded_combo`/`rounded_switch`,
-`Spinner`, `EdgeIconButton`), the UI-SKETCH fine-tune expanders
-(`ExpandableSwitch`/`ExpandableSection` + the `quiet_restore` context
-manager that keeps a settings restore from unfolding them),
-Start/Stop button styling
-(`style_action_button`/`_style_icon_bar_button`), the folder-grouping
-helpers shared by the dashboard tree and the Select window
-(`folder_of`/`rels_in_folder`), and the Advanced-override numeric
-field parsers (`_parse_fraction`/`_parse_nonneg_int`/
-`_parse_int_range`). The toolkit's one non-leaf dependency:
-`rounded_button` draws its optional icon via `gui.icons.icon`.
-
-Owns the two LIVE mutable globals every theme flip / zoom rewrites —
-`ACTIVE_THEME` and `FONT_BASE`. Every OTHER module that needs the
-CURRENT value reads it off `widgets.ACTIVE_THEME` / `widgets.
-FONT_BASE` (a module-attribute access, e.g. `gui/theme.py`'s
-`_apply_theme_now` and `gui/switch.py`'s `DayNightSwitch.__init__`) —
-never `from .widgets import ACTIVE_THEME`, which would freeze a stale
-copy at import time and silently stop tracking flips/zooms.
-
-### `icons.py` — Icon Loading + Switch Art
-SVG-first icon loading (`icon`, `_svg_to_pil`, `ICON_DIR`) via Qt's
-`QSvgRenderer` (PySide6), PNG as the fallback for icons with no svg
-and for svgs QtSvg's Tiny profile can't render; and the Day/Night
-switch's hand-rendered art — anti-aliased radial-gradient sun/moon
-knobs (`_render_sun_knob`/`_render_moon_knob`, craters + terminator
-shading + surface mottling) and the track-pill rasterizer
-(`_render_switch_track`), all built on the same SVG->PIL path. The
-toolkit's LEAF module — no dependency on any other `gui` submodule.
-
-### `theme.py` — The Theme Engine
-The coordinated ttk/CTk/plain-tk Day/Night flip (`apply_theme`/
-`_apply_theme_now`), the plain-tk skin registry (`skin_text`/
-`skin_listbox`/`skin_canvas`/`skin_tree`/`skin_toplevel` +
-`recolor_tk_registry`, for the Text/Listbox/Canvas/Toplevel colours
-CTk's automatic tuple resolution can't reach), and the shared
-snapshot-cover transition (`smooth_transition`) that hides every big
-repaint — the theme flip itself, the Controls collapse, a window
-maximize/restore. Depends on `gui.widgets`
-(`status`, `tk_font`/`TREE_ROW_FACTOR` for `setup_style`, and the live
-`ACTIVE_THEME`/`FONT_BASE` globals) and `gui.icons` (the big sun/moon
-cover icon rendered behind the flip).
-
-### `scroll.py` — ScrollFrame
-A vertically (optionally also horizontally) scrollable frame:
-self-healing fill-height (a periodic poll catches a content-height
-change no caller remembered to `refresh()`), a resize-debounced
-re-fit (a window drag applies its width/height/scrollregion pass ONCE,
-on settle, not per frame), and mouse-wheel binding scoped to hover.
-Depends on `gui.theme` (`skin_canvas`).
-
-### `switch.py` — DayNightSwitch
-The mini Day/Night toggle, top-right: an anti-aliased PIL-composited
-image pill (dark starfield + moon / sky + sun) ported from the
-owner's website switch. A click flips the theme synchronously (via
-`gui.theme.apply_theme`, riding the shared snapshot-cover transition)
-while the knob itself slides as a smoothstep-eased flourish. Depends
-on `gui.widgets` (the live `ACTIVE_THEME`), `gui.icons` (the knob/track
-renderers) and `gui.theme` (`apply_theme`, `skin_canvas`).
-
-### `filter_editor.py` — FilterEditor
-The reusable stacked-filter widget (GUI rework Phase 4): removable
-condition rows (kind/polarity combos + numeric fields) over
-`painter.filters`, an "+ Add condition" button, and a save/load/delete
-PRESET row. Depends on `gui.widgets` (`rounded_button`/`rounded_entry`/
-`rounded_combo`, `INPUT_HEIGHT`).
-
-### `aspect_canvas.py` — AspectRatioCanvas
-A live, draggable preview of the target output ratio (GUI rework
-Phase 5): a rectangle in a fixed square arena whose 4 edges reshape it
-(LEFT/RIGHT change WIDTH, TOP/BOTTOM change HEIGHT), with a live
-decimal + reduced-integer label underneath. Depends on `gui.theme`
-(`skin_canvas`) and `gui.widgets` (`job_color`, `tk_font`, the live
-`ACTIVE_THEME`).
-
-### `logic.py` — Pure Logic Helpers
-The Tk-free module-level functions: the shared-filter engine glue
-(`_filter_files`, `_parse_condition_dicts`, the legacy
-aspect-filter/upscale-gate migrations), the per-image post-save
-pipeline runner (`_run_pipeline_steps`), the dashboard's per-scope stat
-formatter (`_scope_stats`), the fixer auto-dispatch decision
-(`_fixer_decision`), the manual-fix result-to-UI mapping
-(`_fix_result_ui`), and small pure view-layout helpers
-(`_visible_agent_slots`, `_menu_tile_columns`, `_next_view`). No Tk
-dependency at all — every function is directly unit-testable.
-
-### `dash_helpers.py` — Dashboard Support Helpers
-Small helpers shared by two or more dashboard surfaces: the badge-dot
-`PhotoImage` cache (`badge_dots`), the tool-panel timing summary line
-(`fmt_time_summary`), the AI-check report/tag helpers shared by
-`AiCheckPanel` and `DashPanel` (`ai_check_doc_md`/`ai_check_image_file`/
-`ai_check_tag`), the shared `Treeview` builder (`build_job_tree`), and
-the before/after transparency-checkerboard helpers (`_checkerboard`/
-`_has_alpha`/`_scaled_photo`). Depends on `gui.theme`
-(`TOOL_CHANGED_TAG`/`TOOL_SKIP_TAG`, `skin_tree`).
-
-### `dash_panels.py` — Dashboard Job Panel Base + Site Panel
-`JobPanel` (the shared per-JOB dashboard panel base — header,
-close/pause, the folder>image tree-node plumbing) and `DashPanel`
-(one generation site's live view — task/theme progress, the two-scope
-stats table, the collections history tree, the per-step restore
-viewer and the parallel Checker AI's per-row report). F3 (owner
-2026-07-29): Start goes through `begin_run` — the table and counters
-SURVIVE every restart (manual or quota auto-restart) and the new
-pending count stacks on top; the full wipe is `clear()`, behind the
-header's explicit Clear button only. See
-[Dashboard Job Panel Base + Site Panel](dash_panels.md).
-
-### `tool_dash.py` — Tool + AI-Checker Dashboard Panels + Grid
-`ToolPanel` (one standalone tool's live view — progress, metric,
-before/after viewer + restore), `AiCheckPanel` (the AI checker's own
-dashboard panel — flagged/OK/error counts, the defect viewer, resend/
-clear actions) and `DashGrid` (the responsive up-to-6-cell job-panel
-grid). Both panels subclass `JobPanel` from `dash_panels.py`. See
-[Tool + AI-Checker Dashboard Panels + Grid](tool_dash.md).
-
-### `menu.py` — Main Menu + Icon Bar
-`MainMenu` (the startup landing screen's responsive tile grid) and
-`IconBar` (the compact top strip shown while a job is running, one
-button per tile, lit while any of its job kinds is live). See
-[Main Menu + Icon Bar](menu.md).
-
-### `select_window.py` — Select-Images Window
-`SelectWindow` — the per-site tick-list Toplevel over the queued
-Collections (3-level tree: collection -> folder -> image), with the
-chunked Expand-all and coalesced recount that keep a big queue
-responsive. See [Select-Images Window](select_window.md).
-
-### `viewer_shared.py` — Viewer Shared Rules
-The `DOC_*` window-sizing family (Rule #4 — the "never bigger than the
-screen" / "tall open" clamps every doc-shaped window, including the
-Select window, shares) plus the three tiny helpers all viewers use:
-`_copy_to_clipboard`, `_readonly_text_keys` and `_restore_step` (the
-ONE `JobTemp.restore_to` call site). A true leaf — plain tkinter, no
-`gui` sibling. See [Viewer Shared Rules](viewer_shared.md).
-
-### `doc_window.py` — Doc Window
-`DocWindow` — the Markdown/prompt/image viewer plus its optional
-Fixer-AI manual buttons; since GUI rework Phase F4f it backs the
-sheet/folder-level dashboard rows only. See [Doc Window](doc_window.md).
-
-### `restore_windows.py` — Restore Viewers
-`BeforeAfterWindow` (a tool job's before/after viewer),
-`_filmstrip_stages` (the pure per-image pipeline-stage list) and
-`StepRestoreWindow` (the per-step restore filmstrip built from it) —
-one cohesive pair plus their shared data. See
-[Restore Viewers](restore_windows.md).
-
-### `image_viewer.py` — Image Viewer
-`ImageViewer` (Phase F4f, owner G6/G7) — the PORTRAIT Prev/Next/Delete
-viewer that replaced `DocWindow` for IMAGE-level dashboard rows: the
-image's own file-stem title, the main image or its refusal reason, the
-prompt block, and two lookup-gated expandable sub-sections, Check and
-Steps. See [Image Viewer](image_viewer.md).
-
-### `dialogs.py` — Modal Dialogs
-`_ModalToolDialog` (shared centre-on-parent placement), `_AiDialog`
-(the worker-queue poll loop both AI dialogs share, and the owner of
-`AI_POLL_MS`), `AiKeyWizard` (the guided Gemini-API-key onboarding)
-and `AiSheetDialog` ('New collection (AI)…'). See
-[Modal Dialogs](dialogs.md).
+with its own sheet prompt.
 
 ## Connections
 
@@ -357,7 +135,7 @@ and `AiSheetDialog` ('New collection (AI)…'). See
   tunable), `aspect`/`filters`/`jobtemp`, `settings`, `sheet_parser`
 
 ### Used by
-- [Main (Entry Point)](../main.md) — `from gui import PainterGui`
+- [Main (Entry Point)](../__about/main.md) — `from gui import PainterGui`
 
 ## Design Decisions
 
