@@ -13,8 +13,9 @@ tools/
 # Tool before/after backups (restore engine) — transient, never committed
 .painter_tmp/
 
-# The owner's local GUI settings
-settings.json
+# The owner's local GUI settings (root-anchored — must NOT also match
+# .claude/settings.json, which is tracked project hook configuration)
+/settings.json
 
 # Build outputs (PyInstaller + NSIS pipeline — setup/build.py)
 build/

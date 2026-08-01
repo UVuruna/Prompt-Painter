@@ -6,6 +6,41 @@ from the project root.
 
 ## Files
 
+### Guard Tests — `test_structure_law.py` / `test_config_sections.py` / `test_docs_coverage.py` / `test_doc_links.py` / `run_guards.py`
+Project-META tests: they check the STRUCTURE of the codebase itself
+(root Rule #20 THE STRUCTURE LAW, rules/CODE.md THE CONFIG SECTION
+LAW, rules/DOCS.md THE DOCS LAW), not `painter`/`gui` runtime
+behavior. Installed 2026-08-01 (MIGRATE-DOCS session) and wired into
+`.claude/settings.json` (PostToolUse `--fast`, Stop full) via
+`run_guards.py`.
+
+- **`test_structure_law.py`** (renamed from `test_structure.py`, same
+  ratchet content) — no `.py` source file over ~1,000 lines without a
+  documented, owner-approved `RATCHET` entry naming why and who owes
+  the split. The three TEST god-files the owner pre-approved this
+  session (`test_gui_tool_panels.py`, `test_runner.py`, `test_ai.py`)
+  were split and their entries removed; five entries remain
+  (`gui/app_jobs.py`, `painter/driver.py`, `gui/agent_panel.py`,
+  `tests/test_driver.py`, `tests/test_gui_fixer.py` — out of this
+  session's scope).
+- **`test_config_sections.py`** — every `painter/config/*.py` data file
+  (seeded in `CONFIG_FILES`) has no module-level post-definition
+  patching (`TABLE["x"] = ...` / `.update(...)` after the table's own
+  definition), no duplicate dict keys, and no top-level definition
+  sitting before the file's first section banner.
+- **`test_docs_coverage.py`** — every source file carries the docs its
+  TIER requires (`TRIVIAL_FILES`/`FLOW_REQUIRED_FILES` encode the tier
+  assignment; everything else defaults to Standard/`__about`-only), and
+  every code folder has its `___folder.md`.
+- **`test_doc_links.py`** — every relative `.md` link across the whole
+  project resolves to a real file, and every project `.md` (except
+  `tests/fixtures/*.md`, sheet-format test DATA, not documentation) is
+  reachable from `README.md`.
+- **`run_guards.py`** — the fast wrapper both hooks call: `--fast` runs
+  structure + config-sections only (right after an Edit/Write); the
+  bare call runs all four (the Stop hook — a session cannot end with a
+  red guard). Exits 2 on failure.
+
 ### `test_sheet_parser.py` — Golden Parser Tests
 Runs the parser against the REAL archetype sheets in DOMY Watch
 `research/prompts/archetype/` (all eight files). Expected values
@@ -19,35 +54,43 @@ heading, a missing H1 (`SheetError`), escaping and non-image drop
 paths. Skips (with a clear reason) if the DOMY Watch sheets are not
 on disk.
 
-### `test_runner.py` — Run-Loop Tests
+### Run-Loop Tests — `test_runner_paths_and_save.py` / `test_runner_images.py` / `test_runner_recovery_ladder.py` / `test_runner_queue_and_control.py`
 Drives `run_sheet` with a duck-typed fake driver and a temp out
-folder — no browser: the per-site rule suffix on every submitted
-prompt (Gemini's three laws, ChatGPT without them), the direct
-`<out>/<drop-path>` layout, the report txt (header, per-image
-lines with resolution and postprocess actions, averages, totals,
-stop reason), resume by FILE EXISTENCE (a second unattended run
-drives nothing; a ticked `only` REGENERATES an already-saved file),
-the graceful stop flag, the `post_save` hook (a failure
-is loud, counted, and never kills the run), the per-item
-`extra_suffix` map (the AI re-send's fix note — appended after the
-site suffix for exactly the mapped item, and riding the safer
-retry), and `TerminalState`
-propagation — the runner logs the parsed quota reset time, stamps
-it into the report and re-raises the exception unchanged. The F1
-turn-based protocol (owner 2026-07-29): `NoImage` is ALWAYS a loud
-per-item skip now (never a site-stopping raise, even after an
-exhausted nudge), an `ItemRefused` surfacing INSIDE the image-failed
-recovery ladder is handled exactly like a first-attempt refusal, and
-a duplicate-bytes save (the site re-serving the previous image) gets
-one fresh re-submit before being skipped. F2 model degradation adds
-`on_degrade`: a `ModelDegraded` asks it for a choice — "continue"
-loud-skips the item and the run keeps going, anything else (no
-callback included) re-raises as `TerminalState` with the same
-`retry_after_s` — plus a pin on the F2-retimed ladder constants
-(`IMAGE_FAILED_RETRY_MAX`, `IMAGE_FAILED_RETRY_DELAY_RANGE_S`,
-`IMAGE_FAILED_ESCALATION_DELAYS_S`), read straight from
-`painter.config` so the autouse fast-recovery fixture's monkeypatch
-of `painter.runner`'s own copies never masks the real shipped values.
+folder — no browser. Split by concern from the former `test_runner.py`
+god-file (root Rule #20, second round, 2026-08-01 — same 47 tests,
+same fixtures duplicated per module rather than shared, see each
+file's own docstring):
+
+- **`test_runner_paths_and_save.py`** — `dest_for`/`versioned_dest_for`/
+  `prompt_suffix` (the output-path contract), and the plain save/report/
+  resume path: the per-site rule suffix on every submitted prompt
+  (Gemini's three laws, ChatGPT without them), the direct
+  `<out>/<drop-path>` layout, the report txt (header, per-image lines
+  with resolution and postprocess actions, averages, totals, stop
+  reason), safer-retry recovery and the copyright reframing.
+- **`test_runner_images.py`** — input-image items (`← ref`, owner
+  2026-07-23: `submit_with_image`, the missing-input loud skip, the
+  escalation re-attach) and the ChatGPT continue-nudge stall recovery
+  (F1: `NoImage` with `had_text=True` is ALWAYS a loud per-item skip,
+  never nudged — the market-scene incident).
+- **`test_runner_recovery_ladder.py`** — the `ImageGenFailed` recovery
+  ladder (BUG 3, owner 2026-07-21 + escalation 2026-07-23): native
+  Retry button → paced "retry" resends → escalation rounds (refresh →
+  new session → whole prompt), an `ItemRefused` surfacing INSIDE the
+  ladder handled like a first-attempt refusal (F1, owner 2026-07-29),
+  and the F1 duplicate-bytes guard (one fresh re-submit, then a loud
+  skip).
+- **`test_runner_queue_and_control.py`** — refusals/advice/resume/redo
+  queue semantics (resume by FILE EXISTENCE, a ticked `only` REGENERATES
+  as the next `_vN` version, `extra_suffix`'s fix note), and run
+  control: the graceful stop flag, the `post_save` hook (a failure is
+  loud, counted, never fatal), `TerminalState` propagation (the parsed
+  quota reset time), and F2 model degradation — `on_degrade` gets a
+  choice on a `ModelDegraded` ("continue" loud-skips the item, anything
+  else re-raises as `TerminalState` with the same `retry_after_s`),
+  plus a pin on the F2-retimed ladder constants read straight from
+  `painter.config` (never `painter.runner`'s copies, which the autouse
+  fast-recovery fixture monkeypatches).
 
 ### `test_driver.py` — CDP Driver, F1/F2 Protocol
 Duck-typed Locator/Page fakes over `SiteDriver` (no browser — see the
@@ -66,27 +109,37 @@ image-failed/refusal/quota markers in both `await_done` and
 from the banner's own absolute-moment text — and, with no banner
 wired, the ordinary quota classification still fires unchanged.
 
-### `test_ai.py` — Gemini Client + AI Flows
+### Gemini Client + AI Flows — `test_ai_client.py` / `test_ai_sheet_flow.py` / `test_ai_checks.py` / `test_ai_flags.py`
 NO live API anywhere: the HTTP layer is the monkeypatched
-`painter.ai._urlopen`. Covers the client's request building (url +
-model, `x-goog-api-key` header, contents/systemInstruction payload,
-base64 `inlineData` for images), the tolerant candidates/parts
-response parsing, the loud failure taxonomy (`AiError` on HTTP
-errors with the API's own message, prompt blocks, non-STOP finishes,
-malformed shapes; `NoKey` on a missing/blank key BEFORE any network
-traffic), the free-tier pacing sleep, the sheet-generator flow with
-a mocked `gen` (questions parsing + cap, skipped answers, the
-whole-file fence unwrap, real-parser validation, exactly ONE repair
-round, the still-broken path that must NOT load, slugged
-collision-free saves), the checker's strict OK/DEFECTS format, the
-Fixer AI's `build_fix_prompt` (GUI rework Phase 20 — pure, defects
-become bullets, an empty list still returns a non-blank fallback, raw
-appended verbatim when given and omitted when blank), and
-the flag memory (round-trip, merge, clear, the mtime-based prune of
-regenerated/missing files, relative-vs-absolute keys, the
-`dest_for` reverse mapping and the full `plan_resend` grouping —
-per site / per sheet, each item its own fix note, loud unmatched
-reasons).
+`painter.ai.client._urlopen`. Split by `painter/ai/` submodule from
+the former `test_ai.py` god-file (root Rule #20, second round,
+2026-08-01 — same 80 tests, one module per package module):
+
+- **`test_ai_client.py`** — the client's request building (url +
+  model, `x-goog-api-key` header, contents/systemInstruction payload,
+  base64 `inlineData` for images), the tolerant candidates/parts
+  response parsing, the loud failure taxonomy (`AiError` on HTTP
+  errors with the API's own message, prompt blocks, non-STOP finishes,
+  malformed shapes; `NoKey` on a missing/blank key BEFORE any network
+  traffic), the transient-error retry/backoff, the free-tier pacing
+  sleep, API image generation + the reference-image path, and model
+  discovery/recommendation (`list_models` pagination, `capable_models`,
+  `recommend_model`, `model_for`'s settings override).
+- **`test_ai_sheet_flow.py`** — the sheet-generator flow with a mocked
+  `gen` (questions parsing + cap, skipped answers, the whole-file fence
+  unwrap, real-parser validation, exactly ONE repair round, the
+  still-broken path that must NOT load, slugged collision-free saves).
+- **`test_ai_checks.py`** — the checker's strict OK/DEFECTS format, the
+  Fixer AI's `build_fix_prompt` (GUI rework Phase 20 — pure, defects
+  become bullets, an empty list still returns a non-blank fallback, raw
+  appended verbatim when given and omitted when blank), the per-image
+  checker orchestrator (`check_one_image`, pairing over a batch), and
+  the re-send reverse mapping (`drop_and_site_for`, `plan_resend` —
+  per site / per sheet, each item its own fix note, loud unmatched
+  reasons).
+- **`test_ai_flags.py`** — the flag memory (round-trip, merge, clear,
+  the mtime-based prune of regenerated/missing files, relative-vs-
+  absolute keys).
 
 ### `test_quota_reset.py` — Quota Reset Parsing
 `parse_quota_reset` against the LIVE-captured ChatGPT quota
@@ -147,7 +200,7 @@ the REAL downloaded binary (skipped when `tools/realesrgan/` is
 absent).
 
 ### `test_jobtemp.py` — Job Temp / Restore + Measure
-Synthetic PNGs through [Job Temp](../painter/jobtemp.md): a
+Synthetic PNGs through [Job Temp](../painter/__about/jobtemp.md): a
 backup→restore_one byte round-trip, `drop` removing a no-op backup,
 `restore_all` reverting every backed-up file, `clear`/`clear_all`
 wiping the slot / whole root, a fresh `JobTemp` wiping a stale slot,
@@ -217,7 +270,7 @@ timing passes through); a mutate exception propagates loudly while
 the overlay still fades — never a stuck cover, never a masked error.
 
 ### `test_filters.py` — Shared Filter Framework
-[Shared Filter Framework](../painter/filters.md)'s `matches()` on
+[Shared Filter Framework](../painter/__about/filters.md)'s `matches()` on
 synthetic `(width, height)` ints, no images: one test per kind (aspect
 exact, aspect range, any side, width, height), IF vs IF NOT for each,
 several conditions ANDed together (a mixed IF/IF-NOT stack, and one
@@ -443,52 +496,60 @@ a restored-ON switch folded, still hides a sub-panel whose switch is
 restored OFF, releases after the block — and releases even when the
 block raises.
 
-### `test_gui_tool_panels.py` — Standalone-Tool Settings Panels + Stop
+### Standalone-Tool Settings Panels + Stop — `test_tool_panels_base.py` / `test_tool_panels_bg.py` / `test_tool_panels_geometry.py` / `test_tool_panels_image_checker.py`
 GUI rework Phase 13 (`BgSettingsPanel`/`CropSettingsPanel`) through
-Phase 15 (`ImageCheckerSettingsPanel`), one growing file over the
-shared `ToolSettingsPanel` base. Pure/near-pure halves: module-level
-`gui._filter_files` (the shared pre-filter, real tiny PNGs on disk)
-and the Advanced-override field parsers (`_parse_fraction`/
-`_parse_nonneg_int`/`_parse_int_range`). Real (withdrawn) Tk root
-halves, the SAME `make_panel`/`root` convention as every other
-GUI-phase file: `resolve_input()`/`get_conditions()`/`build_func()`
-against all five panels, monkeypatched engine calls proving a
-NON-default Advanced override actually reaches
-`remove_background`/`crop_transparent`/`upscale_if_small`/
-`change_aspect`, run-state/pause/Stop button availability, and the
-settings round-trip (BG/Crop's safety+margin+ink fields, Upscale's
-min-side, Aspect's target ratio, the AI checker's `conditions`-only
-shape). BG's mode block (owner 2026-07-28) gets the same treatment:
-the chosen mode/colour/tolerance reaching the engine call, a mistyped
-colour raising at Start (and being HARMLESS in a mode that ignores
-it), an out-of-range tolerance, the colour fields packed only in
-Custom mode, the guards typed as PERCENT still reaching the engine as
-FRACTIONS, the REACH dropdown reaching it too (and defaulting to the
-flood fill), the swatch click opening a color chooser — monkeypatched,
-never a real modal — opening it on the CURRENT color and writing the
-result back normalised, with Cancel leaving the field alone, and the
-round-trip storing the MODE and REACH KEYS (an unknown stored value
-falling back to the default). One test pins the UNIT MIGRATION:
-a settings file from the fraction build (`safety_black: "0.40"`) must
-fall back to the 40 % default, never be misread as a 0.4 % guard that
-would refuse every image. `PainterGui._start_tool_from_panel`'s pre-filter path end to
-end through a duck-typed `FakeGuiForPanel` (`_run_tool_job` a
-RECORDING stand-in) for the four tools; `PainterGui._start_ai_check`'s
-OWN equivalent through a SEPARATE `FakeGuiForAiCheck`
-(`_run_ai_check_job` likewise a RECORDING stand-in) — a different fake
-because the AI checker's Start does not share `_launch_tool_worker`
-(no JobTemp, no per-file engine callable; see gui.md's own
-**Standalone-tool settings panels**). **Stop** (Phase 14, widened to
-the AI checker Phase 15 with NO new method — `PainterGui._stop_tool`
-proven generic by keying `FakeGuiForPanel` `"aicheck"` too):
-`_stop_tool`'s request half (sets the event, wins over a pending
-pause, no-ops when nothing is running) and `_run_tool_job`'s/
-`_run_ai_check_job`'s own `should_stop` halting the loop BETWEEN
-images/checks — mirrors test_runner.py's own
-`test_stop_flag_stops_between_items` — over a duck-typed fake `self`
-with a real `queue.Queue`; the checker's own version monkeypatches
-`painter.ai.check_one_image` (no network, no API quota spent) so the
-in-flight (mocked) vision call still finishes before the halt.
+Phase 15 (`ImageCheckerSettingsPanel`), over the shared
+`ToolSettingsPanel` base. Split by `gui/tool_panels/` module from the
+former `test_gui_tool_panels.py` god-file (root Rule #20, second
+round, 2026-08-01 — same 98 tests):
+
+- **`test_tool_panels_base.py`** — the BASE contract, exercised through
+  concrete panels purely as instantiation vehicles: module-level
+  `gui._filter_files` (the shared pre-filter, real tiny PNGs on disk),
+  the Advanced-override field parsers (`_parse_fraction`/
+  `_parse_nonneg_int`/`_parse_int_range`), `resolve_input()`/
+  `get_conditions()`, run-state/pause/Advanced-collapsible reflection,
+  the generic settings-round-trip fallback, and
+  `PainterGui._start_tool_from_panel`/`_stop_tool`/`_run_tool_job` — the
+  pre-filter path end to end through a duck-typed `FakeGuiForPanel`
+  (`_run_tool_job` a RECORDING stand-in) plus its own `should_stop`
+  halting the loop BETWEEN images (mirrors
+  `test_runner_queue_and_control.py`'s own
+  `test_stop_flag_stops_between_items`).
+- **`test_tool_panels_bg.py`** — `BgSettingsPanel`'s own fields: the
+  Advanced safety-fraction overrides reaching `remove_background`, the
+  mode block (owner 2026-07-28 — chosen mode/colour/tolerance reaching
+  the engine call, a mistyped colour raising at Start and being
+  HARMLESS in a mode that ignores it, the colour fields packed only in
+  Custom mode, the guards typed as PERCENT still reaching the engine as
+  FRACTIONS, the REACH dropdown, the swatch click opening a
+  monkeypatched color chooser), the settings round-trip (MODE/REACH
+  KEYS, an unknown stored value falling back), and the UNIT MIGRATION
+  pin (a fraction-build settings file's `"0.40"` must fall back to the
+  40% default, never misread as a 0.4% guard).
+- **`test_tool_panels_geometry.py`** — `CropSettingsPanel`/
+  `UpscaleSettingsPanel`/`AspectSettingsPanel` (all three live in
+  `gui/tool_panels/geometry.py`): Crop's margin/ink-alpha overrides
+  reaching `crop_transparent`, Upscale's min-side reaching
+  `upscale_if_small` (cross-checked against
+  `test_gui_upscale.py`'s own resolution table), Aspect's target-ratio
+  W/H entries + canvas two-way sync reaching `change_aspect`, and each
+  panel's own settings round-trip.
+- **`test_tool_panels_image_checker.py`** — `ImageCheckerSettingsPanel`:
+  no Advanced section, the read-only `_picker_title_suffix` (never
+  claims "runs IN PLACE"), the OPTIONAL `sheets_path()` second input
+  (F6, REWORK.md, owner E2), `gui.app_tools._sheet_prompt_map` (the
+  pure drop_path→prompt builder over a sheet file or folder),
+  `PainterGui._start_ai_check`'s OWN pre-filter path through a
+  SEPARATE `FakeGuiForAiCheck` (a different fake from
+  `_start_tool_from_panel` because the AI checker's Start does not
+  share `_launch_tool_worker`), **Stop** reusing `_stop_tool` VERBATIM
+  keyed `"aicheck"`, `_run_ai_check_job`'s own `should_stop` halting
+  BETWEEN checks with `painter.ai.check_one_image` monkeypatched (no
+  network, no API quota spent), and the F6 two-input flow (a
+  `sheets_path` narrows the check to only images whose reversed drop
+  path matches a sheet entry, WITH that entry's prompt; no
+  `sheets_path` keeps every image quality-only).
 
 ### `test_gui_checker.py` — Checker AI, Parallel Per-Item Check
 GUI rework Phase 16. Four halves: `AgentPanel`'s new `checker_var`
@@ -589,9 +650,9 @@ one violation each.
 ## Connections
 
 ### Uses
-- [Sheet Parser](../painter/sheet_parser.md),
-  [Run Loop](../painter/runner.md), [Shared Filter
-  Framework](../painter/filters.md) and [GUI](../gui.md) — the units
+- [Sheet Parser](../painter/__about/sheet_parser.md),
+  [Run Loop](../painter/__about/runner.md), [Shared Filter
+  Framework](../painter/__about/filters.md) and [GUI](../gui/___gui.md) — the units
   under test
 - DOMY Watch `research/prompts/archetype/` — the golden input
 
