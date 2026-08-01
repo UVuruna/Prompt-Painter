@@ -1,12 +1,15 @@
 # Background Remover
 
-**Script:** [Background Remover (script)](bg_remove.py)
+**Script:** [Background Remover (script)](../bg_remove.py) ·
+**Flow:** [diagram](../__flow/bg_remove.md)
 
 ## Purpose
+
 Makes a generated image's background transparent. Originally built
 inside DOMY Watch (`tools/bg_remove.py`); moved here 2026-07-17 on
 the owner's rule that no part of this program lives in another
-project.
+project. Also runnable standalone
+(`python painter/bg_remove.py <file-or-folder> --in-place --crop`).
 
 ### One engine, several recipes
 
@@ -36,20 +39,15 @@ alpha                   = 0        where distance <= dist_full
 ### Why enclosed regions of the background colour survive
 
 The default `reach` is a **flood fill from the frame**, not a colour
-test. A pixel is background only if you can walk to it from the edge of
-the image through other matching pixels. So the counters inside the
+test. A pixel is background only if you can walk to it from the edge
+of the image through other matching pixels. So the counters inside the
 letters of HOPE / SALVATION — pure `#000000`, identical to the
 background — stay OPAQUE: the letter stroke walls them off, and the
-fill never reaches them. The same rule is what protects the black
-leading between stained glass, a dark inner area, and Aurora's own
-black hour sector.
-
-`BG_REACH_ALL` (owner 2026-07-28) drops the connectivity test: every
-matching pixel goes, wherever it sits, and the letters are left as
-outlines. Measured on Compass-Ages: 42.14 % edge-reach vs 42.42 %
-everywhere — the difference IS the letter counters. Note that clearing
-more can push a plate over its SAFETY guard; that is reported, never
-silent.
+fill never reaches them. `BG_REACH_ALL` (owner 2026-07-28) drops the
+connectivity test: every matching pixel goes, wherever it sits, and
+the letters are left as outlines. Measured on Compass-Ages: 42.14 %
+edge-reach vs 42.42 % everywhere — the difference IS the letter
+counters.
 
 That single key subsumes both historical ones EXACTLY: distance from
 black `#000000` is `max(r,g,b)` (the old `brightness`) and distance
@@ -59,9 +57,8 @@ targets (verified byte-identical against the pre-refactor code over
 17 real plates and 400 randomised ones).
 
 Only BORDER-CONNECTED pixels are cleared, so a dark region ENCLOSED by
-the subject (the black leading between glass, Aurora's own black hour
-sector) stays opaque. This replaced the old "largest bright blob + fill
-holes" disc, which could not tell a DARK subject from a black
+the subject stays opaque. This replaced the old "largest bright blob +
+fill holes" disc, which could not tell a DARK subject from a black
 background and ate the dark stone frame of the bible/dark rondels
 (50-78% turned transparent — swiss cheese).
 
@@ -71,36 +68,29 @@ background and ate the dark stone frame of the bible/dark rondels
   1. sniff the outer 1% frame for white / off-white (thresholds
      ADAPTED to that plate's own white level);
   2. else sniff it for a black void;
-  3. else ask the **FOUR CORNERS** (owner 2026-07-28, his own rule —
-     *"da li recimo u 4 coska po recimo 5-10 piksela u dubinu ima isti
-     COLOR"*). Each corner contributes its median; if all four agree
-     within `AUTO_CORNER_AGREE_MAX` per channel, THAT is the
-     background colour and it is cleared with the configured
-     tolerance. The choice is logged — an auto-DECIDED colour is
+  3. else ask the **FOUR CORNERS** (owner 2026-07-28, his own rule).
+     Each corner contributes its median; if all four agree within
+     `AUTO_CORNER_AGREE_MAX` per channel, THAT is the background
+     colour and it is cleared with the configured tolerance — logged,
      never silent.
 
   Only when even the corners disagree (a gradient, a scene) is the
   image **ambiguous** → reported and left alone. The report names the
   colour it saw, so it can be pasted into the custom-colour field —
-  skip, never guess, but never a dead end either.
-
-  Why the corners and not the whole border band: a medallion running
-  to the top edge drags the border median, but leaves all four
-  corners sitting on the true background.
+  skip, never guess, but never a dead end either. Corners, not the
+  whole border band: a medallion running to the top edge drags the
+  border median, but leaves all four corners sitting on the true
+  background.
 - **`BG_MODE_BLACK` / `BG_MODE_WHITE`** (owner 2026-07-28) — the owner
   STATING the background; the sniff is skipped entirely.
 - **`BG_MODE_COLOR`** (owner 2026-07-28) — any target colour plus a
   `±X %` tolerance (percent of 255, per channel), BOTH owner-editable
-  fields, not fixed values. `BG_COLOR_TOLERANCE_PCT` is only the
-  starting value. His own worked example: `#FF0000 ± 6.67 %` spans
+  fields. His own worked example: `#FF0000 ± 6.67 %` spans
   `#EE0000`…`#FF1111` (±17 levels). **`0 %` is legal** and keys the
   typed colour EXACTLY.
 - **already transparent** → skipped untouched in EVERY mode, forced
-  ones included (it has a real alpha channel a colour key knows nothing
-  about) — this is what makes re-running a folder safe.
-
-A custom removal at `#000000` IS a fully tunable black removal, which
-is why the black path needs no tolerance knob of its own.
+  ones included (it has a real alpha channel a colour key knows
+  nothing about) — this is what makes re-running a folder safe.
 
 ### The SAFETY GUARD
 
@@ -119,16 +109,14 @@ its message NAMING the guard that fired.
 
 The constants are FRACTIONS because the engine compares them against a
 fraction; the GUI shows and takes them as PERCENT and converts at the
-panel edge (owner 2026-07-28 — a bare `0.40` in a box says nothing).
-All three are owner-editable per run.
+panel edge. All three are owner-editable per run.
 
 **Known limit (owner 2026-07-28, the "pointers" case).** The black
 guard measures AREA, which is only a proxy for "it ate the subject",
 and the proxy fails on shapes whose legitimate background is simply
 large. 17 disc-in-a-square plates measured 41.2–42.2 % of pure-black
-background with the subject fully intact — a perfectly clean cut (the
-mask moves < 0.6 pp while the void threshold sweeps 2 → 20) that black's
-0.40 nonetheless bails on. Stating the colour (`BG_MODE_COLOR`
+background with the subject fully intact — a perfectly clean cut that
+black's 0.40 nonetheless bails on. Stating the colour (`BG_MODE_COLOR`
 `#000000`, guard 0.85) is the way through; raising the black guard per
 run is the other. Pinned by
 `test_pointers_regression_black_guard_bails_custom_colour_succeeds`.
@@ -137,23 +125,22 @@ run is the other. Pinned by
 
 ### Uses
 - numpy, scipy (`ndimage`), Pillow
-- [Config (subfolder)](config/___config.md) — `CROP_INK_ALPHA`, `CROP_MIN_INK_PX`,
-  `CLEAN_EDGE_ALPHA` (the ink-crop / edge-cleanup thresholds),
-  `BLACK_VOID_MAX` (the black-void brightness ceiling), the
-  background-mode constants (`BG_MODE_*`, `BG_COLOR_DEFAULT`,
-  `BG_COLOR_TOLERANCE_PCT`, `AUTO_CORNER_PX`,
-  `AUTO_CORNER_AGREE_MAX`) and the three SAFETY guards
-  `SAFETY_MAX_REMOVE_FRAC` / `_WHITE` / `_COLOR`. Imported
-  package-first (`from painter.config`) with a bare `from config`
-  fallback so the standalone script still runs.
+- [Config (subfolder)](../config/___config.md) — `CROP_INK_ALPHA`,
+  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA` (the ink-crop / edge-cleanup
+  thresholds), `BLACK_VOID_MAX` (the black-void brightness ceiling),
+  the background-mode constants (`BG_MODE_*`, `BG_COLOR_DEFAULT`,
+  `BG_COLOR_TOLERANCE_PCT`, `AUTO_CORNER_PX`, `AUTO_CORNER_AGREE_MAX`)
+  and the three SAFETY guards `SAFETY_MAX_REMOVE_FRAC` / `_WHITE` /
+  `_COLOR`. Imported package-first (`from painter.config`) with a bare
+  `from config` fallback so the standalone script still runs.
 
 ### Used by
 - [Postprocess](postprocess.md) — uses the internals (`plan`,
   `apply_plan`, `parse_hex_color`, `content_bbox`, `clean_edge_halo`)
   for its two split, composable steps
-- [BG Settings Panel](../gui/tool_panels/bg.md) —
-  `BgSettingsPanel` calls `parse_hex_color` to validate the typed
-  colour at Start and to drive the live swatch
+- [GUI (folder)](../../gui/___gui.md) — `BgSettingsPanel` calls
+  `parse_hex_color` to validate the typed colour at Start and to drive
+  the live swatch
 - The owner, standalone:
   `python painter/bg_remove.py <file-or-folder> --in-place --crop`
 
@@ -175,9 +162,8 @@ run is the other. Pinned by
   `None` when the corners disagree.
 - `apply_plan(img, removal, reach) -> (rgba, removed_frac)` — run the
   engine with one plan's parameters. `reach` is NOT part of the plan:
-  it is orthogonal to WHICH colour is the background (any mode,
-  detected or stated, runs either way), so it stays the caller's
-  choice rather than something detection decides.
+  it is orthogonal to WHICH colour is the background, so it stays the
+  caller's choice rather than something detection decides.
 - `remove_color_background(img, target, dist_full, dist_edge, sigma,
   reach) -> (rgba, removed_frac)` — THE engine (see above); the second
   value is the fraction the removal clears, which the guard checks.
@@ -192,18 +178,14 @@ run is the other. Pinned by
 - `autocrop` — crop to the ink-based content box.
 - `content_bbox(img, ink_alpha, min_ink_px) -> (l, t, r, b) | None`
   — the INK-BASED content box shared by `autocrop` and the
-  postprocess crop step (owner 2026-07-18, the OldAge.png case). A
-  row/col counts as content only when it holds at least `min_ink_px`
-  pixels that are at least `ink_alpha` opaque, so a sparse faint
-  stray line hugging the border no longer extends the box; `None`
-  when no row/col qualifies (fully transparent / faint speckle).
+  postprocess crop step. A row/col counts as content only when it
+  holds at least `min_ink_px` pixels that are at least `ink_alpha`
+  opaque; `None` when no row/col qualifies.
 - `clean_edge_halo(img, edge_alpha) -> (rgba_copy, n_cleaned)` — the
   CONSERVATIVE edge-halo cleanup: faint pixels (alpha < `edge_alpha`)
   that connect to the image border are zeroed (reusing
   `edge_connected_background`), while faint pixels enclosed by the
-  solid subject (interior soft edges) are never border-connected and
-  stay untouched. Returns the cleaned copy and the count of pixels
-  that actually lost visible alpha.
+  solid subject stay untouched.
 - `main(argv)` — the standalone CLI (`--in-place`, `--crop`,
   `--backup`, `--mode auto|white|black|color`, `--reach edge|all`, and
   for the colour mode `--color '#RRGGBB'` / `--tolerance <percent>`).

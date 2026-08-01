@@ -1,8 +1,10 @@
 # Sheet-Generator Flow
 
-**Script:** [Sheet-Generator Flow (script)](sheet_flow.py)
+**Script:** [Sheet-Generator Flow (script)](../sheet_flow.py) ·
+**Flow:** [diagram](../__flow/sheet_flow.md)
 
 ## Purpose
+
 The owner's #2: turn a free-form request into a VALIDATED prompt sheet
 — clarifying questions first, then the sheet itself, held to the real
 contract and saved under `sheets/`. Split out of the single-file
@@ -13,15 +15,16 @@ contract and saved under `sheets/`. Split out of the single-file
 ### Uses
 - [Gemini REST Client](client.md) — `generate_text` (the default
   `gen`, resolved at CALL time so a test can inject its own)
-- [Sheet Parser](../sheet_parser.md) — `parse_sheet`, the REAL
-  contract validation
-- [Config (subfolder)](../config/___config.md) — `AI_SHEET_SYSTEM`,
+- [Sheet Parser](../../__about/sheet_parser.md) — `parse_sheet`, the
+  REAL contract validation
+- [Config (subfolder)](../../config/___config.md) — `AI_SHEET_SYSTEM`,
   `AI_QUESTIONS_SYSTEM`, `AI_REPAIR_PROMPT`, `AI_MAX_QUESTIONS`,
   `PROJECT_ROOT`
 
 ### Used by
-- [AI (subfolder)](___ai.md) — `__init__.py` re-exports it
-- [GUI](../../gui.md) — the New-collection (AI) dialog
+- [AI (subfolder)](../___ai.md) — `__init__.py` re-exports it
+- [GUI (folder)](../../../gui/___gui.md) — the New-collection (AI)
+  dialog
 
 ## Functions
 

@@ -1,8 +1,10 @@
 # Upscale (Real-ESRGAN)
 
-**Script:** [Upscale (script)](upscale.py)
+**Script:** [Upscale (script)](../upscale.py) ·
+**Flow:** [diagram](../__flow/upscale.md)
 
 ## Purpose
+
 Owner's #13: some generations come back small. The fix is the
 standalone `realesrgan-ncnn-vulkan` Windows binary (Vulkan GPU, no
 Python package), kept under `tools/realesrgan/` (gitignored) and
@@ -20,17 +22,15 @@ image is LANCZOS-scaled by the smallest factor keeping BOTH minimums,
 so the binding axis lands on its target), PNG in/out so transparency
 survives. Anything else → `"nothing"`, so callers count done vs
 skipped cleanly. This signature and these four config defaults are
-UNCHANGED by the GUI rework (GUI-composition only, Phase 6): the GUI
-no longer exposes `min_width`/`min_height`/`aspect_min`/`aspect_max`
-as four separate typed fields — each site's own fine-tune block and
-the standalone Upscale dialog instead expose ONE min-side number plus
-an embedded [Shared Filter Framework](filters.md) `FilterEditor`, and
-`gui._upscale_params_from_side_and_filter` resolves those two into
-this function's same four kwargs before every call (`min_width ==
-min_height == min_side`; `aspect_min`/`aspect_max` off the filter's
-Aspect condition, or `(0, inf)` when there isn't one) — see
-[GUI](../gui.md)'s upscale-gate section for the full resolution and
-how a stacked NON-aspect condition is separately honored.
+UNCHANGED by the GUI rework (GUI-composition only): the GUI no longer
+exposes `min_width`/`min_height`/`aspect_min`/`aspect_max` as four
+separate typed fields — each site's own fine-tune block and the
+standalone Upscale dialog instead expose ONE min-side number plus an
+embedded [Shared Filter Framework](filters.md) `FilterEditor`, and
+the GUI resolves those two into this function's same four kwargs
+before every call (`min_width == min_height == min_side`;
+`aspect_min`/`aspect_max` off the filter's Aspect condition, or
+`(0, inf)` when there isn't one).
 
 **Model:** `-n UPSCALE_MODEL` picks the ncnn net (config data). Switched
 2026-07-21 (owner research) from the general-purpose `realesrgan-x4plus`
@@ -45,19 +45,22 @@ variance ~328 vs ~264), no colour shift or banding regression, and
 **Native 4x only:** the binary always runs the configured model's
 native 4x and LANCZOS brings the result down to the exact target.
 Non-native `-s 2/3` runs were verified LIVE (2026-07-18, a real
-rondel, x4plus) to corrupt the output — tile misalignment, lost detail.
+rondel, x4plus) to corrupt the output — tile misalignment, lost
+detail.
 
 ## Connections
 
 ### Uses
-- [Config (subfolder)](config/___config.md) — the `UPSCALE_*` block, `fmt_size`
+- [Config (subfolder)](../config/___config.md) — the `UPSCALE_*`
+  block, `fmt_size`
 - Pillow (LANCZOS correction), `urllib`/`zipfile` (the one-time
   download), `subprocess` (the binary)
 
 ### Used by
-- [Main (Entry Point)](../main.md) — composed into the `post_save`
-  hook (`--upscale`/`--no-upscale`, default on)
-- [GUI](../gui.md) — its own composed hook / standalone runs
+- [Main (Entry Point)](../../__about/main.md) — composed into the
+  `post_save` hook (`--upscale`/`--no-upscale`, default on)
+- [GUI (folder)](../../gui/___gui.md) — its own composed hook /
+  standalone runs
 
 ## Functions
 

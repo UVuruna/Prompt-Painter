@@ -1,0 +1,182 @@
+# CDP Driver
+
+**Script:** [CDP Driver (script)](../driver.py) ·
+**Flow:** [diagram](../__flow/driver.md)
+
+## Purpose
+
+Drives the open, logged-in site tab. Chrome runs with
+`--remote-debugging-port=9222` (see [Chrome Launcher](chrome.md) for
+the dedicated automation profile); the driver attaches with
+Playwright's `connect_over_cdp` — no extension, no OCR, no virtual
+mice. It never clicks Download: the generated image's bytes are
+fetched from the DOM (inside `page.evaluate`) and handed back for the
+runner to save under the sheet's own name.
+
+Already in the structure-law RATCHET as a god-file (1058 lines,
+`config.SiteConfig`-driven protocol code) — documented normally per
+the orchestrator's scope; a future split would carve it by
+responsibility (submit / await / extract / recovery) rather than by
+line count.
+
+## The per-item protocol (F1 turn-based, owner 2026-07-29)
+
+The driver tracks FOUR element states (owner's decree) and verifies
+every step — it never assumes: the composer TEXT, the SEND–BUSY
+button, the last SENT user turn, and the last IMAGE. Everything
+after a send is judged against a pre-submit `Baseline` snapshot
+(assistant-turn count + last generated image src), which makes
+"grab the last visible image" — the duplicate-save root cause —
+impossible. See the flow diagram for the full state machine.
+
+1. `submit_prompt(prompt, log=print)` — `_ensure_ready` (stuck-busy
+   guard) → `capture_baseline()` → `_paste_and_send` →
+   `_confirm_sent`. EVERY DOM interaction is preceded by
+   `_hesitate()` — a random human-like pause from the config's
+   action-delay range, so nothing ever fires machine-instant. The
+   typing body lives in `_type_into_box(prompt)` (clears the box
+   ONLY when it holds text, verifies the composer really holds the
+   prompt via `_composer_holds`, one silent retype then loud
+   `DriverError`); the locate + click of the send button lives in
+   `_click_send(prompt, log)`; `_paste_and_send(prompt, log)` chains
+   the two. `_confirm_sent` polls up to `send_confirm_timeout_s`
+   for "composer empty AND our text visible as the newest user turn"
+   (`SiteConfig.user_turn`), retrying the send once at half the
+   window; an unconfirmable send raises loudly — the runner never
+   proceeds on an unsent prompt.
+
+   **Send-button reload recovery** (owner 2026-07-21, config
+   `SEND_RELOAD_RECOVERY`, default on): a real run's exact failure —
+   "no selector for the send button matched within 10s ... site
+   stopped" — was fixed by nothing more than a manual page refresh.
+   `_click_send` now does that refresh itself: when (and ONLY when)
+   the send-button lookup raises `SelectorRot` — never any other
+   selector miss — it calls `page.reload()`, re-runs
+   `_type_into_box(prompt)` (the reload wipes the composer's unsent
+   text), and retries the send-button lookup exactly ONCE more. A
+   second miss raises `SelectorRot` same as always.
+1b. `submit_with_image(image_path, prompt)` — **image + text submit**
+   (owner 2026-07-23), used BOTH by input-image sheet entries (the
+   `← \`ref\`` reference photo — "put THIS character into that scene")
+   and by WEBSITE FIX (re-attaching a flagged output for a focused
+   correction). Acts like a PERSON: walk `attach_menu_path` — EXPAND
+   the "+" menu, then click the add-image option — each step
+   `_hesitate()`-paced. Then attach the file: if the site exposes
+   `file_input` (ChatGPT's `#upload-photos`), `set_input_files` on it
+   directly; else (Gemini) the option opens the OS dialog, caught with
+   `page.expect_file_chooser()`. Then WAIT for the composer's
+   `attach_preview` before sending. Raises `AttachNotConfigured`
+   immediately while the site's `attach_menu_path` is empty. A
+   send-button reload recovery for this path RE-ATTACHES the image
+   before re-typing (a `reload()` drops the attachment too).
+2. `await_done(log)` — waits for OUR RESULT, not for the button: the
+   old "stop button disappears" done edge stalled forever on ChatGPT's
+   stuck button and could not tell our generation from a leftover one.
+   Each poll (bounded by the hard `generation_timeout_s`) looks for an
+   assistant turn NEWER than the baseline: a loaded image with a fresh
+   src = done (even mid-stuck-button); turn text is scanned for
+   image-failed / refusal / quota markers; final text with NO image
+   and the busy signal gone raises `NoImage(had_text=True)`; nothing
+   new + no busy signal past `busy_appear_timeout_s` raises
+   `NoImage(had_text=False)` (the one nudge-eligible case).
+3. `click_error_retry(log) -> bool` — the first rung of the recovery
+   ladder: click the site's native Retry button
+   (`image_error_retry_button`) if present; True when clicked. Never
+   loud — a missing button is a normal branch.
+4. `refresh(log)` — reload the page and wait for the composer back (a
+   last-resort ladder rung); the login lives in the profile on disk.
+2b. `new_chat(log)` — clicks the sidebar's New-chat control and waits
+   for the fresh composer; re-anchors the baseline to nothing (a fresh
+   conversation restarts turn numbering).
+3. `extract_image() -> bytes` — the loaded, non-placeholder `<img>` of
+   OUR new turn ONLY (src must differ from the baseline's last image),
+   read in-page CANVAS-FIRST (`drawImage` + `toDataURL`: site CSP
+   blocks `fetch()` of `blob:` srcs on Gemini, while a canvas needs no
+   request); `fetch()` stays as the fallback.
+
+All required-element lookups poll up to the selector timeout before
+failing loudly — SPAs morph elements a beat after input events.
+
+## Failure taxonomy (all loud, root Rule #1)
+
+- `SelectorRot` — no fallback selector matched; the site reskinned,
+  fix the config block. EXCEPTION: a `SelectorRot` on the send button
+  specifically first tries the one-time reload recovery above; only a
+  SECOND miss raises it for real.
+- `ItemRefused` — the response matches a refusal marker: the runner
+  reports the item and continues with the rest. Carries a `category`
+  naming the refusal SCENARIO it matched (`REFUSAL_SAFETY` /
+  `REFUSAL_COPYRIGHT`) so the runner picks the matching safer-retry
+  preamble (`RETRY_PREAMBLES`). Marker categories are checked
+  MOST-SPECIFIC-FIRST.
+- `TerminalState` — the response matches a quota/rate-limit marker:
+  the whole site stops, never blind-retried. Carries
+  `retry_after_s: float | None` (parsed via `QUOTA_RESET_PATTERNS`,
+  English and Serbian phrasings).
+- `GenerationTimeout` — no result for our turn inside the hard cap.
+- `NoImage` — a `DriverError` subclass for "our turn holds no image
+  and its text matches NO known marker". Carries `had_text`.
+  `had_text=True` = the model ANSWERED with unrecognized text — the
+  runner LOUD-SKIPS the item and NEVER sends the continue nudge (the
+  market-scene incident). `had_text=False` = a truly empty/interrupted
+  answer — the one case where a single `CONTINUE_NUDGE` is allowed.
+  `NoImage` no longer stops the site.
+- `ImageGenFailed` — ChatGPT's image tool failed outright while the
+  busy/stop signal never clears, in one of two forms — its own
+  "reply with 'retry'" text, or the generic "Hmm...something seems to
+  have gone wrong." error turn (which renders a native Retry button).
+  Both match `image_failed_text_markers`. Raised by
+  `_check_image_failed()`, called from `await_done`'s polling loop on
+  every poll — a silent no-op wherever the site's
+  `image_failed_text_markers` is empty (Gemini today). The runner
+  catches it and walks a recovery LADDER (Retry button → paced "retry"
+  text → escalation rounds of refresh + new session); the ladder
+  re-raises only when every rung is spent, which stops the site.
+- `ModelDegraded` — the site's degradation banner is up (Gemini's
+  "Limit reached. Continuing with Flash-Lite.", `SiteConfig.
+  degrade_banner`) and OUR turn produced no image. Checked BEFORE the
+  quota markers (the banner's companion text also matches them).
+  Carries `retry_after_s` parsed from the banner's own absolute
+  phrasing. The runner asks the configured choice (`on_degrade`):
+  "continue" = loud per-item skip, run stays alive on the weaker
+  model; "wait" (and the CLI default) = re-raised as `TerminalState`
+  (auto-restart at the reset). `degrade_banner_text()` is a
+  non-raising probe of the SAME banner, used AFTER a save (the image
+  can arrive even while the banner is up).
+- `AttachNotConfigured` — `submit_with_image` is disabled for this
+  site because `attach_menu_path` is empty in `SITES`. Raised
+  immediately, before touching the page at all.
+- `DriverError` — anything else the config block does not recognize,
+  always with the response's opening text quoted.
+
+## Connections
+
+### Uses
+- [Config (subfolder)](../config/___config.md) — `SiteConfig`,
+  `Timing`, `MIN_IMAGE_PX`, `SEND_RELOAD_RECOVERY`
+- Playwright (`playwright.sync_api`) — the CDP session
+
+### Used by
+- [Run Loop](runner.md) — per-item protocol
+- [Main (Entry Point)](../../__about/main.md) — attach/close lifecycle
+
+## Classes
+
+### SiteDriver
+`attach()` (find the tab by URL fragment; several tabs → the last
+one; a MISSING tab is opened by the driver itself — the caller has
+already ensured Chrome via [Chrome Launcher](chrome.md)'s
+`ensure_chrome`), `wait_for_login()` (poll for the composer while the
+owner logs in by hand — status every 15 s, loud after
+`login_wait_timeout_s`), `submit_prompt()`, `submit_with_image()`
+(image + text, GATED by `attach_menu_path`), `await_done()`,
+`extract_image()`, `close()` (detaches; never closes the owner's
+browser).
+
+## Functions
+
+- `sniff_format(data) -> str | None` — image format from magic
+  bytes, so the runner can warn when saved bytes are not PNG.
+- `normalize_text(text) -> str` — whitespace-collapsed, lowercased
+  text for the composer/user-turn DOM comparisons (ProseMirror/Quill
+  editors reflow whitespace and newlines).

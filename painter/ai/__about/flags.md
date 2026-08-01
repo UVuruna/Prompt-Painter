@@ -1,8 +1,9 @@
 # Flag Memory
 
-**Script:** [Flag Memory (script)](flags.py)
+**Script:** [Flag Memory (script)](../flags.py)
 
 ## Purpose
+
 `<out>/_state/ai_flags.json` — the record of what a check found, so a
 defect survives the app closing and a re-check knows what changed.
 Pure disk state: no HTTP, no model, so the GUI can read it without
@@ -12,15 +13,15 @@ Rule #20, 2026-07-30).
 ## Connections
 
 ### Uses
-- [Config (subfolder)](../config/___config.md) — `AI_FLAGS_FILENAME`,
-  `STATE_DIRNAME`
+- [Config (subfolder)](../../config/___config.md) —
+  `AI_FLAGS_FILENAME`, `STATE_DIRNAME`
 
 ### Used by
 - [Image Checker](checks.md) — `flag_key`/`record_flag`/`clear_flag`
   around every checked image
-- [AI (subfolder)](___ai.md) — `__init__.py` re-exports it
-- [GUI](../../gui.md) — the checker report viewer and its Clear-flags
-  action
+- [AI (subfolder)](../___ai.md) — `__init__.py` re-exports it
+- [GUI (folder)](../../../gui/___gui.md) — the checker report viewer
+  and its Clear-flags action
 
 ## Functions
 
@@ -37,9 +38,9 @@ Rule #20, 2026-07-30).
   data — a re-check rebuilds them).
 - `flag_file(key, out_base) -> Path` — the EXACT reverse of
   `flag_key` (relative under the base, or absolute when the image was
-  outside): the ONE home for the round-trip, used by `prune_stale_flags`
-  AND the GUI viewer, so the flag key and the image it opens can never
-  drift apart.
+  outside): the ONE home for the round-trip, used by
+  `prune_stale_flags` AND the GUI viewer, so the flag key and the
+  image it opens can never drift apart.
 
 ## Design Decisions
 - **The flag mtime is the invalidation.** A regenerated image gets a

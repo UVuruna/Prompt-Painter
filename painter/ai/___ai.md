@@ -33,37 +33,18 @@ free-tier-EXHAUSTED signal (`_is_paid_quota_error` /
 permanent and short-circuits to `PaidFeatureRequired` on the very
 first attempt, even though its body also names a "retry in Xs" hint
 like an ordinary rate-limit 429 (the trap: classify on the signal,
-never that hint — see Design Decisions). The retry keys on the numeric
-HTTP status, which the client attaches to the raised `AiError`
-(`.status`).
+never that hint). The retry keys on the numeric HTTP status, which the
+client attaches to the raised `AiError` (`.status`).
 
 ## Files
 
-### `client.py` — Gemini REST Client
-The transport every other module calls through: `api_key`, the four
-calls (`generate_text`/`check_image`/`generate_image`/`edit_image`),
-the ONE retry/pace/classification shell under them
-(`_call_raw` -> `_send_request`), the response parsers, and the F5
-model discovery (`list_models`/`capable_models`/`recommend_model`/
-`model_for`). Owns the `AiError`/`NoKey`/`PaidFeatureRequired`
-taxonomy. See [Gemini REST Client](client.md).
-
-### `sheet_flow.py` — Sheet-Generator Flow
-The owner's #2: clarifying questions, the two calls built from the
-sheet contract, validation with the REAL parser plus ONE automatic
-repair round, and the slugged save under `sheets/`. See
-[Sheet-Generator Flow](sheet_flow.md).
-
-### `checks.py` — Image Checker
-The owner's #3: the checker's strict response format, the fix prompt
-built from it, the per-image driver both GUI callers share
-(`check_one_image`), and the resend plan (`drop_and_site_for` /
-`plan_resend`). See [Image Checker](checks.md).
-
-### `flags.py` — Flag Memory
-`<out>/_state/ai_flags.json` — what a check found, keyed by the
-image's out-relative path and invalidated by the file's own mtime.
-Pure disk state: no HTTP, no model. See [Flag Memory](flags.md).
+| File | Tier | One line |
+|------|------|----------|
+| `__init__.py` | Standard | pure re-export shell of the whole public API — [about](__about/__init__.md) |
+| `client.py` | Algorithmic | Gemini REST transport, retry/pace shell, model discovery — [about](__about/client.md) · [flow](__flow/client.md) |
+| `sheet_flow.py` | Algorithmic | sheet-generator flow: questions, contract, validate-and-repair, save — [about](__about/sheet_flow.md) · [flow](__flow/sheet_flow.md) |
+| `checks.py` | Algorithmic | image checker's response format, fix prompt, resend plan — [about](__about/checks.md) · [flow](__flow/checks.md) |
+| `flags.py` | Standard | `<out>/_state/ai_flags.json` mtime-invalidated flag memory — [about](__about/flags.md) |
 
 ## Connections
 
@@ -71,16 +52,16 @@ Pure disk state: no HTTP, no model. See [Flag Memory](flags.md).
 - [Config (subfolder)](../config/___config.md) — the whole `GEMINI_*` /
   `AI_*` block, `MODEL_PURPOSE_RANKING`/`MODELS_SETTING` (F5), `SITES`,
   `STATE_DIRNAME`, `PROJECT_ROOT`
-- [Settings](../settings.md) — `load_settings` (the key lives in
-  `settings.json` under `gemini_api_key`; F5's per-purpose model
+- [Settings](../__about/settings.md) — `load_settings` (the key lives
+  in `settings.json` under `gemini_api_key`; F5's per-purpose model
   overrides under `MODELS_SETTING`, `"models"`)
-- [Sheet Parser](../sheet_parser.md) — `parse_sheet` validates every
-  AI-produced sheet with the REAL contract rules
+- [Sheet Parser](../__about/sheet_parser.md) — `parse_sheet` validates
+  every AI-produced sheet with the REAL contract rules
 
 ### Used by
-- [GUI](../../gui.md) — the key wizard's Test, the New-collection
-  dialog, the AI-check job, the re-send mapping, and (F5)
-  `ApiImageGenPanel`'s "Models…" picker + `ApiImageAdapter`'s
+- [GUI (folder)](../../gui/___gui.md) — the key wizard's Test, the
+  New-collection dialog, the AI-check job, the re-send mapping, and
+  (F5) `ApiImageGenPanel`'s "Models…" picker + `ApiImageAdapter`'s
   `submit_with_image`/`extract_image`
 - [Tests (folder)](../../tests/___tests.md) — mocked-HTTP client tests,
   flow tests, flag round-trips

@@ -7,97 +7,22 @@ the driver touches a browser.
 
 ## Files
 
-### `config/` — Configuration
-Every tunable value, split by domain into a package (paths,
-formatters, sheet contract, postprocess, upscale, aspect + shared
-filter framework, theme, jobs, jobtemp, ai, sites): CDP endpoint,
-Chrome launch settings and the dedicated profile folder, output
-layout, sheet-contract constants, background-tool settings, all
-timing/pacing knobs, and the per-site DOM config blocks (selector
-fallbacks, background prompt suffixes, refusal markers). See
-[Config (subfolder)](config/___config.md).
-
-### `sheet_parser.py` — Sheet Parser
-Parses one prompt-sheet `.md` into items to generate, entries the
-sheet marks as skipped, and loudly reported contract problems.
-Stdlib only. See [Sheet Parser](sheet_parser.md).
-
-### `driver.py` — CDP Driver
-Attaches over CDP to the open, logged-in tab and drives the DOM:
-paste, send, watch the done edge, read the generated image's bytes
-straight from the DOM. See [CDP Driver](driver.md).
-
-### `runner.py` — Run Loop
-The paced, resumable per-item loop: background suffix, save under
-`<out>/<site>/<drop-path>`, background fix, FILE-EXISTENCE resume
-(no sidecar — "done" is the saved file), graceful stop. See
-[Run Loop](runner.md).
-
-### `chrome.py` — Chrome Launcher
-Probes CDP and, when nothing answers, launches the automation
-Chrome with the dedicated `chrome-profile/` and one tab per site.
-See [Chrome Launcher](chrome.md).
-
-### `postprocess.py` — Background Removal + Crop
-The two split, composable per-save steps (owner's #7):
-`remove_background` (auto-detected or a stated background, in place)
-and `crop_transparent` (content box + safety margin) — callers compose
-them by flags; loud on failure, never fatal. See
-[Postprocess](postprocess.md).
-
-### `bg_remove.py` — Background Remover
-The remover itself (moved in from DOMY Watch tools — no part of
-this program lives in another project): ONE colour-keyed engine that
-clears the border-connected region around ANY target colour, with
-per-file auto-detection (white/black), forced white/black, or a custom
-colour ± tolerance (owner 2026-07-28); plus autocrop. Also runnable
-standalone. See [Background Remover](bg_remove.md).
-
-### `upscale.py` — Real-ESRGAN Upscaler
-Upscales small near-square (badge-class) images with the
-`realesrgan-ncnn-vulkan` binary (downloaded on first use into
-`tools/`, gitignored) so no dimension stays below the configured
-minimum; loud but catchable on a machine without Vulkan. See
-[Upscale](upscale.md).
-
-### `aspect.py` — Change Aspect Ratio
-The standalone batch DEFORM tool (owner 2026-07-19): stretches every
-image in a folder to a target ratio `X:Y` in place — a grow-only,
-non-proportional LANCZOS stretch that never shrinks either axis and
-leaves an already-at-ratio image byte-unchanged. Loud but catchable.
-See [Change Aspect Ratio](aspect.md).
-
-### `jobtemp.py` — Job Temp / Restore
-The four in-place tools' safety net (owner 2026-07-19): back up the
-ORIGINAL of every file before the op, so the dashboard's before/after
-viewer can RESTORE one image or the whole job, plus `measure` — the
-before→after % each tool panel shows (removed / reduction / increase /
-deformation), derived OUTSIDE the engine functions. Cleared on panel
-CLOSE, on app exit and swept at startup. See [Job Temp](jobtemp.md).
-
-### `ai/` — AI (subfolder)
-The AI features' engine (owner 2026-07-20): a minimal Gemini REST
-client over `urllib` (free AI Studio key from `settings.json`, loud
-`AiError`/`NoKey`, paced for the free tier), the sheet-GENERATOR
-flow (clarifying questions → final `.md` → REAL-parser validation +
-one automatic repair round → save under `sheets/`), and the image
-CHECKER's flag memory (`<out>/_state/ai_flags.json`, mtime-based
-invalidation) with the `dest_for` reverse mapping the re-send uses.
-See [AI (subfolder)](ai/___ai.md).
-
-### `settings.py` — Settings Persistence
-Loads/saves the GUI's remembered choices as `settings.json` at the
-project root (gitignored); a corrupt file is loud but never crashes
-the app. See [Settings](settings.md).
-
-### `filters.py` — Shared Filter Framework
-GUI rework Phase 3 (owner decision 2026-07-21): the pure engine half
-of ONE stackable "what should this tool touch" gate — a
-`FilterCondition` dataclass (kind/polarity/lo/hi) and `matches()`
-ANDing a whole stack against one image's width/height. Replaced the
-Aspect tool's scalar filter (Phase 4) and Upscale's bespoke four-field
-gate (Phase 6); the BG/Crop tools are still unmigrated. See
-[Shared Filter Framework](filters.md).
+| File | Tier | One line |
+|------|------|----------|
+| `__init__.py` | Trivial | empty package marker — no logic |
+| `settings.py` | Standard | GUI's remembered-choices JSON, load/save — [about](__about/settings.md) |
+| `chrome.py` | Algorithmic | probe/launch/poll attach-point protocol for the automation Chrome — [about](__about/chrome.md) · [flow](__flow/chrome.md) |
+| `driver.py` | Algorithmic | CDP driver — the F1 turn-based per-item protocol (submit, await, extract, recovery) — [about](__about/driver.md) · [flow](__flow/driver.md) |
+| `runner.py` | Algorithmic | the paced, resumable run loop over a sheet's pending items — [about](__about/runner.md) · [flow](__flow/runner.md) |
+| `sheet_parser.py` | Algorithmic | parses one prompt-sheet `.md` into the run queue — [about](__about/sheet_parser.md) · [flow](__flow/sheet_parser.md) |
+| `bg_remove.py` | Algorithmic | the color-keyed background-removal engine — [about](__about/bg_remove.md) · [flow](__flow/bg_remove.md) |
+| `postprocess.py` | Algorithmic | composed post-save hook: background removal + transparent crop — [about](__about/postprocess.md) · [flow](__flow/postprocess.md) |
+| `upscale.py` | Algorithmic | upscale gating + Real-ESRGAN invocation — [about](__about/upscale.md) · [flow](__flow/upscale.md) |
+| `aspect.py` | Algorithmic | batch DEFORM tool — stretch every image in a folder to a target ratio — [about](__about/aspect.md) · [flow](__flow/aspect.md) |
+| `filters.py` | Algorithmic | shared stackable "what should this tool touch" gate — [about](__about/filters.md) · [flow](__flow/filters.md) |
+| `jobtemp.py` | Algorithmic | the four in-place tools' backup/restore safety net — [about](__about/jobtemp.md) · [flow](__flow/jobtemp.md) |
+| `config/` | — | every tunable value, split by domain — [Config (subfolder)](config/___config.md) |
+| `ai/` | — | the AI features' engine: Gemini client, sheet generator, image checker, flag memory — [AI (subfolder)](ai/___ai.md) |
 
 ## Connections
 
@@ -106,8 +31,9 @@ gate (Phase 6); the BG/Crop tools are still unmigrated. See
   `research/prompts/`) — READ-ONLY input
 
 ### Used by
-- [Main (CLI)](../main.md) and [GUI](../gui.md) — the two entry
-  points wiring the modules together
+- [Main (Entry Point)](../__about/main.md) and
+  [GUI (folder)](../gui/___gui.md) — the two entry points wiring the
+  modules together
 - [Tests (folder)](../tests/___tests.md) — golden parser tests and
   offline runner tests
 

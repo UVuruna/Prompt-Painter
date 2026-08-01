@@ -1,20 +1,23 @@
 # Postprocess (Background Removal + Crop)
 
-**Script:** [Postprocess (script)](postprocess.py)
+**Script:** [Postprocess (script)](../postprocess.py) ·
+**Flow:** [diagram](../__flow/postprocess.md)
 
 ## Purpose
-Owner workflow step 6, SPLIT IN TWO composable steps (owner's #7,
-2026-07-18): the pipeline callers ([Main (Entry Point)](../main.md)
-`_build_post_save`, the [GUI](../gui.md)'s own hook) compose them
-by flags instead of one fused fix. Both work IN PLACE, only on the
-file they are given (inside the output folder), and NEVER raise for
-a no-op — only for real errors (`PostprocessError`, loud).
 
-- **`remove_background`** — the in-house
-  [Background Remover](bg_remove.md) internals. Already-transparent →
-  `"nothing"` (untouched, in EVERY mode); the background cleared →
-  `"done"`; nothing done → `"unclear"` (reported via the log, ORIGINAL
-  left untouched). No cropping any more — that is the second step.
+Owner workflow step 6, SPLIT IN TWO composable steps (owner's #7,
+2026-07-18): the pipeline callers ([Main (Entry Point)](../../__about/main.md)'s
+`_build_post_save`, the [GUI (folder)](../../gui/___gui.md)'s own hook)
+compose them by flags instead of one fused fix. Both work IN PLACE,
+only on the file they are given (inside the output folder), and
+NEVER raise for a no-op — only for real errors (`PostprocessError`,
+loud).
+
+- **`remove_background`** — the in-house [Background Remover](bg_remove.md)
+  internals. Already-transparent → `"nothing"` (untouched, in EVERY
+  mode); the background cleared → `"done"`; nothing done →
+  `"unclear"` (reported via the log, ORIGINAL left untouched). No
+  cropping any more — that is the second step.
 
   Its **`mode`** (owner 2026-07-28) picks WHICH background is cleared:
   `BG_MODE_AUTO` sniffs the border for white or black and then asks the
@@ -45,10 +48,8 @@ a no-op — only for real errors (`PostprocessError`, loud).
   (`SAFETY_MAX_REMOVE_FRAC_COLOR`, 0.85) run high because their legit
   backgrounds are large (real white plates reach ~0.57) and, for a
   colour, the background is known rather than inferred. The abort
-  message NAMES the guard that fired and its value in PERCENT — the
-  owner's "pointers" case (a legitimate 42 %-background plate bailing
-  on black's 40 %) was unreadable precisely because the old message
-  named neither. All three are owner-editable per run, as percent.
+  message NAMES the guard that fired and its value in PERCENT. All
+  three are owner-editable per run, as percent.
 - **`crop_transparent`** — halo cleanup THEN autocrop in place (owner
   2026-07-18, the OldAge.png case): (1) `clean_edge_halo` zeroes the
   faint stray line / halo CONNECTED TO THE IMAGE BORDER
@@ -73,35 +74,27 @@ counts and reports it; the raw image stays saved).
 functions accept OPTIONAL keyword-only arguments — one per config
 constant they read — defaulting to the matching constant, so every
 EXISTING caller (which passes neither) keeps today's exact byte-for-
-byte behaviour. [GUI](../gui.md)'s new `BgSettingsPanel`/
-`CropSettingsPanel` (a standalone tool's persistent settings panel) is
-the one caller that overrides them, per run: `remove_background`'s
-`mode`/`color`/`tolerance_pct` (from `BgSettingsPanel`'s always-visible
-primary block) plus `safety_max_remove_frac`/`_white`/`_color` (the
-three SAFETY GUARD ceilings, from its Advanced collapsible), and
-`crop_transparent`'s `clean_edge_enable`/`clean_edge_alpha`/
-`crop_margin_px`/`crop_ink_alpha`/`crop_min_ink_px`.
-The site-generation pipeline ([GUI](../gui.md)'s own composed hook)
-and [Main (Entry Point)](../main.md) still call both with no
-overrides — the config constants remain the single source of truth
-for every run that doesn't explicitly override them.
+byte behaviour. The GUI's `BgSettingsPanel`/`CropSettingsPanel` (a
+standalone tool's persistent settings panel) is the one caller that
+overrides them, per run.
 
 ## Connections
 
 ### Uses
-- [Config (subfolder)](config/___config.md) — `CROP_MARGIN_PX`, `CROP_INK_ALPHA`,
-  `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`, `CLEAN_EDGE_ENABLE`,
-  `BG_MODE_*`, `BG_COLOR_DEFAULT`, `BG_COLOR_TOLERANCE_PCT`,
-  `SAFETY_MAX_REMOVE_FRAC`, `SAFETY_MAX_REMOVE_FRAC_WHITE`,
-  `SAFETY_MAX_REMOVE_FRAC_COLOR`
+- [Config (subfolder)](../config/___config.md) — `CROP_MARGIN_PX`,
+  `CROP_INK_ALPHA`, `CROP_MIN_INK_PX`, `CLEAN_EDGE_ALPHA`,
+  `CLEAN_EDGE_ENABLE`, `BG_MODE_*`, `BG_COLOR_DEFAULT`,
+  `BG_COLOR_TOLERANCE_PCT`, `SAFETY_MAX_REMOVE_FRAC`,
+  `SAFETY_MAX_REMOVE_FRAC_WHITE`, `SAFETY_MAX_REMOVE_FRAC_COLOR`
 - [Background Remover](bg_remove.md) — `plan`, `apply_plan`,
   `parse_hex_color`, `content_bbox`, `clean_edge_halo`; imported
   lazily (numpy/scipy load only when a step actually runs)
 
 ### Used by
-- [Main (Entry Point)](../main.md) — composed into the `post_save`
-  hook by the `--no-bgfix` / `--no-crop` flags
-- [GUI](../gui.md) — its own composed hook + the dependency check
+- [Main (Entry Point)](../../__about/main.md) — composed into the
+  `post_save` hook by the `--no-bgfix` / `--no-crop` flags
+- [GUI (folder)](../../gui/___gui.md) — its own composed hook + the
+  dependency check
 
 ## Functions
 

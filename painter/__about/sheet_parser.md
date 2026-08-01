@@ -1,8 +1,10 @@
 # Sheet Parser
 
-**Script:** [Sheet Parser (script)](sheet_parser.py)
+**Script:** [Sheet Parser (script)](../sheet_parser.py) ·
+**Flow:** [diagram](../__flow/sheet_parser.md)
 
 ## Purpose
+
 Turns one prompt-sheet `.md` into the run queue. Pure and offline
 (stdlib only), strict on the contract: what it cannot pair or place,
 it reports loudly — the fix belongs in the sheet, never in parser
@@ -37,13 +39,13 @@ escaping paths — the REUSE pointers) are silently ignored instead
 of reported, so old sheets never block a batch:
 
 - **Heading entry** — `### Sun — Ancient of Days (\`file.png\`)`:
-  a `##`/`###` heading carrying exactly ONE backticked image name
-  (bible2, bible_theme, planet_art, planets ...).
+  a `##`/`###` heading carrying exactly ONE backticked image name.
 - **Bold token** — `**Sun** — \`sun.png\``: the whole paragraph is
-  the bold name plus one backticked image name (planet_signs).
+  the bold name plus one backticked image name.
 - **Bare bold under a dir section** — `**Aries**` alone below
   `## SIGN look (\`assets/zodiac/astrology/sign/\`)`: the drop
-  path becomes `sign/Aries.png` (astrology).
+  path becomes `sign/Aries.png`.
+
 3. The FIRST fenced code block after the entry is the prompt,
    byte-identical.
 4. Skip markers (`REUSE`, `SUPERSEDED`, `DO NOT GENERATE` —
@@ -60,14 +62,16 @@ of reported, so old sheets never block a batch:
 ## Connections
 
 ### Uses
-- [Config (subfolder)](config/___config.md) — `IMAGE_EXTENSIONS`,
+- [Config (subfolder)](../config/___config.md) — `IMAGE_EXTENSIONS`,
   `SKIP_MARKER_PATTERN`, `TOOL_IMAGE_EXTENSIONS` (the input-image
   reference accepts any of these)
 
 ### Used by
 - [Run Loop](runner.md) — consumes `Sheet`
-- [Main (CLI)](../main.md) — parses and reports
-- [Tests (folder)](../tests/___tests.md) — golden tests
+- [Main (Entry Point)](../../__about/main.md) — parses and reports
+- [Sheet-Generator Flow](../ai/__about/sheet_flow.md) — validates
+  every AI-produced sheet with the REAL contract rules
+- [Tests (folder)](../../tests/___tests.md) — golden tests
 
 ## Classes
 

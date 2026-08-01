@@ -1,11 +1,16 @@
 # Chrome Launcher
 
-**Script:** [Chrome Launcher (script)](chrome.py)
+**Script:** [Chrome Launcher (script)](../chrome.py) ·
+**Flow:** [diagram](../__flow/chrome.md)
 
 ## Purpose
+
 Guarantees an attach point: probes the CDP endpoint, and when
 nothing answers, launches the automation Chrome itself — one tab
-per requested site — and waits for the endpoint.
+per requested site — and waits for the endpoint. This is the
+project's small "attach-point protocol" (probe → launch → poll →
+succeed/timeout), which is why it carries a flow diagram despite its
+size.
 
 **Why a dedicated profile:** Chrome 136+ ignores
 `--remote-debugging-port` on the DEFAULT user profile, so the
@@ -18,12 +23,13 @@ session cookies — treat it as a credential store.
 ## Connections
 
 ### Uses
-- [Config (subfolder)](config/___config.md) — `CDP_PORT`, `CDP_URL`, `CHROME_CANDIDATES`,
-  `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
+- [Config (subfolder)](../config/___config.md) — `CDP_PORT`, `CDP_URL`,
+  `CHROME_CANDIDATES`, `CHROME_PROFILE_DIR`, `CHROME_LAUNCH_TIMEOUT_S`
 
 ### Used by
-- [Main (CLI)](../main.md) — pre-run guarantee
-- [GUI](../gui.md) — the "Open Chrome (login)" button
+- [Main (Entry Point)](../../__about/main.md) — pre-run guarantee
+- [GUI (folder)](../../gui/___gui.md) — the "Open Chrome (login)"
+  button
 
 ## Functions
 
