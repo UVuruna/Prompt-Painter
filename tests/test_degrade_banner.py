@@ -12,7 +12,7 @@ from painter.driver import TerminalState
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet
 
-from test_runner import FakeDriver
+from test_runner_paths_and_save import FakeDriver
 
 FAST = replace(TIMING, pause_min_s=0.0, pause_max_s=0.0)
 
