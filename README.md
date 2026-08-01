@@ -16,7 +16,9 @@ sheet, resumable, paced, sources strictly read-only.
 decisions, workflow, DOM states, build order) **+
 [PLAN.md](PLAN.md)** (the design discussion behind it) **+
 [REWORK.md](REWORK.md)** (the BIG REWORK plan, owner Q&A
-2026-07-29 — wins over older CLAUDE.md sections until folded in).
+2026-07-29 — wins over older CLAUDE.md sections until folded in) **+
+[UI-SKETCH.md](UI-SKETCH.md)** (the setup-screen layout reference,
+implemented and verified 2026-07-30).
 First consumer: DOMY Watch prompt sheets.
 
 ## Structure
@@ -24,23 +26,28 @@ First consumer: DOMY Watch prompt sheets.
 ```
 📁 PromptPainter/
   🐍 main.py            ← THE entry point (no args: GUI; sheets: CLI)
-  📝 main.md
+  📁 __about/               ← root-level file docs (main.py)
+  📁 __flow/                ← root-level flow diagrams (main.py)
   📁 gui/                ← the tkinter window (main.py opens it)
-    📝 ___gui.md            split into the toolkit modules + the
-                            still-monolithic PainterGui (god-file
-                            refactor, in progress)
+    📝 ___gui.md            file index — mixins, widgets, theming
+    📁 __about/ · 📁 __flow/
+    📁 tool_panels/         ← the standalone-tool settings panels
   ⚙️ requirements.txt   ← playwright, numpy/scipy/pillow, pytest
   📁 assets/
     🖼️ logo.svg
   📁 painter/           ← config, parser, driver, loop, chrome,
     📝 ___painter.md       bg remover, postprocess
+    📁 __about/ · 📁 __flow/
     📁 config/             ← every tunable, split by domain
+    📁 ai/                 ← AI client, sheet flow, checks, flags
     🐍 sheet_parser.py
     🐍 driver.py
     🐍 runner.py
     🐍 chrome.py
     🐍 bg_remove.py
     🐍 postprocess.py
+  📁 setup/             ← build orchestrator, cert, NSIS, ICO
+    📝 ___setup.md
   📁 tests/             ← golden parser tests + offline loop tests
     📝 ___tests.md
     📁 fixtures/
@@ -55,13 +62,16 @@ First consumer: DOMY Watch prompt sheets.
   sheet author (person or agent) follows; also behind the GUI's
   **Instructions** button
 - [Painter (folder)](painter/___painter.md) — the engine package:
-  [Config (subfolder)](painter/config/___config.md), [Sheet Parser](painter/sheet_parser.md),
-  [CDP Driver](painter/driver.md), [Run Loop](painter/runner.md),
-  [Chrome Launcher](painter/chrome.md),
-  [Background Remover](painter/bg_remove.md),
-  [Postprocess](painter/postprocess.md)
-- [GUI (folder)](gui/___gui.md) — the window, the sheet queue, the threading
-- [Main (Entry Point)](main.md) — usage, options, exit codes
+  [Config (subfolder)](painter/config/___config.md),
+  [AI (subfolder)](painter/ai/___ai.md), plus the sheet parser, CDP
+  driver, run loop, Chrome launcher, background remover and
+  postprocess modules (see the folder doc's file table)
+- [GUI (folder)](gui/___gui.md) — the window, the sheet queue, the
+  threading, and the [Tool Panels (subfolder)](gui/tool_panels/___tool_panels.md)
+- [Setup (folder)](setup/___setup.md) — the build pipeline: version
+  info, SVG→ICO, PyInstaller, signing, NSIS installer, and a
+  fail-closed verify gate
+- [Main (Entry Point)](__about/main.md) — usage, options, exit codes
 - [Tests (folder)](tests/___tests.md) — the offline safety net
 
 ## Running

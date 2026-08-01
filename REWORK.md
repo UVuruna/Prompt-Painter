@@ -400,7 +400,7 @@ successor), docs.
   approved "the three worst + the guard"). `gui/viewers.py` (1185) ->
   `viewer_shared.py`/`doc_window.py`/`restore_windows.py`/
   `image_viewer.py`; `painter/ai.py` (1198) and `gui/tool_panels.py`
-  (1283) -> their own packages; `tests/test_structure.py` now FAILS
+  (1283) -> their own packages; `tests/test_structure_law.py` now FAILS
   the suite for any unlisted file over ~1000 lines, and the remaining
   offenders (`gui/app_jobs.py`, `painter/driver.py`,
   `gui/agent_panel.py` + five test modules) are documented RATCHET

@@ -1,9 +1,20 @@
 # CLAUDE.md — PromptPainter
 
 Project-specific guidance for Claude Code. **Inherits ALL rules from
-the monorepo root [CLAUDE.md](../../CLAUDE.md)** — read that first.
-Communicate with the owner in Serbian (Latin); everything in files
-stays English.
+the monorepo root [CLAUDE.md](../../CLAUDE.md)** (the constitution) —
+read that first, then use its Router table to load only the rulebook
+your job needs (`../../rules/`). This file states ONLY what is
+specific to PromptPainter — decisions, workflow, DOM states — and
+never restates a root rule. Communicate with the owner in Serbian
+(Latin); everything in files stays English.
+
+**Enforcement (installed 2026-08-01):** the four standard guard tests
+(`tests/test_structure_law.py`, `tests/test_config_sections.py`,
+`tests/test_docs_coverage.py`, `tests/test_doc_links.py`) run via
+`tests/run_guards.py` and are wired into `.claude/settings.json`
+(PostToolUse fast pass + Stop full pass) — see
+[Code Rules](../../rules/CODE.md) → Enforcement for the spec this
+project follows.
 
 ---
 
@@ -290,7 +301,7 @@ nudge fires ONLY on truly empty answers); a refusal inside the
 image-failed ladder skips the item instead of stopping the site; a
 byte-identical result to the previous save is re-submitted once then
 loud-skipped (the duplicate-save bug). Details in
-[CDP Driver](painter/driver.md) and [Run Loop](painter/runner.md).
+[CDP Driver](painter/__about/driver.md) and [Run Loop](painter/__about/runner.md).
 
 `parse(sheet) → queue` → per pending item: paste (+ suffix) →
 submit → await the done-edge (hard timeout) → extract bytes → save
