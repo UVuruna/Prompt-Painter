@@ -7,6 +7,7 @@ ambiguous -> unclear, left untouched); crop_transparent autocrops
 a transparent image to its content bounding box.
 """
 
+# ═══════════════════════════ CROP THRESHOLDS ═══════════════════════════
 CROP_MARGIN_PX = 4  # safety margin kept around the content box
 
 # CHANGED vs SKIPPED by EXACT resolution (owner 2026-07-19, reverses the
@@ -26,6 +27,7 @@ CROP_MARGIN_PX = 4  # safety margin kept around the content box
 CROP_INK_ALPHA = 40   # alpha >= this counts as a solid "ink" pixel
 CROP_MIN_INK_PX = 3   # a row/col needs this many ink pixels to be content
 
+# ═══════════════════════════ EDGE-HALO CLEANUP ═════════════════════════
 # CONSERVATIVE EDGE-HALO CLEANUP (owner 2026-07-18). Before cropping,
 # faint pixels (alpha < CLEAN_EDGE_ALPHA) that are CONNECTED TO THE IMAGE
 # BORDER — the visible stray line / halo in the transparent frame — have
@@ -35,6 +37,7 @@ CROP_MIN_INK_PX = 3   # a row/col needs this many ink pixels to be content
 CLEAN_EDGE_ALPHA = 40     # faint pixels below this may be border halo
 CLEAN_EDGE_ENABLE = True  # run the border-connected cleanup before crop
 
+# ═════════════════ BLACK-VOID REMOVAL + SAFETY GUARD ═══════════════════
 # BLACK-VOID REMOVAL + SAFETY GUARD (owner 2026-07-19, the bible/dark
 # case). Brightness-keying cannot separate a DARK subject from a black
 # background, so the old "biggest bright blob" black remover ate the
@@ -84,6 +87,7 @@ BLACK_VOID_MAX = 14                  # brightness <= this AND border-connected =
 SAFETY_MAX_REMOVE_FRAC = 0.40        # BLACK path: clearing more than this -> abort
 SAFETY_MAX_REMOVE_FRAC_WHITE = 0.85  # WHITE path: legit backgrounds reach ~0.57
 
+# ═══════════════════════════ BACKGROUND MODE ═══════════════════════════
 # BACKGROUND MODE (owner 2026-07-28, the "pointers" case). Two gaps the
 # auto-only, black/white-only remover had:
 #
@@ -118,6 +122,7 @@ BG_MODE_LABEL = {
     BG_MODE_COLOR: "Custom color",
 }
 
+# ═══════════════════════════════ REACH ═════════════════════════════════
 # REACH — WHERE a matching pixel counts as background (owner
 # 2026-07-28). The removal has always been BORDER-CONNECTED: a pixel
 # only counts if it can be walked to from the image frame through other
@@ -139,6 +144,7 @@ BG_REACH_LABEL = {
     BG_REACH_ALL: "Everywhere in the image",
 }
 
+# ═══════════════ CUSTOM COLOR + AUTO-DETECTION ══════════════════════════
 BG_COLOR_DEFAULT = "#000000"    # custom-colour target, hex
 # DEFAULT ONLY — the BG panel's own "+-" field is the fine-tune, and
 # 0 is a legal value there (owner 2026-07-28: "MOZE i 0 TOLERANCE AKO

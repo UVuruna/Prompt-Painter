@@ -24,6 +24,7 @@ ttkbootstrap. gui.py turns each entry into the two backbones:
               (False = left/moon, True = right/sun).
 """
 
+# ═══════════════════ PALETTES — THEMES + PAIR HELPERS ══════════════════
 THEMES = {
     "night": {
         "ttkname": "darkly",
@@ -109,6 +110,7 @@ def status_pair(role: str) -> tuple[str, str]:
     return (THEMES["day"]["status"][role], THEMES["night"]["status"][role])
 
 
+# ═══════════════════════ SOLID BUTTON FILLS ═════════════════════════════
 # --- Solid-button fills per theme (owner 2026-07-19) -----------------
 #
 # The SOLID button kinds each carry their OWN (day, night) fill + text,
@@ -149,6 +151,7 @@ def button_text_pair(kind: str) -> tuple[str, str]:
     return BUTTON_TEXT[kind]
 
 
+# ═══════════════ SWITCH — GEOMETRY + ANIMATION TIMING ═══════════════════
 # --- The Day/Night switch (image-based, ported from the owner's website
 # switch — geometry scales from the switch height H) ------------------
 # CRISP art (owner 2026-07-18): tkinter Canvas has no anti-aliasing, so
@@ -189,6 +192,7 @@ SWITCH_COVER_ICON_SS = 2       # supersample for the big cover icon (LANCZOS dow
 # theme keeps its own SWITCH_FADE_* timing above. NOT used for a window
 # maximize/restore (owner 2026-07-21 perf fix — covering that OS-level
 # state jump broke it; see gui/app_build.py's _on_root_configure).
+# ═════════ VISUAL MECHANICS — TRANSITION FADE + RESIZE DEBOUNCE ═════════
 TRANSITION_FADE_MS = 260    # collapse/settings cover fade
 TRANSITION_FADE_STEPS = 14  # alpha ramp ticks across TRANSITION_FADE_MS
 
@@ -222,6 +226,7 @@ RESIZE_SETTLE_MS = 150
 # after its own reveal (wired by PainterGui to ``ScrollFrame.refresh``)
 # — zero timers, zero idle cost.
 
+# ═══════════════ SWITCH ART — TRACK SVGS + KNOB HIGHLIGHT ═══════════════
 # the two track pill SVGs (stems, resolved in assets/icons) — reused
 # straight from the owner's website switch, so the starfield / sky-clouds
 # art matches the site exactly
@@ -232,6 +237,7 @@ SWITCH_TRACK_DAY_SVG = "switch_day"      # ON track: sky #5ea7ee + clouds pill
 # radial gradient reads as a 3D sphere, not a flat disc
 SWITCH_KNOB_HILIGHT = (0.40, 0.36)
 
+# ═══════════════════════ SWITCH ART — MOON KNOB ═════════════════════════
 # MOON knob (owner 2026-07-20 — "a real moon with craters"): a silver
 # radial-gradient sphere with TERMINATOR shading (day side toward the
 # light, the far limb falling into shadow), 7 craters of varied sizes
@@ -274,6 +280,7 @@ SWITCH_MOON_NOISE_AMPL = 11.0    # +- brightness amplitude of the mottling
 #                                  ~3% of the lit silver; 11 reads as faint
 #                                  maria without getting dirty)
 
+# ═══════════════════════ SWITCH ART — SUN KNOB ══════════════════════════
 # SUN knob — gold radial gradient (bright centre -> amber edge) with a
 # soft outer glow: a larger low-alpha gold disc behind, GaussianBlur-ed.
 SWITCH_SUN_CENTER = "#ffd93d"    # radial-gradient centre (bright gold)

@@ -8,6 +8,7 @@ import re
 
 from .paths import PROJECT_ROOT
 
+# ═══════════ PROMPT SUFFIX — BACKGROUND RULE + PROMPT HELPERS ══════════
 # --- Prompt rules appended per site (owner 2026-07-17) ---------------
 
 # F4c (owner 2026-07-29): "default" resolves PER SITE at suffix-build
@@ -101,6 +102,7 @@ SITE_PROMPT_RULES = {
 # per-site laws below.
 
 
+# ═══════════════════ PER-AGENT STYLE CLAUSE ═════════════════════════════
 # --- Per-agent STYLE clause (owner 2026-07-19) -----------------------
 #
 # Each AgentPanel picks a rendering STYLE; the chosen clause is appended
@@ -143,6 +145,7 @@ STYLE_CHOICES = tuple(STYLES)  # dropdown order — "None" first
 STYLE_DEFAULT = "None"
 
 
+# ═══════════════════ PROMPT SUFFIX ASSEMBLY ═════════════════════════════
 def prompt_suffix(
     site_key: str,
     background: str,
@@ -203,6 +206,7 @@ def prompt_suffix(
     return suffix
 
 
+# ═══════════ SAFER-RETRY PREAMBLES + CONTINUE NUDGE ═════════════════════
 # --- Safer-retry preambles, PER REFUSAL SCENARIO (opt-in) ------------
 #
 # When a refusal is detected and "safer retry" is on, the same prompt is
@@ -258,6 +262,8 @@ RETRY_PREAMBLES = {
 
 
 # --- Continue nudge (opt-in, ON by default, owner 2026-07-20) --------
+# (same banner as the preambles above — both are recovery copy sent
+# back into the chat)
 
 # ChatGPT sometimes STALLS mid-image: the done edge fires (stop button
 # gone) yet no image loads and the answer text is EMPTY — a NoImage /
@@ -270,6 +276,7 @@ RETRY_PREAMBLES = {
 CONTINUE_NUDGE = "Continue - please finish generating the image."
 
 
+# ═══════════ IMAGE-GENERATION-FAILED RETRY LADDER ═══════════════════════
 # --- Image-generation-failed retry (ChatGPT, owner 2026-07-21) --------
 
 # BUG 3: ChatGPT's image tool sometimes fails outright ("Image
@@ -312,6 +319,7 @@ IMAGE_FAILED_ESCALATION_DELAYS_S = (
 )
 
 
+# ═══════════ GEMINI API — MODEL NAMES + ENDPOINT ════════════════════════
 # --- AI features: free Gemini API (owner 2026-07-20) ------------------
 #
 # painter/ai.py drives the FREE AI Studio REST API (no SDK) for two GUI
@@ -341,6 +349,7 @@ GEMINI_KEY_SETTING = "gemini_api_key"     # the settings.json key name
 # where the wizard's step-1 button sends the browser (the key page)
 AI_STUDIO_URL = "https://aistudio.google.com/apikey"
 
+# ═══════ MODEL DISCOVERY + CALL / RETRY TUNABLES ════════════════════════
 # --- Model discovery + purpose-based recommendation (F5, owner 2026-07-29) --
 #
 # ai.list_models() calls the ListModels endpoint; ai.recommend_model()
@@ -389,6 +398,7 @@ AI_RETRY_BACKOFF_S = 5.0  # fixed wait before a 503/500 retry
 # "please retry in Xs"); honour it, but never wait longer than this
 AI_RETRY_MAX_WAIT_S = 30.0
 
+# ═══════════════════ API IMAGE QUOTA MARKERS ════════════════════════════
 # GUI rework Phase 18: the free-tier-EXHAUSTED signal that makes a 429
 # PERMANENT (ai.PaidFeatureRequired) instead of transient. Each inner
 # tuple is an AND-group — every substring in it must appear
@@ -412,6 +422,7 @@ AI_IMAGE_QUOTA_MARKERS = (
     ("check your plan and billing details",),
 )
 
+# ═══════════════════ API IMAGE GENERATION JOB ═══════════════════════════
 # --- API Image Generation job (GUI rework Phase 19) --------------------
 #
 # The "Check API access" probe (ApiImageGenPanel) makes ONE real
@@ -432,6 +443,7 @@ AI_IMAGE_GATE_MESSAGE = (
     " 0; use Website GEN for free."
 )
 
+# ═══════════════ AI SHEET GENERATOR — PROMPTS ═══════════════════════════
 # --- the AI sheet generator (owner's #2: follow-up questions) ---------
 AI_MAX_QUESTIONS = 6  # the clarifying poll is capped at this many
 # where AI-generated sheets are saved (owner content, NOT gitignored —
@@ -476,6 +488,7 @@ AI_REPAIR_PROMPT = (
     " listed problem and keeping everything else identical."
 )
 
+# ═══════════════════ IMAGE CHECKER — COPY ═══════════════════════════════
 # --- the AI image checker (owner's #3: banal defects only) ------------
 AI_FLAGS_FILENAME = "ai_flags.json"  # under <out>/_state/
 # the vision instruction — BANAL defects only, in a strict short format
@@ -515,6 +528,7 @@ AI_CHECK_PROMPT_MATCH = (
     " different format.\n\n--- ORIGINAL PROMPT ---\n{prompt}\n--- END"
     " PROMPT ---"
 )
+# ═══════════════════ FIXER AI — TEMPLATES + MODE ════════════════════════
 # the per-item extra suffix appended when a flagged image is re-sent to
 # its original generator ({defects} = the '; '-joined defect list)
 AI_FIX_NOTE = (
@@ -569,6 +583,7 @@ FIXER_MODE_API = "api"
 FIXER_MODE_WEBSITE = "website"
 FIXER_MODE_CHOICES = (FIXER_MODE_API, FIXER_MODE_WEBSITE)
 
+# ═══════════════════════ MODEL DEGRADATION ══════════════════════════════
 # --- Model degradation (F2, owner 2026-07-29) -------------------------
 #
 # Gemini's "Limit reached. Continuing with Flash-Lite." banner: the
@@ -583,6 +598,7 @@ DEGRADE_CONTINUE = "continue"
 DEGRADE_WAIT = "wait"
 DEGRADE_CHOICES = (DEGRADE_ASK, DEGRADE_CONTINUE, DEGRADE_WAIT)
 
+# ═══════════════════ QUOTA RESET TIME — PARSER ══════════════════════════
 # --- Quota reset time (owner's #2) -----------------------------------
 
 # ChatGPT's live quota message names the wait ("... when the limit

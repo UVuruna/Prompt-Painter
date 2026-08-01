@@ -4,6 +4,7 @@
 
 from dataclasses import dataclass
 
+# ═══════════════════ DASHBOARD PER-JOB PANELS ══════════════════════════
 # --- Dashboard per-JOB panels (owner 2026-07-19) ---------------------
 #
 # The dashboard shows one panel PER RUNNING JOB (up to 7 in parallel):
@@ -93,6 +94,7 @@ def job_color_pair(kind: str) -> tuple[str, str]:
     return JOB_COLORS[kind]
 
 
+# ═════════════ DASHBOARD GRID SIZING + DISPLAY MODES ═══════════════════
 # F4e (owner 2026-07-29, REWORK.md): the dashboard grid is laid out by
 # WINDOW WIDTH against one card MIN width — every card treated
 # identically, columns = how many MIN-width cards fit (1xN when very
@@ -110,6 +112,7 @@ DASH_MODE_SLIDER = "slider"
 DASH_MODES = (DASH_MODE_GRID, DASH_MODE_SLIDER)
 
 
+# ═══════════════════ DASHBOARD STATUS BADGES ═══════════════════════════
 # --- Dashboard status badges (owner 2026-07-20) ----------------------
 #
 # Small coloured DOT badges beside an image's name in the gen panels'
@@ -173,6 +176,7 @@ def badge_keys_for(actions: str, retried: bool = False) -> tuple:
     return tuple(key for key in BADGES if key in earned)
 
 
+# ═════════════════ MAIN MENU — GEOMETRY + MENU_TILES ═══════════════════
 # --- Main Menu (GUI rework Phase 10) ----------------------------------
 #
 # The startup landing screen: ONE big tile per functionality, replacing
@@ -267,6 +271,7 @@ MENU_TILES: tuple[MenuTile, ...] = (
     ),
 )
 
+# ═════════════════ MAIN MENU — TILE_JOB_KINDS MAPPING ══════════════════
 # which JOB_ORDER kind(s) each MENU_TILES id represents — the running
 # view's IconBar (GUI rework Phase 11) reads this to decide whether a
 # tile is currently "live" (config.JOB_COLORS-tinted) vs idle: a

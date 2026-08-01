@@ -1,5 +1,8 @@
 """Small human-readable formatters shared by the runner and the GUI."""
 
+# ═══════════════════════════ HUMAN FORMATTERS ═════════════════════════
+# One cohesive unit — four small formatter functions, no sub-groups.
+
 
 def fmt_duration(seconds: float) -> str:
     """A short human duration: '3m 12s', '48s'."""

@@ -6,8 +6,10 @@ Everything here is a leaf: no dependency on any other config submodule.
 import re
 from pathlib import Path
 
+# ═══════════════════════════ PROJECT ROOT ═══════════════════════════
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+# ═════════════════════ CDP ATTACHMENT / CHROME LAUNCH ════════════════
 # --- CDP attachment / Chrome launch ----------------------------------
 
 CDP_PORT = 9222
@@ -27,6 +29,7 @@ CHROME_PROFILE_DIR = PROJECT_ROOT / "chrome-profile"
 # launch -> the CDP endpoint must answer within this window
 CHROME_LAUNCH_TIMEOUT_S = 30.0
 
+# ═══════════════════════════ OUTPUT LAYOUT ═══════════════════════════
 # --- Output ----------------------------------------------------------
 
 # The out/ folder MIRRORS the DOMY assets/ tree so the owner can copy
@@ -106,6 +109,7 @@ def versioned_dest_for(
     return f"{folder}/{versioned}" if folder else versioned
 
 
+# ═════════════════════════ SETTINGS PERSISTENCE ══════════════════════
 # --- Settings persistence (owner's #9) -------------------------------
 
 # The GUI's remembered choices; JSON at the project root, gitignored.

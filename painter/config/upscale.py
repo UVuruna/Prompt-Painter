@@ -4,6 +4,7 @@ binary, plus the gate that decides which images qualify.
 
 from .paths import PROJECT_ROOT
 
+# ═══════════════════════ TOOL BINARY LOCATION ══════════════════════════
 # Real-ESRGAN via the standalone realesrgan-ncnn-vulkan Windows
 # binary. It lives under tools/realesrgan/ (gitignored, downloaded
 # on first use from the official GitHub release).
@@ -14,6 +15,7 @@ UPSCALE_ZIP_URL = (
     "https://github.com/xinntao/Real-ESRGAN/releases/download/"
     "v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip"
 )
+# ═══════════════════════════ MODEL CHOICE ══════════════════════════════
 # Model (owner research 2026-07-21): the anime-6B net is ART-TUNED for
 # flat-colour / cell-shaded illustration — this project's stained-glass
 # rondels and badges — where the general-purpose x4plus over-smooths fine
@@ -25,6 +27,7 @@ UPSCALE_ZIP_URL = (
 # Flip back to "realesrgan-x4plus" if a future asset style suits the
 # smoother general-purpose net better.
 UPSCALE_MODEL = "realesrgan-x4plus-anime"
+# ═══════════════════════ GATING THRESHOLDS ═════════════════════════════
 # Gating (owner 2026-07-19, four editable params at the ENGINE level —
 # painter/upscale.py's upscale_if_small signature/defaults are UNCHANGED
 # by the GUI rework). An image qualifies ONLY if its aspect ratio W/H is

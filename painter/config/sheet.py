@@ -5,6 +5,7 @@ Collections queue use.
 
 import re
 
+# ═══════════════════════════ THE SHEET CONTRACT ═══════════════════════
 # --- The sheet contract ----------------------------------------------
 
 # The arrow line must name a file with one of these extensions.
@@ -15,6 +16,7 @@ IMAGE_EXTENSIONS = (".png",)
 SKIP_MARKER_PATTERN = r"\bREUSE\b|\bSUPERSEDED\b|\bDO[\s-]+NOT[\s-]+GENERATE\b"
 
 
+# ═══════════════════ MULTI-FILE SELECTION BASE ════════════════════════
 # --- Multi-file selection base (aspect tool, owner 2026-07-19) --------
 #
 # The Aspect-ratio tool picks INDIVIDUAL image FILES (a folder may hold
@@ -44,6 +46,7 @@ def selection_base_and_rels(paths) -> tuple:
     return base, rels
 
 
+# ═══════════════════ IMAGE / MD FILE ENUMERATORS ══════════════════════
 # The image extensions the four in-place tools accept — ONE home for the
 # folder walk (iter_images) and the aspect file-picker filter (Rule #4/#5).
 TOOL_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")

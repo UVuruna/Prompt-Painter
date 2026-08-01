@@ -6,6 +6,7 @@ FAILS LOUDLY (root Rule #1) instead of guessing.
 
 from dataclasses import dataclass
 
+# ═══════════════════════════════ TIMING ═════════════════════════════════
 # --- Timing ----------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -85,6 +86,7 @@ MIN_IMAGE_PX = 64
 SEND_RELOAD_RECOVERY = True
 
 
+# ═══════════════ REFUSAL SCENARIO CATEGORIES ════════════════════════════
 # --- Refusal scenario categories (owner 2026-07-23) ------------------
 #
 # A refusal is CLASSIFIED into a scenario so the runner can pick the
@@ -96,6 +98,7 @@ REFUSAL_SAFETY = "safety"
 REFUSAL_COPYRIGHT = "copyright"
 
 
+# ═══════════════ SITE CONFIG — DOM HOOK SCHEMA ══════════════════════════
 # --- Site DOM states (ONE config block, with fallbacks) --------------
 
 @dataclass(frozen=True)
@@ -193,6 +196,7 @@ class SiteConfig:
     attach_preview: tuple[str, ...] = ()
 
 
+# ═══════════════ SITES — PER-SITE DOM CONFIG + NEW-CHAT POLICY ══════════
 SITES = {
     "chatgpt": SiteConfig(
         name="ChatGPT",

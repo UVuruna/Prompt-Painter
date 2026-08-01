@@ -10,6 +10,7 @@ ASPECT_TOL of the target ratio is already at ratio and left BYTE-
 UNCHANGED (no write). The GUI's ratio prompt defaults to 16:9.
 """
 
+# ═════════════════ ASPECT TOOL — CORE + LEGACY FILTER ═════════════════
 ASPECT_TOL = 0.001
 ASPECT_DEFAULT_W = 16
 ASPECT_DEFAULT_H = 9
@@ -38,6 +39,7 @@ ASPECT_FILTER_DEFAULT_TO = 1.1
 # place and importable with no tkinter dependency.
 ASPECT_LABEL_DECIMALS = 3
 
+# ═══════════════════ SHARED FILTER FRAMEWORK ═══════════════════════════
 # --- Shared filter framework (owner decision 2026-07-21) --------------
 #
 # GUI rework Phase 3: ONE stackable "what should this tool touch" gate

@@ -9,6 +9,7 @@ panel's CLOSE, on app exit, and swept at startup.
 
 from .jobs import JOB_LABEL
 
+# ═══════════ BACKUP STORE — DIRNAME + PER-STEP LAYOUT ═══════════════════
 JOBTEMP_DIRNAME = ".painter_tmp"  # PROJECT_ROOT-relative temp/backup root
 # alpha below this counts as a "removed" (transparent) pixel for the BG
 # metric — the same opacity notion as CROP_INK_ALPHA / CLEAN_EDGE_ALPHA.
@@ -41,6 +42,7 @@ JOBTEMP_STEPS_SUBDIR = "__steps__"
 # happened in.
 JOBTEMP_STEP_NAMES = ("original", "bg", "crop", "aspect", "upscale", "fixer")
 
+# ═════════ DISK CAP + KEEP-ALL-STEPS TOGGLE + BANNER TEXT ═══════════════
 # Intermediate-backup disk cap (owner decision 2026-07-21): 4 GiB per
 # job. Findings' memory math — 4 enabled steps x ~3MB/image = ~12MB/image
 # (~15MB with Fixer), so a realistic overnight batch (~300 images) peaks
@@ -73,6 +75,7 @@ JOBTEMP_CAP_BANNER_TEXT = (
     "Aspect/Upscale in-between stages."
 )
 
+# ═══════════════════ RESTORE VIEWER LABELS ══════════════════════════════
 # GUI rework Phase 9: the per-step restore viewer's filmstrip label for
 # each raw JOBTEMP_STEP_NAMES key ("original"/"bg"/... are internal
 # identifiers, never shown to the owner as-is). The four real pipeline
@@ -95,6 +98,7 @@ JOBTEMP_STEP_LABEL = {
 # kept named step in gui._filmstrip_stages's returned list.
 STEP_RESTORE_CURRENT_LABEL = "Current"
 
+# ═════════════ BEFORE/AFTER CHECKERBOARD BACKDROP ═══════════════════════
 # Transparency backdrop for the before/after viewer. BG removal (and the
 # other tools) leave the AFTER image transparent where the background was
 # cleared; drawn straight onto the panel colour, "removed" looks
