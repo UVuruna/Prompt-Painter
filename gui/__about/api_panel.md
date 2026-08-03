@@ -18,9 +18,15 @@ images, so a Folder/Files picker would be actively wrong here. Faza 3
 LEFT = settings (the Model group on top, then the same four groups
 `AgentPanel` grids 2×2 — Pipeline | Run behavior / Pacing (always
 open) | Prompt, with the Force-Aspect target and the Upscale gate
-living under their own Pipeline switches), RIGHT = a
+living under their own Pipeline switches — as `ExpandableSwitch`es
+since owner 2026-08-03, folded by default and `eager=True` so the
+canvas binding and the FilterEditor stack exist regardless: keeping
+that fine-tune permanently open stretched this column past the window
+and pushed Pacing/Prompt and the whole Start/Pause/Stop row below the
+fold. `apply_settings` wraps its restore in `quiet_restore` so a
+reopened panel stays folded), RIGHT = a
 [Collections Column](collections_column.md) instance (queue + Output
-+ Select images + the Prompt+Image toggle/section — the SAME queue,
++ Select images + Check + the Prompt+Image toggle/section — the SAME queue,
 output var and mode state as the website setup screen; the host
 supplies it via the `build_collections` factory, `None` in headless
 tests keeps the panel self-contained). Its Start already honours the

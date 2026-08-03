@@ -57,6 +57,8 @@ from .logic import _upscale_params_from_side_and_filter
 from .theme import THEME_TOPLEVELS
 from .tool_panels import ASPECT_DIALOG_ENTRY_W, DENSE_COL_GAP_PX, DENSE_COL_WRAP_PX
 from .widgets import (
+    ExpandableSwitch,
+    quiet_restore,
     Spinner,
     rounded_button,
     rounded_combo,
@@ -277,66 +279,24 @@ class ApiImageGenPanel(ttk.Frame):
         rounded_switch(g_pipe, "Crop", self.crop_var).pack(
             anchor="w", pady=1
         )
-        rounded_switch(
-            g_pipe, "Force Aspect Ratio", self.force_aspect_var,
-        ).pack(anchor="w", pady=1)
+        # Force Aspect Ratio + Upscale are EXPANDABLE here, exactly as
+        # in AgentPanel (owner 2026-08-03): their fine-tune — the
+        # aspect canvas and the upscale FilterEditor — is tall enough
+        # that keeping it permanently open stretched this left column
+        # past the window, pushing Pacing/Prompt and the whole
+        # Start/Pause/Stop row below the fold.
         self.force_aspect_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
         self.force_aspect_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
-        fa_box = ttk.Frame(g_pipe)
-        fa_box.pack(fill="x", pady=2)
-        fa_fields = ttk.Frame(fa_box)
-        fa_fields.pack(side="left", anchor="n")
-        ttk.Label(fa_fields, text="W").pack(side="left", padx=(0, 4))
-        rounded_entry(
-            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
-            textvariable=self.force_aspect_w_var, justify="center",
-        ).pack(side="left")
-        ttk.Label(fa_fields, text=":", font=tk_font("head")).pack(
-            side="left", padx=8
+        self._sw_aspect = ExpandableSwitch(
+            g_pipe, "Force Aspect Ratio", self.force_aspect_var,
+            build_sub=self._build_aspect_sub, eager=True,
         )
-        ttk.Label(fa_fields, text="H").pack(side="left", padx=(0, 4))
-        rounded_entry(
-            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
-            textvariable=self.force_aspect_h_var, justify="center",
-        ).pack(side="left")
-        self._force_aspect_canvas = AspectRatioCanvas(
-            fa_box, w=int(self.force_aspect_w_var.get()),
-            h=int(self.force_aspect_h_var.get()),
-            on_change=self._on_force_aspect_canvas_drag,
+        self._sw_aspect.pack(fill="x", pady=1)
+        self._sw_upscale = ExpandableSwitch(
+            g_pipe, "Upscale", self.upscale_var,
+            build_sub=self._build_upscale_sub, eager=True,
         )
-        self._force_aspect_canvas.pack(side="left", padx=(12, 0), anchor="n")
-        self.force_aspect_w_var.trace_add(
-            "write", self._on_force_aspect_wh_typed
-        )
-        self.force_aspect_h_var.trace_add(
-            "write", self._on_force_aspect_wh_typed
-        )
-        rounded_switch(g_pipe, "Upscale", self.upscale_var).pack(
-            anchor="w", pady=1
-        )
-        self.up_minside_var = tk.StringVar(
-            value=str(UPSCALE_MIN_SIDE_DEFAULT)
-        )
-        row = ttk.Frame(g_pipe)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="min side", width=8).pack(side="left")
-        Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
-            side="left"
-        )
-        ttk.Label(
-            row, text="px (the smaller side reaches this)",
-            wraplength=DENSE_COL_WRAP_PX,
-        ).pack(side="left", padx=(4, 0))
-        self.upscale_filter = FilterEditor(
-            g_pipe,
-            conditions=[filters.FilterCondition(
-                kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
-                lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
-            )],
-            presets=self._filter_presets,
-            on_presets_changed=self._on_filter_presets_changed,
-        )
-        self.upscale_filter.pack(fill="x", pady=(2, 0))
+        self._sw_upscale.pack(fill="x", pady=1)
         rounded_switch(
             g_pipe, "Keep every pipeline step (more disk)",
             self.keep_all_steps_var,
@@ -348,6 +308,7 @@ class ApiImageGenPanel(ttk.Frame):
         rounded_switch(g_run, "Report txt", self.report_var).pack(
             anchor="w", pady=1
         )
+
 
         # Pacing — ALWAYS OPEN (same decree as AgentPanel's own group):
         # pace between prompts — run_sheet's own pacing wait, unrelated
@@ -418,6 +379,67 @@ class ApiImageGenPanel(ttk.Frame):
         self._force_aspect_canvas.redraw_theme()
 
     # --- Force Aspect Ratio two-way sync (mirrors AgentPanel's own) ----
+
+
+    def _build_aspect_sub(self, parent) -> None:
+        """The Force-Aspect target: W:H entries mirrored two-way with
+        an AspectRatioCanvas — AgentPanel's own sub-panel content."""
+        fa_box = ttk.Frame(parent)
+        fa_box.pack(fill="x", pady=2)
+        fa_fields = ttk.Frame(fa_box)
+        fa_fields.pack(side="left", anchor="n")
+        ttk.Label(fa_fields, text="W").pack(side="left", padx=(0, 4))
+        rounded_entry(
+            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self.force_aspect_w_var, justify="center",
+        ).pack(side="left")
+        ttk.Label(fa_fields, text=":", font=tk_font("head")).pack(
+            side="left", padx=8
+        )
+        ttk.Label(fa_fields, text="H").pack(side="left", padx=(0, 4))
+        rounded_entry(
+            fa_fields, width=ASPECT_DIALOG_ENTRY_W,
+            textvariable=self.force_aspect_h_var, justify="center",
+        ).pack(side="left")
+        self._force_aspect_canvas = AspectRatioCanvas(
+            fa_box, w=int(self.force_aspect_w_var.get()),
+            h=int(self.force_aspect_h_var.get()),
+            on_change=self._on_force_aspect_canvas_drag,
+        )
+        self._force_aspect_canvas.pack(side="left", padx=(12, 0), anchor="n")
+        self.force_aspect_w_var.trace_add(
+            "write", self._on_force_aspect_wh_typed
+        )
+        self.force_aspect_h_var.trace_add(
+            "write", self._on_force_aspect_wh_typed
+        )
+
+    def _build_upscale_sub(self, parent) -> None:
+        """The upscale gate: min-side spinner + the FilterEditor whose
+        one default condition is the 0.9-1.1 aspect range."""
+        self.up_minside_var = tk.StringVar(
+            value=str(UPSCALE_MIN_SIDE_DEFAULT)
+        )
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="min side", width=8).pack(side="left")
+        Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
+            side="left"
+        )
+        ttk.Label(
+            row, text="px (the smaller side reaches this)",
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(side="left", padx=(4, 0))
+        self.upscale_filter = FilterEditor(
+            parent,
+            conditions=[filters.FilterCondition(
+                kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
+                lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
+            )],
+            presets=self._filter_presets,
+            on_presets_changed=self._on_filter_presets_changed,
+        )
+        self.upscale_filter.pack(fill="x", pady=(2, 0))
 
     def _on_force_aspect_canvas_drag(self, w: int, h: int) -> None:
         self.force_aspect_w_var.set(str(w))
@@ -715,9 +737,16 @@ class ApiImageGenPanel(ttk.Frame):
                 getattr(self, f"{key}_var").set(stored[key])
         bool_fields = ("bg_removal", "crop", "force_aspect", "upscale",
                        "report", "keep_all_steps")
-        for key in bool_fields:
-            if key in stored:
-                getattr(self, f"{key}_var").set(bool(stored[key]))
+        # a RESTORE must not auto-expand the two ExpandableSwitches —
+        # Tk cannot tell a restoring .set() from a click, and a panel
+        # has to open compact (the SAME contract AgentPanel.
+        # apply_settings honours; without it this panel reopened with
+        # the aspect canvas and the upscale FilterEditor both unfolded,
+        # which is what pushed Start/Pause/Stop below the fold).
+        with quiet_restore(self._sw_aspect, self._sw_upscale):
+            for key in bool_fields:
+                if key in stored:
+                    getattr(self, f"{key}_var").set(bool(stored[key]))
         if conditions is not None:
             self.upscale_filter.set_conditions(conditions)
         try:
