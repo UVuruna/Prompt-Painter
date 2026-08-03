@@ -196,6 +196,7 @@ from .logic import (
     _visible_agent_slots,
 )
 from .menu import IconBar, MainMenu
+from .prompt_image import PromptImageSection
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
 from .select_window import SelectWindow
 from .switch import DayNightSwitch

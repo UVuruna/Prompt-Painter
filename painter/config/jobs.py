@@ -221,7 +221,9 @@ MENU_TILES: tuple[MenuTile, ...] = (
     # F4a (owner 2026-07-29): the description IS the card's short
     # ABOUT text — logo + title + what it does, in a sentence or two
     MenuTile(
-        id="website_gen", label="Website GEN",
+        # renamed Website GEN -> Website Image GEN (owner 2026-08-03,
+        # UI rework tačka 3 — the name says WHAT it generates)
+        id="website_gen", label="Website Image GEN",
         description=(
             "Drive your logged-in ChatGPT/Gemini tabs through whole"
             " prompt collections — paced, supervised, resumable"

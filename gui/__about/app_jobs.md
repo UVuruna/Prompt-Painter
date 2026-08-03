@@ -18,6 +18,14 @@ the quota auto-restart timers (`_handle_terminal`/`_tick_restart`/
 composer (`_compose_post_save` — BG→Crop→Aspect→Upscale, shared by
 sites and the API-image job via its own panel).
 
+PROMPT + IMAGE mode (faza 2, owner 2026-08-03): every Start — the two
+sites AND the API job — reads the shared `_pi_section`
+([Prompt + Image Section](prompt_image.md)) and passes
+`reference_dir` (the ← resolution's second rung, always) plus
+`require_input_image` (the eligibility narrowing, only while the mode
+is ON) through `_drive_site` into `run_sheet` — one mode, every
+generator.
+
 The parallel Checker AI and the Fixer AI used to live here too — this
 module had grown past the ~1000-line Rule #20 budget, so step 8/8
 split them out into [Checker/Fixer Mixin](app_checker_fixer.md)'s own

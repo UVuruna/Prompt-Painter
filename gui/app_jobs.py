@@ -460,7 +460,8 @@ class SiteJobsMixin:
             f" crop={panel.crop_var.get()}"
             f" upscale={panel.upscale_var.get()}"
             f" | safer_retry={panel.safer_var.get()}"
-            f" continue_nudge={panel.continue_nudge_var.get()} ==="
+            f" continue_nudge={panel.continue_nudge_var.get()}"
+            f" | prompt_image={self._pi_section.enabled()} ==="
         )
         # GUI rework Phase 19: _drive_site now takes its driver as a
         # parameter (widened to accept an ApiImageAdapter too, see
@@ -508,7 +509,15 @@ class SiteJobsMixin:
                 self._stop_events[key],
                 self._pause_events[key],
             ),
-            kwargs={"on_degrade": on_degrade},
+            kwargs={
+                "on_degrade": on_degrade,
+                # PROMPT + IMAGE mode (faza 2, owner 2026-08-03): the
+                # section's Reference folder always rides along (the ←
+                # resolution's second rung); the eligibility narrowing
+                # applies only while the mode is ON
+                "reference_dir": self._pi_section.reference_dir(),
+                "require_input_image": self._pi_section.enabled(),
+            },
             daemon=True,
         )
         self._workers[key] = worker
@@ -692,6 +701,12 @@ class SiteJobsMixin:
                 self._stop_events["api_image"],
                 self._pause_events["api_image"],
             ),
+            kwargs={
+                # PROMPT + IMAGE mode (faza 2): the API run honours the
+                # SAME section — one mode, every generator
+                "reference_dir": self._pi_section.reference_dir(),
+                "require_input_image": self._pi_section.enabled(),
+            },
             daemon=True,
         )
         self._workers["api_image"] = worker
@@ -703,6 +718,7 @@ class SiteJobsMixin:
         self, key, sheets, out_base, timing, driver, post_save, suffix,
         extra_suffix, report, selection, safer, continue_nudge, new_chat,
         stop_event, pause_event, on_degrade=None,
+        reference_dir=None, require_input_image=False,
     ) -> None:
         """One job's whole run — the theme queue in order, one thread.
 
@@ -770,6 +786,8 @@ class SiteJobsMixin:
                         continue_nudge=continue_nudge,
                         new_chat_per_folder=(new_chat == "folder"),
                         on_degrade=on_degrade,
+                        reference_dir=reference_dir,
+                        require_input_image=require_input_image,
                     )
                     done_sheets += 1
                     log(f"collection done: {generated} image(s) into {out_base}")

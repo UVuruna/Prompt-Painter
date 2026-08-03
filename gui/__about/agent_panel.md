@@ -19,19 +19,22 @@ folds/unfolds by hand, OFF hides it entirely):
 - **Run behavior** — Report, Safer retry, Continue nudge; the AI
   checker (its own F6 prompt-match toggle + the Fixer AI living
   INSIDE the checker switch's own expander, reachable only while the
-  checker itself is on, plus its api/website mode); a Pacing section
-  (pause range, action-delay range, the F2 on-degrade choice).
+  checker itself is on, plus its api/website mode).
+- **Pacing** — its OWN group, ALWAYS OPEN (owner 2026-08-03, UV
+  tačka 3 "Pacing uvek otvoren" — the old folded ExpandableSection
+  inside Run behavior is gone): pause range, action-delay range, the
+  F2 on-degrade choice, in plain sight before every Start.
 - **Prompt** — Background (with the F7 custom-colour wheel + swatch),
   Style, New chat mode, the F7 prompt-helper toggles.
 
 The old global Settings gear (and its `settings_collapsed` state) is
 GONE — everything it held now lives under its owning switch (or the
-Pacing section). The three groups are ONE vertical stack
-(`_stack_groups`): the panel lives in the setup screen's LEFT
-settings column now (never the full window width — the pre-sketch
-side-by-side "dense" mode measured 1322 px and pushed the right-hand
-collections/output/Select column off a default-sized window, so it
-was deleted, not kept "just in case"). Its own Start/Pause/Stop
+always-open Pacing group). The FOUR groups grid as the owner's 2×2
+(`_stack_groups`, owner 2026-08-03): Pipeline | Run behavior above,
+Pacing | Prompt below, both columns sharing the width evenly — the
+setup screen's LEFT settings column is a true half of the window now
+(the 50-50 split, same decree), wide enough for two group columns
+where the 2026-07-29 single stack was not. Its own Start/Pause/Stop
 drives that one site's run. Split out of `gui/__init__.py` (root Rule
 #20 god-file refactor, step 4/8).
 

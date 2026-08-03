@@ -291,9 +291,10 @@ def test_apply_settings_never_auto_expands_a_restored_on_switch(root):
 
 def test_every_finetune_switch_owns_its_own_expander(root):
     """The UI-SKETCH map: BG removal / Force aspect ratio / Upscale /
-    AI checker each carry their own sub-panel, plus the switch-less
-    Pacing section. Crop and the plain Run-behavior switches carry
-    none — they have nothing to fine-tune."""
+    AI checker each carry their own sub-panel. Crop and the plain
+    Run-behavior switches carry none — they have nothing to fine-tune.
+    (Pacing is no expander at all any more — see the always-open test
+    below, owner 2026-08-03.)"""
     panel = make_panel(root)
     owners = {
         panel._sw_bg: panel.bg_removal_var,
@@ -304,7 +305,6 @@ def test_every_finetune_switch_owns_its_own_expander(root):
     for switch, var in owners.items():
         assert switch._var is var
         assert switch.sub.winfo_manager() == ""  # all start collapsed
-    assert panel._sec_pacing.sub.winfo_manager() == ""
 
 
 # --- expanders -> on_layout_change (owner 2026-07-21 perf fix) ---------
@@ -333,14 +333,26 @@ def test_expanding_a_switch_calls_on_layout_change_after_the_reveal(root):
     assert calls == ["pack", ""]
 
 
-def test_pacing_section_also_reports_its_layout_change(root):
-    """The switch-LESS Pacing section (ExpandableSection) is wired to
-    the same hook — a plain label + caret, no switch to gate it."""
-    calls: list[str] = []
-    panel = make_panel(root, on_layout_change=lambda: calls.append("x"))
-    panel._sec_pacing.toggle()
-    assert panel._sec_pacing.sub.winfo_manager() == "pack"
-    assert calls == ["x"]
+def test_pacing_group_is_always_open(root):
+    """owner 2026-08-03 (UV tačka 3, "Pacing uvek otvoren"): the old
+    folded ExpandableSection is gone — the pacing rows build straight
+    into their OWN group body, mapped from construction, no caret."""
+    panel = make_panel(root)
+    assert not hasattr(panel, "_sec_pacing")
+    assert panel._group_pacing.winfo_children()  # rows exist
+    for child in panel._group_pacing.winfo_children():
+        assert child.winfo_manager() == "pack"
+
+
+def test_groups_grid_as_the_owners_two_by_two(root):
+    """owner 2026-08-03 (UV tačka 3): Pipeline | Run behavior on the
+    first row, Pacing | Prompt on the second."""
+    panel = make_panel(root)
+    cells = {
+        (int(w.grid_info()["row"]), int(w.grid_info()["column"]))
+        for w in panel._groups
+    }
+    assert cells == {(0, 0), (0, 1), (1, 0), (1, 1)}
 
 
 def test_expander_on_layout_change_defaults_to_a_harmless_noop(root):

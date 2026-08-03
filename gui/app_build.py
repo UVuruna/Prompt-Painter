@@ -46,6 +46,7 @@ from .api_panel import ApiImageGenPanel
 from .dash_panels import DashPanel, JobPanel
 from .logic import _visible_agent_slots, menu_min_size
 from .menu import MENU_GRID_PADX, IconBar, MainMenu
+from .prompt_image import PromptImageSection
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
 from .switch import DayNightSwitch
 from .theme import (
@@ -63,7 +64,13 @@ from .tool_panels import (
     ToolSettingsPanel,
     UpscaleSettingsPanel,
 )
-from .widgets import rounded_button, rounded_entry, set_font_base, tk_font
+from .widgets import (
+    _style_icon_bar_button,
+    rounded_button,
+    rounded_entry,
+    set_font_base,
+    tk_font,
+)
 
 # --- Main window: min size, on-screen clamp, wheel, collapse (Rule #4) -
 # The whole window is vertically scrollable so a stale-tall geometry can
@@ -241,21 +248,40 @@ class BuildMixin:
         # order is deterministic regardless of build order)
         self._collapsed = False
         self._controls_box = ttk.Frame(self._main_view)
-        # UI-SKETCH (owner 2026-07-29): the setup screen is LEFT
-        # settings / RIGHT input — the agent panels (with their
-        # per-switch expanders) on the left, the collections drop list
-        # + output folder + Select on the right.
+        # UI-SKETCH (owner 2026-07-29; širine/visine owner 2026-08-03,
+        # UV tačka 3): the setup screen is LEFT settings / RIGHT input —
+        # the agent panels on the left, the collections drop list +
+        # output + Select + the Prompt+Image section on the right. The
+        # columns split the WIDTH 50-50; the right column's two
+        # sections (Collections above, Prompt+Image below, when ON)
+        # split its HEIGHT 50-50 and stretch to fill it.
         setup = ttk.Frame(self._controls_box)
         setup.pack(fill="both", expand=True, pady=(0, 6))
-        setup.columnconfigure(0, weight=3)
-        setup.columnconfigure(1, weight=2)
+        setup.columnconfigure(0, weight=1, uniform="setupcol")
+        setup.columnconfigure(1, weight=1, uniform="setupcol")
+        setup.rowconfigure(0, weight=1)
         setup_left = ttk.Frame(setup)
-        setup_left.grid(row=0, column=0, sticky="new")
+        setup_left.grid(row=0, column=0, sticky="nsew")
         setup_right = ttk.Frame(setup)
-        setup_right.grid(row=0, column=1, sticky="new", padx=(12, 0))
+        setup_right.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        setup_right.columnconfigure(0, weight=1)
+        setup_right.rowconfigure(0, weight=1, uniform="setuprow")
+        setup_right.rowconfigure(1, weight=1, uniform="setuprow")
+        right_top = ttk.Frame(setup_right)
+        right_top.grid(row=0, column=0, sticky="nsew")
         self._build_options(setup_left)
-        self._build_queue(setup_right)
-        self._build_inputs_tail(setup_right)
+        self._build_queue(right_top)
+        self._build_inputs_tail(right_top)
+        # PROMPT + IMAGE (faza 2, owner 2026-08-03): the reference-run
+        # section — built once, gridded into the right column's lower
+        # half ONLY while the mode is on (_apply_prompt_image_state)
+        self._pi_section = PromptImageSection(
+            setup_right,
+            get_sheet_paths=lambda: list(self._sheets),
+            on_change=self._schedule_save,
+        )
+        self._pi_section.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        self._pi_section.grid_remove()
         self._build_toolbar(self._controls_box)
         self._build_compact(self._main_view)
         self._build_views(self._main_view)
@@ -420,6 +446,7 @@ class BuildMixin:
         self._set_collapsed(False)  # deterministic initial packing
         self._set_view("menu")      # ditto — every launch lands on the menu
         self._apply_settings(self._settings)  # may restore a saved state
+        self._apply_prompt_image_state()  # reconcile the restored mode
         self._apply_min_size()  # AFTER settings — fonts are final here
         self._wire_persistence()
         # the maximize/restore + drag-resize watcher — seeded and bound
@@ -738,12 +765,14 @@ class BuildMixin:
         lf = ttk.Labelframe(
             parent, text="Collections (prompt .md files, one image set each)"
         )
-        lf.pack(fill="x", pady=(0, 6))
+        # fill the right column's upper half (owner 2026-08-03, UV
+        # tačka 3: both right sections stretch over the full height)
+        lf.pack(fill="both", expand=True, pady=(0, 6))
         self.sheet_list = tk.Listbox(
             lf, height=5, activestyle="none", font=tk_font("mono")
         )
         skin_listbox(self.sheet_list)
-        self.sheet_list.pack(side="left", fill="x", expand=True)
+        self.sheet_list.pack(side="left", fill="both", expand=True)
         col = ttk.Frame(lf)
         col.pack(side="left", padx=(8, 0), anchor="n")
         rounded_button(
@@ -766,7 +795,9 @@ class BuildMixin:
     def _build_inputs_tail(self, parent) -> None:
         """The RIGHT column's tail (UI-SKETCH, owner 2026-07-29): the
         Output folder + the Select-images door, right under the
-        collections list."""
+        collections list — plus the PROMPT + IMAGE mode toggle (faza 2,
+        owner 2026-08-03, "TAJ BUTTON tamo gde je SELECT IMAGES"),
+        which reveals the reference-run section below."""
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(4, 2))
         ttk.Label(row, text="Output:", width=8).pack(side="left")
@@ -777,10 +808,44 @@ class BuildMixin:
         rounded_button(
             row, "Browse…", command=self._pick_out,
         ).pack(side="left", padx=(8, 0))
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(4, 0))
         self.btn_select = rounded_button(
-            parent, "Select images…", command=self._select_images,
+            row, "Select images…", command=self._select_images,
         )
-        self.btn_select.pack(anchor="w", pady=(4, 0))
+        self.btn_select.pack(side="left")
+        self.btn_prompt_image = rounded_button(
+            row, "Prompt + Image", command=self._toggle_prompt_image,
+        )
+        self.btn_prompt_image.pack(side="left", padx=(8, 0))
+
+    # --- PROMPT + IMAGE mode (faza 2, owner 2026-08-03) ----------------
+
+    def _toggle_prompt_image(self) -> None:
+        self._pi_section.enabled_var.set(
+            not self._pi_section.enabled_var.get()
+        )
+        self._apply_prompt_image_state()
+        self._schedule_save()
+
+    def _apply_prompt_image_state(self) -> None:
+        """Reconcile the mode's surfaces to ``enabled_var``: the section
+        shows (and refreshes its eligibility view) only while ON; the
+        toggle button reads filled-ON / outline-OFF — the SAME visual
+        language the IconBar's live tiles already speak. Called after
+        the toggle, and once at startup after the settings restore."""
+        on = self._pi_section.enabled_var.get()
+        if on:
+            self._pi_section.grid()
+            self._pi_section.refresh()
+        else:
+            self._pi_section.grid_remove()
+        # the website tile's indigo accent — this mode belongs to the
+        # gen-sites family, same as the tile that hosts it
+        _style_icon_bar_button(
+            self.btn_prompt_image, ("#4338ca", "#818cf8"), active=on
+        )
+        self._scroll.refresh()
 
     def _build_options(self, parent) -> None:
         lf = ttk.Labelframe(parent, text="Agents")

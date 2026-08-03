@@ -18,7 +18,13 @@ F4g, Chrome is ensured automatically at Start), the AI features' key
 gate (`gemini_key`/`set_gemini_key`/`_ensure_ai_key`/
 `add_generated_sheet`) and the whole settings round-trip
 (`_collect_settings`/`_apply_settings`/the two one-time migration
-helpers/`_schedule_save`/`_save_now`/`_on_close`).
+helpers/`_schedule_save`/`_save_now`/`_on_close`). Faza 2 (owner
+2026-08-03): the round-trip also carries `prompt_image` (the mode
+toggle + Reference folder — `_pi_section.get_settings`/
+`apply_settings`), and every queue mutation
+(`_queue_sheets`/`_remove_sheet`/`_clear_sheets`) calls
+`_refresh_prompt_image` so the section's eligibility view stays live
+while the mode is on.
 
 **F4h (owner 2026-07-29): `_show_node` is GUARDED end to end** — a
 viewer failure (any exception) logs the full traceback and shows a

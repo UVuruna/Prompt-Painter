@@ -50,19 +50,23 @@ BUFFERS dashboard `__event__` messages into `_pending_events`, flushed
 in order by `_resize_settled` once the drag stops — so a live run's
 tree/label updates stop re-rendering per drag frame.
 
-**The setup screen's two columns** (UI-SKETCH, owner 2026-07-29):
-`__init__` grids `_controls_box`'s content as LEFT settings (the
-`Agents` labelframe — the "Sites:" show/hide row + the per-site
-`AgentPanel`s, stacked vertically by `_relayout_agents`) and RIGHT
-input (`_build_queue`'s Collections list + `_build_inputs_tail`'s
-Output folder and `Select images…` door), column weights 3:2. The
-whole setup then requests ~1030 px — it fits the default 1120×840
-window in every visible-count state, which the pre-sketch full-width
-panel layout did not (measured 2020 px, with the entire input column
-pushed off screen). `WINDOW_DEFAULT_W`/`WINDOW_DEFAULT_H` (1120×840,
-owner 2026-07-29 hotfix) are also what a maximized-close geometry falls
-back to on restore (`_clamp_geometry`) — a stale full-screen `WxH`
-would otherwise reopen the app huge.
+**The setup screen's two columns** (UI-SKETCH, owner 2026-07-29;
+widths/heights owner 2026-08-03, UV tačka 3): `__init__` grids
+`_controls_box`'s content as LEFT settings (the `Agents` labelframe —
+the "Sites:" show/hide row + the per-site `AgentPanel`s, stacked by
+`_relayout_agents`, each panel's own groups in a 2×2) and RIGHT input
+(`_build_queue`'s Collections list + `_build_inputs_tail`'s Output
+folder, `Select images…` and the `Prompt + Image` toggle) — the
+columns split the WIDTH 50-50 (uniform + weight 1). The right column
+splits its HEIGHT 50-50: Collections above, and the
+`PromptImageSection` (`_pi_section`, faza 2 — see
+[Prompt + Image Section](prompt_image.md)) gridded into the lower
+half only while the mode is ON (`_toggle_prompt_image`/
+`_apply_prompt_image_state`, restored once at startup).
+`WINDOW_DEFAULT_W`/`WINDOW_DEFAULT_H` (1120×840, owner 2026-07-29
+hotfix) are also what a maximized-close geometry falls back to on
+restore (`_clamp_geometry`) — a stale full-screen `WxH` would
+otherwise reopen the app huge.
 
 Also builds, unpacked at construction (each shown only by
 `ViewMixin._apply_running_layout`): the Main Menu (`MainMenu`) and

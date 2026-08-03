@@ -64,7 +64,6 @@ from .logic import _upscale_params_from_side_and_filter
 from .theme import THEME_TOPLEVELS
 from .tool_panels import ASPECT_DIALOG_ENTRY_W, DENSE_COL_WRAP_PX
 from .widgets import (
-    ExpandableSection,
     ExpandableSwitch,
     Spinner,
     quiet_restore,
@@ -324,20 +323,22 @@ class AgentPanel(ttk.Labelframe):
             value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
         )
 
-        # the three groups below live in ONE grid container, stacked —
-        # see _stack_groups (the pre-sketch side-by-side "dense" mode is
-        # gone: this panel now sits in the setup screen's LEFT settings
-        # column, which is never the full window width)
+        # the four groups below live in ONE grid container, arranged
+        # 2x2 — see _stack_groups (owner 2026-08-03, UV tačka 3:
+        # Pipeline | Run behavior above, Pacing | Prompt below)
         self._content = ttk.Frame(self)
         self._content.pack(fill="x")
-        self._groups: list[ttk.Frame] = []  # Pipeline / Run / Prompt
+        self._groups: list[ttk.Frame] = []  # Pipeline/Run/Pacing/Prompt
 
-        # UI-SKETCH (owner 2026-07-29): the settings are THREE GROUPS —
-        # Pipeline / Run behavior / Prompt — each switch that owns
-        # fine-tune carrying its OWN indented expand/collapse sub-panel
-        # (ExpandableSwitch: turning ON auto-expands, the caret folds).
-        # The old global Settings gear is GONE; everything it held now
-        # lives under its owning switch (or the Pacing section).
+        # UI-SKETCH (owner 2026-07-29; regrouped 2026-08-03): the
+        # settings are FOUR GROUPS — Pipeline / Run behavior / Pacing /
+        # Prompt — each switch that owns fine-tune carrying its OWN
+        # indented expand/collapse sub-panel (ExpandableSwitch: turning
+        # ON auto-expands, the caret folds). The old global Settings
+        # gear is GONE; everything it held now lives under its owning
+        # switch — and Pacing, once a folded ExpandableSection inside
+        # Run behavior, is now its OWN group, ALWAYS OPEN (owner
+        # 2026-08-03: "Pacing uvek otvoren").
         # every ExpandableSwitch/Section is kept as a named field — the
         # expander IS this panel's fine-tune surface now that the gear
         # is gone, so its open/closed state has to stay reachable (the
@@ -387,11 +388,13 @@ class AgentPanel(ttk.Labelframe):
             on_layout_change=self._on_layout_change,
         )
         self._sw_checker.pack(fill="x", pady=1)
-        self._sec_pacing = ExpandableSection(
-            self._group_run, "Pacing", self._build_pacing_sub,
-            on_layout_change=self._on_layout_change,
-        )
-        self._sec_pacing.pack(fill="x", pady=(3, 1))
+
+        # Pacing — its OWN group, ALWAYS OPEN (owner 2026-08-03, UV
+        # tačka 3; replacing the folded ExpandableSection that used to
+        # sit inside Run behavior): the rows build straight into the
+        # group body, no caret, nothing to miss before a Start
+        self._group_pacing = self._build_group(self._content, "Pacing")
+        self._build_pacing_sub(self._group_pacing)
 
         self._group_prompt = self._build_group(self._content, "Prompt")
         row = ttk.Frame(self._group_prompt)
@@ -464,7 +467,7 @@ class AgentPanel(ttk.Labelframe):
         self.btn_stop.pack(side="left", padx=6)
         # UI-SKETCH (owner 2026-07-29): the global Settings gear is
         # GONE — every fine-tune lives under its owning switch's
-        # expander (or the Pacing section) above.
+        # expander (or the always-open Pacing group) above.
         # every Start/Stop pair this agent owns (the panel's own pair plus
         # the collapsed-strip pair added by build_compact); set_run_state
         # styles ALL of them so both views always agree on availability
@@ -493,21 +496,22 @@ class AgentPanel(ttk.Labelframe):
         return body
 
     def _stack_groups(self) -> None:
-        """Grid the three GROUPS (Pipeline / Run behavior / Prompt,
-        UI-SKETCH 2026-07-29) as ONE vertical stack — this panel lives
-        in the setup screen's LEFT settings column, so its width is the
-        column's, not the window's, in every visible-count state.
+        """Grid the four GROUPS as the owner's 2x2 (owner 2026-08-03,
+        UV tačka 3 — "Run behavior ide desno; Pacing uvek otvoren levo,
+        Prompt desno od njega"):
 
-        (The pre-sketch layout also had a "dense" side-by-side mode for
-        a sole visible panel spanning the FULL controls width; the
-        two-column setup screen has no such width to give — three
-        groups abreast measure 1322 px and pushed the right-hand
-        collections/output/Select column clean off a default-sized
-        window. Retired with the gear, Rule #6: no dead mode kept
-        "just in case".)"""
-        for r, w in enumerate(self._groups):
-            w.grid(row=r, column=0, sticky="ew", pady=2)
-        self._content.columnconfigure(0, weight=1)
+            Pipeline | Run behavior
+            Pacing   | Prompt
+
+        Both columns share the width evenly (uniform + weight 1). This
+        panel lives in the setup screen's LEFT settings column — now a
+        true 50% of the window (2026-08-03), wide enough for two group
+        columns where the old 2026-07-29 single stack was not."""
+        for i, w in enumerate(self._groups):
+            r, c = divmod(i, 2)
+            w.grid(row=r, column=c, sticky="new", padx=(0, 8), pady=2)
+        self._content.columnconfigure(0, weight=1, uniform="agentgrp")
+        self._content.columnconfigure(1, weight=1, uniform="agentgrp")
 
     # --- UI-SKETCH sub-panel builders (owner 2026-07-29) --------------
     # Each builds ONE switch's fine-tune into its ExpandableSwitch.sub

@@ -440,7 +440,7 @@ AI_IMAGE_PROBE_PROMPT = (
 # user-facing copy constant (SAFER_PREAMBLE, CONTINUE_NUDGE).
 AI_IMAGE_GATE_MESSAGE = (
     "API image generation needs billing enabled — free tier limit is"
-    " 0; use Website GEN for free."
+    " 0; use Website Image GEN for free."
 )
 
 # ═══════════════ AI SHEET GENERATOR — PROMPTS ═══════════════════════════

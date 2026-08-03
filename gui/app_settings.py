@@ -347,6 +347,7 @@ class SettingsMixin:
                 self._sheets.append(path)
                 self.sheet_list.insert("end", path.name)
         self._schedule_save()
+        self._refresh_prompt_image()
 
     def _add_sheets(self) -> None:
         paths = filedialog.askopenfilenames(
@@ -370,11 +371,20 @@ class SettingsMixin:
             self.sheet_list.delete(index)
             del self._sheets[index]
         self._schedule_save()
+        self._refresh_prompt_image()
 
     def _clear_sheets(self) -> None:
         self.sheet_list.delete(0, "end")
         self._sheets.clear()
         self._schedule_save()
+        self._refresh_prompt_image()
+
+    def _refresh_prompt_image(self) -> None:
+        """Keep the Prompt+Image eligibility view live across queue
+        mutations (faza 2) — a no-op while the mode is off (the hidden
+        section re-parses on its next reveal anyway)."""
+        if self._pi_section.enabled():
+            self._pi_section.refresh()
 
     def _pick_out(self) -> None:
         path = filedialog.askdirectory(title="Output folder")
@@ -592,6 +602,10 @@ class SettingsMixin:
                 key: panel.get_settings()
                 for key, panel in self.agents.items()
             },
+            # PROMPT + IMAGE mode (faza 2, owner 2026-08-03): the
+            # toggle + the Reference folder, same round-trip shape as
+            # every panel above
+            "prompt_image": self._pi_section.get_settings(),
             # GUI rework Phase 13/14: each standalone tool's PERSISTENT
             # settings panel (all four now) — its filter stack + Advanced
             # (or always-visible, for upscale/aspect) overrides, same
@@ -773,6 +787,12 @@ class SettingsMixin:
                     parent=self.root,
                 ),
             )
+        # PROMPT + IMAGE mode (faza 2, owner 2026-08-03): restore the
+        # toggle + Reference folder; the visible reconcile
+        # (_apply_prompt_image_state) runs once from __init__'s tail
+        self._pi_section.apply_settings(
+            dict(stored.get("prompt_image", {}))
+        )
         saved_out = stored.get("output")
         if saved_out and Path(saved_out).is_dir():
             self.out_var.set(saved_out)
