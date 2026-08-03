@@ -111,6 +111,7 @@ into [Viewer Shared Rules](__about/viewer_shared.md),
 | `tool_dash.py` | Algorithmic | `ToolPanel` + `AiCheckPanel` + `DashGrid` — the tool/checker dashboard panels and grid — [about](__about/tool_dash.md) · [flow](__flow/tool_dash.md) |
 | `menu.py` | Algorithmic | `MainMenu` + `IconBar` — the startup's fixed 4×2 tile grid and the HOME-led nav strip (setup + running views) — [about](__about/menu.md) · [flow](__flow/menu.md) |
 | `prompt_image.py` | Algorithmic | `PromptImageSection` — the PROMPT+IMAGE mode's Reference folder + live eligibility view (faza 2) — [about](__about/prompt_image.md) |
+| `collections_column.py` | Standard | `CollectionsColumn` — the shared right column (queue + output + Select + Prompt+Image), one component for the website setup AND the API panel (faza 3) — [about](__about/collections_column.md) |
 | `select_window.py` | Algorithmic | `SelectWindow` — the per-site tick-list Toplevel over the queued Collections — [about](__about/select_window.md) · [flow](__flow/select_window.md) |
 | `viewer_shared.py` | Standard | `DOC_*` window-sizing family + tiny shared viewer helpers — [about](__about/viewer_shared.md) |
 | `doc_window.py` | Algorithmic | `DocWindow` — the Markdown/prompt/image viewer + Fixer-AI manual buttons — [about](__about/doc_window.md) · [flow](__flow/doc_window.md) |

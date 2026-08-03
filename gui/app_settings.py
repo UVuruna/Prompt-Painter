@@ -345,7 +345,7 @@ class SettingsMixin:
             path = Path(raw)
             if path not in self._sheets:
                 self._sheets.append(path)
-                self.sheet_list.insert("end", path.name)
+        self._repaint_sheet_lists()
         self._schedule_save()
         self._refresh_prompt_image()
 
@@ -366,25 +366,38 @@ class SettingsMixin:
             return
         self._queue_sheets(iter_md_files(folder))
 
-    def _remove_sheet(self) -> None:
-        for index in reversed(self.sheet_list.curselection()):
-            self.sheet_list.delete(index)
+    def _remove_sheet(self, listbox=None) -> None:
+        """Remove the selection of ONE column's queue view (faza 3:
+        each CollectionsColumn's Remove passes its OWN listbox — its
+        selection is the intent; ``None`` keeps the primary website
+        column, the pre-faza-3 call shape)."""
+        box = listbox if listbox is not None else self.sheet_list
+        for index in reversed(box.curselection()):
             del self._sheets[index]
+        self._repaint_sheet_lists()
         self._schedule_save()
         self._refresh_prompt_image()
 
     def _clear_sheets(self) -> None:
-        self.sheet_list.delete(0, "end")
         self._sheets.clear()
+        self._repaint_sheet_lists()
         self._schedule_save()
         self._refresh_prompt_image()
 
+    def _repaint_sheet_lists(self) -> None:
+        """Refill EVERY registered CollectionsColumn's queue view from
+        the one ``self._sheets`` truth (faza 3 — the website setup and
+        the API panel each render the same queue)."""
+        for column in self._collections_columns:
+            column.repaint_queue(self._sheets)
+
     def _refresh_prompt_image(self) -> None:
-        """Keep the Prompt+Image eligibility view live across queue
-        mutations (faza 2) — a no-op while the mode is off (the hidden
-        section re-parses on its next reveal anyway)."""
+        """Keep the Prompt+Image eligibility views live across queue
+        mutations (faza 2/3, every column) — a no-op while the mode is
+        off (a hidden section re-parses on its next reveal anyway)."""
         if self._pi_section.enabled():
-            self._pi_section.refresh()
+            for column in self._collections_columns:
+                column.pi_section.refresh()
 
     def _pick_out(self) -> None:
         path = filedialog.askdirectory(title="Output folder")

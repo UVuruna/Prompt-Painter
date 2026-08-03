@@ -21,10 +21,14 @@ gate (`gemini_key`/`set_gemini_key`/`_ensure_ai_key`/
 helpers/`_schedule_save`/`_save_now`/`_on_close`). Faza 2 (owner
 2026-08-03): the round-trip also carries `prompt_image` (the mode
 toggle + Reference folder — `_pi_section.get_settings`/
-`apply_settings`), and every queue mutation
-(`_queue_sheets`/`_remove_sheet`/`_clear_sheets`) calls
-`_refresh_prompt_image` so the section's eligibility view stays live
-while the mode is on.
+`apply_settings` over the SHARED mode vars), and every queue mutation
+(`_queue_sheets`/`_remove_sheet`/`_clear_sheets`) repaints EVERY
+registered [Collections Column](collections_column.md)
+(`_repaint_sheet_lists` — faza 3: the website setup's and the API
+panel's render one queue truth) and calls `_refresh_prompt_image` so
+each column's eligibility view stays live while the mode is on;
+`_remove_sheet(listbox=…)` honours the CALLING column's own
+selection.
 
 **F4h (owner 2026-07-29): `_show_node` is GUARDED end to end** — a
 viewer failure (any exception) logs the full traceback and shows a

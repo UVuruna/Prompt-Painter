@@ -12,16 +12,23 @@ UNCHANGED). Split out of `gui/__init__.py` (root Rule #20 god-file
 refactor, step 4/8).
 
 `ApiImageGenPanel`'s INPUT is the SAME queued Collections `.md` sheet
-list Website GEN already drives — never a folder of existing images,
-so a Folder/Files picker would be actively wrong here. It mirrors
-`AgentPanel` instead: background/style dropdowns feeding the SAME
-`config.prompt_suffix` machinery (this job's own `SITE_PROMPT_RULES`
-entry is an empty tuple — no forced per-site law today), the
-composable post-save switches (BG removal/Crop/Force Aspect
-Ratio/Upscale) — ALL FOUR default ON here, unlike `AgentPanel`'s own
-BG/Crop/Upscale-ON-but-Aspect-OFF defaults, because the paid image
-model cannot render a real transparent background, so BG removal +
-Crop must run by default for every generated image. A pause RANGE
+list Website Image GEN already drives — never a folder of existing
+images, so a Folder/Files picker would be actively wrong here. Faza 3
+(owner 2026-08-03, UV tačka 5) put it on THE SHARED SETUP SKELETON:
+LEFT = settings (the Model group on top, then the same four groups
+`AgentPanel` grids 2×2 — Pipeline | Run behavior / Pacing (always
+open) | Prompt, with the Force-Aspect target and the Upscale gate
+living under their own Pipeline switches), RIGHT = a
+[Collections Column](collections_column.md) instance (queue + Output
++ Select images + the Prompt+Image toggle/section — the SAME queue,
+output var and mode state as the website setup screen; the host
+supplies it via the `build_collections` factory, `None` in headless
+tests keeps the panel self-contained). Its Start already honours the
+Prompt+Image mode (`_start_api_image` passes
+`reference_dir`/`require_input_image` like every site Start).
+Pipeline switches ALL default ON — unlike `AgentPanel`'s own
+BG/Crop/Upscale-ON-but-Aspect-OFF defaults — because the paid image
+model cannot render a real transparent background. A pause RANGE
 only — no action-delay pair, since that is `SiteDriver._hesitate()`'s
 DOM-hesitation concept, meaningless for a pure REST call. The
 Background dropdown defaults to "white" (a colour the model CAN
@@ -45,18 +52,21 @@ falsely claiming OK or wrongly gating). The Start handler
 (`SiteJobsMixin._start_api_image`) ALSO checks `panel.access_gated`
 itself before spawning a worker — defense in depth, not the only guard.
 
-**F5 — model discovery + per-purpose overrides.** A "Models…" row's
-"Refresh models" button makes its own probe (same private
-queue+poll pattern) and fills THREE capability-filtered dropdowns
-(image / vision / text — the vision and text purposes ride along so
-the SAME picker also configures the checker/sheet-generator, which
-share settings.json's one `models` override). Each combo preselects
-via `CTkComboBox.set()` — which does NOT fire `command` — so only a
-GENUINE user pick (the combo's own `command=`, wired to
-`_on_model_pick`) ever writes `settings.json`; merely displaying the
-current override or the ranked recommendation never does. A pick is
-persisted IMMEDIATELY (no debounced hook to route through), so the
-NEXT generation reflects it right away.
+**F5 — model discovery; faza 3 — Image ONLY, hinted.** "Refresh
+models" makes its own probe (same private queue+poll pattern) and
+fills ONE dropdown — the Image-generation model (owner 2026-08-03:
+"podešavanja treba da budu samo za modele koje OVAJ job koristi";
+the Vision pick moves to AI Check and the Text pick to New Collection
+in faza 4 — their settings.json overrides stay untouched meanwhile).
+The list holds image-CAPABLE models only (P3=A); a "show all (debug)"
+switch widens it to everything discovered. A curated one-line hint
+(`config.model_hint` — the MODEL_PURPOSE_HINTS substring registry;
+honest `MODEL_HINT_UNKNOWN` for anything uncurated) shows under the
+dropdown for the current selection, seeded at build from
+`model_for("image")`. The combo preselects via `CTkComboBox.set()` —
+which does NOT fire `command` — so only a GENUINE user pick (wired to
+`_on_model_pick`) ever writes `settings.json`; a pick is persisted
+IMMEDIATELY and refreshes the hint.
 
 `ApiImageAdapter` remaps a free-tier-exhausted 429
 (`ai.PaidFeatureRequired`) to `driver.TerminalState` so the EXISTING

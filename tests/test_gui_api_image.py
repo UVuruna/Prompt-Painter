@@ -634,9 +634,13 @@ def _run_refresh_models_synchronously(monkeypatch, panel) -> None:
     panel._apply_models_result(msg)
 
 
-def test_refresh_models_populates_capable_dropdowns_ranked_by_purpose(
+def test_refresh_models_populates_the_image_only_dropdown(
     root, monkeypatch,
 ):
+    """Faza 3 (owner UV tačka 5, P3=A): the API panel carries ONLY the
+    Image-generation dropdown — the Vision/Text picks move to the
+    panels that USE them (AI Check / New Collection, faza 4) — and the
+    list holds image-CAPABLE models only, never all 58."""
     from painter import settings as settings_module
 
     monkeypatch.setattr(ai_module, "list_models", lambda **k: FAKE_DISCOVERED_MODELS)
@@ -646,20 +650,41 @@ def test_refresh_models_populates_capable_dropdowns_ranked_by_purpose(
     _run_refresh_models_synchronously(monkeypatch, panel)
 
     assert panel._discovered_models == FAKE_DISCOVERED_MODELS
-    # "image": only the image-named model is CAPABLE
+    assert set(panel._model_combos) == {"image"}   # no vision/text here
     assert panel._model_combos["image"].cget("values") == [
         "gemini-2.5-flash-image"
     ]
     assert panel.model_image_var.get() == "gemini-2.5-flash-image"
-    # "vision"/"text": every generateContent model EXCEPT the
-    # image-generation and embedding ones
-    assert set(panel._model_combos["vision"].cget("values")) == {
-        "gemini-flash-latest", "gemini-3.1-pro",
-    }
-    # both purposes' ranking puts "gemini-3.1-pro" first among the
-    # capable set (MODEL_PURPOSE_RANKING)
-    assert panel.model_vision_var.get() == "gemini-3.1-pro"
-    assert panel.model_text_var.get() == "gemini-3.1-pro"
+    # the curated hint follows the selection (config.model_hint)
+    assert "Flash image" in panel._model_hint_var.get()
+
+
+def test_show_all_debug_switch_widens_the_list_to_everything(
+    root, monkeypatch,
+):
+    from painter import settings as settings_module
+
+    monkeypatch.setattr(ai_module, "list_models", lambda **k: FAKE_DISCOVERED_MODELS)
+    monkeypatch.setattr(settings_module, "load_settings", lambda: {})
+    panel = make_panel(root)
+    _run_refresh_models_synchronously(monkeypatch, panel)
+
+    panel.model_show_all_var.set(True)  # the trace repopulates
+    assert panel._model_combos["image"].cget("values") == [
+        m["name"] for m in FAKE_DISCOVERED_MODELS
+    ]
+    panel.model_show_all_var.set(False)
+    assert panel._model_combos["image"].cget("values") == [
+        "gemini-2.5-flash-image"
+    ]
+
+
+def test_unknown_model_gets_the_honest_unverified_hint(root, monkeypatch):
+    from painter.config import MODEL_HINT_UNKNOWN
+
+    panel = make_panel(root)
+    panel._update_model_hint("some-future-model")
+    assert panel._model_hint_var.get() == MODEL_HINT_UNKNOWN
 
 
 def test_refresh_models_preselects_the_stored_override_over_the_recommendation(
@@ -670,14 +695,13 @@ def test_refresh_models_preselects_the_stored_override_over_the_recommendation(
     monkeypatch.setattr(ai_module, "list_models", lambda **k: FAKE_DISCOVERED_MODELS)
     monkeypatch.setattr(
         settings_module, "load_settings",
-        lambda: {MODELS_SETTING: {"vision": "gemini-flash-latest"}},
+        lambda: {MODELS_SETTING: {"image": "gemini-2.5-flash-image"}},
     )
     panel = make_panel(root)
 
     _run_refresh_models_synchronously(monkeypatch, panel)
 
-    assert panel.model_vision_var.get() == "gemini-flash-latest"    # the override
-    assert panel.model_image_var.get() == "gemini-2.5-flash-image"  # unaffected
+    assert panel.model_image_var.get() == "gemini-2.5-flash-image"  # the override
 
 
 def test_refresh_models_nokey_shows_the_key_gate_message(root, monkeypatch):

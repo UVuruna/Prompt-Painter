@@ -72,7 +72,9 @@ dropped); `get_settings`/`apply_settings` — the standard round-trip.
   a SECOND pairing mechanism with its own edge cases (the stem-match
   idea the owner explicitly rejected for generation). Point the
   Reference folder at any stash; the sheet's `←` paths do the rest.
-- **Shared by design (Rule C):** Website Image GEN hosts it now; API
-  Image GEN joins the same section when its panel moves onto the
-  shared setup skeleton (faza 3) — its Start already honours the
-  mode.
+- **Shared by design (Rule C), delivered in faza 3:** every
+  [Collections Column](collections_column.md) (the website setup's
+  AND the API panel's) renders its OWN section instance over the ONE
+  shared mode state (`enabled_var`/`ref_dir_var` passed in — a
+  standalone section, as in tests, still makes its own vars); the
+  mode flips everywhere at once and both Starts honour it.

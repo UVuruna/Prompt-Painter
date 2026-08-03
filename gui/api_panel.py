@@ -115,6 +115,7 @@ class ApiImageGenPanel(ttk.Frame):
         on_stop: Callable[[str], None],
         filter_presets: dict[str, list[dict]] | None = None,
         on_filter_presets_changed: Callable[[], None] | None = None,
+        build_collections: Callable | None = None,
     ):
         super().__init__(master, padding=8)
         self._on_start = on_start
@@ -138,21 +139,26 @@ class ApiImageGenPanel(ttk.Frame):
             style="Head.TLabel",
         ).pack(side="left")
 
-        # two-column-dense body (owner 2026-07-21 layout fix): this panel
-        # is ALWAYS shown full-width, exactly like the ToolSettingsPanel
-        # family, so a single left-hugging stack left the right half dead
-        # (Rule #16). LEFT mirrors AgentPanel's own quick controls —
-        # description, Background/Style, the post-save switches, pacing,
-        # the API-access gate; RIGHT holds the two detailed editor blocks
-        # (the Force-Aspect canvas, the Upscale gate's FilterEditor).
+        # THE SHARED SETUP SKELETON (faza 3, owner 2026-08-03, UV
+        # tačka 5: "raspored kao Website Image GEN"): LEFT = settings
+        # (Model on top, then the same four groups AgentPanel grids —
+        # Pipeline | Run behavior / Pacing | Prompt), RIGHT = the
+        # shared CollectionsColumn (queue + output + Select + the
+        # Prompt+Image toggle/section) when the host supplies its
+        # builder (``build_collections`` — None in headless tests keeps
+        # the panel self-contained).
         body = ttk.Frame(self)
-        body.pack(fill="x", pady=(6, 0))
-        body.columnconfigure(0, weight=1)
-        body.columnconfigure(1, weight=1)
+        body.pack(fill="both", expand=True, pady=(6, 0))
+        body.columnconfigure(0, weight=1, uniform="apicol")
+        body.columnconfigure(1, weight=1, uniform="apicol")
+        body.rowconfigure(0, weight=1)
         left = ttk.Frame(body)
         left.grid(row=0, column=0, sticky="new")
-        right = ttk.Frame(body)
-        right.grid(row=0, column=1, sticky="new", padx=(DENSE_COL_GAP_PX, 0))
+        if build_collections is not None:
+            column = build_collections(body)
+            column.grid(
+                row=0, column=1, sticky="nsew", padx=(DENSE_COL_GAP_PX, 0)
+            )
 
         ttk.Label(
             left,
@@ -162,98 +168,23 @@ class ApiImageGenPanel(ttk.Frame):
             style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
         ).pack(anchor="w", pady=(0, 4))
 
-        # background/style — the SAME prompt_suffix machinery every
-        # AgentPanel already feeds (Rule #5); "white" default (not a
-        # site's own default_background) since the model cannot render
-        # real transparency — see this class's own docstring
-        self.background_var = tk.StringVar(value="white")
-        self.style_var = tk.StringVar(value=STYLE_DEFAULT)
-        row = ttk.Frame(left)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Background:").pack(side="left")
-        rounded_combo(
-            row, BACKGROUND_CHOICES, self.background_var, width=105,
-        ).pack(side="left", padx=(2, 10))
-        ttk.Label(row, text="Style:").pack(side="left")
-        rounded_combo(
-            row, STYLE_CHOICES, self.style_var, width=150,
-        ).pack(side="left", padx=(2, 0))
-
-        # post-save pipeline switches — ALL default ON (no native
-        # transparency, spec item 3): _compose_post_save runs whichever
-        # are ticked in the fixed BG -> Crop -> Aspect -> Upscale order,
-        # identical to every AgentPanel-driven site.
-        self.bg_removal_var = tk.BooleanVar(value=True)
-        self.crop_var = tk.BooleanVar(value=True)
-        self.force_aspect_var = tk.BooleanVar(value=True)
-        self.upscale_var = tk.BooleanVar(value=True)
-        row = ttk.Frame(left)
-        row.pack(fill="x", pady=2)
-        rounded_switch(row, "BG removal", self.bg_removal_var).pack(
-            side="left"
-        )
-        rounded_switch(row, "Crop", self.crop_var).pack(side="left", padx=8)
-        rounded_switch(
-            row, "Force Aspect Ratio", self.force_aspect_var,
-        ).pack(side="left", padx=(0, 8))
-        rounded_switch(row, "Upscale", self.upscale_var).pack(side="left")
-
-        self.report_var = tk.BooleanVar(value=True)
-        self.keep_all_steps_var = tk.BooleanVar(
-            value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
-        )
-        row = ttk.Frame(left)
-        row.pack(fill="x", pady=2)
-        rounded_switch(row, "Report txt", self.report_var).pack(side="left")
-        rounded_switch(
-            row, "Keep every pipeline step (uses more disk)",
-            self.keep_all_steps_var,
-        ).pack(side="left", padx=8)
-
-        # pace between prompts — run_sheet's own pacing wait, unrelated
-        # to ai.py's internal AI_CALL_PAUSE_S free-tier throttle; no
-        # action-delay field (that is SiteDriver._hesitate()'s DOM
-        # concept — there is no DOM here).
-        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
-        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
-        row = ttk.Frame(left)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="pause", width=12).pack(side="left")
-        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-
-        # --- GATING: the "Check API access" probe (spec item 5) -------
-        gate_row = ttk.Frame(left)
-        gate_row.pack(fill="x", pady=(8, 2))
-        self._gate_btn = rounded_button(
-            gate_row, "Check API access", command=self._probe_access,
-            kind="info",
-        )
-        self._gate_btn.pack(side="left")
-        self._gate_var = tk.StringVar(value="")
+        # --- MODEL group (faza 3): ONLY the Image-generation model ----
+        # lives here now — the Vision pick belongs to AI Check and the
+        # Text pick to New Collection (AI) (owner: "podešavanje za TEXT
+        # GEN i IMAGE CHECK ide tamo ko to KORISTI" — they move in faza
+        # 4; their settings.json overrides stay untouched meanwhile).
+        # "Refresh models" mirrors the gating probe below (its own
+        # private queue+poll, same background-thread convention); the
+        # dropdown lists IMAGE-CAPABLE models only (P3=A — "show all"
+        # is the debug escape hatch), each pick showing its curated
+        # one-line hint (config.model_hint). The combo PRESELECTS via
+        # ``CTkComboBox.set()`` — which does NOT fire ``command`` — so
+        # only a GENUINE user pick ever writes settings.json.
         ttk.Label(
-            gate_row, textvariable=self._gate_var, style="Muted.TLabel",
-            wraplength=DENSE_COL_WRAP_PX,
-        ).pack(side="left", padx=(8, 0))
-        self._probe_q: queue.Queue = queue.Queue()
-        self._probe_poll_job: str | None = None
-
-        # --- MODEL PICKS: "Models…" discovery + per-purpose override --
-        # (F5, owner D1/D2/D4) — "Refresh models" mirrors the gating
-        # probe above (its own private queue+poll, same background-
-        # thread convention) and fills THREE capability-filtered
-        # dropdowns (image/vision/text — "vision"/"text" ride along so
-        # the SAME picker also configures the checker/sheet-generator,
-        # which share settings.json's one "models" override). Each
-        # combo PRESELECTS via ``CTkComboBox.set()`` — which does NOT
-        # fire ``command`` — so only a GENUINE user pick (the combo's
-        # own ``command=``, wired to ``_on_model_pick``) ever writes
-        # settings.json; merely displaying the current override or the
-        # ranked recommendation never does.
+            left, text="Model (image generation)", style="Head.TLabel",
+        ).pack(anchor="w", pady=(2, 2))
         models_row = ttk.Frame(left)
-        models_row.pack(fill="x", pady=(4, 2))
+        models_row.pack(fill="x", pady=(0, 2))
         self._models_btn = rounded_button(
             models_row, "Refresh models", command=self._refresh_models,
             kind="info",
@@ -271,35 +202,87 @@ class ApiImageGenPanel(ttk.Frame):
         picks_row = ttk.Frame(left)
         picks_row.pack(fill="x", pady=2)
         self.model_image_var = tk.StringVar(value="")
-        self.model_vision_var = tk.StringVar(value="")
-        self.model_text_var = tk.StringVar(value="")
-        self._model_vars = {
-            "image": self.model_image_var,
-            "vision": self.model_vision_var,
-            "text": self.model_text_var,
-        }
+        self._model_vars = {"image": self.model_image_var}
         self._model_combos: dict[str, ctk.CTkComboBox] = {}
-        for purpose, label in (
-            ("image", "Image"), ("vision", "Vision"), ("text", "Text"),
-        ):
-            ttk.Label(picks_row, text=f"{label}:").pack(side="left")
-            combo = rounded_combo(
-                picks_row, (), self._model_vars[purpose], width=160,
-                state="disabled",
-                command=partial(self._on_model_pick, purpose),
-            )
-            combo.pack(side="left", padx=(2, 10))
-            self._model_combos[purpose] = combo
-
-        # Force Aspect Ratio target — the SAME AspectRatioCanvas two-way
-        # sync AgentPanel's own Force-Aspect block / AspectSettingsPanel
-        # already use (Rule #5)
+        ttk.Label(picks_row, text="Image:").pack(side="left")
+        combo = rounded_combo(
+            picks_row, (), self.model_image_var, width=200,
+            state="disabled",
+            command=partial(self._on_model_pick, "image"),
+        )
+        combo.pack(side="left", padx=(2, 10))
+        self._model_combos["image"] = combo
+        self.model_show_all_var = tk.BooleanVar(value=False)
+        rounded_switch(
+            picks_row, "show all (debug)", self.model_show_all_var,
+        ).pack(side="left")
+        self.model_show_all_var.trace_add(
+            "write", lambda *_a: self._populate_model_dropdowns()
+        )
+        self._model_hint_var = tk.StringVar(value="")
         ttk.Label(
-            right, text="Force Aspect Ratio target:", style="Head.TLabel",
-        ).pack(anchor="w")
+            left, textvariable=self._model_hint_var, style="Muted.TLabel",
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(anchor="w", pady=(0, 2))
+        self._update_model_hint(self._current_image_model())
+
+        # --- GATING: the "Check API access" probe (spec item 5) -------
+        gate_row = ttk.Frame(left)
+        gate_row.pack(fill="x", pady=(2, 4))
+        self._gate_btn = rounded_button(
+            gate_row, "Check API access", command=self._probe_access,
+            kind="info",
+        )
+        self._gate_btn.pack(side="left")
+        self._gate_var = tk.StringVar(value="")
+        ttk.Label(
+            gate_row, textvariable=self._gate_var, style="Muted.TLabel",
+            wraplength=DENSE_COL_WRAP_PX,
+        ).pack(side="left", padx=(8, 0))
+        self._probe_q: queue.Queue = queue.Queue()
+        self._probe_poll_job: str | None = None
+
+        # --- the four groups, gridded 2x2 like AgentPanel (faza 3) ----
+        content = ttk.Frame(left)
+        content.pack(fill="x", pady=(4, 0))
+        content.columnconfigure(0, weight=1, uniform="apigrp")
+        content.columnconfigure(1, weight=1, uniform="apigrp")
+
+        def group(title: str, r: int, c: int) -> ttk.Frame:
+            outer = ttk.Frame(content)
+            outer.grid(row=r, column=c, sticky="new", padx=(0, 8), pady=2)
+            ttk.Label(outer, text=title, style="Head.TLabel").pack(
+                anchor="w", pady=(2, 2)
+            )
+            body_ = ttk.Frame(outer)
+            body_.pack(fill="x")
+            return body_
+
+        # Pipeline — ALL switches default ON (no native transparency,
+        # spec item 3): _compose_post_save runs whichever are ticked in
+        # the fixed BG -> Crop -> Aspect -> Upscale order, identical to
+        # every AgentPanel-driven site. The Force-Aspect target and the
+        # Upscale gate live right under their switches.
+        g_pipe = group("Pipeline", 0, 0)
+        self.bg_removal_var = tk.BooleanVar(value=True)
+        self.crop_var = tk.BooleanVar(value=True)
+        self.force_aspect_var = tk.BooleanVar(value=True)
+        self.upscale_var = tk.BooleanVar(value=True)
+        self.keep_all_steps_var = tk.BooleanVar(
+            value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
+        )
+        rounded_switch(g_pipe, "BG removal", self.bg_removal_var).pack(
+            anchor="w", pady=1
+        )
+        rounded_switch(g_pipe, "Crop", self.crop_var).pack(
+            anchor="w", pady=1
+        )
+        rounded_switch(
+            g_pipe, "Force Aspect Ratio", self.force_aspect_var,
+        ).pack(anchor="w", pady=1)
         self.force_aspect_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
         self.force_aspect_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
-        fa_box = ttk.Frame(right)
+        fa_box = ttk.Frame(g_pipe)
         fa_box.pack(fill="x", pady=2)
         fa_fields = ttk.Frame(fa_box)
         fa_fields.pack(side="left", anchor="n")
@@ -328,16 +311,13 @@ class ApiImageGenPanel(ttk.Frame):
         self.force_aspect_h_var.trace_add(
             "write", self._on_force_aspect_wh_typed
         )
-
-        # the upscale gate — min-side spinner + embedded FilterEditor,
-        # the SAME shape AgentPanel/UpscaleSettingsPanel already use
-        ttk.Label(
-            right, text="Upscale gate:", style="Head.TLabel",
-        ).pack(anchor="w", pady=(8, 0))
+        rounded_switch(g_pipe, "Upscale", self.upscale_var).pack(
+            anchor="w", pady=1
+        )
         self.up_minside_var = tk.StringVar(
             value=str(UPSCALE_MIN_SIDE_DEFAULT)
         )
-        row = ttk.Frame(right)
+        row = ttk.Frame(g_pipe)
         row.pack(fill="x", pady=2)
         ttk.Label(row, text="min side", width=8).pack(side="left")
         Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
@@ -348,7 +328,7 @@ class ApiImageGenPanel(ttk.Frame):
             wraplength=DENSE_COL_WRAP_PX,
         ).pack(side="left", padx=(4, 0))
         self.upscale_filter = FilterEditor(
-            right,
+            g_pipe,
             conditions=[filters.FilterCondition(
                 kind=FILTER_KIND_ASPECT_RANGE, polarity=FILTER_POLARITY_IF,
                 lo=UPSCALE_ASPECT_MIN, hi=UPSCALE_ASPECT_MAX,
@@ -357,6 +337,53 @@ class ApiImageGenPanel(ttk.Frame):
             on_presets_changed=self._on_filter_presets_changed,
         )
         self.upscale_filter.pack(fill="x", pady=(2, 0))
+        rounded_switch(
+            g_pipe, "Keep every pipeline step (more disk)",
+            self.keep_all_steps_var,
+        ).pack(anchor="w", pady=(3, 1))
+
+        # Run behavior
+        g_run = group("Run behavior", 0, 1)
+        self.report_var = tk.BooleanVar(value=True)
+        rounded_switch(g_run, "Report txt", self.report_var).pack(
+            anchor="w", pady=1
+        )
+
+        # Pacing — ALWAYS OPEN (same decree as AgentPanel's own group):
+        # pace between prompts — run_sheet's own pacing wait, unrelated
+        # to ai.py's internal AI_CALL_PAUSE_S free-tier throttle; no
+        # action-delay field (that is SiteDriver._hesitate()'s DOM
+        # concept — there is no DOM here).
+        g_pace = group("Pacing", 1, 0)
+        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
+        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
+        row = ttk.Frame(g_pace)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="pause", width=12).pack(side="left")
+        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="–").pack(side="left", padx=2)
+        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
+        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
+
+        # Prompt — the SAME prompt_suffix machinery every AgentPanel
+        # already feeds (Rule #5); "white" default (not a site's own
+        # default_background) since the model cannot render real
+        # transparency — see this class's own docstring
+        g_prompt = group("Prompt", 1, 1)
+        self.background_var = tk.StringVar(value="white")
+        self.style_var = tk.StringVar(value=STYLE_DEFAULT)
+        row = ttk.Frame(g_prompt)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Background:").pack(side="left")
+        rounded_combo(
+            row, BACKGROUND_CHOICES, self.background_var, width=105,
+        ).pack(side="left", padx=(2, 0))
+        row = ttk.Frame(g_prompt)
+        row.pack(fill="x", pady=2)
+        ttk.Label(row, text="Style:").pack(side="left")
+        rounded_combo(
+            row, STYLE_CHOICES, self.style_var, width=150,
+        ).pack(side="left", padx=(2, 0))
 
         btn_row = ttk.Frame(self)
         btn_row.pack(fill="x", pady=(10, 0))
@@ -553,34 +580,59 @@ class ApiImageGenPanel(ttk.Frame):
         self._populate_model_dropdowns()
 
     def _populate_model_dropdowns(self) -> None:
-        """Fill each purpose's dropdown with its CAPABLE discovered
-        models (``ai.capable_models``), preselected to the stored
-        override (else ``ai.recommend_model``'s ranked pick) via
+        """Fill the Image dropdown with the IMAGE-CAPABLE discovered
+        models (``ai.capable_models`` — faza 3/P3=A: the models this
+        job actually needs, not all 58; the "show all (debug)" switch
+        widens the list to everything discovered), preselected to the
+        stored override (else ``ai.recommend_model``'s ranked pick) via
         ``combo.set()`` — the widget's OWN method, which edits the
         entry directly and does NOT go through the bound variable's
-        ``command`` callback (see this class's own note on the row's
-        construction) — so populating the list never itself persists
-        anything."""
+        ``command`` callback — so populating the list never itself
+        persists anything. Also refreshes the curated purpose hint for
+        whatever ends up selected."""
         from painter import ai
         from painter.config import MODELS_SETTING
         from painter.settings import load_settings
 
         overrides = load_settings().get(MODELS_SETTING) or {}
-        for purpose, combo in self._model_combos.items():
+        combo = self._model_combos["image"]
+        if self.model_show_all_var.get():
+            names = [m["name"] for m in self._discovered_models]
+        else:
             names = [
                 m["name"]
-                for m in ai.capable_models(self._discovered_models, purpose)
+                for m in ai.capable_models(self._discovered_models, "image")
             ]
-            combo.configure(
-                values=names, state="readonly" if names else "disabled",
-            )
-            override = str(overrides.get(purpose, "") or "").strip()
-            pick = (
-                override if override in names
-                else ai.recommend_model(self._discovered_models, purpose)
-            )
-            if pick:
-                combo.set(pick)
+        combo.configure(
+            values=names, state="readonly" if names else "disabled",
+        )
+        override = str(overrides.get("image", "") or "").strip()
+        pick = (
+            override if override in names
+            else ai.recommend_model(self._discovered_models, "image")
+        )
+        if pick:
+            combo.set(pick)
+            self._update_model_hint(pick)
+
+    def _current_image_model(self) -> str:
+        """The model an actual run would call RIGHT NOW —
+        ``model_for("image")`` (settings override, else the config
+        fallback) — for the hint shown before any discovery."""
+        from painter import ai
+
+        try:
+            return ai.model_for("image")
+        except Exception:  # a broken settings.json must not kill build
+            return ""
+
+    def _update_model_hint(self, name: str) -> None:
+        """The curated one-line "which model for what" note (faza 3,
+        ``config.model_hint`` — substring registry, honest
+        MODEL_HINT_UNKNOWN for anything uncurated)."""
+        from painter.config import model_hint
+
+        self._model_hint_var.set(model_hint(name) if name else "")
 
     def _on_model_pick(self, purpose: str, choice: str) -> None:
         """A GENUINE user selection (the combo's ``command=`` fires
@@ -600,6 +652,8 @@ class ApiImageGenPanel(ttk.Frame):
         models[purpose] = choice
         settings[MODELS_SETTING] = models
         save_settings(settings)
+        if purpose == "image":
+            self._update_model_hint(choice)
 
     def _refresh_start_state(self) -> None:
         style_action_button(

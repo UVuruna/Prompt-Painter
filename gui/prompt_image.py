@@ -52,16 +52,22 @@ class PromptImageSection(ttk.Labelframe):
         parent,
         get_sheet_paths: Callable[[], list[Path]],
         on_change: Callable[[], None] | None = None,
+        enabled_var: tk.BooleanVar | None = None,
+        ref_dir_var: tk.StringVar | None = None,
     ):
         super().__init__(parent, text="Prompt + Image (reference sheets)")
         self._get_sheet_paths = get_sheet_paths
         self._on_change = on_change or (lambda: None)
         self._refresh_job: str | None = None
 
-        # the mode toggle's STATE lives here (the button that flips it
-        # sits beside "Select images…" — PainterGui._build_inputs_tail)
-        self.enabled_var = tk.BooleanVar(value=False)
-        self.ref_dir_var = tk.StringVar(value="")
+        # the mode toggle's STATE (the button that flips it sits beside
+        # "Select images…" in every CollectionsColumn). ``enabled_var``/
+        # ``ref_dir_var`` may be SHARED vars passed in (faza 3 — the
+        # website and API columns each render their own section over
+        # the ONE mode state); a standalone section (tests) makes its
+        # own.
+        self.enabled_var = enabled_var or tk.BooleanVar(value=False)
+        self.ref_dir_var = ref_dir_var or tk.StringVar(value="")
 
         row = ttk.Frame(self)
         row.pack(fill="x", pady=(2, 2))

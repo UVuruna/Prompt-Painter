@@ -44,15 +44,14 @@ from . import widgets
 from .agent_panel import AgentPanel
 from .api_panel import ApiImageGenPanel
 from .dash_panels import DashPanel, JobPanel
+from .collections_column import CollectionsColumn
 from .logic import _visible_agent_slots, menu_min_size
 from .menu import MENU_GRID_PADX, IconBar, MainMenu
-from .prompt_image import PromptImageSection
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
 from .switch import DayNightSwitch
 from .theme import (
     apply_theme,
     register_painter_day,
-    skin_listbox,
     skin_text,
 )
 from .tool_dash import AiCheckPanel, DashGrid, ToolPanel
@@ -67,7 +66,6 @@ from .tool_panels import (
 from .widgets import (
     _style_icon_bar_button,
     rounded_button,
-    rounded_entry,
     set_font_base,
     tk_font,
 )
@@ -250,11 +248,18 @@ class BuildMixin:
         self._controls_box = ttk.Frame(self._main_view)
         # UI-SKETCH (owner 2026-07-29; širine/visine owner 2026-08-03,
         # UV tačka 3): the setup screen is LEFT settings / RIGHT input —
-        # the agent panels on the left, the collections drop list +
-        # output + Select + the Prompt+Image section on the right. The
-        # columns split the WIDTH 50-50; the right column's two
-        # sections (Collections above, Prompt+Image below, when ON)
-        # split its HEIGHT 50-50 and stretch to fill it.
+        # the agent panels on the left, the shared CollectionsColumn
+        # (queue + output + Select + the Prompt+Image toggle/section,
+        # faza 3 — the SAME component the API Image GEN panel hosts)
+        # on the right. The columns split the WIDTH 50-50; the column
+        # itself splits its height 50-50 (Collections / Prompt+Image).
+        # The SHARED Prompt+Image state (one mode, every column) and
+        # the shared Output var are created FIRST — every column
+        # renders over them.
+        self.out_var = tk.StringVar(value=str(DEFAULT_OUT_DIR))
+        self._pi_enabled_var = tk.BooleanVar(value=False)
+        self._pi_ref_dir_var = tk.StringVar(value="")
+        self._collections_columns: list[CollectionsColumn] = []
         setup = ttk.Frame(self._controls_box)
         setup.pack(fill="both", expand=True, pady=(0, 6))
         setup.columnconfigure(0, weight=1, uniform="setupcol")
@@ -262,26 +267,15 @@ class BuildMixin:
         setup.rowconfigure(0, weight=1)
         setup_left = ttk.Frame(setup)
         setup_left.grid(row=0, column=0, sticky="nsew")
-        setup_right = ttk.Frame(setup)
-        setup_right.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
-        setup_right.columnconfigure(0, weight=1)
-        setup_right.rowconfigure(0, weight=1, uniform="setuprow")
-        setup_right.rowconfigure(1, weight=1, uniform="setuprow")
-        right_top = ttk.Frame(setup_right)
-        right_top.grid(row=0, column=0, sticky="nsew")
         self._build_options(setup_left)
-        self._build_queue(right_top)
-        self._build_inputs_tail(right_top)
-        # PROMPT + IMAGE (faza 2, owner 2026-08-03): the reference-run
-        # section — built once, gridded into the right column's lower
-        # half ONLY while the mode is on (_apply_prompt_image_state)
-        self._pi_section = PromptImageSection(
-            setup_right,
-            get_sheet_paths=lambda: list(self._sheets),
-            on_change=self._schedule_save,
-        )
-        self._pi_section.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
-        self._pi_section.grid_remove()
+        main_column = CollectionsColumn(setup, self)
+        main_column.grid(row=0, column=1, sticky="nsew", padx=(12, 0))
+        # the canonical aliases older call sites read (the website
+        # column is the primary): the queue listbox, the Select door,
+        # and the Prompt+Image section the settings/jobs mixins query
+        self.sheet_list = main_column.sheet_list
+        self.btn_select = main_column.btn_select
+        self._pi_section = main_column.pi_section
         self._build_toolbar(self._controls_box)
         self._build_compact(self._main_view)
         self._build_views(self._main_view)
@@ -388,6 +382,12 @@ class BuildMixin:
                 on_stop=self._stop_site,
                 filter_presets=self._filter_presets,
                 on_filter_presets_changed=self._on_filter_presets_changed,
+                # faza 3 (owner UV tačka 5): the API panel hosts its
+                # OWN CollectionsColumn — same queue, same output var,
+                # same Prompt+Image mode as the website setup screen
+                build_collections=lambda parent: CollectionsColumn(
+                    parent, self
+                ),
             ),
         }
 
@@ -761,90 +761,36 @@ class BuildMixin:
 
     # --- construction --------------------------------------------------
 
-    def _build_queue(self, parent) -> None:
-        lf = ttk.Labelframe(
-            parent, text="Collections (prompt .md files, one image set each)"
-        )
-        # fill the right column's upper half (owner 2026-08-03, UV
-        # tačka 3: both right sections stretch over the full height)
-        lf.pack(fill="both", expand=True, pady=(0, 6))
-        self.sheet_list = tk.Listbox(
-            lf, height=5, activestyle="none", font=tk_font("mono")
-        )
-        skin_listbox(self.sheet_list)
-        self.sheet_list.pack(side="left", fill="both", expand=True)
-        col = ttk.Frame(lf)
-        col.pack(side="left", padx=(8, 0), anchor="n")
-        rounded_button(
-            col, "Add…", command=self._add_sheets, icon_name="add",
-            width=110, icon_edge=True,
-        ).pack(fill="x")
-        rounded_button(
-            col, "Remove", command=self._remove_sheet, icon_name="remove",
-            width=110, icon_edge=True,
-        ).pack(fill="x", pady=4)
-        rounded_button(
-            col, "Clear", command=self._clear_sheets, icon_name="clear",
-            width=110, icon_edge=True,
-        ).pack(fill="x")
-        rounded_button(
-            col, "Add folder…", command=self._add_sheets_folder,
-            icon_name="add", width=110, icon_edge=True,
-        ).pack(fill="x", pady=(4, 0))
-
-    def _build_inputs_tail(self, parent) -> None:
-        """The RIGHT column's tail (UI-SKETCH, owner 2026-07-29): the
-        Output folder + the Select-images door, right under the
-        collections list — plus the PROMPT + IMAGE mode toggle (faza 2,
-        owner 2026-08-03, "TAJ BUTTON tamo gde je SELECT IMAGES"),
-        which reveals the reference-run section below."""
-        row = ttk.Frame(parent)
-        row.pack(fill="x", pady=(4, 2))
-        ttk.Label(row, text="Output:", width=8).pack(side="left")
-        self.out_var = tk.StringVar(value=str(DEFAULT_OUT_DIR))
-        rounded_entry(row, textvariable=self.out_var).pack(
-            side="left", fill="x", expand=True
-        )
-        rounded_button(
-            row, "Browse…", command=self._pick_out,
-        ).pack(side="left", padx=(8, 0))
-        row = ttk.Frame(parent)
-        row.pack(fill="x", pady=(4, 0))
-        self.btn_select = rounded_button(
-            row, "Select images…", command=self._select_images,
-        )
-        self.btn_select.pack(side="left")
-        self.btn_prompt_image = rounded_button(
-            row, "Prompt + Image", command=self._toggle_prompt_image,
-        )
-        self.btn_prompt_image.pack(side="left", padx=(8, 0))
-
     # --- PROMPT + IMAGE mode (faza 2, owner 2026-08-03) ----------------
+    # (the queue/output/Select widgets themselves live in the shared
+    # CollectionsColumn — gui/collections_column.py, faza 3)
 
     def _toggle_prompt_image(self) -> None:
-        self._pi_section.enabled_var.set(
-            not self._pi_section.enabled_var.get()
-        )
+        self._pi_enabled_var.set(not self._pi_enabled_var.get())
         self._apply_prompt_image_state()
         self._schedule_save()
 
     def _apply_prompt_image_state(self) -> None:
-        """Reconcile the mode's surfaces to ``enabled_var``: the section
-        shows (and refreshes its eligibility view) only while ON; the
-        toggle button reads filled-ON / outline-OFF — the SAME visual
-        language the IconBar's live tiles already speak. Called after
-        the toggle, and once at startup after the settings restore."""
-        on = self._pi_section.enabled_var.get()
-        if on:
-            self._pi_section.grid()
-            self._pi_section.refresh()
-        else:
-            self._pi_section.grid_remove()
-        # the website tile's indigo accent — this mode belongs to the
-        # gen-sites family, same as the tile that hosts it
-        _style_icon_bar_button(
-            self.btn_prompt_image, ("#4338ca", "#818cf8"), active=on
-        )
+        """Reconcile the mode's surfaces to the SHARED
+        ``_pi_enabled_var`` — in EVERY registered CollectionsColumn
+        (faza 3: the website setup's and the API panel's): each
+        column's section shows (and refreshes its eligibility view)
+        only while ON; each toggle button reads filled-ON /
+        outline-OFF — the SAME visual language the IconBar's live
+        tiles already speak. Called after any toggle, and once at
+        startup after the settings restore."""
+        on = self._pi_enabled_var.get()
+        for column in self._collections_columns:
+            if on:
+                column.pi_section.grid()
+                column.pi_section.refresh()
+            else:
+                column.pi_section.grid_remove()
+            # the website tile's indigo accent — this mode belongs to
+            # the gen family, same as the tile that hosts it
+            _style_icon_bar_button(
+                column.btn_prompt_image, ("#4338ca", "#818cf8"), active=on
+            )
         self._scroll.refresh()
 
     def _build_options(self, parent) -> None:
