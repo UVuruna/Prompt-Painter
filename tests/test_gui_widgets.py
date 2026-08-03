@@ -248,3 +248,86 @@ def test_section_re_toggling_the_same_state_is_a_no_op(root):
     )
     section.toggle(open_=False)  # already collapsed
     assert calls == []
+
+
+# --- FlowRow: the NEVER-CLIP primitive (owner 2026-08-03, slika 1) ----
+# The owner's binding rule for the setup screen: an element may shrink
+# or move to a new row, but "ni pod kojim uslovima ne smeš da sečeš
+# elemente da oni izlaze iz vidokruga". These pin exactly that.
+
+
+def _flow_with(root, widths, avail):
+    """A FlowRow of fixed-width children, laid out for ``avail`` px."""
+    from gui.widgets import FlowRow
+
+    host = ttk.Frame(root, width=avail, height=200)
+    host.pack_propagate(False)
+    host.pack()
+    flow = FlowRow(host, gap=0, row_gap=0)
+    flow.pack(fill="x")
+    for w in widths:
+        flow.add(tk.Frame(flow, width=w, height=10))
+    root.update_idletasks()
+    flow.reflow(avail)  # withdrawn root: winfo_width stays 1, pass it
+    return flow
+
+
+def test_flow_row_wraps_instead_of_running_off_the_edge(root):
+    flow = _flow_with(root, [100, 100, 100], avail=250)
+    rows = [w.place_info()["y"] for w in flow._items]
+    assert rows[0] == rows[1]      # two fit on the first row
+    assert rows[2] != rows[0]      # the third WRAPS, never clipped
+    for w in flow._items:
+        assert int(w.place_info()["x"]) + int(w.winfo_reqwidth()) <= 250
+
+
+def test_flow_row_never_truncates_an_oversized_element(root):
+    """A child wider than the whole row keeps its FULL width on a row
+    of its own — shrinking is the caller's job, cutting is nobody's."""
+    flow = _flow_with(root, [60, 400], avail=200)
+    assert int(flow._items[1].winfo_reqwidth()) == 400
+    assert flow._items[1].place_info()["y"] != flow._items[0].place_info()["y"]
+
+
+def test_flow_row_requests_room_for_its_widest_element(root):
+    """The frame reports the widest child as its own requested width —
+    that is the floor the window's computed minsize rests on."""
+    flow = _flow_with(root, [60, 180, 90], avail=400)
+    assert flow.winfo_reqwidth() >= 180
+
+
+def test_flow_row_reflows_when_the_width_changes(root):
+    flow = _flow_with(root, [100, 100], avail=250)
+    assert flow._items[0].place_info()["y"] == flow._items[1].place_info()["y"]
+    flow.reflow(150)
+    assert flow._items[0].place_info()["y"] != flow._items[1].place_info()["y"]
+
+
+def test_accordion_folds_the_previously_open_switch(root):
+    from gui.widgets import ExpanderAccordion
+
+    acc = ExpanderAccordion()
+    host = ttk.Frame(root)
+    a, _va, _ba = make_switch(
+        root, on=True, build_sub=lambda box: None, accordion=acc,
+        sub_host=host,
+    )
+    b, _vb, _bb = make_switch(
+        root, on=True, build_sub=lambda box: None, accordion=acc,
+        sub_host=host,
+    )
+    a.toggle(open_=True)
+    b.toggle(open_=True)
+    assert b.is_open
+    assert not a.is_open
+    assert a.sub.winfo_manager() == ""
+
+
+def test_sub_host_opens_the_fine_tune_unindented(root):
+    host = ttk.Frame(root)
+    sw, _var, _built = make_switch(
+        root, on=True, build_sub=lambda box: None, sub_host=host,
+    )
+    sw.toggle(open_=True)
+    assert sw.sub.winfo_parent() == str(host)
+    assert int(sw.sub.pack_info()["padx"]) == 0

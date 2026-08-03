@@ -15,6 +15,25 @@ former single-file `gui.py` (root Rule #20 god-file refactor, step
 `gui` submodule is `gui.icons.icon` (`rounded_button`'s optional
 icon).
 
+**The never-clip primitives** (owner 2026-08-03, slika 1 — "ni pod
+kojim uslovima ne smeš da sečeš elemente da oni izlaze iz vidokruga"):
+`FlowRow` lays its children out left-to-right with `place` and WRAPS
+the overflow onto further rows instead of letting it fall off the
+right edge, reporting its widest child as its own requested width so
+the computed window minsize never drops below one whole element; it
+re-runs on the next idle until a pass reproduces the previous one, so
+a child whose real size is only known after realization can never
+leave the last row half-hidden. CustomTkinter widgets must go through
+`FlowRow.cell()`/`FlowRow.switch()` — CTk rescales `place`
+coordinates, which would push a measured row past the edge it was
+measured for; `add()` refuses them loudly. `fit_switch`/
+`refit_switches` re-width a `CTkSwitch` to its own measured label
+(CTk fixes the frame at `width` and turns propagation off, so
+"Continue nudge" used to render as "Continue n"). `ExpanderAccordion`
+enforces one-open-fine-tune-per-panel, and `ExpandableSwitch` takes an
+optional `sub_host` so that fine-tune opens full-width below a whole
+band instead of indented under its own switch.
+
 Two smooth-field fixes live here alongside the factories:
 `_untheme_inner_entry` unsubscribes the plain `tkinter.Entry` inside
 every `CTkEntry`/`CTkComboBox` from ttkbootstrap's automatic re-style

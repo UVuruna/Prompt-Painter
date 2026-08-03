@@ -335,24 +335,51 @@ def test_expanding_a_switch_calls_on_layout_change_after_the_reveal(root):
 
 def test_pacing_group_is_always_open(root):
     """owner 2026-08-03 (UV tačka 3, "Pacing uvek otvoren"): the old
-    folded ExpandableSection is gone — the pacing rows build straight
-    into their OWN group body, mapped from construction, no caret."""
+    folded ExpandableSection is gone — the pacing cells build straight
+    into their band's FlowRow, placed from construction, no caret."""
     panel = make_panel(root)
     assert not hasattr(panel, "_sec_pacing")
-    assert panel._group_pacing.winfo_children()  # rows exist
-    for child in panel._group_pacing.winfo_children():
-        assert child.winfo_manager() == "pack"
+    pacing_flow = panel._flows[2]  # Pipeline, Run behavior, Pacing, ...
+    assert pacing_flow._items  # the three pacing cells exist
+    assert pacing_flow.winfo_manager() == "pack"
 
 
-def test_groups_grid_as_the_owners_two_by_two(root):
-    """owner 2026-08-03 (UV tačka 3): Pipeline | Run behavior on the
-    first row, Pacing | Prompt on the second."""
+def test_groups_stack_as_full_width_bands(root):
+    """owner 2026-08-03 (slika 1): the 2x2 grid is GONE — every group
+    is its own full-width band, one per row in column 0, so an
+    expanded fine-tune gets the panel's whole width."""
     panel = make_panel(root)
-    cells = {
+    cells = sorted(
         (int(w.grid_info()["row"]), int(w.grid_info()["column"]))
         for w in panel._groups
-    }
-    assert cells == {(0, 0), (0, 1), (1, 0), (1, 1)}
+    )
+    assert cells == [(0, 0), (1, 0), (2, 0), (3, 0)]
+
+
+def test_only_one_fine_tune_stays_open(root):
+    """owner 2026-08-03 (slika 1, "samo jedan setting moze biti
+    expandovan"): the accordion spans the WHOLE panel — opening
+    Upscale (Pipeline band) folds AI checker (Run behavior band)."""
+    panel = make_panel(root)
+    panel.checker_var.set(True)      # a live turn-ON auto-expands
+    assert panel._sw_checker.is_open
+    panel._sw_upscale.toggle(open_=True)
+    assert panel._sw_upscale.is_open
+    assert not panel._sw_checker.is_open
+
+
+def test_fine_tune_opens_below_the_switches_full_width(root):
+    """owner 2026-08-03: the sub-panel opens into the band's own
+    full-width HOST below the (wrapping) switch row — NOT indented
+    under its switch, which is what used to cut it off."""
+    panel = make_panel(root)
+    panel._sw_upscale.toggle(open_=True)
+    sub = panel._sw_upscale.sub
+    # the sub's parent is the band host, a SIBLING of the flow row —
+    # never the switch widget itself
+    assert sub.winfo_parent() != str(panel._sw_upscale)
+    assert sub.pack_info()["fill"] == "x"
+    assert int(sub.pack_info()["padx"]) == 0  # no indent — full width
 
 
 def test_expander_on_layout_change_defaults_to_a_harmless_noop(root):

@@ -15,9 +15,15 @@ refactor, step 4/8).
 list Website Image GEN already drives — never a folder of existing
 images, so a Folder/Files picker would be actively wrong here. Faza 3
 (owner 2026-08-03, UV tačka 5) put it on THE SHARED SETUP SKELETON:
-LEFT = settings (the Model group on top, then the same four groups
-`AgentPanel` grids 2×2 — Pipeline | Run behavior / Pacing (always
-open) | Prompt, with the Force-Aspect target and the Upscale gate
+LEFT = settings (the Model group on top, then the same FULL-WIDTH
+BANDS `AgentPanel` stacks — owner 2026-08-03 slika 1, replacing the
+2×2 grid: a `FlowRow` per band whose controls WRAP instead of being
+cut off, and a full-width host below them for whichever fine-tune is
+open (`ExpanderAccordion`: only one at a time). Here Run behavior,
+Pacing and Prompt hold one-to-two controls each, so they share ONE
+band — "objedini ih u jednu kolonu jer imaju malo elemenata" — while
+the settings column takes 2/3 of the width, with the Force-Aspect
+target and the Upscale gate
 living under their own Pipeline switches — as `ExpandableSwitch`es
 since owner 2026-08-03, folded by default and `eager=True` so the
 canvas binding and the FilterEditor stack exist regardless: keeping

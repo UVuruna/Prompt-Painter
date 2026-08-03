@@ -65,6 +65,8 @@ from .theme import THEME_TOPLEVELS
 from .tool_panels import ASPECT_DIALOG_ENTRY_W, DENSE_COL_WRAP_PX
 from .widgets import (
     ExpandableSwitch,
+    ExpanderAccordion,
+    FlowRow,
     Spinner,
     quiet_restore,
     rounded_button,
@@ -337,12 +339,17 @@ class AgentPanel(ttk.Labelframe):
             value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
         )
 
-        # the four groups below live in ONE grid container, arranged
-        # 2x2 — see _stack_groups (owner 2026-08-03, UV tačka 3:
-        # Pipeline | Run behavior above, Pacing | Prompt below)
+        # the four groups below are FULL-WIDTH BANDS stacked vertically
+        # (owner 2026-08-03, slika 1 — replacing the 2x2 grid of
+        # 2026-08-03 morning): each band's switches FLOW and WRAP
+        # (FlowRow) and its fine-tune opens into a full-width host
+        # BELOW them, so no element is ever cut off the right edge.
         self._content = ttk.Frame(self)
         self._content.pack(fill="x")
         self._groups: list[ttk.Frame] = []  # Pipeline/Run/Pacing/Prompt
+        self._flows: list[FlowRow] = []     # every band's flow row
+        # panel-wide "only ONE fine-tune open" (owner 2026-08-03)
+        self._accordion = ExpanderAccordion()
 
         # UI-SKETCH (owner 2026-07-29; regrouped 2026-08-03): the
         # settings are FOUR GROUPS — Pipeline / Run behavior / Pacing /
@@ -358,111 +365,86 @@ class AgentPanel(ttk.Labelframe):
         # is gone, so its open/closed state has to stay reachable (the
         # settings round-trip, a future "expand all", and the tests
         # that pin the auto-expand contract all read these).
-        self._group_pipeline = self._build_group(self._content, "Pipeline")
+        flow, host = self._build_group(self._content, "Pipeline")
         self._sw_bg = ExpandableSwitch(
-            self._group_pipeline, "BG removal", self.bg_removal_var,
+            flow, "BG removal", self.bg_removal_var,
             build_sub=self._build_bg_sub, eager=True,
             on_layout_change=self._on_layout_change,
+            sub_host=host, accordion=self._accordion,
         )
-        self._sw_bg.pack(fill="x", pady=1)
-        rounded_switch(
-            self._group_pipeline, "Crop", self.crop_var,
-        ).pack(anchor="w", pady=1)
+        flow.add(self._sw_bg)
+        flow.switch("Crop", self.crop_var)
         self._sw_aspect = ExpandableSwitch(
-            self._group_pipeline, "Force aspect ratio",
-            self.force_aspect_var,
+            flow, "Force aspect ratio", self.force_aspect_var,
             build_sub=self._build_aspect_sub, eager=True,
             on_layout_change=self._on_layout_change,
+            sub_host=host, accordion=self._accordion,
         )
-        self._sw_aspect.pack(fill="x", pady=1)
+        flow.add(self._sw_aspect)
         self._sw_upscale = ExpandableSwitch(
-            self._group_pipeline, "Upscale", self.upscale_var,
+            flow, "Upscale", self.upscale_var,
             build_sub=self._build_upscale_sub, eager=True,
             on_layout_change=self._on_layout_change,
+            sub_host=host, accordion=self._accordion,
         )
-        self._sw_upscale.pack(fill="x", pady=1)
-        rounded_switch(
-            self._group_pipeline, "Keep every pipeline step (more disk)",
-            self.keep_all_steps_var,
-        ).pack(anchor="w", pady=(3, 1))
+        flow.add(self._sw_upscale)
+        flow.switch(
+            "Keep every pipeline step (more disk)", self.keep_all_steps_var,
+        )
 
-        self._group_run = self._build_group(self._content, "Run behavior")
-        rounded_switch(
-            self._group_run, "Report txt", self.report_var,
-        ).pack(anchor="w", pady=1)
-        rounded_switch(
-            self._group_run, "Safer retry", self.safer_var,
-        ).pack(anchor="w", pady=1)
-        rounded_switch(
-            self._group_run, "Continue nudge", self.continue_nudge_var,
-        ).pack(anchor="w", pady=1)
+        flow, host = self._build_group(self._content, "Run behavior")
+        flow.switch("Report txt", self.report_var)
+        flow.switch("Safer retry", self.safer_var)
+        flow.switch("Continue nudge", self.continue_nudge_var)
         self._sw_checker = ExpandableSwitch(
-            self._group_run, "AI checker", self.checker_var,
+            flow, "AI checker", self.checker_var,
             build_sub=self._build_checker_sub, eager=True,
             on_layout_change=self._on_layout_change,
+            sub_host=host, accordion=self._accordion,
         )
-        self._sw_checker.pack(fill="x", pady=1)
+        flow.add(self._sw_checker)
 
         # Pacing — its OWN group, ALWAYS OPEN (owner 2026-08-03, UV
         # tačka 3; replacing the folded ExpandableSection that used to
         # sit inside Run behavior): the rows build straight into the
         # group body, no caret, nothing to miss before a Start
-        self._group_pacing = self._build_group(self._content, "Pacing")
-        self._build_pacing_sub(self._group_pacing)
+        flow, _host = self._build_group(self._content, "Pacing")
+        self._build_pacing_sub(flow)
 
-        self._group_prompt = self._build_group(self._content, "Prompt")
-        row = ttk.Frame(self._group_prompt)
-        row.pack(fill="x", pady=1)
-        ttk.Label(row, text="Background:", width=12).pack(side="left")
+        flow, _host = self._build_group(self._content, "Prompt")
+        cell = flow.cell()
+        ttk.Label(cell, text="Background:").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, BACKGROUND_CHOICES, self.background_var, width=105,
-        ).pack(side="left", padx=(2, 0))
+            cell, BACKGROUND_CHOICES, self.background_var, width=105,
+        ).pack(side="left")
         # F7: the "custom" background color — picking "custom" opens
         # the color wheel; the swatch shows the hex, click reopens
-        self._custom_swatch = tk.Label(row, text="", width=8, cursor="hand2")
+        self._custom_swatch = tk.Label(cell, text="", width=8, cursor="hand2")
         self._custom_swatch.bind(
             "<Button-1>", lambda _e: self._pick_custom_background()
         )
-        row = ttk.Frame(self._group_prompt)
-        row.pack(fill="x", pady=1)
-        ttk.Label(row, text="Style:", width=12).pack(side="left")
+        cell = flow.cell()
+        ttk.Label(cell, text="Style:").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, STYLE_CHOICES, self.style_var, width=150,
-        ).pack(side="left", padx=(2, 0))
-        row = ttk.Frame(self._group_prompt)
-        row.pack(fill="x", pady=1)
-        ttk.Label(row, text="New chat:", width=12).pack(side="left")
+            cell, STYLE_CHOICES, self.style_var, width=140,
+        ).pack(side="left")
+        cell = flow.cell()
+        ttk.Label(cell, text="New chat:").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, NEW_CHAT_CHOICES, self.new_chat_var, width=100,
-        ).pack(side="left", padx=(2, 0))
+            cell, NEW_CHAT_CHOICES, self.new_chat_var, width=100,
+        ).pack(side="left")
         _HELPER_LABEL = {
             "no_mirror": "no mirror",
             "no_empty_space": "no empty space",
             "no_grainy": "no grainy",
         }
-        # the helper switches WRAP (owner 2026-08-03: "ne može da
-        # ostane ovako da se ne vidi — prelomi u 2 reda ako treba ili
-        # više redova"): this group is one cell of the 2x2 settings
-        # grid, so a single row of three switches ran off its right
-        # edge and the last one was invisible. The label takes its own
-        # line and the switches grid TWO PER ROW underneath, both
-        # columns weighted — adding a fourth helper simply opens a
-        # third row, no width math to redo.
-        helpers_row = ttk.Frame(self._group_prompt)
-        helpers_row.pack(fill="x", pady=(3, 1))
-        ttk.Label(helpers_row, text="Helpers:").pack(anchor="w")
-        helpers_grid = ttk.Frame(helpers_row)
-        helpers_grid.pack(fill="x", padx=(12, 0))
-        helpers_grid.columnconfigure(0, weight=1, uniform="helper")
-        helpers_grid.columnconfigure(1, weight=1, uniform="helper")
-        for i, key in enumerate(HELPER_CHOICES):
-            rounded_switch(
-                helpers_grid, _HELPER_LABEL.get(key, key),
-                self.helper_vars[key],
-            ).grid(
-                row=i // 2, column=i % 2, sticky="w", pady=1,
-                padx=(0, 6),
-            )
+        # the helper switches are ordinary flow elements now (owner
+        # 2026-08-03, slika 1): each one wraps on its own when the
+        # width runs out, so no fixed 2-per-row grid to redo when a
+        # fourth helper arrives — and none of them can be cut off.
+        flow.add(ttk.Label(flow, text="Helpers:"))
+        for key in HELPER_CHOICES:
+            flow.switch(_HELPER_LABEL.get(key, key), self.helper_vars[key])
 
         self.background_var.trace_add(
             "write", lambda *_a: self._on_background_change()
@@ -511,36 +493,39 @@ class AgentPanel(ttk.Labelframe):
         THEME_TOPLEVELS.append(self)
         self.bind("<Destroy>", self._on_destroy)
 
-    def _build_group(self, parent, title: str) -> ttk.Frame:
-        """One UI-SKETCH settings GROUP: a heading + its body frame.
-        Returns the BODY (children pack into it); the outer frame is
-        gridded by ``_stack_groups``."""
+    def _build_group(self, parent, title: str):
+        """One settings BAND (owner 2026-08-03, slika 1): a heading, a
+        wrapping ``FlowRow`` of controls, and the full-width HOST the
+        band's fine-tune opens into, below the (possibly wrapped) rows
+        of controls. Returns ``(flow, host)``."""
         outer = ttk.Frame(parent)
         ttk.Label(outer, text=title, style="Head.TLabel").pack(
             anchor="w", pady=(2, 2)
         )
-        body = ttk.Frame(outer)
-        body.pack(fill="x")
+        flow = FlowRow(outer)
+        flow.pack(fill="x")
+        self._flows.append(flow)
+        host = ttk.Frame(outer)
+        host.pack(fill="x")
         self._groups.append(outer)
-        return body
+        return flow, host
 
     def _stack_groups(self) -> None:
-        """Grid the four GROUPS as the owner's 2x2 (owner 2026-08-03,
-        UV tačka 3 — "Run behavior ide desno; Pacing uvek otvoren levo,
-        Prompt desno od njega"):
-
-            Pipeline | Run behavior
-            Pacing   | Prompt
-
-        Both columns share the width evenly (uniform + weight 1). This
-        panel lives in the setup screen's LEFT settings column — now a
-        true 50% of the window (2026-08-03), wide enough for two group
-        columns where the old 2026-07-29 single stack was not."""
+        """Stack the four BANDS vertically, each at the panel's FULL
+        width (owner 2026-08-03, slika 1 — "extra additional setup
+        zauzima ceo width levog panela"). The old 2x2 grid halved every
+        band's width, which is exactly what pushed Upscale's filter row
+        and Force-aspect's canvas off the visible edge."""
         for i, w in enumerate(self._groups):
-            r, c = divmod(i, 2)
-            w.grid(row=r, column=c, sticky="new", padx=(0, 8), pady=2)
-        self._content.columnconfigure(0, weight=1, uniform="agentgrp")
-        self._content.columnconfigure(1, weight=1, uniform="agentgrp")
+            w.grid(row=i, column=0, sticky="new", pady=(2, 4))
+        self._content.columnconfigure(0, weight=1)
+
+    def reflow(self) -> None:
+        """Re-wrap every band for the current width — called on a font
+        zoom, where each element's requested width changes but no
+        <Configure> of the bands themselves has to follow."""
+        for flow in self._flows:
+            flow.reflow()
 
     # --- UI-SKETCH sub-panel builders (owner 2026-07-29) --------------
     # Each builds ONE switch's fine-tune into its ExpandableSwitch.sub
@@ -550,25 +535,27 @@ class AgentPanel(ttk.Labelframe):
     def _build_bg_sub(self, box) -> None:
         """BG removal's own knobs — the SAME set the standalone BG tool
         exposes, passed into ``remove_background`` (see ``bg_params``)."""
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="mode", width=10).pack(side="left")
+        # mode / tolerance / reach are three flow cells — side by side
+        # across the full band, wrapping when the window narrows
+        flow = FlowRow(box)
+        flow.pack(fill="x")
+        self._flows.append(flow)
+        cell = flow.cell()
+        ttk.Label(cell, text="mode").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, tuple(BG_MODE_LABEL), self.bg_mode_var, width=100,
+            cell, tuple(BG_MODE_LABEL), self.bg_mode_var, width=100,
         ).pack(side="left")
-        self._bg_swatch = tk.Label(row, text="", width=8, cursor="hand2")
+        self._bg_swatch = tk.Label(cell, text="", width=8, cursor="hand2")
         self._bg_swatch.pack(side="left", padx=(8, 0))
         self._bg_swatch.bind("<Button-1>", lambda _e: self._pick_bg_color())
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="tolerance", width=10).pack(side="left")
-        Spinner(row, self.bg_tolerance_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="% per channel").pack(side="left", padx=(4, 0))
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="reach", width=10).pack(side="left")
+        cell = flow.cell()
+        ttk.Label(cell, text="tolerance").pack(side="left", padx=(0, 4))
+        Spinner(cell, self.bg_tolerance_var, step=1.0).pack(side="left")
+        ttk.Label(cell, text="% per channel").pack(side="left", padx=(4, 0))
+        cell = flow.cell()
+        ttk.Label(cell, text="reach").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, tuple(BG_REACH_LABEL), self.bg_reach_var, width=110,
+            cell, tuple(BG_REACH_LABEL), self.bg_reach_var, width=110,
         ).pack(side="left")
         self.bg_mode_var.trace_add(
             "write", lambda *_a: self._render_bg_swatch()
@@ -581,8 +568,14 @@ class AgentPanel(ttk.Labelframe):
     def _build_aspect_sub(self, box) -> None:
         """Force Aspect Ratio's target — W/H entries mirrored two-way
         with the SAME AspectRatioCanvas the standalone tool uses."""
-        fa_fields = ttk.Frame(box)
-        fa_fields.pack(fill="x", pady=2)
+        # W/H fields and the canvas are two FLOW cells (owner
+        # 2026-08-03, slika 2 — the canvas used to be cut in half):
+        # side by side while the band is wide, canvas on its own row
+        # the moment it no longer fits.
+        flow = FlowRow(box)
+        flow.pack(fill="x")
+        self._flows.append(flow)
+        fa_fields = flow.cell()
         ttk.Label(fa_fields, text="W").pack(side="left", padx=(0, 4))
         self._force_aspect_w_entry = rounded_entry(
             fa_fields, width=ASPECT_DIALOG_ENTRY_W,
@@ -598,8 +591,7 @@ class AgentPanel(ttk.Labelframe):
             textvariable=self.force_aspect_h_var, justify="center",
         )
         self._force_aspect_h_entry.pack(side="left")
-        canvas_row = ttk.Frame(box)
-        canvas_row.pack(fill="x", pady=(2, 0))
+        canvas_row = flow.cell()
         self._force_aspect_canvas = AspectRatioCanvas(
             canvas_row,
             w=int(self.force_aspect_w_var.get()),
@@ -619,15 +611,19 @@ class AgentPanel(ttk.Labelframe):
         + the FilterEditor stack deciding WHICH images qualify;
         ``upscale_params()`` resolves both into ``upscale_if_small``'s
         kwargs."""
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="min side", width=10).pack(side="left")
-        Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
+        # min side + its explanation are two flow cells (owner
+        # 2026-08-03, slika 3: the sentence used to be sliced mid-word)
+        flow = FlowRow(box)
+        flow.pack(fill="x")
+        self._flows.append(flow)
+        cell = flow.cell()
+        ttk.Label(cell, text="min side").pack(side="left", padx=(0, 4))
+        Spinner(cell, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
             side="left"
         )
-        ttk.Label(
-            row, text="px (the smaller side reaches this)"
-        ).pack(side="left", padx=(4, 0))
+        flow.add(ttk.Label(
+            flow, text="px (the smaller side reaches this)"
+        ))
         self.upscale_filter = FilterEditor(
             box,
             conditions=self._default_upscale_conditions,
@@ -639,19 +635,17 @@ class AgentPanel(ttk.Labelframe):
     def _build_checker_sub(self, box) -> None:
         """The parallel Checker AI's fine-tune (F6): the prompt-match
         toggle + the Fixer AI (auto-fix + api/website mode)."""
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        rounded_switch(
-            row, "Check prompt match too", self.checker_prompt_var,
-        ).pack(side="left")
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        rounded_switch(row, "Auto-fix flagged images", self.fixer_var).pack(
+        flow = FlowRow(box)
+        flow.pack(fill="x")
+        self._flows.append(flow)
+        flow.switch("Check prompt match too", self.checker_prompt_var)
+        cell = flow.cell()
+        rounded_switch(cell, "Auto-fix flagged images", self.fixer_var).pack(
             side="left"
         )
-        ttk.Label(row, text="via", width=4).pack(side="left", padx=(8, 0))
+        ttk.Label(cell, text="via").pack(side="left", padx=(8, 4))
         rounded_combo(
-            row, FIXER_MODE_CHOICES, self.fixer_mode_var, width=90,
+            cell, FIXER_MODE_CHOICES, self.fixer_mode_var, width=90,
         ).pack(side="left")
         ttk.Label(
             box,
@@ -660,28 +654,29 @@ class AgentPanel(ttk.Labelframe):
             style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
         ).pack(anchor="w", pady=(0, 2))
 
-    def _build_pacing_sub(self, box) -> None:
-        """Run pacing (the old gear's top rows): the paced pause range,
-        the human action-delay range, and the F2 on-degrade choice."""
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="pause", width=12).pack(side="left")
-        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="action delay", width=12).pack(side="left")
-        Spinner(row, self.act_min_var, step=0.1).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.act_max_var, step=0.1).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-        row = ttk.Frame(box)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="on degrade", width=12).pack(side="left")
+    def _build_pacing_sub(self, flow) -> None:
+        """Run pacing: the paced pause range, the human action-delay
+        range and the F2 on-degrade choice — THREE flow CELLS (owner
+        2026-08-03, slika 1), so a narrow window wraps them onto
+        further rows instead of cutting the last one off. Labels lost
+        their fixed width=12 for the same reason: every px of the band
+        is width some element can still use."""
+        cell = flow.cell()
+        ttk.Label(cell, text="pause").pack(side="left", padx=(0, 4))
+        Spinner(cell, self.pause_min_var, step=1.0).pack(side="left")
+        ttk.Label(cell, text="–").pack(side="left", padx=2)
+        Spinner(cell, self.pause_max_var, step=1.0).pack(side="left")
+        ttk.Label(cell, text="s").pack(side="left", padx=(2, 0))
+        cell = flow.cell()
+        ttk.Label(cell, text="action delay").pack(side="left", padx=(0, 4))
+        Spinner(cell, self.act_min_var, step=0.1).pack(side="left")
+        ttk.Label(cell, text="–").pack(side="left", padx=2)
+        Spinner(cell, self.act_max_var, step=0.1).pack(side="left")
+        ttk.Label(cell, text="s").pack(side="left", padx=(2, 0))
+        cell = flow.cell()
+        ttk.Label(cell, text="on degrade").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, DEGRADE_CHOICES, self.degrade_var, width=110,
+            cell, DEGRADE_CHOICES, self.degrade_var, width=110,
         ).pack(side="left")
 
     def _pick_bg_color(self) -> None:

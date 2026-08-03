@@ -29,16 +29,21 @@ folds/unfolds by hand, OFF hides it entirely):
 
 The old global Settings gear (and its `settings_collapsed` state) is
 GONE — everything it held now lives under its owning switch (or the
-always-open Pacing group). The FOUR groups grid as the owner's 2×2
-(`_stack_groups`, owner 2026-08-03): Pipeline | Run behavior above,
-Pacing | Prompt below, both columns sharing the width evenly — the
-setup screen's LEFT settings column is a true half of the window now
-(the 50-50 split, same decree), wide enough for two group columns
-where the 2026-07-29 single stack was not. Inside the Prompt group
-the F7 helper switches WRAP — label on its own line, switches two per
-grid row (owner 2026-08-03: "prelomi u 2 reda ako treba" — three on
-one line ran off the half-width cell and the last was invisible); a
-fourth helper simply opens a third row. Its own Start/Pause/Stop
+always-open Pacing group). The FOUR groups are FULL-WIDTH BANDS
+stacked vertically (`_stack_groups`, owner 2026-08-03 slika 1,
+replacing that morning's 2×2 grid): each band's controls live in a
+`FlowRow` that WRAPS them onto further rows as the window narrows,
+and each band carries a full-width HOST below those rows into which
+the fine-tune of whichever switch is open expands (`sub_host`) — "uvek
+se otvara ispod svih ovih glavnih, ako ih prelomiš u više redova onda
+ispod svih njih". Only ONE fine-tune is open at a time across the
+whole panel (`ExpanderAccordion`), so opening Upscale folds AI
+checker. The setup screen's settings column now takes 2/3 of the
+window (same decree). This is what fixed the owner's core complaint:
+the 2×2 halved every band, so Upscale's filter row and Force-aspect's
+canvas were CUT — expanding them was pointless below an absurd window
+width. `reflow()` re-wraps every band after a font zoom. Its own
+Start/Pause/Stop
 drives that one site's run. Split out of `gui/__init__.py` (root Rule
 #20 god-file refactor, step 4/8).
 
@@ -145,7 +150,8 @@ disagree.
 
 ### AgentPanel
 One site's full control surface — see the Purpose section above. The
-three groups are ONE vertical stack (`_stack_groups`); `apply_settings`
+four groups are full-width BANDS, one per grid row (`_stack_groups`),
+each a wrapping `FlowRow` plus its fine-tune host; `apply_settings`
 runs the whole round-trip under `widgets.quiet_restore`, so a
 restored-ON switch never auto-expands its fine-tune and the panel
 always opens compact — `_expanders()` is the ONE list of switches that

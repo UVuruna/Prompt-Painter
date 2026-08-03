@@ -58,6 +58,8 @@ from .theme import THEME_TOPLEVELS
 from .tool_panels import ASPECT_DIALOG_ENTRY_W, DENSE_COL_GAP_PX, DENSE_COL_WRAP_PX
 from .widgets import (
     ExpandableSwitch,
+    ExpanderAccordion,
+    FlowRow,
     quiet_restore,
     Spinner,
     rounded_button,
@@ -151,8 +153,10 @@ class ApiImageGenPanel(ttk.Frame):
         # the panel self-contained).
         body = ttk.Frame(self)
         body.pack(fill="both", expand=True, pady=(6, 0))
-        body.columnconfigure(0, weight=1, uniform="apicol")
-        body.columnconfigure(1, weight=1, uniform="apicol")
+        # 2:1 in favour of the settings column (owner 2026-08-03,
+        # slika 1) — the same split the website setup screen uses
+        body.columnconfigure(0, weight=2)
+        body.columnconfigure(1, weight=1)
         body.rowconfigure(0, weight=1)
         left = ttk.Frame(body)
         left.grid(row=0, column=0, sticky="new")
@@ -244,28 +248,41 @@ class ApiImageGenPanel(ttk.Frame):
         self._probe_q: queue.Queue = queue.Queue()
         self._probe_poll_job: str | None = None
 
-        # --- the four groups, gridded 2x2 like AgentPanel (faza 3) ----
+        # --- the groups as FULL-WIDTH BANDS, like AgentPanel (owner
+        # 2026-08-03, slika 1) — switches FLOW and WRAP, and each
+        # band's fine-tune opens into a full-width host BELOW them, so
+        # nothing is ever cut off the right edge. API's Run behavior /
+        # Pacing / Prompt hold ONE-TO-TWO controls each ("objedinis ih
+        # u jednu kolonu jer imaju malo elemenata"), so all three share
+        # ONE band whose flow puts them side by side and wraps them
+        # when the window narrows.
         content = ttk.Frame(left)
         content.pack(fill="x", pady=(4, 0))
-        content.columnconfigure(0, weight=1, uniform="apigrp")
-        content.columnconfigure(1, weight=1, uniform="apigrp")
+        content.columnconfigure(0, weight=1)
+        self._flows: list[FlowRow] = []
+        self._accordion = ExpanderAccordion()
+        self._band_row = 0
 
-        def group(title: str, r: int, c: int) -> ttk.Frame:
+        def group(title: str):
             outer = ttk.Frame(content)
-            outer.grid(row=r, column=c, sticky="new", padx=(0, 8), pady=2)
+            outer.grid(row=self._band_row, column=0, sticky="new", pady=(2, 4))
+            self._band_row += 1
             ttk.Label(outer, text=title, style="Head.TLabel").pack(
                 anchor="w", pady=(2, 2)
             )
-            body_ = ttk.Frame(outer)
-            body_.pack(fill="x")
-            return body_
+            flow_ = FlowRow(outer)
+            flow_.pack(fill="x")
+            self._flows.append(flow_)
+            host_ = ttk.Frame(outer)
+            host_.pack(fill="x")
+            return flow_, host_
 
         # Pipeline — ALL switches default ON (no native transparency,
         # spec item 3): _compose_post_save runs whichever are ticked in
         # the fixed BG -> Crop -> Aspect -> Upscale order, identical to
         # every AgentPanel-driven site. The Force-Aspect target and the
         # Upscale gate live right under their switches.
-        g_pipe = group("Pipeline", 0, 0)
+        flow, host = group("Pipeline")
         self.bg_removal_var = tk.BooleanVar(value=True)
         self.crop_var = tk.BooleanVar(value=True)
         self.force_aspect_var = tk.BooleanVar(value=True)
@@ -273,12 +290,8 @@ class ApiImageGenPanel(ttk.Frame):
         self.keep_all_steps_var = tk.BooleanVar(
             value=JOBTEMP_KEEP_ALL_STEPS_DEFAULT
         )
-        rounded_switch(g_pipe, "BG removal", self.bg_removal_var).pack(
-            anchor="w", pady=1
-        )
-        rounded_switch(g_pipe, "Crop", self.crop_var).pack(
-            anchor="w", pady=1
-        )
+        flow.switch("BG removal", self.bg_removal_var)
+        flow.switch("Crop", self.crop_var)
         # Force Aspect Ratio + Upscale are EXPANDABLE here, exactly as
         # in AgentPanel (owner 2026-08-03): their fine-tune — the
         # aspect canvas and the upscale FilterEditor — is tall enough
@@ -288,63 +301,54 @@ class ApiImageGenPanel(ttk.Frame):
         self.force_aspect_w_var = tk.StringVar(value=str(ASPECT_DEFAULT_W))
         self.force_aspect_h_var = tk.StringVar(value=str(ASPECT_DEFAULT_H))
         self._sw_aspect = ExpandableSwitch(
-            g_pipe, "Force Aspect Ratio", self.force_aspect_var,
+            flow, "Force Aspect Ratio", self.force_aspect_var,
             build_sub=self._build_aspect_sub, eager=True,
+            sub_host=host, accordion=self._accordion,
         )
-        self._sw_aspect.pack(fill="x", pady=1)
+        flow.add(self._sw_aspect)
         self._sw_upscale = ExpandableSwitch(
-            g_pipe, "Upscale", self.upscale_var,
+            flow, "Upscale", self.upscale_var,
             build_sub=self._build_upscale_sub, eager=True,
+            sub_host=host, accordion=self._accordion,
         )
-        self._sw_upscale.pack(fill="x", pady=1)
-        rounded_switch(
-            g_pipe, "Keep every pipeline step (more disk)",
-            self.keep_all_steps_var,
-        ).pack(anchor="w", pady=(3, 1))
+        flow.add(self._sw_upscale)
+        flow.switch(
+            "Keep every pipeline step (more disk)", self.keep_all_steps_var,
+        )
 
-        # Run behavior
-        g_run = group("Run behavior", 0, 1)
+        # Run behavior + Pacing + Prompt — ONE merged band (owner
+        # 2026-08-03: "kod API IMAGE GEN objedini ih u jednu kolonu jer
+        # imaju malo elemenata"): Report txt, the pause range (run_sheet's
+        # own pacing wait, unrelated to ai.py's internal AI_CALL_PAUSE_S
+        # free-tier throttle; no action-delay field — that is
+        # SiteDriver._hesitate()'s DOM concept and there is no DOM here)
+        # and the two prompt dropdowns, which feed the SAME prompt_suffix
+        # machinery every AgentPanel already does (Rule #5); "white" is
+        # the default (not a site's own default_background) since the
+        # model cannot render real transparency.
+        flow, _host = group("Run behavior · Pacing · Prompt")
         self.report_var = tk.BooleanVar(value=True)
-        rounded_switch(g_run, "Report txt", self.report_var).pack(
-            anchor="w", pady=1
-        )
-
-
-        # Pacing — ALWAYS OPEN (same decree as AgentPanel's own group):
-        # pace between prompts — run_sheet's own pacing wait, unrelated
-        # to ai.py's internal AI_CALL_PAUSE_S free-tier throttle; no
-        # action-delay field (that is SiteDriver._hesitate()'s DOM
-        # concept — there is no DOM here).
-        g_pace = group("Pacing", 1, 0)
         self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
         self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
-        row = ttk.Frame(g_pace)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="pause", width=12).pack(side="left")
-        Spinner(row, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="–").pack(side="left", padx=2)
-        Spinner(row, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(row, text="s").pack(side="left", padx=(2, 0))
-
-        # Prompt — the SAME prompt_suffix machinery every AgentPanel
-        # already feeds (Rule #5); "white" default (not a site's own
-        # default_background) since the model cannot render real
-        # transparency — see this class's own docstring
-        g_prompt = group("Prompt", 1, 1)
         self.background_var = tk.StringVar(value="white")
         self.style_var = tk.StringVar(value=STYLE_DEFAULT)
-        row = ttk.Frame(g_prompt)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Background:").pack(side="left")
+        flow.switch("Report txt", self.report_var)
+        cell = flow.cell()
+        ttk.Label(cell, text="pause").pack(side="left", padx=(0, 4))
+        Spinner(cell, self.pause_min_var, step=1.0).pack(side="left")
+        ttk.Label(cell, text="–").pack(side="left", padx=2)
+        Spinner(cell, self.pause_max_var, step=1.0).pack(side="left")
+        ttk.Label(cell, text="s").pack(side="left", padx=(2, 0))
+        cell = flow.cell()
+        ttk.Label(cell, text="Background:").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, BACKGROUND_CHOICES, self.background_var, width=105,
-        ).pack(side="left", padx=(2, 0))
-        row = ttk.Frame(g_prompt)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="Style:").pack(side="left")
+            cell, BACKGROUND_CHOICES, self.background_var, width=105,
+        ).pack(side="left")
+        cell = flow.cell()
+        ttk.Label(cell, text="Style:").pack(side="left", padx=(0, 4))
         rounded_combo(
-            row, STYLE_CHOICES, self.style_var, width=150,
-        ).pack(side="left", padx=(2, 0))
+            cell, STYLE_CHOICES, self.style_var, width=140,
+        ).pack(side="left")
 
         btn_row = ttk.Frame(self)
         btn_row.pack(fill="x", pady=(10, 0))
@@ -381,13 +385,22 @@ class ApiImageGenPanel(ttk.Frame):
     # --- Force Aspect Ratio two-way sync (mirrors AgentPanel's own) ----
 
 
+    def reflow(self) -> None:
+        """Re-wrap every band for the current width (font zoom — the
+        elements' requested widths change without a <Configure>)."""
+        for flow in self._flows:
+            flow.reflow()
+
     def _build_aspect_sub(self, parent) -> None:
         """The Force-Aspect target: W:H entries mirrored two-way with
         an AspectRatioCanvas — AgentPanel's own sub-panel content."""
-        fa_box = ttk.Frame(parent)
+        # fields + canvas are FLOW cells (owner 2026-08-03, slika 2):
+        # side by side while there is room, canvas on its own row the
+        # moment there is not — never sliced in half
+        fa_box = FlowRow(parent)
         fa_box.pack(fill="x", pady=2)
-        fa_fields = ttk.Frame(fa_box)
-        fa_fields.pack(side="left", anchor="n")
+        self._flows.append(fa_box)
+        fa_fields = fa_box.cell()
         ttk.Label(fa_fields, text="W").pack(side="left", padx=(0, 4))
         rounded_entry(
             fa_fields, width=ASPECT_DIALOG_ENTRY_W,
@@ -401,12 +414,13 @@ class ApiImageGenPanel(ttk.Frame):
             fa_fields, width=ASPECT_DIALOG_ENTRY_W,
             textvariable=self.force_aspect_h_var, justify="center",
         ).pack(side="left")
+        canvas_cell = fa_box.cell()
         self._force_aspect_canvas = AspectRatioCanvas(
-            fa_box, w=int(self.force_aspect_w_var.get()),
+            canvas_cell, w=int(self.force_aspect_w_var.get()),
             h=int(self.force_aspect_h_var.get()),
             on_change=self._on_force_aspect_canvas_drag,
         )
-        self._force_aspect_canvas.pack(side="left", padx=(12, 0), anchor="n")
+        self._force_aspect_canvas.pack(anchor="nw")
         self.force_aspect_w_var.trace_add(
             "write", self._on_force_aspect_wh_typed
         )
@@ -420,16 +434,17 @@ class ApiImageGenPanel(ttk.Frame):
         self.up_minside_var = tk.StringVar(
             value=str(UPSCALE_MIN_SIDE_DEFAULT)
         )
-        row = ttk.Frame(parent)
-        row.pack(fill="x", pady=2)
-        ttk.Label(row, text="min side", width=8).pack(side="left")
-        Spinner(row, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
+        flow = FlowRow(parent)
+        flow.pack(fill="x", pady=2)
+        self._flows.append(flow)
+        cell = flow.cell()
+        ttk.Label(cell, text="min side").pack(side="left", padx=(0, 4))
+        Spinner(cell, self.up_minside_var, step=UPSCALE_MINDIM_STEP).pack(
             side="left"
         )
-        ttk.Label(
-            row, text="px (the smaller side reaches this)",
-            wraplength=DENSE_COL_WRAP_PX,
-        ).pack(side="left", padx=(4, 0))
+        flow.add(ttk.Label(
+            flow, text="px (the smaller side reaches this)"
+        ))
         self.upscale_filter = FilterEditor(
             parent,
             conditions=[filters.FilterCondition(

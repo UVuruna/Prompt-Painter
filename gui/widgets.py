@@ -395,15 +395,192 @@ class Spinner(ctk.CTkFrame):
 
 
 
+SWITCH_TRACK_PX = 52   # the switch graphic + its gap to the label
+SWITCH_TEXT_PAD_PX = 8  # trailing slack so the last glyph never touches
+
+
+def fit_switch(switch: ctk.CTkSwitch) -> None:
+    """Re-width a switch to ITS OWN TEXT (owner 2026-08-03, slika 1).
+
+    ``CTkSwitch`` fixes its frame at ``width`` (default 100) and turns
+    geometry propagation OFF, so a longer label is simply CUT at that
+    edge — "Continue nudge" rendered as "Continue n". Measuring the
+    label in the CURRENT font and widening the widget is what makes the
+    never-clip rule hold for switches, and re-running it after a font
+    zoom keeps it holding."""
+    text = getattr(switch, "_fit_text", None)
+    if text is None:
+        return
+    font = tk_font("root")
+    switch.configure(
+        width=SWITCH_TRACK_PX + font.measure(text) + SWITCH_TEXT_PAD_PX
+    )
+
+
+def refit_switches(widget) -> None:
+    """``fit_switch`` over a widget subtree — FlowRow calls this before
+    measuring, so every switch reports its TRUE width."""
+    if isinstance(widget, ctk.CTkSwitch):
+        fit_switch(widget)
+    for child in widget.winfo_children():
+        refit_switches(child)
+
+
 def rounded_switch(parent, text: str, variable) -> ctk.CTkSwitch:
-    """A rounded on/off switch for the main run options."""
-    return ctk.CTkSwitch(
+    """A rounded on/off switch for the main run options — sized to its
+    own label (see ``fit_switch``), never truncating it."""
+    switch = ctk.CTkSwitch(
         parent, text=text, variable=variable,
         onvalue=True, offvalue=False,
         font=ctk_font("root"),
         fg_color=theme_pair("secondary"), progress_color=theme_pair("success"),
         text_color=theme_pair("fg"), bg_color=theme_pair("bg"),
     )
+    switch._fit_text = text
+    fit_switch(switch)
+    return switch
+
+
+# --- the NEVER-CLIP layout primitives (owner 2026-08-03, slika 1) ----
+# The owner's hardest rule for the setup screen: "ni pod kojim uslovima
+# ne smeš da sečeš elemente da oni izlaze iz vidokruga". A plain
+# side="left" pack row does exactly that — the children past the frame's
+# right edge are simply never drawn, which is how Force-aspect's canvas
+# and Upscale's filter row ended up invisible until the window was
+# absurdly wide. FlowRow is the answer: it MEASURES every child and
+# WRAPS the overflow into further rows instead of clipping it, and it
+# reports the widest child as its own requested width so the window's
+# computed minsize can never fall below "one full element".
+FLOW_GAP_PX = 8       # horizontal gap between two elements in a flow row
+FLOW_ROW_GAP_PX = 4   # vertical gap between two wrapped rows
+
+
+class FlowRow(ttk.Frame):
+    """A horizontal container that WRAPS instead of clipping.
+
+    Children are added through ``add()`` (build them with this frame as
+    their parent) and laid out left-to-right with ``place``; when the
+    next child would cross the frame's right edge it starts a NEW row.
+    A child WIDER than the whole frame still gets its own row and is
+    placed at its full requested width — never truncated (the window's
+    minsize, computed from ``winfo_reqwidth`` which this frame reports
+    as its widest child, keeps that case off screen in practice).
+
+    ``place`` rather than ``grid`` on purpose: grid shares one column
+    width across every row, so a wide element in row 2 would stretch
+    row 1's first column and re-introduce the overflow this class
+    exists to prevent."""
+
+    def __init__(self, parent, gap: int = FLOW_GAP_PX,
+                 row_gap: int = FLOW_ROW_GAP_PX):
+        super().__init__(parent)
+        self._gap = gap
+        self._row_gap = row_gap
+        self._items: list[ttk.Widget] = []
+        self._laid_w = -1
+        self._laid_out: tuple = ()
+        self.bind("<Configure>", self._on_configure)
+
+    def add(self, widget):
+        """Register an already-built child (parent = this frame).
+
+        The child MUST be a plain ttk widget: CustomTkinter applies its
+        own widget scaling to ``place`` coordinates (a child asked for
+        y=68 lands at y=85 on a 125 % display, overflowing the row it
+        was measured into), so CTk controls go through ``cell()`` /
+        ``switch()`` and are packed inside an unscaled ttk frame."""
+        if isinstance(widget, ctk.CTkBaseClass):
+            raise TypeError(
+                "FlowRow cannot place a CustomTkinter widget directly"
+                " (its scaling rewrites place coordinates) — wrap it in"
+                " flow.cell() or use flow.switch()"
+            )
+        self._items.append(widget)
+        self.after_idle(self.reflow)
+        return widget
+
+    def cell(self) -> ttk.Frame:
+        """A fresh child frame, registered — build a multi-widget
+        element (label + spinner + unit) inside it and it flows/wraps as
+        ONE unit."""
+        return self.add(ttk.Frame(self))
+
+    def switch(self, text: str, variable) -> ctk.CTkSwitch:
+        """One ``rounded_switch`` as a flow element, in its own cell."""
+        cell = self.cell()
+        sw = rounded_switch(cell, text, variable)
+        sw.pack(side="left")
+        return sw
+
+    def _on_configure(self, event=None) -> None:
+        if event is not None and event.width != self._laid_w:
+            self.reflow(event.width)
+
+    def reflow(self, width: int | None = None) -> None:
+        """Re-place every child for ``width`` (default: the frame's
+        current width). Idempotent and cheap — called on resize, on
+        font zoom and after every add."""
+        if not self.winfo_exists():
+            return
+        avail = self.winfo_width() if width is None else width
+        if avail <= 1:
+            return  # not mapped yet; <Configure> fires when it is
+        x = y = row_h = widest = 0
+        sig: list[tuple[int, int]] = []
+        for w in self._items:
+            refit_switches(w)  # true widths BEFORE any wrapping decision
+            # a CTk widget's real height can exceed its requested one
+            # (widget scaling) — take the larger, or the last row ends
+            # up half-hidden under the next band's heading
+            iw = max(w.winfo_reqwidth(), w.winfo_width())
+            ih = max(w.winfo_reqheight(), w.winfo_height())
+            widest = max(widest, iw)
+            if x and x + iw > avail:
+                y += row_h + self._row_gap
+                x = row_h = 0
+            # position only — NEVER width/height: a placed widget keeps
+            # its own requested size (that is the whole point, an
+            # element is moved, never resized into a truncation), and
+            # CustomTkinter widgets flatly refuse width/height here
+            w.place(x=x, y=y)
+            sig.append((x, y))
+            x += iw + self._gap
+            row_h = max(row_h, ih)
+        self._laid_w = avail
+        # the frame's OWN requested size: tall enough for every wrapped
+        # row, wide enough for the widest single element (the minsize
+        # floor — below this the app stops shrinking rather than cut)
+        need_h = max(y + row_h, 1)
+        self.configure(height=need_h, width=max(widest, 1))
+        # a child's REAL size is only known once Tk has realized it (and
+        # an expander mid-fold measures its transient height), so the
+        # first pass can place a row too low and size the frame too
+        # short — the last wrapped row then sits half-hidden under the
+        # next band. Settle it: re-run on the next idle until a pass
+        # reproduces the previous one exactly (owner 2026-08-03 —
+        # nothing may be cut, vertically either).
+        layout = (need_h, tuple(sig))
+        if layout != self._laid_out:
+            self._laid_out = layout
+            self.after_idle(lambda: self.reflow(self._laid_w))
+
+
+class ExpanderAccordion:
+    """The panel-wide "only ONE fine-tune open at a time" rule (owner
+    2026-08-03, slika 1): opening Upscale folds AI checker and vice
+    versa, across ALL groups of one panel — so the open sub-panel may
+    take the full width and the panel's height barely moves."""
+
+    def __init__(self):
+        self._members: list[ExpandableSwitch] = []
+
+    def register(self, switch: ExpandableSwitch) -> None:
+        self._members.append(switch)
+
+    def opened(self, switch: ExpandableSwitch) -> None:
+        for other in self._members:
+            if other is not switch and other.is_open:
+                other.toggle(open_=False)
 
 
 class ExpandableSection(ttk.Frame):
@@ -459,11 +636,25 @@ class ExpandableSwitch(ttk.Frame):
     def __init__(
         self, parent, label: str, variable,
         build_sub=None, on_layout_change=None, eager: bool = False,
+        sub_host=None, accordion: ExpanderAccordion | None = None,
     ):
+        """``sub_host`` (owner 2026-08-03, slika 1): the frame the
+        fine-tune opens into, instead of indented under the switch
+        itself. The setup panels pass the FULL-WIDTH host that sits
+        below their whole (wrapping) row of switches — "uvek se otvara
+        ispod svih ovih glavnih, ako ih prelomiš u više redova onda
+        ispod svih njih" — which is what lets a sub-panel use the
+        panel's entire width and stop being cut off.
+        ``accordion`` enrolls this switch in the panel-wide
+        one-open-at-a-time rule."""
         super().__init__(parent)
         self._var = variable
         self._build_sub = build_sub
         self._on_layout_change = on_layout_change or (lambda: None)
+        self._sub_host = sub_host
+        self._accordion = accordion
+        if accordion is not None:
+            accordion.register(self)
         self._open = False
         self._built = False
         # while True a turn-ON does NOT auto-expand (a settings
@@ -475,7 +666,7 @@ class ExpandableSwitch(ttk.Frame):
         self._caret = ttk.Label(row, text="", cursor="hand2", width=2)
         self._caret.pack(side="left", padx=(4, 0))
         self._caret.bind("<Button-1>", lambda _e: self.toggle())
-        self.sub = ttk.Frame(self)
+        self.sub = ttk.Frame(sub_host if sub_host is not None else self)
         if build_sub is not None:
             if eager:
                 # content whose STATE outlives the widget's visibility
@@ -503,6 +694,10 @@ class ExpandableSwitch(ttk.Frame):
         else:
             self._render_caret()
 
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
     def toggle(self, open_: bool | None = None) -> None:
         if self._build_sub is None:
             return
@@ -517,7 +712,14 @@ class ExpandableSwitch(ttk.Frame):
             return
         self._open = want
         if want:
-            self.sub.pack(fill="x", padx=(28, 0), pady=(2, 4))
+            if self._accordion is not None:
+                self._accordion.opened(self)
+            if self._sub_host is not None:
+                # full width of the host, no indent: the host IS the
+                # dedicated row below every switch of the panel
+                self.sub.pack(fill="x", pady=(2, 4))
+            else:
+                self.sub.pack(fill="x", padx=(28, 0), pady=(2, 4))
         else:
             self.sub.pack_forget()
         self._render_caret()
