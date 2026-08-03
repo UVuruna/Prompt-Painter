@@ -70,12 +70,16 @@ class PromptItem:
     # DO NOT GENERATE ...) — ADVICE, not law (owner 2026-07-17): the
     # item still loads, but runs only when explicitly ticked
     advice: str | None = None
-    # an OPTIONAL input-image reference (owner 2026-07-23): the RAW
-    # relative path from the entry's "← `...`" line — a read-only source
-    # photo the runner attaches into the chat BEFORE the prompt text
-    # ("put this character into that scene"). Resolved relative to the
-    # sheet's own folder at run time; None when the entry has no input.
-    input_image: str | None = None
+    # OPTIONAL input-image references (owner 2026-07-23; MULTI + the
+    # reference-folder fallback 2026-08-03, faza 2): the RAW paths from
+    # the entry's "← `...`" line(s) — read-only source photos the
+    # runner attaches into the chat BEFORE the prompt text ("put this
+    # character into that scene"; a reference sheet's likeness source).
+    # LINE ORDER IS ATTACH ORDER — a prompt saying "the FIRST attached
+    # image" means the first ← line. Resolved at run time: relative to
+    # the sheet's own folder, else the run's Reference folder, else
+    # absolute. Empty when the entry has no input.
+    input_images: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -119,12 +123,12 @@ def parse_sheet(path: Path) -> Sheet:
     problems: list[Problem] = []
 
     # entry awaiting its prompt block:
-    # (title, drop_path, line, advice, legacy, input_image)
+    # (title, drop_path, line, advice, legacy, input_images)
     # legacy entries (heading/bold-token forms) are best-effort: they
     # pair only with an IMMEDIATELY following fence and never raise
     # problems — the strict arrow contract keeps the loud failures
     pending: (
-        tuple[str, str, int, str | None, bool, str | None] | None
+        tuple[str, str, int, str | None, bool, tuple[str, ...]] | None
     ) = None
     # active advice from a marked section heading or note;
     # cleared by the next heading
@@ -157,14 +161,15 @@ def parse_sheet(path: Path) -> Sheet:
         at: int,
         advice: str | None,
         legacy: bool,
-        input_image: str | None = None,
+        input_images: tuple[str, ...] = (),
     ) -> None:
         """Validate a drop path and set the entry pending.
 
         Legacy-form entries never raise problems: an invalid or
         duplicate path there is a reuse pointer, not an entry.
-        ``input_image`` (the raw "← `...`" reference, already validated
-        by the caller) rides along to the PromptItem built at the fence.
+        ``input_images`` (the raw "← `...`" references in line order,
+        already validated by the caller) ride along to the PromptItem
+        built at the fence.
         """
         nonlocal pending
         drop_parts = PurePosixPath(drop)
@@ -198,7 +203,7 @@ def parse_sheet(path: Path) -> Sheet:
                     )
                 )
             return
-        pending = (title, drop, at, advice, legacy, input_image)
+        pending = (title, drop, at, advice, legacy, input_images)
 
     def png_tokens_of(text: str) -> list[str]:
         return [
@@ -224,11 +229,11 @@ def parse_sheet(path: Path) -> Sheet:
                 )
             i += 1
             if pending is not None:
-                title, drop, at, advice, _legacy, input_image = pending
+                title, drop, at, advice, _legacy, input_images = pending
                 items.append(
                     PromptItem(
                         title, drop, "\n".join(block), at, advice,
-                        input_image,
+                        input_images,
                     )
                 )
                 pending = None
@@ -355,18 +360,20 @@ def parse_sheet(path: Path) -> Sheet:
 
         flush_pending("the next entry starts")
 
-        # OPTIONAL input-image reference (owner 2026-07-23): a read-only
-        # source photo attached BEFORE the prompt ("put this character
-        # into that scene"). Validated for an image extension here (any
-        # of TOOL_IMAGE_EXTENSIONS — a reference photo may be a jpg);
-        # resolved on disk by the runner, relative to the sheet's folder.
-        # A malformed "← `...`" on a real entry is a loud author error.
-        input_image: str | None = None
-        input_arrow = _INPUT_ARROW.search(para)
-        if input_arrow is not None:
-            ref = input_arrow.group(1).strip()
+        # OPTIONAL input-image reference(s) (owner 2026-07-23; MULTI
+        # 2026-08-03, faza 2): read-only source photos attached BEFORE
+        # the prompt ("put this character into that scene") — one "←"
+        # line per attachment, LINE ORDER = ATTACH ORDER (a dual plate's
+        # prompt says "the FIRST/SECOND attached image"). Validated for
+        # an image extension here (any of TOOL_IMAGE_EXTENSIONS — a
+        # reference photo may be a jpg); resolved on disk by the runner
+        # (sheet folder → the run's Reference folder → absolute). A
+        # malformed "← `...`" on a real entry is a loud author error.
+        refs: list[str] = []
+        for raw_ref in _INPUT_ARROW.findall(para):
+            ref = raw_ref.strip()
             if PurePosixPath(ref).suffix.lower() in TOOL_IMAGE_EXTENSIONS:
-                input_image = ref
+                refs.append(ref)
             elif not legacy:
                 problems.append(
                     Problem(
@@ -379,7 +386,7 @@ def parse_sheet(path: Path) -> Sheet:
         # the entry's own marker outranks the section's advice; either
         # way the prompt LOADS — advice only unticks it by default
         register_entry(
-            title, drop, start, reason or poison, legacy, input_image
+            title, drop, start, reason or poison, legacy, tuple(refs)
         )
 
     flush_pending("the sheet ends")

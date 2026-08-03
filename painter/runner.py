@@ -17,7 +17,6 @@ import hashlib
 import random
 import struct
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -34,7 +33,6 @@ from painter.config import (
     Timing,
     dest_for,
     fmt_duration,
-    fmt_size,
     parse_quota_reset,
     versioned_dest_for,
 )
@@ -47,6 +45,7 @@ from painter.driver import (
     TerminalState,
     sniff_format,
 )
+from painter.run_report import RunReport
 from painter.sheet_parser import Sheet, SkippedItem
 
 Log = Callable[[str], None]
@@ -71,10 +70,6 @@ def _png_size(data: bytes) -> str:
         width, height = struct.unpack(">II", data[16:24])
         return f"{width}x{height}"
     return "?"
-
-
-def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _pause(timing: Timing, should_stop: ShouldStop | None, log: Log) -> None:
@@ -143,6 +138,38 @@ def wait_while_paused(
     return False
 
 
+def resolve_input_images(
+    refs: tuple[str, ...] | list[str],
+    sheet_dir: Path,
+    reference_dir: Path | None = None,
+) -> tuple[list[str], list[str]]:
+    """Resolve an entry's "← `ref`" references to real files (faza 2,
+    owner 2026-08-03 — the binding resolution order): each ref is tried
+    ① relative to the sheet's own folder, ② relative to the run's
+    ``reference_dir`` (the GUI Prompt+Image section's Reference
+    folder), ③ as an absolute path. Sources are READ ONLY everywhere.
+
+    Returns ``(resolved, missing)`` — resolved absolute path strings in
+    the SAME order as ``refs`` (attach order), and the raw refs that
+    were found nowhere. Never guesses (no basename search, no fuzzy
+    match): a miss is the author's or the folder-picker's to fix, and
+    it is reported loudly by every caller."""
+    resolved: list[str] = []
+    missing: list[str] = []
+    for ref in refs:
+        candidates = [sheet_dir / ref]
+        if reference_dir is not None:
+            candidates.append(reference_dir / ref)
+        if Path(ref).is_absolute():
+            candidates.append(Path(ref))
+        hit = next((c for c in candidates if c.is_file()), None)
+        if hit is None:
+            missing.append(ref)
+        else:
+            resolved.append(str(hit))
+    return resolved, missing
+
+
 def _recover_image_failed(
     exc: ImageGenFailed,
     driver: SiteDriver,
@@ -151,7 +178,7 @@ def _recover_image_failed(
     should_stop: ShouldStop | None,
     log: Log,
     emit: OnEvent,
-    input_image_path: str | None = None,
+    input_image_paths: list[str] | None = None,
 ) -> tuple[bytes, float]:
     """Walk the image-failure recovery ladder (owner 2026-07-23).
 
@@ -172,10 +199,10 @@ def _recover_image_failed(
          entry: wait a random duration in that entry's range, then
          REFRESH the page, open a NEW SESSION, and resend the WHOLE
          original prompt (a fresh chat has no context, so "retry" alone
-         would mean nothing) — RE-ATTACHING ``input_image_path`` when
-         the item carried a "← `ref`" input image (owner 2026-07-23; the
-         earlier rungs stay in the same chat where the image already
-         sits, so only this new-session rung re-attaches).
+         would mean nothing) — RE-ATTACHING ``input_image_paths`` when
+         the item carried "← `ref`" input image(s) (owner 2026-07-23;
+         the earlier rungs stay in the same chat where the image(s)
+         already sit, so only this new-session rung re-attaches).
 
     Returns ``(image bytes, send timestamp)`` from the first rung that
     yields an image. When every rung is spent the ladder re-raises
@@ -235,7 +262,7 @@ def _recover_image_failed(
         driver.refresh(log)
         driver.new_chat(log)
         try:
-            data, t_send = generate_one(base, attach=input_image_path)
+            data, t_send = generate_one(base, attach=input_image_paths)
             log(f"    escalation round {rnd} RECOVERED (fresh session)")
             return data, t_send
         except ImageGenFailed as again:
@@ -244,91 +271,6 @@ def _recover_image_failed(
     # every rung spent — stop the worker (finished work is safe on disk)
     log(f"    RECOVERY EXHAUSTED — stopping the site: {reason}")
     raise ImageGenFailed(reason)
-
-
-class RunReport:
-    """``<out_root>/<sheet-stem>_report.txt`` — appended per run.
-
-    Written INCREMENTALLY (header, then a line per image, then the
-    summary) so an interrupted run keeps every finished line.
-    """
-
-    def __init__(self, path: Path, theme: str, site_name: str):
-        self.path = path
-        self._theme = theme
-        self._site = site_name
-        self._gen_times: list[float] = []
-        self._over_times: list[float] = []
-        self._refused = 0
-
-    def _append(self, text: str) -> None:
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(text + "\n")
-
-    def start(self, pending: int, total: int, skipped=()) -> None:
-        self._append("=" * 68)
-        self._append(f"{self._theme}  [{self._site}]")
-        self._append(f"Run started:  {_now()}  ({pending}/{total} pending)")
-        for sk in skipped:
-            self._append(
-                f"SKIPPED by the sheet (L{sk.line}): {sk.title} —"
-                f" {sk.reason}"
-            )
-        self._append("-" * 68)
-
-    def item(
-        self,
-        drop_path: str,
-        gen_s: float,
-        over_s: float,
-        orig_res: str,
-        final_res: str,
-        size_bytes: int,
-        actions: list[str],
-    ) -> None:
-        self._gen_times.append(gen_s)
-        self._over_times.append(over_s)
-        note = f"  [{', '.join(actions)}]" if actions else ""
-        resolution = (
-            f"{orig_res} -> {final_res}"
-            if final_res not in ("", orig_res)
-            else orig_res
-        )
-        self._append(
-            f"{_now()}  {drop_path:<44} gen {gen_s:6.1f}s"
-            f"  ours {over_s:6.1f}s  {resolution:>21}"
-            f"  {fmt_size(size_bytes):>8}{note}"
-        )
-
-    def refused(self, drop_path: str, reason: str) -> None:
-        self._refused += 1
-        self._append(f"{_now()}  {drop_path:<44} REFUSED — {reason[:120]}")
-
-    def finish(self, generated: int, wall_s: float, stopped_why: str) -> None:
-        self._append("-" * 68)
-        if self._refused:
-            self._append(
-                f"Refused: {self._refused} image(s) — rework those"
-                " prompts in the sheet (or intervene manually) and rerun"
-            )
-        if self._gen_times:
-            n = len(self._gen_times)
-            avg_gen = sum(self._gen_times) / n
-            avg_over = sum(self._over_times) / n
-            self._append(
-                f"Images: {generated}  |  average generation (AI):"
-                f" {fmt_duration(avg_gen)}/image  |  average our time"
-                f" (save+bgfix+pause): {fmt_duration(avg_over)}/image"
-            )
-            self._append(
-                "Total AI + our time:"
-                f" {fmt_duration(sum(self._gen_times) + sum(self._over_times))}"
-                f"  (wall clock: {fmt_duration(wall_s)})"
-            )
-        else:
-            self._append("Images: 0")
-        self._append(f"Run finished: {_now()}  ({stopped_why})")
-        self._append("")
 
 
 def run_sheet(
@@ -351,6 +293,8 @@ def run_sheet(
     image_failed_retry: bool = True,
     new_chat_per_folder: bool = False,
     on_degrade: Callable[[float | None], str] | None = None,
+    reference_dir: Path | None = None,
+    require_input_image: bool = False,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -394,13 +338,23 @@ def run_sheet(
     first ``ImageGenFailed`` propagates and stops the site immediately,
     same shape as ``continue_nudge=False``.
 
-    An item carrying an INPUT IMAGE (``PromptItem.input_image``, owner
-    2026-07-23 — the sheet's "← `ref`" line) has that reference resolved
-    RELATIVE TO THE SHEET'S OWN FOLDER (``sheet.source.parent``, read
-    only) and attached into the composer before the prompt via
-    ``driver.submit_with_image``; a plain item still goes through
-    ``submit_prompt``. A missing reference file is a loud per-item SKIP
-    (logged, counted, reported) so the rest of the batch still runs.
+    An item carrying INPUT IMAGE(S) (``PromptItem.input_images``, owner
+    2026-07-23; MULTI + the reference folder 2026-08-03, faza 2 — the
+    sheet's "← `ref`" line(s), LINE ORDER = ATTACH ORDER) has each
+    reference resolved by ``resolve_input_images`` (sheet folder →
+    ``reference_dir`` → absolute; sources READ ONLY) and attached into
+    the composer before the prompt via ``driver.submit_with_image``; a
+    plain item still goes through ``submit_prompt``. A missing
+    reference file is a loud per-item SKIP (logged, counted, reported)
+    so the rest of the batch still runs.
+
+    ``require_input_image`` (faza 2 — the GUI's PROMPT + IMAGE mode,
+    owner: "radi samo one slike koje imaju i PROMPT i PNG u prilogu"):
+    when True the queue is narrowed to items that declare at least one
+    "←" reference AND whose references ALL resolve right now — load
+    every prompt plus one reference file on disk and exactly one item
+    runs. Every excluded item is loudly listed and reported, never
+    silently dropped.
     """
     state_dir = out_base / STATE_DIRNAME / site_key
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -474,6 +428,40 @@ def run_sheet(
                 " anyway)"
             )
             queue = [it for it in queue if not it.advice]
+    if require_input_image:
+        # PROMPT + IMAGE mode (faza 2): only items whose prompt AND
+        # every declared "←" reference are both present run — the
+        # owner's rule, checked against the CURRENT disk state
+        eligible = []
+        for it in queue:
+            if not it.input_images:
+                log(f"  NOT ELIGIBLE (no ← reference): {it.title}")
+                report_skips.append(SkippedItem(
+                    it.title, "Prompt+Image mode: no ← reference", it.line
+                ))
+                continue
+            _ok, missing = resolve_input_images(
+                it.input_images, sheet.source.parent, reference_dir
+            )
+            if missing:
+                log(
+                    f"  NOT ELIGIBLE (reference missing): {it.title} —"
+                    f" {', '.join(missing)}"
+                )
+                report_skips.append(SkippedItem(
+                    it.title,
+                    "Prompt+Image mode: reference missing:"
+                    f" {', '.join(missing)}",
+                    it.line,
+                ))
+                continue
+            eligible.append(it)
+        if len(eligible) != len(queue):
+            log(
+                f"  PROMPT+IMAGE: {len(eligible)}/{len(queue)} item(s)"
+                " have both prompt and reference(s) — only those run"
+            )
+        queue = eligible
     if run_report is not None:
         run_report.start(len(queue), len(sheet.items), tuple(report_skips))
 
@@ -482,24 +470,25 @@ def run_sheet(
             on_event(event)
 
     def generate_one(
-        text: str, attach: str | None = None
+        text: str, attach: list[str] | None = None
     ) -> tuple[bytes, float]:
         """Submit one prompt and return (image bytes, send timestamp).
 
-        ``attach`` (owner 2026-07-23) is a resolved input-image path: when
-        given, the image is attached into the composer BEFORE the text
+        ``attach`` (owner 2026-07-23; MULTI 2026-08-03) is the resolved
+        input-image path list, in the sheet's ← line order: when given,
+        the image(s) are attached into the composer BEFORE the text
         (``submit_with_image`` — "put THIS character into that scene");
-        otherwise it is a plain text submit. Callers pass ``attach`` only
-        where a fresh chat needs the image: the FIRST send and a safer
-        retry (same item, reframed) and the image-failed escalation
-        (which opens a NEW session); the same-chat nudges/retries stay
-        text-only (the image is already attached there).
+        otherwise it is a plain text submit. Callers pass ``attach``
+        only where a fresh chat needs the image(s): the FIRST send and
+        a safer retry (same item, reframed) and the image-failed
+        escalation (which opens a NEW session); the same-chat nudges/
+        retries stay text-only (the images are already attached there).
 
         The send timestamp marks when SEND was pressed, so the caller
         can time the pure generation (send -> image) apart from the
         input hesitation inside the submit.
         """
-        if attach is not None:
+        if attach:
             driver.submit_with_image(attach, text)
         else:
             driver.submit_prompt(text)
@@ -573,22 +562,27 @@ def run_sheet(
                 suffix += "\n\n" + extra
             base = item.prompt + suffix
 
-            # OPTIONAL input image (owner 2026-07-23): resolve the
-            # "← `ref`" reference RELATIVE TO THE SHEET'S OWN FOLDER and
-            # attach it into the composer before the prompt. Sources are
-            # READ ONLY (never under out_base). A missing file is a loud
-            # per-item SKIP — the rest of the batch still runs; the fix
-            # is in the sheet or on disk, not here.
-            input_path: str | None = None
-            if item.input_image:
-                ref = sheet.source.parent / item.input_image
-                if not ref.exists():
+            # OPTIONAL input image(s) (owner 2026-07-23; MULTI + the
+            # reference folder 2026-08-03): resolve every "← `ref`"
+            # (sheet folder → reference_dir → absolute) and attach them
+            # into the composer before the prompt, in ← line order.
+            # Sources are READ ONLY (never under out_base). A missing
+            # file is a loud per-item SKIP — the rest of the batch
+            # still runs; the fix is in the sheet, the Reference folder
+            # pick, or on disk — not here.
+            input_paths: list[str] | None = None
+            if item.input_images:
+                resolved, missing = resolve_input_images(
+                    item.input_images, sheet.source.parent, reference_dir
+                )
+                if missing:
                     refused += 1
-                    reason = f"input image missing: {ref}"
-                    log(f"    INPUT IMAGE MISSING — {ref}")
+                    reason = f"input image missing: {', '.join(missing)}"
+                    log(f"    INPUT IMAGE MISSING — {', '.join(missing)}")
                     log(
-                        "    skipping this item; add the file (or fix the"
-                        " '← path' in the sheet) and rerun"
+                        "    skipping this item; add the file(s), fix the"
+                        " '← path' in the sheet, or point the Reference"
+                        " folder at them — then rerun"
                     )
                     if run_report is not None:
                         run_report.refused(item.drop_path, reason)
@@ -601,8 +595,11 @@ def run_sheet(
                     if idx < total:
                         _pause(timing, should_stop, log)
                     continue
-                input_path = str(ref)
-                log(f"    input image: {ref.name}")
+                input_paths = resolved
+                log(
+                    "    input image(s): "
+                    + ", ".join(Path(p).name for p in resolved)
+                )
 
             retried = False  # True when a RETRY path produced the image
             skip_reason: str | None = None
@@ -625,7 +622,7 @@ def run_sheet(
                     emit({"type": "item_retry"})
                     try:
                         out = generate_one(
-                            preamble + base, attach=input_path
+                            preamble + base, attach=input_paths
                         )
                         log("    safer retry SUCCEEDED")
                         return out, None
@@ -634,7 +631,7 @@ def run_sheet(
                 return None, reason
 
             try:
-                data, t_send = generate_one(base, attach=input_path)
+                data, t_send = generate_one(base, attach=input_paths)
             except ItemRefused as exc:
                 result, reason = try_safer(exc)
                 if result is None:
@@ -703,7 +700,7 @@ def run_sheet(
                 try:
                     data, t_send = _recover_image_failed(
                         exc, driver, generate_one, base, should_stop, log,
-                        emit, input_path,
+                        emit, input_paths,
                     )
                     retried = True
                 except ItemRefused as exc2:
@@ -726,7 +723,7 @@ def run_sheet(
                     )
                     emit({"type": "item_retry"})
                     try:
-                        data, t_send = generate_one(base, attach=input_path)
+                        data, t_send = generate_one(base, attach=input_paths)
                         digest = hashlib.sha1(data).digest()
                         retried = True
                     except (ItemRefused, NoImage, ImageGenFailed) as exc:

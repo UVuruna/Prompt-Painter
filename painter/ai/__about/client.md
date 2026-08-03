@@ -77,13 +77,15 @@ rate-limit 429.
   no `image_path`: the SAME text payload `generate_text` builds
   (`_payload_text`, no system instruction), widened with
   `generationConfig.responseModalities: ["TEXT", "IMAGE"]`. With
-  `image_path` given: the saved image at that path rides along as an
-  `inlineData` part BEFORE the prompt text (`_payload_reference_and_
-  prompt` — mirrors [CDP Driver](../../__about/driver.md)'s own
-  `submit_with_image` order, picture attached before the prompt is
-  sent) — closes the gap where an API-mode sheet item carrying a
-  "← ref" input image had no method to call. Returns the decoded PNG
-  bytes (`_response_image`).
+  `image_path` given (one path or a LIST — MULTI faza 2 2026-08-03):
+  each saved image rides along as an `inlineData` part BEFORE the
+  prompt text, in list order (`_payload_reference_and_prompt` —
+  mirrors [CDP Driver](../../__about/driver.md)'s own
+  `submit_with_image` order, picture(s) attached before the prompt is
+  sent, "the FIRST attached image" = the first ← line) — closes the
+  gap where an API-mode sheet item carrying a "← ref" input image had
+  no method to call. Returns the decoded PNG bytes
+  (`_response_image`).
 - `edit_image(image_path, prompt, *, key=None, model=None,
   log=print) -> bytes` — one image EDIT call: the source image
   embedded exactly like `check_image` (`_payload_image` + `_mime_for`,

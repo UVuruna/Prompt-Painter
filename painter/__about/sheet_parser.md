@@ -20,16 +20,19 @@ leniency.
    arrow, and the heading itself may contain single backticks.
    An arrow whose target is not an image file, or whose bold title
    ends with `:`, is prose (the weekday "Drop dirs" pointers).
-2b. An entry may ALSO carry an OPTIONAL input-image reference
-   (owner 2026-07-23): a `← \`refs/photo.png\`` line in the same
-   paragraph (mirror of the `→` output arrow). It fills
-   `PromptItem.input_image` with the RAW relative string — a
-   read-only source photo the runner attaches into the chat before
-   the prompt, resolved on disk relative to the sheet's own folder at
-   run time (never touched here — the parser stays pure and offline).
-   Any of `TOOL_IMAGE_EXTENSIONS` (png/jpg/jpeg/webp — a reference
-   photo may be a jpg). A `←` on a real entry naming a non-image file
-   is reported loudly.
+2b. An entry may ALSO carry OPTIONAL input-image reference(s)
+   (owner 2026-07-23; MULTI faza 2 2026-08-03): one or more
+   `← \`refs/photo.png\`` lines in the same paragraph (mirror of the
+   `→` output arrow), LINE ORDER = ATTACH ORDER (a dual plate's
+   prompt says "the FIRST/SECOND attached image"). They fill
+   `PromptItem.input_images` (a tuple of the RAW strings) — read-only
+   source photos the runner attaches into the chat before the prompt,
+   resolved on disk at run time (sheet folder → the run's Reference
+   folder → absolute — `runner.resolve_input_images`; never touched
+   here, the parser stays pure and offline). Any of
+   `TOOL_IMAGE_EXTENSIONS` (png/jpg/jpeg/webp — a reference photo may
+   be a jpg). A `←` on a real entry naming a non-image file is
+   reported loudly (the entry keeps its other, valid refs).
 
 ## The legacy forms it also reads (best-effort, never loud)
 
@@ -79,9 +82,9 @@ of reported, so old sheets never block a batch:
 One image to generate: `title`, `drop_path` (POSIX-relative, becomes
 `out/<drop_path>`), `prompt` (byte-identical), `line`, `advice`
 (the skip-marker text when the sheet advises against it, else None),
-`input_image` (the raw `← \`...\`` reference — a read-only source photo
-attached before the prompt, resolved relative to the sheet folder at
-run time; None when the entry has no input line).
+`input_images` (a tuple of the raw `← \`...\`` references in line
+order — read-only source photos attached before the prompt, resolved
+by the runner at run time; empty when the entry has no input lines).
 
 ### SkippedItem
 A marked entry with NO prompt in the sheet (nothing to load):

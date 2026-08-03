@@ -14,6 +14,7 @@ the driver touches a browser.
 | `chrome.py` | Algorithmic | probe/launch/poll attach-point protocol for the automation Chrome — [about](__about/chrome.md) · [flow](__flow/chrome.md) |
 | `driver.py` | Algorithmic | CDP driver — the F1 turn-based per-item protocol (submit, await, extract, recovery) — [about](__about/driver.md) · [flow](__flow/driver.md) |
 | `runner.py` | Algorithmic | the paced, resumable run loop over a sheet's pending items — [about](__about/runner.md) · [flow](__flow/runner.md) |
+| `run_report.py` | Standard | the per-sheet report txt writer (split out of runner.py, faza 2) — [about](__about/run_report.md) |
 | `sheet_parser.py` | Algorithmic | parses one prompt-sheet `.md` into the run queue — [about](__about/sheet_parser.md) · [flow](__flow/sheet_parser.md) |
 | `bg_remove.py` | Algorithmic | the color-keyed background-removal engine — [about](__about/bg_remove.md) · [flow](__flow/bg_remove.md) |
 | `postprocess.py` | Algorithmic | composed post-save hook: background removal + transparent crop — [about](__about/postprocess.md) · [flow](__flow/postprocess.md) |

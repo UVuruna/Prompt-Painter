@@ -56,19 +56,23 @@ impossible. See the flow diagram for the full state machine.
    text), and retries the send-button lookup exactly ONCE more. A
    second miss raises `SelectorRot` same as always.
 1b. `submit_with_image(image_path, prompt)` — **image + text submit**
-   (owner 2026-07-23), used BOTH by input-image sheet entries (the
-   `← \`ref\`` reference photo — "put THIS character into that scene")
-   and by WEBSITE FIX (re-attaching a flagged output for a focused
-   correction). Acts like a PERSON: walk `attach_menu_path` — EXPAND
-   the "+" menu, then click the add-image option — each step
-   `_hesitate()`-paced. Then attach the file: if the site exposes
-   `file_input` (ChatGPT's `#upload-photos`), `set_input_files` on it
-   directly; else (Gemini) the option opens the OS dialog, caught with
-   `page.expect_file_chooser()`. Then WAIT for the composer's
-   `attach_preview` before sending. Raises `AttachNotConfigured`
-   immediately while the site's `attach_menu_path` is empty. A
-   send-button reload recovery for this path RE-ATTACHES the image
-   before re-typing (a `reload()` drops the attachment too).
+   (owner 2026-07-23; MULTI faza 2 2026-08-03: `image_path` may be a
+   LIST of resolved paths in the sheet's ← line order — all files ride
+   ONE picker interaction, and a picker that refuses multiple files
+   raises loudly rather than silently attaching fewer), used BOTH by
+   input-image sheet entries (the `← \`ref\`` reference photo — "put
+   THIS character into that scene") and by WEBSITE FIX (re-attaching a
+   flagged output for a focused correction). Acts like a PERSON: walk
+   `attach_menu_path` — EXPAND the "+" menu, then click the add-image
+   option — each step `_hesitate()`-paced. Then attach the file(s): if
+   the site exposes `file_input` (ChatGPT's `#upload-photos`),
+   `set_input_files` on it directly; else (Gemini) the option opens
+   the OS dialog, caught with `page.expect_file_chooser()`. Then WAIT
+   for the composer's `attach_preview` before sending. Raises
+   `AttachNotConfigured` immediately while the site's
+   `attach_menu_path` is empty. A send-button reload recovery for
+   this path RE-ATTACHES the image(s) before re-typing (a `reload()`
+   drops the attachment too).
 2. `await_done(log)` — waits for OUR RESULT, not for the button: the
    old "stop button disappears" done edge stalled forever on ChatGPT's
    stuck button and could not tell our generation from a leftover one.

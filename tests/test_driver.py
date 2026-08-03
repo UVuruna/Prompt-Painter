@@ -349,6 +349,35 @@ def test_submit_with_image_sequence_gemini_file_chooser():
     assert i_plus < i_option < i_files < i_text < i_send
 
 
+def test_submit_with_image_list_passes_all_paths_in_order():
+    """MULTI-ATTACH (faza 2): a list of resolved paths rides ONE picker
+    interaction, order preserved — the prompt's "FIRST/SECOND attached
+    image" depends on it."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    loc = _wire_attach(site, page, with_input=True)
+    driver = _driver(site, page)
+
+    driver.submit_with_image(
+        ["C:/refs/Vader.png", "C:/refs/Luke.png"], "two refs"
+    )
+
+    assert loc["file_input"].set_files == [
+        "C:/refs/Vader.png", "C:/refs/Luke.png",
+    ]
+
+
+def test_submit_with_image_single_item_list_unwraps_to_the_proven_form():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    loc = _wire_attach(site, page, with_input=True)
+    driver = _driver(site, page)
+
+    driver.submit_with_image(["C:/out/hero.png"], "one ref")
+
+    assert loc["file_input"].set_files == "C:/out/hero.png"
+
+
 def test_submit_with_image_attaches_before_typing():
     """The image must be attached before the prompt is typed — the
     person expands the menu and attaches first, never types early."""

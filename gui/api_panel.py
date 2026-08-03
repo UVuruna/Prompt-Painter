@@ -157,7 +157,7 @@ class ApiImageGenPanel(ttk.Frame):
         ttk.Label(
             left,
             text="Generates the SAME queued Collections (.md sheets) as"
-            " Website GEN, through the paid Gemini image API instead of"
+            " Website Image GEN, through the paid Gemini image API instead of"
             " a browser tab.",
             style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
         ).pack(anchor="w", pady=(0, 4))
@@ -706,10 +706,10 @@ class ApiImageAdapter:
     auto-restart timer, exactly like a quota message that named no
     parseable reset time.
 
-    ``submit_with_image`` (F5, owner D3) is the API-mode counterpart
-    of ``driver.submit_with_image`` — an item carrying a "← ref" input
-    image (``sheet_parser``'s ``input_image`` field, resolved by
-    ``run_sheet``'s ``generate_one``) attaches it exactly like
+    ``submit_with_image`` (F5, owner D3; MULTI faza 2) is the API-mode
+    counterpart of ``driver.submit_with_image`` — an item carrying
+    "← ref" input image(s) (``sheet_parser``'s ``input_images`` field,
+    resolved by ``run_sheet``) attaches them exactly like
     ``submit_prompt`` remembers a plain prompt; the ACTUAL call still
     happens in ``extract_image``, same submit-then-await-then-extract
     shape. Closes the audited F5 gap: without this method, an API-mode
@@ -720,7 +720,7 @@ class ApiImageAdapter:
     def __init__(self, log: Callable[[str], None] = print):
         self._log = log
         self._prompt: str = ""
-        self._image_path: Path | None = None
+        self._image_path: Path | list[Path] | None = None
         # run_sheet reads driver.site.name for the report header
         # (RunReport's constructor, only when report=True) — a tiny
         # stand-in, never a real SiteConfig (no DOM field on it is
@@ -741,11 +741,19 @@ class ApiImageAdapter:
         self._image_path = None
 
     def submit_with_image(
-        self, image_path: str | Path, prompt: str,
+        self, image_path: str | Path | list, prompt: str,
         log: Callable[[str], None] = print,
     ) -> None:
         self._prompt = prompt
-        self._image_path = Path(image_path)
+        # MULTI-ATTACH (faza 2, owner 2026-08-03): a sheet entry with
+        # several ← lines arrives as a LIST (attach order preserved —
+        # ai.generate_image builds one inlineData part per path); the
+        # long-proven single form stays a bare Path
+        if isinstance(image_path, (list, tuple)):
+            paths = [Path(p) for p in image_path]
+            self._image_path = paths[0] if len(paths) == 1 else paths
+        else:
+            self._image_path = Path(image_path)
 
     def await_done(self, log: Callable[[str], None] = print) -> None:
         pass

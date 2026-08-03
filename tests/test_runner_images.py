@@ -108,7 +108,7 @@ def _sheet_with_input(
         ref_path = tmp_path / ref
         ref_path.parent.mkdir(parents=True, exist_ok=True)
         ref_path.write_bytes(PNG_1PX)
-    item = PromptItem("Hero", "fake/hero.png", "prompt 0", 1, None, ref)
+    item = PromptItem("Hero", "fake/hero.png", "prompt 0", 1, None, (ref,))
     return Sheet("T", source, (item,), (), ())
 
 
@@ -121,10 +121,12 @@ def test_input_image_item_attaches_via_submit_with_image(tmp_path):
 
     assert generated == 1
     assert (out / "chatgpt" / "fake" / "hero.png").exists()
-    # attached (not plain-submitted), resolved RELATIVE TO THE SHEET FOLDER
+    # attached (not plain-submitted), resolved RELATIVE TO THE SHEET
+    # FOLDER; the driver receives the resolved path LIST (multi-attach
+    # contract, faza 2 2026-08-03)
     assert len(driver.attached) == 1
-    attached_path, prompt = driver.attached[0]
-    assert attached_path == str(tmp_path / "refs" / "hero.png")
+    attached_paths, prompt = driver.attached[0]
+    assert attached_paths == [str(tmp_path / "refs" / "hero.png")]
     assert "prompt 0" in prompt
 
 
@@ -133,7 +135,7 @@ def test_input_image_missing_is_skipped_loudly(tmp_path):
     source.write_text("# T\n", encoding="utf-8")
     items = (
         PromptItem("Hero", "fake/hero.png", "prompt 0", 1, None,
-                   "refs/missing.png"),
+                   ("refs/missing.png",)),
         PromptItem("Plain", "fake/plain.png", "prompt 1", 2),
     )
     sheet = Sheet("T", source, items, (), ())
@@ -190,11 +192,98 @@ def test_input_image_reattached_on_escalation_new_session(tmp_path):
     # attached twice: the first send + the escalation re-attach (never a
     # bare "retry" in the fresh session)
     assert len(driver.attached) == 2
-    for path, _prompt in driver.attached:
-        assert path == str(tmp_path / "refs" / "hero.png")
+    for paths, _prompt in driver.attached:
+        assert paths == [str(tmp_path / "refs" / "hero.png")]
     # the escalation refreshed the page and opened a new session first
     assert driver.refreshes >= 1
     assert driver.new_chats >= 1
+
+
+# --- multi-attach + Reference folder + PROMPT+IMAGE mode (faza 2) ----
+
+def test_multiple_refs_attach_in_sheet_line_order(tmp_path):
+    """A dual plate's ← lines attach in LINE ORDER — the prompt's
+    "FIRST/SECOND attached image" depends on it."""
+    source = tmp_path / "sheet.md"
+    source.write_text("# T\n", encoding="utf-8")
+    for name in ("Vader.png", "Luke.png"):
+        (tmp_path / "refs").mkdir(exist_ok=True)
+        (tmp_path / "refs" / name).write_bytes(PNG_1PX)
+    item = PromptItem(
+        "The Father", "fake/Vader.png", "two refs", 1, None,
+        ("refs/Vader.png", "refs/Luke.png"),
+    )
+    sheet = Sheet("T", source, (item,), (), ())
+    driver = FakeDriver(SITES["chatgpt"])
+
+    generated = run_sheet(sheet, driver, tmp_path / "out", "chatgpt", FAST)
+
+    assert generated == 1
+    paths, _prompt = driver.attached[0]
+    assert paths == [
+        str(tmp_path / "refs" / "Vader.png"),
+        str(tmp_path / "refs" / "Luke.png"),
+    ]
+
+
+def test_reference_dir_fallback_resolves_a_ref_not_beside_the_sheet(tmp_path):
+    """Resolution order (faza 2): sheet folder first, then the run's
+    Reference folder — the gitignored reference stash can live anywhere
+    (the starwars sheets' UV/ case)."""
+    ref_home = tmp_path / "elsewhere"
+    (ref_home / "sw_reference").mkdir(parents=True)
+    (ref_home / "sw_reference" / "Yoda.png").write_bytes(PNG_1PX)
+    sheet_dir = tmp_path / "sheets"
+    sheet_dir.mkdir()
+    source = sheet_dir / "sheet.md"
+    source.write_text("# T\n", encoding="utf-8")
+    item = PromptItem(
+        "Yoda", "fake/Yoda.png", "p", 1, None, ("sw_reference/Yoda.png",)
+    )
+    sheet = Sheet("T", source, (item,), (), ())
+    driver = FakeDriver(SITES["chatgpt"])
+
+    generated = run_sheet(
+        sheet, driver, tmp_path / "out", "chatgpt", FAST,
+        reference_dir=ref_home,
+    )
+
+    assert generated == 1
+    paths, _prompt = driver.attached[0]
+    assert paths == [str(ref_home / "sw_reference" / "Yoda.png")]
+
+
+def test_require_input_image_runs_only_complete_pairs(tmp_path):
+    """PROMPT+IMAGE mode (owner: "ako ucitam sve promptove i samo 1
+    sliku RADI SAMO 1 SLIKU"): items without a ← reference, or whose
+    reference is missing on disk, are loudly excluded — only complete
+    prompt+image pairs run."""
+    source = tmp_path / "sheet.md"
+    source.write_text("# T\n", encoding="utf-8")
+    (tmp_path / "refs").mkdir()
+    (tmp_path / "refs" / "hero.png").write_bytes(PNG_1PX)
+    items = (
+        PromptItem("Hero", "fake/hero.png", "p0", 1, None,
+                   ("refs/hero.png",)),
+        PromptItem("NoRef", "fake/noref.png", "p1", 2),
+        PromptItem("Missing", "fake/missing.png", "p2", 3, None,
+                   ("refs/gone.png",)),
+    )
+    sheet = Sheet("T", source, items, (), ())
+    logs: list[str] = []
+    driver = FakeDriver(SITES["chatgpt"])
+
+    generated = run_sheet(
+        sheet, driver, tmp_path / "out", "chatgpt", FAST,
+        log=logs.append, require_input_image=True,
+    )
+
+    assert generated == 1
+    assert (tmp_path / "out" / "chatgpt" / "fake" / "hero.png").exists()
+    assert not (tmp_path / "out" / "chatgpt" / "fake" / "noref.png").exists()
+    assert any("NOT ELIGIBLE (no ← reference)" in ln for ln in logs)
+    assert any("NOT ELIGIBLE (reference missing)" in ln for ln in logs)
+    assert any("PROMPT+IMAGE: 1/3" in ln for ln in logs)
 
 
 def test_continue_nudge_recovers_a_stuck_response(tmp_path):

@@ -185,22 +185,20 @@ def _payload_image(image_bytes: bytes, mime: str, instructions: str) -> dict:
 
 
 def _payload_reference_and_prompt(
-    image_bytes: bytes, mime: str, prompt: str
+    images: list[tuple[bytes, str]], prompt: str
 ) -> dict:
-    """``generate_image``'s OPTIONAL reference-image path (F5, owner
-    D3): the IMAGE part comes FIRST, the prompt text SECOND — mirrors
-    the website flow's own order (``driver.submit_with_image`` attaches
-    the picture into the composer BEFORE the prompt text is typed and
-    sent), unlike ``_payload_image`` above (text first, the checker/
-    edit convention). Shares the per-part builders with it (Rule #5)."""
-    return {
-        "contents": [
-            {"parts": [
-                _inline_data_part(image_bytes, mime),
-                _text_part(prompt),
-            ]}
-        ]
-    }
+    """``generate_image``'s OPTIONAL reference image(s) (F5, owner D3;
+    MULTI faza 2 2026-08-03): every IMAGE part comes FIRST — in the
+    sheet's ← line order, so "the FIRST attached image" holds — and
+    the prompt text LAST, mirroring the website flow's own order
+    (``driver.submit_with_image`` attaches the picture(s) into the
+    composer BEFORE the prompt text is typed and sent), unlike
+    ``_payload_image`` above (text first, the checker/edit
+    convention). ``images`` is ``[(bytes, mime), ...]``; shares the
+    per-part builders with the rest (Rule #5)."""
+    parts = [_inline_data_part(data, mime) for data, mime in images]
+    parts.append(_text_part(prompt))
+    return {"contents": [{"parts": parts}]}
 
 
 # a "38s" / "37.9s" / "retry in 5s" seconds value the server names
@@ -622,7 +620,7 @@ def check_image(
 def generate_image(
     prompt: str,
     *,
-    image_path: Path | None = None,
+    image_path: Path | str | list | None = None,
     key: str | None = None,
     model: str | None = None,
     log=print,
@@ -632,30 +630,36 @@ def generate_image(
     via ``model_for("image")`` (F5, owner D1/D3): settings.json's
     override, else ``GEMINI_IMAGE_MODEL``.
 
-    ``image_path`` (owner D3, F5) — OPTIONAL: when given, the saved
-    image at this path rides along as an ``inlineData`` part BEFORE
-    the prompt text (``_payload_reference_and_prompt`` — mirrors the
-    website flow's own order, ``driver.submit_with_image`` attaches
-    the picture into the composer before the prompt is sent). This
-    closes the audited gap where an API-mode sheet item carrying a
-    "← ref" input image had no method to call
-    (``ApiImageAdapter.submit_with_image``, see ``gui/api_panel.py``).
-    With no ``image_path`` this reuses ``_payload_text`` (the prompt,
-    no system instruction) exactly as before, widened with
-    ``responseModalities: ["TEXT", "IMAGE"]`` so the model returns an
-    inline image part instead of (or alongside) text. Returns the
-    decoded image BYTES; ``_response_image`` raises loudly when none
-    comes back. A free-tier-exhausted 429 raises ``PaidFeatureRequired``
-    instead of retrying (see ``_call_raw``). ``key=None`` reads
-    settings.json (``NoKey`` when absent), like every other call in
-    this module."""
+    ``image_path`` (owner D3, F5; MULTI faza 2 2026-08-03) — OPTIONAL:
+    one path or a LIST of paths (a sheet entry with several ``←``
+    lines). Each saved image rides along as an ``inlineData`` part
+    BEFORE the prompt text, in list order
+    (``_payload_reference_and_prompt`` — mirrors the website flow's
+    own order, ``driver.submit_with_image`` attaches the picture(s)
+    into the composer before the prompt is sent). This closes the
+    audited gap where an API-mode sheet item carrying a "← ref" input
+    image had no method to call (``ApiImageAdapter.submit_with_image``,
+    see ``gui/api_panel.py``). With no ``image_path`` this reuses
+    ``_payload_text`` (the prompt, no system instruction) exactly as
+    before, widened with ``responseModalities: ["TEXT", "IMAGE"]`` so
+    the model returns an inline image part instead of (or alongside)
+    text. Returns the decoded image BYTES; ``_response_image`` raises
+    loudly when none comes back. A free-tier-exhausted 429 raises
+    ``PaidFeatureRequired`` instead of retrying (see ``_call_raw``).
+    ``key=None`` reads settings.json (``NoKey`` when absent), like
+    every other call in this module."""
     resolved_model = model or model_for("image")
-    if image_path is not None:
-        image_path = Path(image_path)
-        mime = _mime_for(image_path, purpose="the reference image")
-        payload = _payload_reference_and_prompt(
-            image_path.read_bytes(), mime, prompt
+    if image_path:
+        paths = (
+            [Path(p) for p in image_path]
+            if isinstance(image_path, (list, tuple))
+            else [Path(image_path)]
         )
+        images = [
+            (p.read_bytes(), _mime_for(p, purpose="the reference image"))
+            for p in paths
+        ]
+        payload = _payload_reference_and_prompt(images, prompt)
     else:
         payload = _payload_text(prompt, None)
     payload["generationConfig"] = {"responseModalities": ["TEXT", "IMAGE"]}

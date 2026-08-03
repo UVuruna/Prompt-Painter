@@ -272,7 +272,7 @@ def test_input_image_reference_parsed(tmp_path):
     assert len(sheet.items) == 1
     item = sheet.items[0]
     assert item.drop_path == "assets/x/Hero.png"
-    assert item.input_image == "refs/hero.png"
+    assert item.input_images == ("refs/hero.png",)
 
 
 def test_entry_without_input_image_is_none(tmp_path):
@@ -280,7 +280,7 @@ def test_entry_without_input_image_is_none(tmp_path):
         tmp_path,
         "# Theme\n\n**Hero** → `assets/x/Hero.png`\n\n```\nprompt\n```\n",
     )
-    assert sheet.items[0].input_image is None
+    assert sheet.items[0].input_images == ()
 
 
 def test_input_image_may_be_a_jpg_reference(tmp_path):
@@ -294,7 +294,7 @@ def test_input_image_may_be_a_jpg_reference(tmp_path):
         "```\nprompt\n```\n",
     )
     assert [p.message for p in sheet.problems] == []
-    assert sheet.items[0].input_image == "refs/hero.jpg"
+    assert sheet.items[0].input_images == ("refs/hero.jpg",)
 
 
 def test_input_image_accepts_a_relative_parent_path(tmp_path):
@@ -308,7 +308,7 @@ def test_input_image_accepts_a_relative_parent_path(tmp_path):
         "```\nprompt\n```\n",
     )
     assert [p.message for p in sheet.problems] == []
-    assert sheet.items[0].input_image == "../shared/hero.png"
+    assert sheet.items[0].input_images == ("../shared/hero.png",)
 
 
 def test_inline_input_arrow_on_the_same_line(tmp_path):
@@ -320,7 +320,38 @@ def test_inline_input_arrow_on_the_same_line(tmp_path):
     )
     assert [p.message for p in sheet.problems] == []
     assert sheet.items[0].drop_path == "assets/x/Hero.png"
-    assert sheet.items[0].input_image == "refs/hero.png"
+    assert sheet.items[0].input_images == ("refs/hero.png",)
+
+
+def test_multiple_input_images_kept_in_line_order(tmp_path):
+    """Faza 2 (owner 2026-08-03): a dual plate attaches TWO references
+    — one ← line per attachment, line order = attach order (the prompt
+    says "the FIRST/SECOND attached image")."""
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n"
+        "**The Father** → `assets/x/Vader.png`\n"
+        "← `sw_reference/Vader.png`\n"
+        "← `sw_reference/Luke.png`\n\n"
+        "```\nTWO ATTACHED IMAGES: the FIRST ... the SECOND ...\n```\n",
+    )
+    assert [p.message for p in sheet.problems] == []
+    assert sheet.items[0].input_images == (
+        "sw_reference/Vader.png", "sw_reference/Luke.png",
+    )
+
+
+def test_one_bad_ref_among_good_ones_reports_and_keeps_the_good(tmp_path):
+    sheet = _parse_text(
+        tmp_path,
+        "# Theme\n\n"
+        "**Hero** → `assets/x/Hero.png`\n"
+        "← `refs/hero.png`\n"
+        "← `notes.txt`\n\n"
+        "```\nprompt\n```\n",
+    )
+    assert any("input image" in p.message for p in sheet.problems)
+    assert sheet.items[0].input_images == ("refs/hero.png",)
 
 
 def test_non_image_input_reference_reported(tmp_path):
@@ -334,4 +365,4 @@ def test_non_image_input_reference_reported(tmp_path):
         "```\nprompt\n```\n",
     )
     assert any("input image" in p.message for p in sheet.problems)
-    assert sheet.items[0].input_image is None
+    assert sheet.items[0].input_images == ()

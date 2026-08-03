@@ -218,6 +218,36 @@ def test_extract_image_passes_the_stored_image_path_and_clears_it(
     assert captured == [("a different, plain item", None)]
 
 
+def test_submit_with_image_list_keeps_attach_order(monkeypatch, tmp_path):
+    """MULTI-ATTACH (faza 2): a dual plate's two ← refs arrive as a
+    list and reach generate_image in the same order — its inlineData
+    parts are "the FIRST/SECOND attached image"."""
+    a = tmp_path / "Vader.png"
+    b = tmp_path / "Luke.png"
+    a.write_bytes(PNG_1PX)
+    b.write_bytes(PNG_1PX)
+    captured = []
+
+    def fake_generate_image(prompt, *, image_path=None, key=None, model=None, log=print):
+        captured.append(image_path)
+        return PNG_1PX
+
+    monkeypatch.setattr(ai_module, "generate_image", fake_generate_image)
+    adapter = gui.ApiImageAdapter()
+    adapter.submit_with_image([str(a), str(b)], "two refs")
+    adapter.extract_image()
+    assert captured == [[a, b]]
+
+
+def test_submit_with_image_single_item_list_stays_a_bare_path(tmp_path):
+    """A one-element list normalizes to the long-proven single form."""
+    ref = tmp_path / "photo.png"
+    ref.write_bytes(PNG_1PX)
+    adapter = gui.ApiImageAdapter()
+    adapter.submit_with_image([str(ref)], "p")
+    assert adapter._image_path == ref
+
+
 def test_submit_prompt_clears_a_previous_attach(monkeypatch, tmp_path):
     """A driver-shaped adapter is reused across MANY items in one run
     (run_sheet's queue loop) — without clearing, a PREVIOUS item's

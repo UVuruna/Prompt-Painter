@@ -571,15 +571,24 @@ class SiteDriver:
         )
 
     def submit_with_image(
-        self, image_path: str, prompt: str, log: Log = print
+        self, image_path: str | list[str], prompt: str, log: Log = print
     ) -> None:
-        """Attach an image into the composer, then paste+send ``prompt``.
+        """Attach image(s) into the composer, then paste+send ``prompt``.
 
         The shared "image + text" submit, used BOTH by input-image sheet
         entries (the ``← `ref``` reference photo — "put THIS character
         into that scene", owner 2026-07-23) and by WEBSITE FIX
         (re-attaching a flagged output for a focused correction). The
         prompt text carries the intent; the mechanics are identical.
+
+        MULTI-ATTACH (faza 2, owner 2026-08-03): ``image_path`` may be a
+        LIST of resolved paths (a sheet entry with several ``←`` lines —
+        the dual plates attach two references); list order is attach
+        order, matching the prompt's "FIRST/SECOND attached image". All
+        files ride ONE picker interaction (``set_input_files``/
+        ``set_files`` accept a list) — a site whose picker refuses
+        multiple files raises loudly there (Rule #1), never silently
+        attaching fewer than the sheet declared.
 
         Acts like a PERSON (owner 2026-07-23): EXPAND the composer's "+"
         menu, THEN pick the add-image option — never click a hidden
@@ -615,17 +624,22 @@ class SiteDriver:
         )
         self._confirm_sent(prompt, log)
 
-    def _attach_image(self, image_path: str) -> None:
-        """Walk the "+" menu like a person and attach ``image_path``, then
+    def _attach_image(self, image_path: str | list[str]) -> None:
+        """Walk the "+" menu like a person and attach ``image_path`` (one
+        path, or a LIST in attach order — faza 2 multi-attach), then
         wait for the composer preview — the attach half of
         ``submit_with_image``, extracted so the send-button reload
         recovery can RE-ATTACH after a ``reload()`` drops the image
         (owner 2026-07-23 / review finding). Idempotent: re-opening the
-        menu and re-setting the file is exactly what the recovery needs.
+        menu and re-setting the file(s) is exactly what the recovery
+        needs. A single path is passed through UNWRAPPED (the picker
+        APIs accept both forms; the single form is the long-proven one).
 
         GATED: raises ``AttachNotConfigured`` immediately while this
         site's ``attach_menu_path`` is empty — never a guessed selector.
         """
+        if isinstance(image_path, list) and len(image_path) == 1:
+            image_path = image_path[0]
         if not self.site.attach_menu_path:
             raise AttachNotConfigured(
                 f"{self.site.name}: image attach is not configured —"

@@ -16,15 +16,29 @@ an unattended rerun resumes past every image already on disk and the
 report keeps every finished line. The loop writes ONLY under
 `out_base`; sheets are READ ONLY by construction.
 
-An item that carries an INPUT IMAGE (`PromptItem.input_image` — the
-sheet's `← \`ref\`` line, owner 2026-07-23) has that reference
-resolved RELATIVE TO THE SHEET'S OWN FOLDER (`sheet.source.parent`,
-read only) and attached into the composer BEFORE the prompt via
-`driver.submit_with_image` ("put THIS character into that scene");
-plain items still go through `submit_prompt`. A missing reference
-file is a loud per-item SKIP (logged, counted, reported) so the rest
-of the batch still runs. The image-failed escalation re-attaches the
-reference in its fresh session (the earlier same-chat rungs do not).
+An item that carries INPUT IMAGE(S) (`PromptItem.input_images` — the
+sheet's `← \`ref\`` line(s), owner 2026-07-23; MULTI + faza 2
+2026-08-03, LINE ORDER = ATTACH ORDER) has each reference resolved by
+`resolve_input_images` — the BINDING order ① sheet folder →
+② `reference_dir` (the GUI Prompt+Image section's Reference folder) →
+③ absolute; sources read only, no basename guessing — and attached
+into the composer BEFORE the prompt via `driver.submit_with_image`
+("put THIS character into that scene"); plain items still go through
+`submit_prompt`. A missing reference file is a loud per-item SKIP
+(logged, counted, reported) so the rest of the batch still runs. The
+image-failed escalation re-attaches the reference(s) in its fresh
+session (the earlier same-chat rungs do not).
+
+`require_input_image=True` (faza 2 — the GUI's PROMPT + IMAGE mode,
+owner: "radi samo one slike koje imaju i PROMPT i PNG u prilogu")
+narrows the queue to items that declare at least one `←` reference
+AND whose references ALL resolve at Start — every excluded item is
+loudly listed and lands in the report's skip lines, never silently
+dropped.
+
+`RunReport` moved to its own module (`painter/run_report.py`, THE
+STRUCTURE LAW split, faza 2) — behavior unchanged, see
+[Run Report](run_report.md).
 
 ## Connections
 
@@ -147,20 +161,10 @@ then a per-item skip.
 
 ## Classes
 
-### RunReport
-The per-sheet report `<out_base>/_state/<site>/<sheet-stem>_report.txt`,
-APPENDED per run and written INCREMENTALLY (header → a line per
-image → summary), so an interrupted run keeps every finished line.
-Per image: completion timestamp, **gen** seconds (AI: SEND →
-image), **ours** seconds (save + bgfix + pause), original → final
-resolution (PNG header parse, stdlib only), final file size, extra
-actions — the `post_save` hook's own description (e.g.
-`REMOVE BG: done, CROP: done, UPSCALE: nothing`;
-`POSTPROCESS: FAILED` on a loud failure). Summary: image count,
-average generation (AI) AND average our-time per image, their
-total, wall clock, run start/finish timestamps and why the run
-ended — a quota stop includes the parsed reset time when the site
-named one.
+*(`RunReport` lives in its own module since the faza 2 STRUCTURE LAW
+split — content and format unchanged, see [Run Report](run_report.md):
+per-image gen/ours seconds, resolutions, sizes, actions, the averages
+and the run's start/finish/why-ended lines.)*
 
 ## The two timings (owner 2026-07-17 — "sve se računa")
 
