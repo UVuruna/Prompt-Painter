@@ -9,10 +9,11 @@ god-file refactor, step 7/8; see [GUI (folder)](../___gui.md) and
 [App (composition)](../app.py)). Owns the three-way `_view` switch
 (`"menu"` / `"main"` / `"running"` — `_set_view`/`_go_view`), the Main
 Menu tile router (`_select_tile`/`_tile_handler`, shared with the
-running view's `IconBar` via `_click_icon_bar_tile`), the running-view
-layout reconciler (`_apply_running_layout` — decides whether
-`_controls_box` or one `ToolSettingsPanel` shows beneath the
-`IconBar`, or NEITHER), the "which jobs are active" queries
+running view's `IconBar` via `_click_icon_bar_tile`), **the ONE packer
+for both working views' layout** (`_pack_main_stack` — see below) and
+the running view's thin wrapper over it (`_apply_running_layout` —
+which surface shows beneath the `IconBar`, or NEITHER), the "which
+jobs are active" queries
 (`_active_kinds`/`_active_tile_ids`/`_sync_running_state`), the Menu
 affordance's gate (`_request_menu` — refuses to leave "running" while
 any job is still live), a standalone tool's persistent settings-panel
@@ -29,6 +30,25 @@ jobs — closing the LAST job never auto-navigates by itself; `"menu"`
 is reachable again ONLY on an explicit Menu click, and ONLY once
 `active_count == 0` (a click while anything is active is a refused
 no-op with a status-bar hint).
+
+**One packer owns the vertical order** (`_pack_main_stack`, owner
+2026-08-03: "svako treba da bude na svom mestu"). Inside `_main_view`
+the order is ALWAYS
+
+    [ IconBar ] → [ the ONE setup surface ] → [ dashboard notebook ]
+
+and it is rebuilt from scratch — everything forgotten, everything
+re-packed — on every view change, every collapse and every inline
+toggle. Before this, THREE packers shared the job (`_set_collapsed`,
+`_set_view`'s own "main" branch, `_apply_running_layout`), each
+anchoring off whatever happened to be packed at the time
+(`before=self.notebook`, `before=self._controls_box`, or nothing), so
+the same three widgets ended up in DIFFERENT orders depending on the
+route: returning from a run to the setup screen re-packed the controls
+AFTER the notebook, rendering the DASHBOARD above the icon bar and the
+settings. Order is no longer inferred from anchors, so it cannot drift;
+`_set_collapsed`/`_apply_running_layout` now only set state and call
+this. Pinned by tests/test_gui_main_stack.py.
 
 **Running view default is the DASHBOARD ALONE** (owner 2026-07-29,
 current behavior — supersedes the legacy `gui.md`'s account of Website
@@ -101,6 +121,7 @@ No `__init__` — every attribute it reads (`self._view`,
 methods: `_set_view`/`_go_view` (the animated view swap),
 `_select_tile`/`_tile_handler`/`_click_icon_bar_tile` (tile routing —
 one shared mapping for both the Main Menu and the running IconBar),
+`_pack_main_stack` (the ONE layout packer),
 `_apply_running_layout`, `_open_tool_panel`, `_active_kinds`/
 `_active_tile_ids`/`_sync_running_state`, `_request_menu`,
 `_set_collapsed`, `_toggle_dash_mode`.

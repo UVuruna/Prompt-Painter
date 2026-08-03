@@ -215,6 +215,24 @@ class BuildMixin:
         shell.pack(fill="both", expand=True)
         self._top_strip = ttk.Frame(shell, padding=(8, 6, 8, 0))
         self._top_strip.pack(fill="x")
+        # the run-status line ("idle" / "running: gemini" / "crop
+        # running …" / a refused Menu click's explanation). MOVED to a
+        # PINNED BOTTOM BAR (owner 2026-08-03: "svako treba da bude na
+        # svom mestu") — it used to be a child of _main_view packed
+        # ABOVE everything, so it sat on top of the icon bar (where a
+        # nav strip belongs) and vanished entirely on the Main Menu.
+        # A status bar is global and belongs at the window's bottom
+        # edge, outside the scroll like the top strip, so it shows on
+        # EVERY view and stays readable however far the content
+        # scrolls. Packed BEFORE the ScrollFrame — the expanding widget
+        # must claim the cavity LAST or it leaves the bar no height.
+        self.status_var = tk.StringVar(value="idle")
+        self._status_bar = ttk.Frame(shell, padding=(8, 2, 8, 4))
+        self._status_bar.pack(side="bottom", fill="x")
+        ttk.Label(
+            self._status_bar, textvariable=self.status_var,
+            style="Muted.TLabel",
+        ).pack(side="left")
         self._scroll = ScrollFrame(shell, fill_height=True)
         self._scroll.pack(fill="both", expand=True)
         outer = ttk.Frame(self._scroll.body, padding=OUTER_PAD_PX)
@@ -406,11 +424,8 @@ class BuildMixin:
             "ai_sheet_gen": SheetGenPanel(self._main_view, self),
         }
 
-        self.status_var = tk.StringVar(value="idle")
-        ttk.Label(
-            self._main_view, textvariable=self.status_var,
-            style="Muted.TLabel",
-        ).pack(fill="x", pady=(4, 0))
+        # (the status line is built with the shell, above — it is a
+        # PINNED BOTTOM BAR, not a child of _main_view)
 
         # the mini Day/Night switch — reflects the already-applied theme
         # (LAST at the edge, owner F4/G5)
@@ -574,6 +589,7 @@ class BuildMixin:
         )
         chrome_h = (
             self._top_strip.winfo_reqheight()
+            + self._status_bar.winfo_reqheight()
             + self._menu_view.chrome_height()
             + 2 * OUTER_PAD_PX
         )

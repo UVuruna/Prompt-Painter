@@ -42,6 +42,19 @@ The old pinned top-strip "Menu" button is GONE (owner 2026-08-03, UI
 rework tačka 2) — IconBar's leftmost HOME icon button (`home.svg`) is
 the single way back to the Main Menu.
 
+**The shell is three pinned bands** (owner 2026-08-03, "svako treba da
+bude na svom mestu"): the TOP STRIP (the two global doors Instructions
+/ AI key…, the centred app title, the Day/Night switch), the scrollable
+body, and a PINNED BOTTOM STATUS BAR (`_status_bar` — the run-status
+line "idle" / "running: gemini" / a refused HOME click's explanation).
+The status line used to be a child of `_main_view` packed ABOVE
+everything, so it sat on top of the icon bar and vanished on the Main
+Menu; as a bottom bar it is global, shows on every view, and stays
+readable however far the content scrolls. It is packed BEFORE the
+`ScrollFrame` — the expanding widget must claim the cavity last or the
+bar gets no height — and its measured height joins `_apply_min_size`'s
+chrome.
+
 A window maximize/restore is tracked in `_on_root_configure` for
 bookkeeping ONLY (owner 2026-07-21 perf fix) — it is deliberately NOT
 wrapped in `smooth_transition` any more (it was, 2026-07-20 through

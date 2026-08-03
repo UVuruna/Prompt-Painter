@@ -182,6 +182,10 @@ class FakeGui:
     _active_tile_ids = gui.PainterGui._active_tile_ids
     _tile_handler = gui.PainterGui._tile_handler
     _apply_running_layout = gui.PainterGui._apply_running_layout
+    # the ONE packer _apply_running_layout delegates its whole layout to
+    # (owner 2026-08-03) — aliased like every other real body here, so
+    # these tests still exercise the PRODUCTION packing, not a copy
+    _pack_main_stack = gui.PainterGui._pack_main_stack
     _toggle_pause_job = gui.PainterGui._toggle_pause_job
     _tool_panel_key = gui.PainterGui._tool_panel_key
     _open_tool_panel = gui.PainterGui._open_tool_panel
@@ -192,6 +196,12 @@ class FakeGui:
         self._tool_workers: dict[str, object] = {}
         self._view = "menu"
         self._inline_kind: str | None = None
+        # _pack_main_stack's other two inputs: the setup screen's
+        # controls/compact choice, and whether any job has ever run (the
+        # dashboard's own visibility gate — no dashboard before the
+        # first job, owner 2026-07-29)
+        self._collapsed = False
+        self._dashgrid = SimpleNamespace(active=lambda: [])
         self.status_var = tk.StringVar(value="idle")
         self.view_log: list[str] = []  # every _go_view request, in order
 

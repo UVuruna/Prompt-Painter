@@ -433,6 +433,22 @@ tile-id/slot bridge for real (the pre-Phase-15 stub that called a fake
 `_start_ai_check()` directly on a tile click is deleted along with the
 production behaviour it stood in for).
 
+### `test_gui_main_stack.py` — The ONE Layout Packer
+Owner 2026-08-03 ("svako treba da bude na svom mestu"). Split out of
+test_gui_running_view.py by RESPONSIBILITY: that module tests the
+running view's SEMANTICS (which view, which job, which tile), this one
+the LAYOUT they render into — what sits above what inside `_main_view`.
+Reuses its `FakeGui` by import (Rule #5 — one duck-typed stand-in, not
+two) and drives the real `ViewMixin._pack_main_stack` over real
+`ttk.Frame`s, reading back `pack_slaves()` order. Pins: the order is
+ALWAYS `[IconBar] → [the one setup surface] → [dashboard]`; the setup
+view keeps the dashboard LAST no matter which route reached it (the
+regression — three disagreeing packers used to re-pack the controls
+after the notebook, putting the dashboard above the icon bar); exactly
+one setup surface survives any pass (a stale tool panel is forgotten
+when the site controls take over); and the `"menu"` view leaves
+`_main_view` completely empty.
+
 ### `test_gui_agent_visibility.py` — Per-Site Show/Hide + the Fine-Tune Expanders
 GUI rework Phase 12 + the UI-SKETCH rework (owner 2026-07-29).
 `gui._visible_agent_slots(order, visible)` is the pure, Tk-free slot

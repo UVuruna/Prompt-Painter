@@ -51,29 +51,68 @@ class ViewMixin:
             text="▭ slider" if slider else "▦ grid"
         )
 
+    # --- the ONE packer for _main_view's vertical order -----------------
+
+    def _pack_main_stack(self) -> None:
+        """Re-pack ``_main_view`` from scratch, ALWAYS in this order:
+
+            [ icon bar ] → [ the one setup surface ] → [ dashboard ]
+
+        THE single place that decides what sits where inside
+        ``_main_view`` (owner 2026-08-03: "svako treba da bude na svom
+        mestu"). Three separate packers used to share the job —
+        ``_set_collapsed`` (controls/compact), ``_set_view``'s own
+        "main" branch (icon bar + notebook) and
+        ``_apply_running_layout`` (icon bar + inline panel) — each
+        anchoring off whatever happened to be packed at the time
+        (``before=self.notebook``, ``before=self._controls_box``, or
+        nothing). Their orders disagreed: returning from a run to the
+        setup screen re-packed the controls AFTER the notebook, so the
+        DASHBOARD rendered above the icon bar and the settings. Order
+        is no longer inferred from anchors — every widget is forgotten
+        and re-packed here, so it cannot drift.
+
+        Reads (never writes) ``_view``/``_collapsed``/``_inline_kind``:
+        the caller sets the state, this renders it."""
+        for widget in (
+            self._icon_bar, self._controls_box, self._compact_box,
+            self.notebook, *self._tool_panels.values(),
+        ):
+            widget.pack_forget()
+        if self._view == "menu":
+            self._scroll.refresh()
+            return
+        # 1. the nav strip — always the topmost thing on both working
+        #    views (owner 2026-08-03, slika 2: "GLAVNI MENI LINE TREBA
+        #    UVEK DA BUDE GORE")
+        self._icon_bar.pack(fill="x", pady=(2, 4))
+        # 2. EXACTLY ONE setup surface, never two (owner 2026-08-03,
+        #    slika 2). On the setup view it is the site controls (or the
+        #    thin compact strip); while running it is whatever
+        #    _inline_kind names — by default NOTHING, i.e. the dashboard
+        #    alone (owner 2026-07-29).
+        if self._view == "running":
+            if self._inline_kind in self._tool_panels:
+                self._tool_panels[self._inline_kind].pack(fill="x")
+            elif self._inline_kind == "website_gen":
+                self._controls_box.pack(fill="x")
+        elif self._collapsed:
+            self._compact_box.pack(fill="x")
+        else:
+            self._controls_box.pack(fill="x")
+        # 3. the dashboard — only once a job has run (owner 2026-07-29:
+        #    the fresh setup screen has no dashboard below it)
+        if self._view == "running" or self._dashgrid.active():
+            self.notebook.pack(fill="both", expand=True)
+        self._scroll.refresh()
+
     def _set_collapsed(self, collapsed: bool) -> None:
         """Swap the full controls for the thin per-agent strip (or back).
         Nothing is destroyed — every StringVar/BooleanVar/Listbox/Spinner
-        keeps its state; 'before=self.notebook' pins the vertical order
-        [controls|compact] above the notebook regardless of pack order."""
+        keeps its state; the vertical order comes from the ONE packer
+        (``_pack_main_stack``), never from this call's own pack order."""
         self._collapsed = collapsed
-        # the notebook is the anchor only while the dashboard is on
-        # screen (owner 2026-07-29: no dashboard before the first job)
-        anchor = (
-            {"before": self.notebook}
-            if self.notebook.winfo_manager()
-            else {}
-        )
-        if collapsed:
-            self._controls_box.pack_forget()
-            self._compact_box.pack(fill="x", **anchor)
-        else:
-            self._compact_box.pack_forget()
-            self._controls_box.pack(fill="x", **anchor)
-        # (no toggle button to relabel any more — the "Controls"
-        # toggle was removed, owner 2026-08-03; this stays the ONE
-        # packer for the controls/compact swap)
-        self._scroll.refresh()
+        self._pack_main_stack()
 
     # --- Main Menu (GUI rework Phase 10) --------------------------------
 
@@ -107,66 +146,30 @@ class ViewMixin:
         else:
             self._menu_view.pack_forget()
             self._main_view.pack(fill="both", expand=True)
-        # owner 2026-07-29: the DASHBOARD notebook shows only once a
-        # job has run ("running", or back on setup WITH live/past
-        # jobs); the fresh setup screen has no dashboard below it.
-        # Packed FIRST so every later pack(before=self.notebook) has
-        # its anchor when the notebook is present.
-        dashboard_visible = view == "running" or (
-            view == "main" and bool(self._dashgrid.active())
-        )
-        if dashboard_visible:
-            if not self.notebook.winfo_manager():
-                self.notebook.pack(fill="both", expand=True)
-        else:
-            self.notebook.pack_forget()
         # EXACTLY ONE setup surface may ever be on screen (owner
         # 2026-08-03, slika 2: "NIKADA ne smeju da budu OTVORENA 2
         # različita SETUPA"). Leaving "running" used to leave the tool
         # panel that was open still packed inside _main_view — invisible
         # only while the menu covered it, and back ABOVE the icon bar
         # together with the website controls the moment the setup view
-        # returned. Every non-running view starts from a clean slate.
-        if view != "running":
+        # returned. Every non-running view starts from a clean slate;
+        # and a FRESH entry into "running" never inherits a stale inline
+        # toggle from a previous run either (spec item 4: Start hides
+        # the launching tool's own settings panel).
+        if view != "running" or not was_running:
             self._inline_kind = None
-            for panel in self._tool_panels.values():
-                panel.pack_forget()
-        if view == "running":
-            if not was_running:
-                # Start hides the LAUNCHING tool's own settings panel
-                # (spec item 4) — a fresh entry into "running" never
-                # inherits a stale inline toggle from a previous run
-                self._inline_kind = None
-            self._apply_running_layout()
-        elif was_running:
-            self._icon_bar.pack_forget()
-            self._set_collapsed(self._collapsed)
-        # F4b (owner 2026-07-29): the icon strip shows on the SETUP
-        # screen too — icons-only, above the settings; its own Menu
-        # button serves as HOME there. HOTFIX (owner 2026-07-29,
-        # slika 2): entering the setup screen ALWAYS expands the full
-        # controls — a persisted collapsed state used to leave only
-        # the thin compact strip, i.e. NO settings and no way to
-        # start; the Controls toggle still collapses afterwards.
+        # HOTFIX (owner 2026-07-29, slika 2): entering the setup screen
+        # ALWAYS expands the full controls — a persisted collapsed state
+        # used to leave only the thin compact strip, i.e. NO settings
+        # and no way to start.
         if view == "main":
-            if self._collapsed:
-                self._set_collapsed(False)
-            if self._controls_box.winfo_manager():
-                self._icon_bar.pack(
-                    fill="x", pady=(2, 4), before=self._controls_box
-                )
-            else:
-                self._icon_bar.pack(fill="x", pady=(2, 4))
-        elif view == "menu":
-            self._icon_bar.pack_forget()
-        # (the [▦ grid] toggle is NOT touched here any more — owner
-        # 2026-08-03, slika 1 moved it INTO the dashboard tab's own
-        # footer, so it lives and dies with the notebook. The leftover
-        # pack(after=self.switch) call was packing a notebook child into
-        # the top strip and raised TclError mid-_set_view, aborting
-        # every menu tile that enters "running" — the empty setup
-        # screen of slika 3.)
-        self._scroll.refresh()
+            self._collapsed = False
+        # the whole vertical order — icon bar, the one setup surface,
+        # the dashboard — comes from the ONE packer (see its docstring
+        # for the three-packers-disagreeing bug this replaced)
+        self._pack_main_stack()
+        if view == "running":
+            self._icon_bar.set_active(self._active_tile_ids())
 
     def _go_view(self, view: str) -> None:
         if view == self._view:
@@ -289,27 +292,15 @@ class ViewMixin:
         ``_inline_kind`` names one of them via ``_open_tool_panel``.
         Every functionality WITHOUT an entry in ``_tool_panels`` still
         launches through its existing modal/dialog handler (see
-        ``_click_icon_bar_tile``). The SAME pack_forget/pack(before=
-        self.notebook) technique ``_set_collapsed`` already proves
-        safe, one container lower — nothing destroyed, only shown/
-        hidden. Callable repeatedly (every inline toggle re-runs it);
+        ``_click_icon_bar_tile``).
+
+        The packing itself is NOT done here (owner 2026-08-03) — this
+        is the running view's thin wrapper over ``_pack_main_stack``,
+        the ONE packer both views share, plus the IconBar's live-status
+        colours. Callable repeatedly (every inline toggle re-runs it);
         only meaningful while ``_view == "running"``."""
-        self._controls_box.pack_forget()
-        self._compact_box.pack_forget()
-        for panel in self._tool_panels.values():
-            panel.pack_forget()
-        self._icon_bar.pack(fill="x", before=self.notebook)
-        if self._inline_kind in self._tool_panels:
-            self._tool_panels[self._inline_kind].pack(
-                fill="x", before=self.notebook
-            )
-        elif self._inline_kind == "website_gen":
-            # settings return ONLY on an explicit Website GEN icon
-            # click (owner 2026-07-29: after Start the screen is the
-            # DASHBOARD — the icon strip is the way back to setup)
-            self._controls_box.pack(fill="x", before=self.notebook)
+        self._pack_main_stack()
         self._icon_bar.set_active(self._active_tile_ids())
-        self._scroll.refresh()
 
     def _open_tool_panel(self, tile_id: str) -> None:
         """Toggle ONE standalone tool's persistent settings panel
