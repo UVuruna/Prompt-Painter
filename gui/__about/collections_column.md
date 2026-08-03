@@ -9,10 +9,19 @@ panel isti kao Website Image GEN"). ONE component, two hosts (root
 Rule C): the Website Image GEN setup screen and the API Image GEN
 panel each render an instance — the Collections queue view
 (Add/Remove/Clear/Add folder), the shared Output folder, the
-Select-images door, the Prompt + Image toggle, and a
-`PromptImageSection` in the column's lower half (visible while the
-mode is ON; the column splits its own height 50-50, the tačka 3
-rule).
+Select-images door, the Prompt + Image toggle, the `Check` button
+(moved out of the top strip, owner 2026-08-03 — it validates the
+queue this column shows, so it lives beside it), and a
+`PromptImageSection` in the column's lower half.
+
+**The 50-50 height split is CONDITIONAL** (owner 2026-08-03: "ne može
+da ostane prazan PROSTOR u DESNOM panelu"). `set_section_visible` is
+the ONE door: with the mode ON both rows carry weight 1 in the
+`colrow` uniform group (the tačka 3 rule); with it OFF the section is
+`grid_remove`d, row 1 drops to weight 0 AND leaves the uniform group
+— a uniform group still reserves a 0-weight row's slice, which was
+exactly the dead gap under "Select images…" that also made the right
+column outgrow the left settings panel.
 
 STATE IS SHARED, WIDGETS ARE NOT: every column renders the same
 `PainterGui._sheets` queue (mutations call each column's

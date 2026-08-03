@@ -170,6 +170,20 @@ class AgentPanel(ttk.Labelframe):
         ).pack(side="left", padx=(0, 4))
         self._head_name = ttk.Label(head, text=site.name, style="Head.TLabel")
         self._head_name.pack(side="left")
+        # the OTHER sites' logos (owner 2026-08-03: "zašto nema logo
+        # Gemini-ja"): the shared header already NAMES both sites, so
+        # it must SHOW both — one label per other site, built here and
+        # left unpacked; set_shared_header packs them between this
+        # panel's own logo and the name, in the same sorted order the
+        # names are joined in.
+        self._extra_logos = [
+            ctk.CTkLabel(
+                head, text="", image=icon(JOB_LOGO[key]), width=22,
+                fg_color="transparent", bg_color=theme_pair("bg"),
+            )
+            for key in sorted(SITES)
+            if key != site_key
+        ]
         # F2 cooldown INFO (owner 2026-07-29): a persisted quota reset
         # shown right beside the site's name during setup — information
         # only, it NEVER gates the Start button
@@ -426,14 +440,29 @@ class AgentPanel(ttk.Labelframe):
             "no_empty_space": "no empty space",
             "no_grainy": "no grainy",
         }
+        # the helper switches WRAP (owner 2026-08-03: "ne može da
+        # ostane ovako da se ne vidi — prelomi u 2 reda ako treba ili
+        # više redova"): this group is one cell of the 2x2 settings
+        # grid, so a single row of three switches ran off its right
+        # edge and the last one was invisible. The label takes its own
+        # line and the switches grid TWO PER ROW underneath, both
+        # columns weighted — adding a fourth helper simply opens a
+        # third row, no width math to redo.
         helpers_row = ttk.Frame(self._group_prompt)
         helpers_row.pack(fill="x", pady=(3, 1))
-        ttk.Label(helpers_row, text="Helpers:", width=12).pack(side="left")
+        ttk.Label(helpers_row, text="Helpers:").pack(anchor="w")
+        helpers_grid = ttk.Frame(helpers_row)
+        helpers_grid.pack(fill="x", padx=(12, 0))
+        helpers_grid.columnconfigure(0, weight=1, uniform="helper")
+        helpers_grid.columnconfigure(1, weight=1, uniform="helper")
         for i, key in enumerate(HELPER_CHOICES):
             rounded_switch(
-                helpers_row, _HELPER_LABEL.get(key, key),
+                helpers_grid, _HELPER_LABEL.get(key, key),
                 self.helper_vars[key],
-            ).pack(side="left", padx=(2 if i == 0 else 6, 0))
+            ).grid(
+                row=i // 2, column=i % 2, sticky="w", pady=1,
+                padx=(0, 6),
+            )
 
         self.background_var.trace_add(
             "write", lambda *_a: self._on_background_change()
@@ -909,12 +938,17 @@ class AgentPanel(ttk.Labelframe):
     def set_shared_header(self, shared: bool) -> None:
         """F4c (owner 2026-07-29): while the both-sites shared editor
         is active, this (primary) panel's header names BOTH sites so
-        it is obvious one setup drives the pair."""
+        it is obvious one setup drives the pair — and SHOWS both
+        logos (owner 2026-08-03), not just this panel's own."""
         if shared:
             names = " + ".join(SITES[k].name for k in sorted(SITES))
             self._head_name.configure(text=f"{names} — shared settings")
+            for logo in self._extra_logos:
+                logo.pack(side="left", padx=(0, 4), before=self._head_name)
         else:
             self._head_name.configure(text=SITES[self.site_key].name)
+            for logo in self._extra_logos:
+                logo.pack_forget()
 
     def pace_floats(self) -> tuple[float, float, float, float]:
         """The four pace numbers — ValueError propagates to the

@@ -57,12 +57,14 @@ the "Sites:" show/hide row + the per-site `AgentPanel`s, stacked by
 `_relayout_agents`, each panel's own groups in a 2×2) and RIGHT input
 (`_build_queue`'s Collections list + `_build_inputs_tail`'s Output
 folder, `Select images…` and the `Prompt + Image` toggle) — the
-columns split the WIDTH 50-50 (uniform + weight 1). The right column
-splits its HEIGHT 50-50: Collections above, and the
+columns split the WIDTH 50-50 (uniform + weight 1) and end at the
+SAME height. The right column's HEIGHT split is conditional: the
 `PromptImageSection` (`_pi_section`, faza 2 — see
-[Prompt + Image Section](prompt_image.md)) gridded into the lower
-half only while the mode is ON (`_toggle_prompt_image`/
-`_apply_prompt_image_state`, restored once at startup).
+[Prompt + Image Section](prompt_image.md)) takes the lower half only
+while the mode is ON (`_toggle_prompt_image`/
+`_apply_prompt_image_state` → each column's `set_section_visible`,
+restored once at startup); with it OFF the Collections queue absorbs
+the whole column, so no dead gap is left below "Select images…".
 `WINDOW_DEFAULT_W`/`WINDOW_DEFAULT_H` (1120×840, owner 2026-07-29
 hotfix) are also what a maximized-close geometry falls back to on
 restore (`_clamp_geometry`) — a stale full-screen `WxH` would
@@ -83,10 +85,11 @@ since its worker lives in `self._running`/`self._workers`, not
 Owns the window-sizing/collapse-glyph constants every other mixin that
 touches the same widgets needs: `WINDOW_MIN_W`/`WINDOW_MIN_H`/
 `WINDOW_SCREEN_MARGIN_PX`/`WINDOW_DEFAULT_W`/`WINDOW_DEFAULT_H`/
-`COMPACT_CLUSTER_GAP_PX` (used only here) and
-`COLLAPSE_GLYPH_EXPANDED`/`COLLAPSE_GLYPH_COLLAPSED` (also read by
-`ViewMixin._set_collapsed` — imported from this module rather than
-duplicated, Rule #5).
+`COMPACT_CLUSTER_GAP_PX` (used only here). The
+`COLLAPSE_GLYPH_*` labels are GONE with the "Controls" toggle button
+(owner 2026-08-03: "CONTROLS NE PRIPADA NIGDE") — `_set_collapsed`
+survives as the controls/compact packer, it simply has no user-facing
+toggle any more.
 
 ## Connections
 
@@ -163,7 +166,7 @@ threads), `self._stop_events`/`self._pause_events` (per-kind
   else — ScrollFrame's own settle-debounced re-fit included) also
   maximizes/restores cleanly. The OS/DWM already animates the state
   change smoothly on its own; the cover was never needed here, only for
-  our OWN Tk-level jumps (theme flip, Controls collapse, a Settings
+  our OWN Tk-level jumps (theme flip, the controls/compact swap, a Settings
   gear/Advanced section) where no native transition exists. NOTE for
   readers of the legacy `gui.md`: that pre-split doc still describes
   maximize/restore as covered by `smooth_transition` — that description

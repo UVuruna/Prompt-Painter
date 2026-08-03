@@ -7,8 +7,9 @@ main / running — ``_set_view``/``_go_view``), the Main Menu tile router
 (``_select_tile``/``_tile_handler``), the running view's IconBar wiring
 (``_apply_running_layout``/``_open_tool_panel``/``_click_icon_bar_tile``),
 the "which jobs are active" queries (``_active_kinds``/``_active_tile_ids``/
-``_sync_running_state``) and the Controls collapse toggle
-(``_set_collapsed``/``_toggle_collapsed``). No ``__init__`` here — every
+``_sync_running_state``) and the controls/compact packer
+(``_set_collapsed`` — its user-facing "Controls" toggle was removed,
+owner 2026-08-03). No ``__init__`` here — every
 attribute it reads (``self._view``, ``self._controls_box``, ``self.
 _tool_panels``, ...) is set by ``BuildMixin.__init__``.
 """
@@ -23,7 +24,6 @@ from painter.config import (
     DASH_MODE_SLIDER,
     TILE_JOB_KINDS,
 )
-from .app_build import COLLAPSE_GLYPH_COLLAPSED, COLLAPSE_GLYPH_EXPANDED
 from .logic import _next_view
 from .theme import smooth_transition
 
@@ -70,19 +70,10 @@ class ViewMixin:
         else:
             self._compact_box.pack_forget()
             self._controls_box.pack(fill="x", **anchor)
-        self._collapse_btn.configure(
-            text=COLLAPSE_GLYPH_COLLAPSED if collapsed
-            else COLLAPSE_GLYPH_EXPANDED
-        )
+        # (no toggle button to relabel any more — the "Controls"
+        # toggle was removed, owner 2026-08-03; this stays the ONE
+        # packer for the controls/compact swap)
         self._scroll.refresh()
-
-    def _toggle_collapsed(self) -> None:
-        # the swap moves the whole upper window — run it behind the
-        # shared snapshot cover so it fades instead of jumping
-        smooth_transition(
-            self.root, partial(self._set_collapsed, not self._collapsed)
-        )
-        self._schedule_save()
 
     # --- Main Menu (GUI rework Phase 10) --------------------------------
 
@@ -135,11 +126,9 @@ class ViewMixin:
                 # (spec item 4) — a fresh entry into "running" never
                 # inherits a stale inline toggle from a previous run
                 self._inline_kind = None
-            self._collapse_btn.configure(state="disabled")
             self._apply_running_layout()
         elif was_running:
             self._icon_bar.pack_forget()
-            self._collapse_btn.configure(state="normal")
             self._set_collapsed(self._collapsed)
         # F4b (owner 2026-07-29): the icon strip shows on the SETUP
         # screen too — icons-only, above the settings; its own Menu
@@ -160,27 +149,18 @@ class ViewMixin:
         elif view == "menu":
             self._icon_bar.pack_forget()
         # HOTFIX (owner 2026-07-29, slika 1): the MENU screen shows a
-        # CLEAN top strip — title + theme switch only; Check/Controls
-        # belong to the working views. The [▦ grid] toggle shows ONLY
-        # while the DASHBOARD itself is on screen (owner 2026-07-29).
-        # (The old pinned top-strip Menu button is gone — IconBar's
-        # HOME icon button is the one affordance, owner 2026-08-03.)
-        if view == "menu":
-            self.btn_check.pack_forget()
-            self._collapse_btn.pack_forget()
-            self._dash_mode_btn.pack_forget()
+        # CLEAN top strip — title + theme switch only. The [▦ grid]
+        # toggle shows ONLY while the DASHBOARD itself is on screen
+        # (owner 2026-07-29). Check moved down beside "Select images…"
+        # and the Controls toggle is gone entirely (owner 2026-08-03),
+        # so the strip has nothing else left to show or hide.
+        if dashboard_visible and view != "menu":
+            if not self._dash_mode_btn.winfo_manager():
+                self._dash_mode_btn.pack(
+                    side="right", padx=(0, 8), after=self.switch
+                )
         else:
-            if not self.btn_check.winfo_manager():
-                self.btn_check.pack(side="left", padx=(8, 0))
-            if dashboard_visible:
-                if not self._dash_mode_btn.winfo_manager():
-                    self._dash_mode_btn.pack(
-                        side="right", padx=(0, 8), after=self.switch
-                    )
-            else:
-                self._dash_mode_btn.pack_forget()
-            if not self._collapse_btn.winfo_manager():
-                self._collapse_btn.pack(side="right", padx=(0, 8))
+            self._dash_mode_btn.pack_forget()
         self._scroll.refresh()
 
     def _go_view(self, view: str) -> None:

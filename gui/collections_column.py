@@ -45,8 +45,20 @@ class CollectionsColumn(ttk.Frame):
         super().__init__(parent)
         self._gui = gui
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=1, uniform="colrow")
-        self.rowconfigure(1, weight=1, uniform="colrow")
+        # the 50-50 height split is CONDITIONAL (owner 2026-08-03: "ne
+        # može da ostane prazan PROSTOR u DESNOM panelu"): row 1 only
+        # claims half the height while the Prompt+Image section is
+        # actually shown — with the mode OFF its weight drops to 0 and
+        # the Collections queue takes the WHOLE column, so the right
+        # column never reserves an empty bottom half (which also made
+        # the column taller than the left settings panel).
+        # See ``set_section_visible``.
+        # NOTE: the "colrow" uniform group is applied ONLY while both
+        # rows are live — a uniform group holding a 0-weight row still
+        # reserves that row's slice, which is exactly the dead gap
+        # this fix exists to kill. set_section_visible owns both.
+        self.rowconfigure(0, weight=1)
+        self.rowconfigure(1, weight=0, uniform="")
 
         top = ttk.Frame(self)
         top.grid(row=0, column=0, sticky="nsew")
@@ -100,6 +112,13 @@ class CollectionsColumn(ttk.Frame):
             row, "Prompt + Image", command=gui._toggle_prompt_image,
         )
         self.btn_prompt_image.pack(side="left", padx=(8, 0))
+        # "Check" lives HERE (owner 2026-08-03), not in the top strip:
+        # it validates the queue this very column shows, so it sits in
+        # the same row as the other queue doors.
+        self.btn_check = rounded_button(
+            row, "Check", command=gui._check_sheets,
+        )
+        self.btn_check.pack(side="left", padx=(8, 0))
 
         self.pi_section = PromptImageSection(
             self,
@@ -112,6 +131,19 @@ class CollectionsColumn(ttk.Frame):
         self.pi_section.grid_remove()  # hidden until the mode is ON
 
         gui._collections_columns.append(self)
+
+    def set_section_visible(self, on: bool) -> None:
+        """Show/hide the Prompt+Image half AND its row weight together
+        — the ONE door ``_apply_prompt_image_state`` uses. Weight 1
+        while shown (the owner's 50-50 rule), 0 while hidden so the
+        queue half absorbs the freed space instead of leaving a hole."""
+        self.rowconfigure(0, weight=1, uniform="colrow" if on else "")
+        self.rowconfigure(1, weight=1 if on else 0,
+                          uniform="colrow" if on else "")
+        if on:
+            self.pi_section.grid()
+        else:
+            self.pi_section.grid_remove()
 
     def repaint_queue(self, paths) -> None:
         """Refill this column's queue view from the ONE shared

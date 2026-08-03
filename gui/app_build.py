@@ -90,8 +90,6 @@ WINDOW_SCREEN_MARGIN_PX = 80  # taskbar + titlebar + slack subtracted from
 WINDOW_DEFAULT_W = 1120
 WINDOW_DEFAULT_H = 840
 COMPACT_CLUSTER_GAP_PX = 24  # gap between the two agent clusters when collapsed
-COLLAPSE_GLYPH_EXPANDED = "▾  Controls"   # toggle label while controls show
-COLLAPSE_GLYPH_COLLAPSED = "▸  Controls"  # toggle label while collapsed
 
 
 class BuildMixin:
@@ -276,6 +274,7 @@ class BuildMixin:
         # and the Prompt+Image section the settings/jobs mixins query
         self.sheet_list = main_column.sheet_list
         self.btn_select = main_column.btn_select
+        self.btn_check = main_column.btn_check
         self._pi_section = main_column.pi_section
         self._build_toolbar(self._controls_box)
         self._build_compact(self._main_view)
@@ -415,15 +414,12 @@ class BuildMixin:
         )
         self._dash_mode_btn.pack(side="right", padx=(0, 8))
         self._render_dash_mode_btn()
-        # the Controls collapse toggle, packed AFTER the switch so
-        # side='right' places it to the switch's LEFT; carries the gamepad
-        # icon (owner 2026-07-19) beside a state caret. The per-agent
-        # Settings gear moved INTO each AgentPanel (no global toggle).
-        self._collapse_btn = rounded_button(
-            self._top_strip, COLLAPSE_GLYPH_EXPANDED,
-            command=self._toggle_collapsed, icon_name="controls",
-        )
-        self._collapse_btn.pack(side="right", padx=(0, 8))
+        # the "Controls" collapse toggle is GONE (owner 2026-08-03:
+        # "CONTROLS NE PRIPADA NIGDE, NEMA ŠTA DA POSTOJI TO") — the
+        # setup screen always shows its full controls. The collapsed
+        # COMPACT strip itself survives as the running-view geometry
+        # (_set_collapsed is still the one packer), it simply has no
+        # user-facing toggle any more.
         # the old pinned top-strip "Menu" button is GONE (owner
         # 2026-08-03, UI rework tačka 2): the ONE way back to the Main
         # Menu is IconBar's leftmost HOME icon button (home.svg) — the
@@ -443,10 +439,11 @@ class BuildMixin:
         # and WAITS for the owner to log in — see _drive_site +
         # SiteDriver.wait_for_login). The Check button stays pinned
         # here so sheet validation is reachable from every view.
-        self.btn_check = rounded_button(
-            self._top_strip, "Check", command=self._check_sheets,
-        )
-        self.btn_check.pack(side="left", padx=(8, 0))
+        # MOVED (owner 2026-08-03: "CHECK PRIPADA TAMO GDE JE SELECT
+        # IMAGES A NE GORE"): the button is built by every
+        # CollectionsColumn, in the row beside "Select images…" — it
+        # validates THAT column's queue, so it belongs with the queue.
+        # Nothing pinned to the top strip any more.
 
         self._bind_zoom()
         self._bind_wheel_routing()
@@ -788,11 +785,9 @@ class BuildMixin:
         startup after the settings restore."""
         on = self._pi_enabled_var.get()
         for column in self._collections_columns:
+            column.set_section_visible(on)
             if on:
-                column.pi_section.grid()
                 column.pi_section.refresh()
-            else:
-                column.pi_section.grid_remove()
             # the website tile's indigo accent — this mode belongs to
             # the gen family, same as the tile that hosts it
             _style_icon_bar_button(

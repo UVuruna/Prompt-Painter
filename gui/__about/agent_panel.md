@@ -34,7 +34,11 @@ always-open Pacing group). The FOUR groups grid as the owner's 2×2
 Pacing | Prompt below, both columns sharing the width evenly — the
 setup screen's LEFT settings column is a true half of the window now
 (the 50-50 split, same decree), wide enough for two group columns
-where the 2026-07-29 single stack was not. Its own Start/Pause/Stop
+where the 2026-07-29 single stack was not. Inside the Prompt group
+the F7 helper switches WRAP — label on its own line, switches two per
+grid row (owner 2026-08-03: "prelomi u 2 reda ako treba" — three on
+one line ran off the half-width cell and the last was invisible); a
+fourth helper simply opens a third row. Its own Start/Pause/Stop
 drives that one site's run. Split out of `gui/__init__.py` (root Rule
 #20 god-file refactor, step 4/8).
 
@@ -102,7 +106,11 @@ disagree.
   Force Aspect Ratio block)
 - [Filter Editor](filter_editor.md) — `FilterEditor` (the upscale
   gate's embedded condition stack)
-- [Icons](icons.md) — `icon()` (the site-logo header image)
+- [Icons](icons.md) — `icon()` (the site-logo header images: this
+  panel's own, plus one per OTHER site — `set_shared_header`
+  packs them all while the both-sites shared editor is active, so
+  the header that NAMES two sites also SHOWS two logos, owner
+  2026-08-03)
 - [Pure Logic Helpers](logic.md) — `_upscale_params_from_side_and_filter`
   (`upscale_params()`)
 - [Theme Engine](theme.md) — `THEME_TOPLEVELS` (the embedded

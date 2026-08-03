@@ -16,8 +16,9 @@ layout reconciler (`_apply_running_layout` — decides whether
 (`_active_kinds`/`_active_tile_ids`/`_sync_running_state`), the Menu
 affordance's gate (`_request_menu` — refuses to leave "running" while
 any job is still live), a standalone tool's persistent settings-panel
-toggle (`_open_tool_panel`), the Controls collapse toggle
-(`_set_collapsed`/`_toggle_collapsed`), and the F4e dashboard
+toggle (`_open_tool_panel`), the controls/compact packer
+(`_set_collapsed` — its "Controls" toggle button was removed,
+owner 2026-08-03), and the F4e dashboard
 grid/slider display-mode toggle (`_toggle_dash_mode`).
 
 **The view-transition rules live in one pure, Tk-free function**,
@@ -48,9 +49,12 @@ the Main Menu. A HOTFIX the same day (slika 2) makes
 entering "main" always expand the full controls — a persisted
 collapsed state used to leave only the thin compact strip on the setup
 screen (no visible settings, no way to start); another hotfix (slika
-1) keeps the "menu" screen's top strip clean (title + theme switch
-only) — Check/Controls/the grid-slider toggle belong to the working
-views and are unpacked entirely while on "menu".
+1) keeps the "menu" screen's top strip clean. As of owner
+2026-08-03 the strip holds ONLY the title + theme switch on every
+view — `Check` moved down beside "Select images…" in each
+[Collections Column](collections_column.md) and the "Controls"
+toggle was deleted outright, leaving the grid/slider button as the
+one thing `_set_view` still packs or unpacks (dashboard on screen).
 
 ## Connections
 
@@ -78,14 +82,14 @@ views and are unpacked entirely while on "menu".
 ### ViewMixin
 No `__init__` — every attribute it reads (`self._view`,
 `self._controls_box`, `self._compact_box`, `self._tool_panels`,
-`self._inline_kind`, `self._icon_bar`,
-`self._collapse_btn`, ...) is set by `BuildMixin.__init__`. Key
+`self._inline_kind`, `self._icon_bar`, ...) is set by
+`BuildMixin.__init__`. Key
 methods: `_set_view`/`_go_view` (the animated view swap),
 `_select_tile`/`_tile_handler`/`_click_icon_bar_tile` (tile routing —
 one shared mapping for both the Main Menu and the running IconBar),
 `_apply_running_layout`, `_open_tool_panel`, `_active_kinds`/
 `_active_tile_ids`/`_sync_running_state`, `_request_menu`,
-`_set_collapsed`/`_toggle_collapsed`, `_toggle_dash_mode`.
+`_set_collapsed`, `_toggle_dash_mode`.
 
 ## Design Decisions
 - **No `__init__`, by design (Rule #5).** `BuildMixin` is the single
@@ -96,11 +100,12 @@ one shared mapping for both the Main Menu and the running IconBar),
   `BuildMixin`, not here**, even though they are arguably "view"
   concerns — see [Build Mixin](app_build.md)'s own Design Decisions for
   why they travel with the constructor that seeds their state instead.
-- **`_view` is deliberately orthogonal to `_collapsed`.** The Controls
-  toggle (pre-existing) keeps working unmodified, independently, in
-  either "main" or "running" — a design that traded a tidier
-  `_collapsed`→`_view` rename for zero regression risk on the riskiest
-  phase of the Main-Menu rework.
+- **`_view` is deliberately orthogonal to `_collapsed`.** The pair
+  stayed independent through the Main-Menu rework — a design that
+  traded a tidier `_collapsed`→`_view` rename for zero regression
+  risk on its riskiest phase. The user-facing "Controls" toggle is
+  gone (owner 2026-08-03), but `_collapsed` still selects which of
+  controls_box/compact_box is packed, so the orthogonality holds.
 - **`_select_tile`/`_click_icon_bar_tile` special-case the six
   standalone-job tiles to skip straight to `_open_tool_panel`,
   bypassing `_go_view("main")`.** Routing them through "main" first,
