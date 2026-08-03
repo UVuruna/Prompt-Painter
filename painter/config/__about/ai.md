@@ -87,7 +87,16 @@ the Fixer AI (owner 2026-07-17 through 2026-07-29 F7).
 
 **API image generation job:**
 - `AI_IMAGE_PROBE_PROMPT`, `AI_IMAGE_GATE_MESSAGE` — the "Check API
-  access" probe prompt and the owner-facing gate message
+  access" probe prompt and the owner-facing gate message (reworded
+  ACTIONABLE, faza 3 2026-08-03: Google's image free tier is
+  literally 0 — the message now names the fix, billing on the key's
+  AI Studio project)
+
+**API image gen — model purpose hints (faza 3):**
+- `MODEL_PURPOSE_HINTS`, `MODEL_HINT_UNKNOWN`, `model_hint(name)` —
+  the curated "which model for what" one-liners under the API panel's
+  Image dropdown; substring match, first wins, honest UNKNOWN for
+  anything uncurated (never invented)
 
 **AI sheet generator — prompts:**
 - `AI_MAX_QUESTIONS`, `SHEETS_DIR` — the clarifying-poll cap and the

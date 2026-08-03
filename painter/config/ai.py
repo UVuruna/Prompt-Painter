@@ -436,12 +436,50 @@ AI_IMAGE_PROBE_PROMPT = (
 )
 # the owner-facing message when the probe (or a live run) hits
 # PaidFeatureRequired — gates the panel's Start button. Exact wording
-# is a product decision (owner 2026-07-21), kept here like every other
-# user-facing copy constant (SAFER_PREAMBLE, CONTINUE_NUDGE).
+# is a product decision (owner 2026-07-21; reworded ACTIONABLE, faza 3
+# 2026-08-03 — the owner's "zašto mi svaki put kaže da imam 0 limit":
+# this is GOOGLE's answer, not a tool bug — image models have a
+# LITERAL ZERO free-tier quota until billing is enabled on the key's
+# AI Studio project; the message now says WHAT to do about it), kept
+# here like every other user-facing copy constant.
 AI_IMAGE_GATE_MESSAGE = (
-    "API image generation needs billing enabled — free tier limit is"
-    " 0; use Website Image GEN for free."
+    "This key's Google project has NO billing for image models —"
+    " Google's free tier for them is literally 0. To use API Image"
+    " GEN: aistudio.google.com → your project → enable billing. Text"
+    " and vision calls stay free; Website Image GEN stays free too."
 )
+
+# ═══════════ API IMAGE GEN — MODEL PURPOSE HINTS (faza 3) ═══════════════
+# Curated one-line "which model for what" hints, shown under the API
+# panel's Image-model dropdown (owner 2026-08-03: "zašto nema nikakvih
+# instrukcija koji model je dobar za šta"). Matched by SUBSTRING
+# against the model name, FIRST match wins — most specific first. A
+# curated registry, not fetched: Google's API does not describe
+# models' strengths, so these are the owner's/agent's verified notes;
+# an unknown model gets MODEL_HINT_UNKNOWN (honest, never invented).
+MODEL_PURPOSE_HINTS: tuple[tuple[str, str], ...] = (
+    ("flash-image", "Flash image — fast and cheapest per image; the"
+                    " batch workhorse. Good default for collections."),
+    ("pro-image", "Pro image — slower and pricier per image; better"
+                  " fine detail and in-image text. Use for the few"
+                  " plates Flash keeps getting wrong."),
+    ("imagen", "Imagen family — photorealistic stills, separate"
+               " pricing; overkill for badge/emblem work."),
+)
+MODEL_HINT_UNKNOWN = (
+    "Unverified model — no curated note yet; try ONE image before a"
+    " whole collection."
+)
+
+
+def model_hint(name: str) -> str:
+    """The curated one-liner for a model name (substring match, first
+    wins), else ``MODEL_HINT_UNKNOWN`` — never a guess."""
+    lowered = (name or "").lower()
+    for needle, hint in MODEL_PURPOSE_HINTS:
+        if needle in lowered:
+            return hint
+    return MODEL_HINT_UNKNOWN
 
 # ═══════════════ AI SHEET GENERATOR — PROMPTS ═══════════════════════════
 # --- the AI sheet generator (owner's #2: follow-up questions) ---------
