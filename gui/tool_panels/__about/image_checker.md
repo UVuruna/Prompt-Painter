@@ -5,6 +5,14 @@
 
 ## Purpose
 
+Faza 4 (owner 2026-08-03, UV tačka 5): the VISION model pick
+lives on THIS panel now — a shared
+[Model Picker Row](../../__about/model_picker.md) at the top of
+`_build_extra` (capable-only list, curated hint, immediate
+persist); the run still resolves via `ai.model_for("vision")`,
+which reads the same override. The footer names "the picked
+Vision model above" instead of a hardcoded constant.
+
 `ImageCheckerSettingsPanel` — the AI image checker's own settings
 panel (GUI rework Phase 15): the same input-picker + Filter +
 Start/Pause/Stop chrome every standalone tool has, plus its own

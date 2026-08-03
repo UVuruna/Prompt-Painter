@@ -14,7 +14,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
 
-from painter.config import AI_CALL_PAUSE_S, GEMINI_VISION_MODEL, STATE_DIRNAME
+from painter.config import AI_CALL_PAUSE_S, STATE_DIRNAME
+from ..model_picker import ModelPickerRow
 from ..widgets import rounded_button
 from .base import ToolSettingsPanel
 from .layout import DENSE_COL_WRAP_PX
@@ -86,6 +87,19 @@ class ImageCheckerSettingsPanel(ToolSettingsPanel):
         return "(read-only)"
 
     def _build_extra(self, box: ttk.Frame) -> None:
+        # the VISION model pick lives HERE now (faza 4, owner UV
+        # tačka 5: "podešavanje za IMAGE CHECK tamo ko to KORISTI" —
+        # moved out of the API panel): the shared ModelPickerRow —
+        # capable-only list, curated hint, immediate persist; the run
+        # itself still resolves via ai.model_for("vision"), which
+        # reads the SAME override this row writes.
+        ttk.Label(
+            box, text="Vision model (the checker's eyes)",
+            style="Head.TLabel",
+        ).pack(anchor="w", pady=(0, 2))
+        self.model_picker = ModelPickerRow(box, "vision", "Vision")
+        self.model_picker.pack(fill="x", pady=(0, 6))
+
         self._sheets_path: Path | None = None
         ttk.Label(
             box,
@@ -143,10 +157,10 @@ class ImageCheckerSettingsPanel(ToolSettingsPanel):
     def _build_footer(self, box: ttk.Frame) -> None:
         ttk.Label(
             box,
-            text="Each image goes to the Gemini vision model"
-            f" ({GEMINI_VISION_MODEL}) for banal defects only, paced"
-            f" ~{AI_CALL_PAUSE_S:.0f}s per call on the free tier."
-            f" Read-only — nothing is modified; flags persist under"
-            f" the output folder's {STATE_DIRNAME}/.",
+            text="Each image goes to the picked Vision model above for"
+            " banal defects only (plus the prompt-match when sheets"
+            f" are given), paced ~{AI_CALL_PAUSE_S:.0f}s per call on"
+            " the free tier. Read-only — nothing is modified; flags"
+            f" persist under the output folder's {STATE_DIRNAME}/.",
             style="Muted.TLabel", wraplength=DENSE_COL_WRAP_PX,
         ).pack(anchor="w")

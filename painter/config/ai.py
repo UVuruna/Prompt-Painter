@@ -458,6 +458,8 @@ AI_IMAGE_GATE_MESSAGE = (
 # models' strengths, so these are the owner's/agent's verified notes;
 # an unknown model gets MODEL_HINT_UNKNOWN (honest, never invented).
 MODEL_PURPOSE_HINTS: tuple[tuple[str, str], ...] = (
+    # image models FIRST — "flash-image" must win over the bare
+    # "flash" text entry below (substring match, first wins)
     ("flash-image", "Flash image — fast and cheapest per image; the"
                     " batch workhorse. Good default for collections."),
     ("pro-image", "Pro image — slower and pricier per image; better"
@@ -465,6 +467,12 @@ MODEL_PURPOSE_HINTS: tuple[tuple[str, str], ...] = (
                   " plates Flash keeps getting wrong."),
     ("imagen", "Imagen family — photorealistic stills, separate"
                " pricing; overkill for badge/emblem work."),
+    # text/vision families (faza 4 — the AI Check / New Collection
+    # pickers read the same registry)
+    ("flash", "Flash — fast and free-tier friendly; fine for sheet"
+              " drafting and routine vision checks."),
+    ("pro", "Pro — stronger reasoning, slower and rate-limited"
+            " sooner; use when Flash's drafts/checks miss things."),
 )
 MODEL_HINT_UNKNOWN = (
     "Unverified model — no curated note yet; try ONE image before a"
