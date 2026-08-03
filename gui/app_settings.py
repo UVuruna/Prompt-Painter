@@ -54,7 +54,7 @@ from painter.config import (
 from painter.settings import save_settings
 from painter.sheet_parser import Sheet, SheetError, parse_sheet
 from . import widgets
-from .dialogs import AiKeyWizard, AiSheetDialog
+from .dialogs import AiKeyWizard
 from .logic import (
     _migrate_legacy_aspect_filter,
     _migrate_legacy_upscale_gate,
@@ -578,11 +578,11 @@ class SettingsMixin:
             return False
 
     def _new_collection_ai(self) -> None:
-        """'New collection (AI)…' — the request -> questions -> sheet
-        flow lives in its own dialog; only the key gate sits here."""
-        if not self._ensure_ai_key():
-            return
-        AiSheetDialog(self.root, self)
+        """'New collection (AI)…' — the wizard is a REAL setup panel
+        now (faza 4, owner UV tačka 4: ``SheetGenPanel``,
+        ``_tool_panels["ai_sheet_gen"]``); the key gate moved onto its
+        own Ask-questions action, so opening the panel is free."""
+        self._open_tool_panel("ai_sheet_gen")
 
     def add_generated_sheet(self, path: Path) -> None:
         """Queue one AI-generated sheet (the same de-dup rule as Add…)."""

@@ -9,12 +9,12 @@ god-file refactor):
 
 - **`_ModalToolDialog`** — the shared centre-on-parent placement
   helper (`_center_on`). It survives as its own base only because
-  `AiKeyWizard`/`AiSheetDialog` (via `_AiDialog`) still use it — the
-  old standalone Upscale/Aspect modal dialogs that used to be its
-  other callers are both retired (replaced by
-  `UpscaleSettingsPanel`/`AspectSettingsPanel`, GUI rework Phase 14).
-- **`_AiDialog`** — the worker-queue poll loop BOTH AI dialogs below
-  share (`_init_ai_queue`/`_arm_poll`/`_poll`), so worker threads only
+  `AiKeyWizard` (via `_AiDialog`) still uses it — the old standalone
+  Upscale/Aspect modal dialogs that used to be its other callers are
+  retired (Phase 14), and `AiSheetDialog` retired too (faza 4 — the
+  wizard is a real panel now, [Sheet Generator Panel](sheetgen_panel.md)).
+- **`_AiDialog`** — the worker-queue poll loop the AI dialog family
+  shares (`_init_ai_queue`/`_arm_poll`/`_poll`), so worker threads only
   ever `self._q.put(...)` and never touch a widget directly. It is
   also the owner of the module's `AI_POLL_MS` constant — the constant
   followed `_AiDialog` here from `gui/__init__.py` once that class
@@ -35,37 +35,29 @@ god-file refactor):
   does NOT register in `THEME_TOPLEVELS` — the grab blocks the
   Day/Night switch too, so a flip genuinely cannot happen while it is
   open.
-- **`AiSheetDialog`** ("New collection (AI)…") — the owner types a
-  free-text request; the model returns a short clarifying-question
-  round (each answer skippable), then produces a sheet `.md` validated
-  against the REAL sheet parser plus one automatic repair round. A
-  valid result is saved under `SHEETS_DIR` and added to the
-  Collections queue; a still-broken result opens in `DocWindow` for
-  manual fixing instead of being loaded (the dialog itself stays
-  open). It is NON-modal (a long generation must not freeze the app)
-  and DOES register in `THEME_TOPLEVELS`.
+- **`AiSheetDialog`** — RETIRED (faza 4, owner 2026-08-03, UV
+  tačka 4): the request → questions → sheet flow lives in
+  [Sheet Generator Panel](sheetgen_panel.md) now, as a persistent
+  setup panel with an editable, parser-revalidated draft.
 
 ## Connections
 ### Uses
 - [Painter (folder)](../../painter/___painter.md) — `config`
-  (`AI_STUDIO_URL`, `AI_TEST_PROMPT`, `SHEETS_DIR`); `ai` (imported
-  LOCALLY inside each worker closure — `generate_text`/`AiError`,
-  `contract_text`/`ask_questions`, `generate_sheet`, `save_sheet` —
-  mirrors the rest of this codebase's lazy-import convention for `ai`)
-- [Theme](theme.md) — `THEME_TOPLEVELS`, `skin_text`, `skin_toplevel`
-- [Doc Window](doc_window.md) — `DocWindow`, a plain real-path import
-  (`AiSheetDialog._finish`'s "fix manually, not loaded" viewer)
+  (`AI_STUDIO_URL`, `AI_TEST_PROMPT`); `ai` (imported LOCALLY inside
+  the Test-key worker closure — `generate_text`/`AiError` — mirrors
+  the rest of this codebase's lazy-import convention for `ai`)
+- [Theme](theme.md) — `skin_toplevel`
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`,
-  `rounded_entry`, `status`, `tk_font`
+  `rounded_entry`, `status`
 
 ### Used by
 - [GUI (folder)](../___gui.md) — `__init__.py` re-exports `AiKeyWizard`,
-  `AiSheetDialog`, `AI_POLL_MS` and (for any remaining internal
-  reference) `_AiDialog`/`_ModalToolDialog`
+  `AI_POLL_MS` and (for any remaining internal reference)
+  `_AiDialog`/`_ModalToolDialog`
 - [Settings Mixin](app_settings.md) — `_open_key_wizard`/
   `_ensure_ai_key` open `AiKeyWizard` by its imported name
-  (`from .dialogs import AiKeyWizard, AiSheetDialog`); `_new_collection_ai`
-  opens `AiSheetDialog` the same way, after the key gate passes
+  (`from .dialogs import AiKeyWizard`); `_new_collection_ai` opens the
+  [Sheet Generator Panel](sheetgen_panel.md) instead (faza 4)
 - `gui.api_panel.ApiImageGenPanel._arm_probe_poll` and
   `gui.doc_window.DocWindow._arm_fix_poll` — both reach `AI_POLL_MS`
   through a deferred `import gui` rather than importing this module
@@ -79,9 +71,6 @@ See the Purpose section above.
 See the Purpose section above.
 
 ### AiKeyWizard
-See the Purpose section above.
-
-### AiSheetDialog
 See the Purpose section above.
 
 ## Design Decisions

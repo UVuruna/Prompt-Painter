@@ -46,17 +46,13 @@ the [flow diagram](../__flow/doc_window.md).
   (unrelated to any AI dialog) reads the same cadence constant. A
   real-path `from .dialogs import AI_POLL_MS` would be circular
   (`gui.dialogs` imports `DocWindow` FROM this module, for
-  `AiSheetDialog._finish`'s "not loaded" viewer), so it reaches the
+  the retired `AiSheetDialog` once did), so it reaches the
   constant through a deferred `import gui; gui.AI_POLL_MS` instead —
   the same late-binding idiom `gui.theme._pkg()` and
   `gui.api_panel`'s `_arm_probe_poll` already established
 
 ### Used by
 - [GUI (folder)](../___gui.md) — `__init__.py` re-exports `DocWindow`
-- [Modal Dialogs](dialogs.md) — `AiSheetDialog._finish` imports
-  `DocWindow` directly (a plain real-path import, not deferred) and
-  opens one when the AI-generated sheet still fails the contract after
-  the repair round
 - [Settings Mixin](app_settings.md) — `_open_instructions`,
   `_show_node_inner` (the collection-level branch), and
   `_show_folder_excerpt` all open it through a deferred

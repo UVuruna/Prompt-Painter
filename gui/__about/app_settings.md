@@ -64,7 +64,7 @@ a cosmetic gap was deliberately skipped (root Rule #15).
   `parse_sheet`); `ai` (imported locally, the key gate)
 - [Pure Logic](logic.md) — `_migrate_legacy_aspect_filter`,
   `_migrate_legacy_upscale_gate`, `_parse_condition_dicts`
-- [Modal Dialogs](dialogs.md) — `AiKeyWizard`, `AiSheetDialog`
+- [Modal Dialogs](dialogs.md) — `AiKeyWizard` (the sheet wizard itself is the [Sheet Generator Panel](sheetgen_panel.md), faza 4)
 - [Select-Images Window](select_window.md) — `SelectWindow`
 - [Widgets](widgets.md) — `folder_of`, plus the live
   `widgets.FONT_BASE`/`widgets.ACTIVE_THEME` globals persisted by

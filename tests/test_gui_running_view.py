@@ -197,9 +197,10 @@ class FakeGui:
 
         self._controls_box = ttk.Frame(root)
         self._compact_box = ttk.Frame(root)
-        # all FIVE standalone-job settings-panel stand-ins (bg/crop, GUI
+        # ALL SEVEN persistent settings-panel stand-ins (bg/crop, GUI
         # rework Phase 13; upscale/aspect, Phase 14; the AI checker,
-        # Phase 15; API Image GEN, Phase 19) — real ttk.Frames so
+        # Phase 15; API Image GEN, Phase 19; New Collection (AI),
+        # faza 4 — its popup retired) — real ttk.Frames so
         # _apply_running_layout's pack/pack_forget is exercised for real
         # (see this module's own docstring). Keyed by MENU_TILES id,
         # exactly like the real PainterGui._tool_panels — "image_checker"
@@ -211,6 +212,7 @@ class FakeGui:
             "aspect": _RecordingToolPanel(root),
             "image_checker": _RecordingToolPanel(root),
             "api_image_gen": _RecordingToolPanel(root),
+            "ai_sheet_gen": _RecordingToolPanel(root),
         }
         self.notebook = ttk.Notebook(root)
         self.notebook.add(ttk.Frame(self.notebook), text="Dashboard")
@@ -526,16 +528,16 @@ def test_click_icon_bar_tile_upscale_not_running_opens_its_inline_panel(
     assert fake._tool_panels["aspect"].winfo_manager() == "pack"
 
 
-def test_click_icon_bar_tile_ai_sheet_gen_always_opens_its_dialog(root):
-    """ai_sheet_gen is now the ONLY tile with no persistent settings
-    panel of its own — every other functionality (bg/crop/upscale/
-    aspect since GUI rework Phase 13/14, the AI checker since Phase
-    15) routes through _open_tool_panel instead; see the tests
-    above."""
+def test_click_icon_bar_tile_ai_sheet_gen_toggles_its_panel(root):
+    """Faza 4 (owner UV tačka 4): the AiSheetDialog popup is retired —
+    ai_sheet_gen now toggles its OWN persistent panel exactly like
+    every other tile (the wizard SheetGenPanel)."""
     fake = FakeGui(root)
     fake._view = "running"
     gui.PainterGui._click_icon_bar_tile(fake, "ai_sheet_gen")
-    assert fake.new_collection_calls == 1
+    assert fake._inline_kind == "ai_sheet_gen"
+    assert fake._tool_panels["ai_sheet_gen"].winfo_manager() == "pack"
+    assert fake.new_collection_calls == 0  # no dialog launch anywhere
 
 
 def test_tile_handler_website_gen_has_no_single_handler(root):

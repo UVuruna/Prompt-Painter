@@ -48,6 +48,7 @@ from .collections_column import CollectionsColumn
 from .logic import _visible_agent_slots, menu_min_size
 from .menu import MENU_GRID_PADX, IconBar, MainMenu
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
+from .sheetgen_panel import SheetGenPanel
 from .switch import DayNightSwitch
 from .theme import (
     apply_theme,
@@ -232,11 +233,11 @@ class BuildMixin:
         self._view = "menu"
         # GUI rework Phase 11: which tile's inline settings surface (if
         # any) shows above the Dashboard/Log while _view == "running" —
-        # "website_gen" (_controls_box) or one of the four standalone
-        # tools (_tool_panels — all four now, GUI rework Phase 14; only
-        # bg/crop had one through Phase 13). image_checker/ai_sheet_gen
-        # still launch through their existing modal/dialog handler —
-        # see _click_icon_bar_tile. Inert, never read, outside "running".
+        # "website_gen" (_controls_box) or one of the SEVEN persistent
+        # _tool_panels (the four tools since Phase 13/14, the AI
+        # checker since 15, API Image GEN since 19, and New Collection
+        # (AI) since faza 4 retired its popup) — see
+        # _click_icon_bar_tile. Inert, never read, outside "running".
         self._inline_kind: str | None = None
         self._main_view = ttk.Frame(outer)
         self._menu_view = MainMenu(outer, on_select=self._select_tile)
@@ -389,6 +390,12 @@ class BuildMixin:
                     parent, self
                 ),
             ),
+            # New Collection (AI) as a REAL setup panel (faza 4, owner
+            # UV tačka 4 — the wizard ①Zahtev→②Pitanja→③Draft&Save
+            # replaced the old AiSheetDialog popup); no job of its own
+            # (TILE_JOB_KINDS["ai_sheet_gen"] is ()), so no
+            # on_start/on_stop trio — its actions live inside
+            "ai_sheet_gen": SheetGenPanel(self._main_view, self),
         }
 
         self.status_var = tk.StringVar(value="idle")

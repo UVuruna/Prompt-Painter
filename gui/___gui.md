@@ -26,7 +26,7 @@ CONTROL-PANEL classes**: `AgentPanel` (`agent_panel.py`), the whole
 DIALOG Toplevels**: `SelectWindow` (`select_window.py`), `DocWindow`/
 `BeforeAfterWindow`/`_filmstrip_stages`/`StepRestoreWindow`
 (`viewers.py`), and `_ModalToolDialog`/`_AiDialog`/`AiKeyWizard`/
-`AiSheetDialog` (`dialogs.py`) — including `AI_POLL_MS`, which follows
+the key wizard (`dialogs.py`) — including `AI_POLL_MS`, which follows
 its real owner `_AiDialog` out of `gui/__init__.py` into
 `gui/dialogs.py` (see that module's own Design Decisions). This step
 (6/8) moved the **MENU + DASHBOARD-PANEL classes**: `MainMenu`/
@@ -112,6 +112,8 @@ into [Viewer Shared Rules](__about/viewer_shared.md),
 | `menu.py` | Algorithmic | `MainMenu` + `IconBar` — the startup's fixed 4×2 tile grid and the HOME-led nav strip (setup + running views) — [about](__about/menu.md) · [flow](__flow/menu.md) |
 | `prompt_image.py` | Algorithmic | `PromptImageSection` — the PROMPT+IMAGE mode's Reference folder + live eligibility view (faza 2) — [about](__about/prompt_image.md) |
 | `collections_column.py` | Standard | `CollectionsColumn` — the shared right column (queue + output + Select + Prompt+Image), one component for the website setup AND the API panel (faza 3) — [about](__about/collections_column.md) |
+| `sheetgen_panel.py` | Algorithmic | `SheetGenPanel` — New Collection (AI) as a wizard setup panel (①Zahtev→②Pitanja→③Draft&Save, faza 4) — [about](__about/sheetgen_panel.md) |
+| `model_picker.py` | Standard | `ModelPickerRow` — one purpose's model picker (capable list + curated hint + persisted pick), hosted by the checker/sheet-gen panels (faza 4) — [about](__about/model_picker.md) |
 | `select_window.py` | Algorithmic | `SelectWindow` — the per-site tick-list Toplevel over the queued Collections — [about](__about/select_window.md) · [flow](__flow/select_window.md) |
 | `viewer_shared.py` | Standard | `DOC_*` window-sizing family + tiny shared viewer helpers — [about](__about/viewer_shared.md) |
 | `doc_window.py` | Algorithmic | `DocWindow` — the Markdown/prompt/image viewer + Fixer-AI manual buttons — [about](__about/doc_window.md) · [flow](__flow/doc_window.md) |

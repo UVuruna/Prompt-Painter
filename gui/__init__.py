@@ -153,7 +153,6 @@ from .dash_panels import DashPanel, JobPanel
 from .dialogs import (
     AI_POLL_MS,
     AiKeyWizard,
-    AiSheetDialog,
     _AiDialog,
     _ModalToolDialog,
 )
@@ -196,8 +195,10 @@ from .logic import (
     _visible_agent_slots,
 )
 from .menu import IconBar, MainMenu
+from .model_picker import ModelPickerRow
 from .prompt_image import PromptImageSection
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
+from .sheetgen_panel import SheetGenPanel
 from .select_window import SelectWindow
 from .switch import DayNightSwitch
 from .theme import (

@@ -56,7 +56,7 @@ Every submodule of `gui/`, one `from .X import (...)` block each:
 - [Dashboard Job Panel Base + Site Panel](dash_panels.md) —
   `DashPanel`, `JobPanel`
 - [Modal Dialogs](dialogs.md) — `AI_POLL_MS`, `AiKeyWizard`,
-  `AiSheetDialog`, `_AiDialog`, `_ModalToolDialog`
+  `_AiDialog`, `_ModalToolDialog` (`AiSheetDialog` retired, faza 4)
 - [FilterEditor](filter_editor.md) — `FilterEditor`
 - [Icons](icons.md) — the SVG/PIL icon-loading and switch-art internals
 - [Logic](logic.md) — the pure Tk-free module-level helpers

@@ -70,9 +70,11 @@ otherwise reopen the app huge.
 
 Also builds, unpacked at construction (each shown only by
 `ViewMixin._apply_running_layout`): the Main Menu (`MainMenu`) and
-running-view `IconBar`, and the SIX persistent `_tool_panels` (BG/Crop/
+running-view `IconBar`, and the SEVEN persistent `_tool_panels` (BG/Crop/
 Upscale/Aspect's `ToolSettingsPanel` family, the AI checker's
-`ImageCheckerSettingsPanel`, and API Image GEN's `ApiImageGenPanel` —
+`ImageCheckerSettingsPanel`, API Image GEN's `ApiImageGenPanel`, and
+New Collection (AI)'s `SheetGenPanel` (faza 4 — no job trio of its
+own) —
 each wired to the shared `on_stop=self._stop_tool` "smart stop"
 handler except API Image GEN, which uses `on_stop=self._stop_site`
 since its worker lives in `self._running`/`self._workers`, not

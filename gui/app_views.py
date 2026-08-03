@@ -238,7 +238,9 @@ class ViewMixin:
         which caller consults it."""
         return {
             "website_gen": None,
-            "ai_sheet_gen": self._new_collection_ai,
+            # faza 4 (owner UV tačka 4): the AiSheetDialog popup is
+            # retired — the wizard is a persistent panel like the rest
+            "ai_sheet_gen": partial(self._open_tool_panel, "ai_sheet_gen"),
             "api_image_gen": partial(self._open_tool_panel, "api_image_gen"),
             "image_checker": partial(self._open_tool_panel, "image_checker"),
             "bg": partial(self._open_tool_panel, "bg"),
@@ -380,14 +382,11 @@ class ViewMixin:
         the Dashboard tab — it is NOT a settings toggle for a running
         job, and that job's own panel stays exactly as hidden as the
         design requires ("without disturbing any running job's own
-        hidden panel"). A NOT-running tool tile ("bg"/"crop"/"upscale"/
-        "aspect"/"image_checker"/"api_image_gen") routes through
-        ``_tile_handler`` to ``_open_tool_panel``, toggling its OWN
-        persistent ``ToolSettingsPanel``; "ai_sheet_gen" (no persistent
-        panel of its own) always launches through its existing dialog
-        handler (``_tile_handler`` — the SAME mapping the Main Menu
-        itself uses), and it disturbs nothing else (always its own
-        Toplevel)."""
+        hidden panel"). A NOT-running tile ("bg"/"crop"/"upscale"/
+        "aspect"/"image_checker"/"api_image_gen"/"ai_sheet_gen" — ALL
+        seven have a persistent panel since faza 4 retired the
+        AiSheetDialog popup) routes through ``_tile_handler`` to
+        ``_open_tool_panel``, toggling its OWN inline panel."""
         if tile_id == "website_gen":
             self._inline_kind = (
                 None if self._inline_kind == "website_gen" else "website_gen"
