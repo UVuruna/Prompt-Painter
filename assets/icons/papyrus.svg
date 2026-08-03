@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- PAPYRUS / scroll (owner 2026-08-03, slika 1): the "Instructions"
+       button icon — plain paths only, QtSvg-renderable (no
+       clipPath/mask/filter, see gui/icons.py _QT_UNSUPPORTED_SVG) -->
+  <path fill="#d8c9a3" d="M5 3h13v18H5z"/>
+  <path fill="#b09b6a" d="M18 3h1.5a2.5 2.5 0 0 1 0 5H18zM5 16H3.5a2.5 2.5 0 0 0 0 5H5z"/>
+  <path fill="#7a6a45" d="M7.5 7h8v1.4h-8zm0 3.4h8v1.4h-8zm0 3.4h5.5v1.4H7.5z"/>
+</svg>

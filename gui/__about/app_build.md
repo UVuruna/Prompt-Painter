@@ -15,7 +15,7 @@ set here, once, at construction.
 
 Also owns the `_build_*` widget-construction helpers it calls from
 `__init__` (`_build_queue`/`_build_inputs_tail`/`_build_options`/
-`_build_toolbar`/`_build_compact`/`_build_views`), the global font-zoom
+`_build_compact`/`_build_views`), the global font-zoom
 bindings (`_bind_zoom`/`_zoom_wheel`/`_zoom_key`/`_zoom_step`) and wheel
 routing (`_bind_wheel_routing`/`_inner_wheel`), `_relayout_agents` (the
 per-site visibility reconciler `_build_compact` wires onto every
@@ -135,7 +135,7 @@ threads), `self._stop_events`/`self._pause_events` (per-kind
 `self._inline_kind` (the view-state-machine seeds `ViewMixin` reads),
 `self._cooldowns` (F2 persisted quota-reset info), `self._agent_mirror_on`
 (F4c shared-editor flag). Key methods: `_build_queue`, `_build_options`,
-`_build_toolbar`, `_build_compact`, `_build_views`, `_relayout_agents`,
+`_build_compact`, `_build_views`, `_relayout_agents`,
 `_set_agent_mirror`, `_on_root_configure`, `_resize_settled`,
 `_clamp_geometry`, `_bind_zoom`, `_bind_wheel_routing`.
 

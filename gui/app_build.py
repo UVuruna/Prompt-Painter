@@ -276,7 +276,11 @@ class BuildMixin:
         self.btn_select = main_column.btn_select
         self.btn_check = main_column.btn_check
         self._pi_section = main_column.pi_section
-        self._build_toolbar(self._controls_box)
+        # _build_toolbar is GONE (owner 2026-08-03, slika 1): its last
+        # three buttons either moved to the top strip (Instructions,
+        # AI key…) or were pure duplication of a Main Menu / IconBar
+        # tile ("New collection (AI)…" — "OVO NE SME DA POSTOJI, IMA
+        # GORE TO ISTO"), so the setup screen has no toolbar rows left.
         self._build_compact(self._main_view)
         self._build_views(self._main_view)
         # GUI rework Phase 11: the running view's icon bar — a child of
@@ -407,13 +411,22 @@ class BuildMixin:
         # (LAST at the edge, owner F4/G5)
         self.switch = DayNightSwitch(self._top_strip, self)
         self.switch.pack(side="right")
-        # F4e (owner 2026-07-29): the dashboard grid/slider mode toggle
-        # — in the top strip, right beside the theme switch
-        self._dash_mode_btn = rounded_button(
-            self._top_strip, "", command=self._toggle_dash_mode,
-        )
-        self._dash_mode_btn.pack(side="right", padx=(0, 8))
-        self._render_dash_mode_btn()
+        # F4e (owner 2026-07-29): the dashboard grid/slider mode toggle.
+        # MOVED (owner 2026-08-03, slika 1: "ovo ide tamo gde pripada —
+        # u sklopu dashboard dole"): it steers the DASHBOARD, so it is
+        # built at the BOTTOM of the dashboard tab itself
+        # (_build_views), not in the global top strip.
+        # The two AI doors live top-left instead (owner 2026-08-03,
+        # slika 1) — both with their SVG icon, both global (they used
+        # to sit in the setup screen's toolbar rows, which are gone).
+        rounded_button(
+            self._top_strip, "Instructions", icon_name="papyrus",
+            command=self._open_instructions,
+        ).pack(side="left", padx=(0, 8))
+        rounded_button(
+            self._top_strip, "AI key…", icon_name="key",
+            command=self._open_key_wizard,
+        ).pack(side="left", padx=(0, 8))
         # the "Controls" collapse toggle is GONE (owner 2026-08-03:
         # "CONTROLS NE PRIPADA NIGDE, NEMA ŠTA DA POSTOJI TO") — the
         # setup screen always shows its full controls. The collapsed
@@ -837,54 +850,6 @@ class BuildMixin:
                 side="left", padx=(6, 0)
             )
 
-    def _build_toolbar(self, parent) -> None:
-        row = ttk.Frame(parent)
-        row.pack(fill="x", pady=(0, 6))
-        # "Check" is PINNED in the always-visible _top_strip; "Open
-        # Chrome (login)" is GONE (F4g — Chrome is ensured at Start);
-        # "Select images…" moved into the RIGHT input column
-        # (UI-SKETCH, owner 2026-07-29 — see _build_inputs_tail).
-        rounded_button(
-            row, "Instructions", command=self._open_instructions,
-        ).pack(side="right")
-        # the four in-place tools (BG removal / Crop / Upscale / Aspect
-        # ratio) had their own quick-access buttons here through GUI
-        # rework Phase 13, each opening the OLD _start_tool modal.
-        # Deleted (Phase 14, _start_tool itself is gone): the IconBar
-        # (GUI rework Phase 11) sits ABOVE this whole controls box
-        # whenever it is visible and already carries all four tiles,
-        # routed to their persistent ToolSettingsPanel via
-        # _open_tool_panel — one click away regardless of which inline
-        # panel (this one or a tool's own) currently shows below it, so
-        # a second copy of the same four buttons here would be pure
-        # duplication (Rule #5), not a shortcut. The AI checker's own
-        # quick button below joined them in this deletion GUI rework
-        # Phase 15, for the identical reason, once IT ALSO gained a
-        # persistent ToolSettingsPanel (ImageCheckerSettingsPanel) the
-        # IconBar reaches the same one-click way.
-
-        # the AI features row (owner 2026-07-20): the sheet GENERATOR
-        # and the guided key wizard — a SECOND row so the tool row
-        # never clips at the window minimum. The batch image CHECKER's
-        # own quick button used to sit here too (`_start_ai_check`
-        # directly popping its folder dialog + confirm) — deleted GUI
-        # rework Phase 15 alongside that dialog itself: the Main Menu/
-        # IconBar's "image_checker" tile now opens
-        # ImageCheckerSettingsPanel instead (see _tile_handler), the
-        # same persistent-panel surface bg/crop/upscale/aspect already
-        # have, so a second door to it here would be pure duplication
-        # (Rule #5), not a shortcut — same reasoning as the four tools
-        # above.
-        ai_row = ttk.Frame(parent)
-        ai_row.pack(fill="x", pady=(0, 6))
-        rounded_button(
-            ai_row, "New collection (AI)…", icon_name="ai",
-            command=self._new_collection_ai,
-        ).pack(side="left")
-        rounded_button(
-            ai_row, "AI key…", command=self._open_key_wizard,
-        ).pack(side="right")
-
     def _build_views(self, parent) -> None:
         self.notebook = ttk.Notebook(parent)
         self.notebook.pack(fill="both", expand=True)
@@ -921,6 +886,16 @@ class BuildMixin:
             on_fix_actions=self._build_fix_workers,
         )
         self._dashgrid.attach(self.panels)
+        # the grid/slider mode toggle belongs WITH the dashboard (owner
+        # 2026-08-03, slika 1) — a footer row at the BOTTOM of this tab,
+        # packed first so the grid above it takes the rest
+        dash_footer = ttk.Frame(dash_tab)
+        dash_footer.pack(side="bottom", fill="x", padx=4, pady=(0, 4))
+        self._dash_mode_btn = rounded_button(
+            dash_footer, "", command=self._toggle_dash_mode,
+        )
+        self._dash_mode_btn.pack(side="right")
+        self._render_dash_mode_btn()
         self._dashgrid.pack(fill="both", expand=True, padx=4, pady=4)
 
         log_tab = ttk.Frame(self.notebook)
