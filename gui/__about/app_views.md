@@ -52,9 +52,23 @@ screen (no visible settings, no way to start); another hotfix (slika
 1) keeps the "menu" screen's top strip clean. As of owner
 2026-08-03 the strip holds ONLY the title + theme switch on every
 view — `Check` moved down beside "Select images…" in each
-[Collections Column](collections_column.md) and the "Controls"
-toggle was deleted outright, leaving the grid/slider button as the
-one thing `_set_view` still packs or unpacks (dashboard on screen).
+[Collections Column](collections_column.md), the "Controls"
+toggle was deleted outright and the grid/slider button moved into the
+dashboard tab's own footer, so `_set_view` packs NOTHING in the top
+strip any more. Its leftover `_dash_mode_btn.pack(after=self.switch)`
+call was a real BUG (owner 2026-08-03, slika 3): it tried to pack a
+notebook child into the top strip, raised `TclError` and aborted
+`_set_view` halfway — every Main Menu tile that enters "running"
+landed on an EMPTY setup screen (icon bar + dashboard, no panel),
+Website Image GEN being the one tile that escaped it (its "main" view
+takes the harmless `pack_forget` branch).
+
+**EXACTLY ONE setup surface** (owner 2026-08-03, slika 2): every
+`_set_view` to a non-"running" view clears `_inline_kind` AND
+`pack_forget`s every `_tool_panels` entry. Leaving "running" used to
+leave the open tool panel packed inside `_main_view` — hidden only
+while the menu covered it, and back on screen ABOVE the icon bar,
+beside the website controls, the moment the setup view returned.
 
 ## Connections
 

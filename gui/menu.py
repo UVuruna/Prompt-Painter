@@ -46,6 +46,9 @@ ICON_BAR_HYSTERESIS_PX = 16
 MENU_HEADER_PADY = (16, 4)
 MENU_GRID_PADX = 24
 MENU_GRID_PADY = (8, 24)
+# left+right breathing room a tile's widest text keeps INSIDE its card,
+# so a title never sits on the accent border (owner 2026-08-03, slika 1)
+TILE_TEXT_MARGIN_PX = 24
 
 
 class MainMenu(ttk.Frame):
@@ -103,6 +106,8 @@ class MainMenu(ttk.Frame):
         # menu_min_size assumes for the window minsize, so the two can
         # never disagree — never the bare MENU_TILE_W (see that
         # constant's own comment for why it needs the extra margin)
+        self._cols = cols
+        self._cell_min = MENU_TILE_CELL_MIN_PX
         for c in range(cols):
             self._grid.columnconfigure(
                 c, weight=1, uniform="menucol",
@@ -113,6 +118,36 @@ class MainMenu(ttk.Frame):
                 r, weight=1, uniform="menurow",
                 minsize=MENU_TILE_H + MENU_TILE_GAP_PX,
             )
+
+    def cell_min_px(self) -> int:
+        """The per-column footprint that renders EVERY tile whole at the
+        CURRENT font zoom (owner 2026-08-03, slika 1: "nijedan karton ne
+        sme da bude isečen... i border i sve").
+
+        ``MENU_TILE_CELL_MIN_PX`` is a static floor computed from
+        ``MENU_TILE_W``; a tile's real content (its title line — "Website
+        Image GEN" is the widest) can be wider than that at a larger
+        font, and then the fixed-width card clips it. So the floor is
+        RAISED here by the widest measured tile content plus the card's
+        own border/breathing room, the value is re-applied as every
+        column's Tk ``minsize``, and the SAME number is handed to
+        ``gui.logic.menu_min_size`` for the window minsize — one
+        measurement, both consumers, so grid and window can never
+        disagree. Call after ``update_idletasks`` for honest numbers."""
+        widest = max(
+            (card.winfo_children()[0].winfo_reqwidth() for card in self._tiles),
+            default=0,
+        )
+        # the card's own chrome around its content frame: the accent
+        # border (hovered width, both sides) + a symmetric text margin,
+        # then the inter-tile gap the grid pad consumes
+        card_min = widest + 2 * MENU_TILE_BORDER_HOVER_PX + TILE_TEXT_MARGIN_PX
+        self._cell_min = max(
+            MENU_TILE_CELL_MIN_PX, card_min + MENU_TILE_GAP_PX
+        )
+        for c in range(self._cols):
+            self._grid.columnconfigure(c, minsize=self._cell_min)
+        return self._cell_min
 
     def chrome_height(self) -> int:
         """Everything this view adds ABOVE/AROUND the tile grid, at the

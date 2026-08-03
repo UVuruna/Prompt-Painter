@@ -65,7 +65,10 @@ into `PainterGui` (`_select_tile`/`_click_icon_bar_tile`;
   `MainMenu` (`on_select=self._select_tile`) and ONE `IconBar`
   (`on_select=self._click_icon_bar_tile`, `on_menu=self._request_menu`);
   `_apply_min_size` reads `MENU_GRID_PADX` + `MainMenu.chrome_height()`
-  for the minsize chrome, `_zoom_step` calls `IconBar.refresh_measure`
+  + `MainMenu.cell_min_px()` (the MEASURED per-column footprint — it
+  re-applies itself as every column's Tk `minsize` on the way out, so
+  no tile can be clipped at any font zoom), `_zoom_step` calls
+  `IconBar.refresh_measure`
 - [View Mixin](app_views.md) — `_select_tile`/`_click_icon_bar_tile`
   (what picking a tile actually does) and `_icon_bar.set_active(...)`
   after every change to the running job set

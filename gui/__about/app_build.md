@@ -26,8 +26,15 @@ others while both are ticked and idle), `_apply_min_size` (owner
 tile math from `gui.logic.menu_min_size` plus the chrome measured
 here at the current font zoom, so the Main Menu's fixed 4×2 grid
 always renders whole with no menu scrolling; `WINDOW_MIN_W`/`_H` stay
-as absolute floors, only ever raised; re-run after every `_zoom_step`,
-which also calls `IconBar.refresh_measure`), and the drag-resize
+as absolute floors, only ever raised; the per-column footprint comes
+from `MainMenu.cell_min_px()` — MEASURED, so a tile whose title grew
+with the font zoom still renders whole — and the chrome reserves the
+`ScrollFrame` vertical bar's width, the two fixes for owner
+2026-08-03 slika 1's clipped first card; re-run after every
+`_zoom_step`, which also calls `IconBar.refresh_measure`. It RETURNS
+the applied (W, H) and `__init__` opens the window at exactly that
+size — the launch view is the Main Menu, so a saved WxH is no longer
+restored, only the saved screen position), and the drag-resize
 event-buffering watcher (`_on_root_configure`/`_resize_settled`/
 `_clamp_geometry`) bound at the tail of `__init__`.
 

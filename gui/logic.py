@@ -498,7 +498,8 @@ def _fix_result_ui(
 # ---------------------------------------------------------------------
 
 def menu_min_size(
-    tile_count: int, chrome_w_px: int, chrome_h_px: int
+    tile_count: int, chrome_w_px: int, chrome_h_px: int,
+    cell_min_px: int = MENU_TILE_CELL_MIN_PX,
 ) -> tuple[int, int]:
     """The window minsize (client-area W, H) that renders the Main
     Menu's FIXED ``MENU_TILE_COLS``-wide grid whole, every tile at its
@@ -513,13 +514,15 @@ def menu_min_size(
     and menu header at the CURRENT font zoom, the scrollbar
     allowance) — this function owns only the tile math, so the pure
     half stays Tk-free and the measured half stays honest. Per-column
-    footprint is ``MENU_TILE_CELL_MIN_PX`` — the SAME constant
-    MainMenu's fixed grid enforces as each column's Tk ``minsize``, so
-    the two can never disagree. Never fewer than one column/row
+    footprint is ``cell_min_px`` — measured and applied to every column
+    by ``MainMenu.cell_min_px`` (which only ever RAISES the static
+    ``MENU_TILE_CELL_MIN_PX`` default, so a tile whose title grew with
+    the font zoom still renders whole), so grid and window can never
+    disagree. Never fewer than one column/row
     (``tile_count`` 0 still returns a sane floor)."""
     cols = min(MENU_TILE_COLS, max(1, tile_count))
     rows = max(1, math.ceil(max(tile_count, 1) / cols))
-    w = cols * MENU_TILE_CELL_MIN_PX + chrome_w_px
+    w = cols * cell_min_px + chrome_w_px
     h = rows * (MENU_TILE_H + MENU_TILE_GAP_PX) + chrome_h_px
     return w, h
 

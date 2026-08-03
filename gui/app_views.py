@@ -120,6 +120,17 @@ class ViewMixin:
                 self.notebook.pack(fill="both", expand=True)
         else:
             self.notebook.pack_forget()
+        # EXACTLY ONE setup surface may ever be on screen (owner
+        # 2026-08-03, slika 2: "NIKADA ne smeju da budu OTVORENA 2
+        # različita SETUPA"). Leaving "running" used to leave the tool
+        # panel that was open still packed inside _main_view — invisible
+        # only while the menu covered it, and back ABOVE the icon bar
+        # together with the website controls the moment the setup view
+        # returned. Every non-running view starts from a clean slate.
+        if view != "running":
+            self._inline_kind = None
+            for panel in self._tool_panels.values():
+                panel.pack_forget()
         if view == "running":
             if not was_running:
                 # Start hides the LAUNCHING tool's own settings panel
@@ -148,19 +159,13 @@ class ViewMixin:
                 self._icon_bar.pack(fill="x", pady=(2, 4))
         elif view == "menu":
             self._icon_bar.pack_forget()
-        # HOTFIX (owner 2026-07-29, slika 1): the MENU screen shows a
-        # CLEAN top strip — title + theme switch only. The [▦ grid]
-        # toggle shows ONLY while the DASHBOARD itself is on screen
-        # (owner 2026-07-29). Check moved down beside "Select images…"
-        # and the Controls toggle is gone entirely (owner 2026-08-03),
-        # so the strip has nothing else left to show or hide.
-        if dashboard_visible and view != "menu":
-            if not self._dash_mode_btn.winfo_manager():
-                self._dash_mode_btn.pack(
-                    side="right", padx=(0, 8), after=self.switch
-                )
-        else:
-            self._dash_mode_btn.pack_forget()
+        # (the [▦ grid] toggle is NOT touched here any more — owner
+        # 2026-08-03, slika 1 moved it INTO the dashboard tab's own
+        # footer, so it lives and dies with the notebook. The leftover
+        # pack(after=self.switch) call was packing a notebook child into
+        # the top strip and raised TclError mid-_set_view, aborting
+        # every menu tile that enters "running" — the empty setup
+        # screen of slika 3.)
         self._scroll.refresh()
 
     def _go_view(self, view: str) -> None:

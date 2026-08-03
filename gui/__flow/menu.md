@@ -24,15 +24,19 @@ Pseudocode for the fixed grid + the computed window minimum
 ```
 build once:
     grid each tile at (row, col) = divmod(index, MENU_TILE_COLS)
-    every column: weight=1, uniform, minsize=MENU_TILE_CELL_MIN_PX
+    every column: weight=1, uniform, minsize=cell_min_px()
+                  # = max(MENU_TILE_CELL_MIN_PX, widest tile content
+                  #       + hover border + text margin + GAP)
     every row:    weight=1, uniform, minsize=MENU_TILE_H + GAP
 
 _apply_min_size (end of __init__, and after every font-zoom step):
     update_idletasks                       # honest measurements
-    chrome_w = 2*OUTER_PAD + 2*MENU_GRID_PADX
+    chrome_w = 2*OUTER_PAD + 2*MENU_GRID_PADX + vbar.reqwidth
     chrome_h = top_strip.reqheight + menu.chrome_height() + 2*OUTER_PAD
-    (w, h) = menu_min_size(len(MENU_TILES), chrome_w, chrome_h)  # pure
+    cell = menu.cell_min_px()      # measured; re-applied as column minsize
+    (w, h) = menu_min_size(len(MENU_TILES), chrome_w, chrome_h, cell)  # pure
     root.minsize(max(w, WINDOW_MIN_W), max(h, WINDOW_MIN_H))
+    # __init__ then OPENS the window at exactly that (w, h)
     # -> the window can NEVER get too narrow/short for the whole 4x2
     #    grid; the menu never scrolls (ScrollFrame's bar auto-hides
     #    when content fits)

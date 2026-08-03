@@ -261,8 +261,13 @@ class BuildMixin:
         self._collections_columns: list[CollectionsColumn] = []
         setup = ttk.Frame(self._controls_box)
         setup.pack(fill="both", expand=True, pady=(0, 6))
-        setup.columnconfigure(0, weight=1, uniform="setupcol")
-        setup.columnconfigure(1, weight=1, uniform="setupcol")
+        # 2:1 in favour of the LEFT settings column (owner 2026-08-03,
+        # slika 1): the settings bands hold spinners, combos and whole
+        # filter rows, the right column only a listbox and its buttons
+        # — the old 50/50 (uniform) split is what starved the left side
+        # and made the fine-tunes unreadable below a huge window width.
+        setup.columnconfigure(0, weight=2)
+        setup.columnconfigure(1, weight=1)
         setup.rowconfigure(0, weight=1)
         setup_left = ttk.Frame(setup)
         setup_left.grid(row=0, column=0, sticky="nsew")
@@ -440,12 +445,20 @@ class BuildMixin:
         # go through _request_menu, which REFUSES the jump while any
         # job is active ("back to menu only once nothing is running").
         # HOTFIX (owner 2026-07-29, slika 1): the app TITLE lives in
-        # the top strip, in line with the theme switcher — centered
-        # between the left buttons and the right toggles
-        ttk.Label(
+        # the top strip, in line with the theme switcher.
+        # CENTERED ON THE WINDOW (owner 2026-08-03, slika 1): packing it
+        # with expand=True only centres it in the space LEFT OVER by the
+        # two left buttons and the right switch, i.e. visibly pushed to
+        # the right. ``place`` is measured against the WHOLE strip, so
+        # relx=0.5 is the true window centre no matter what sits beside
+        # it; a packed spacer still claims the strip's width/height so
+        # the placed label never has to carry the layout.
+        ttk.Frame(self._top_strip).pack(side="left", expand=True, fill="both")
+        self._title_label = ttk.Label(
             self._top_strip, text="PromptPainter", style="Head.TLabel",
             anchor="center",
-        ).pack(side="left", expand=True, fill="x")
+        )
+        self._title_label.place(relx=0.5, rely=0.5, anchor="center")
         # F4g (owner 2026-07-29): the "Open Chrome (login)" button is
         # GONE — starting an agent ensures Chrome itself (launches it
         # with the automation profile when needed, opens the site tab,
@@ -464,7 +477,15 @@ class BuildMixin:
         self._set_view("menu")      # ditto — every launch lands on the menu
         self._apply_settings(self._settings)  # may restore a saved state
         self._apply_prompt_image_state()  # reconcile the restored mode
-        self._apply_min_size()  # AFTER settings — fonts are final here
+        min_w, min_h = self._apply_min_size()  # AFTER settings — fonts final
+        # ALWAYS open at exactly that minimum (owner 2026-08-03, slika
+        # 1: "aplikaciju uvek prvobitno otvaramo u TOM min height i min
+        # width — ali to važi samo za taj prvi HOME PAGE"). The launch
+        # view IS the Main Menu, and the computed minimum is the size
+        # that renders its grid whole; a saved WxH is deliberately NOT
+        # restored (its POSITION on screen still is — _apply_settings
+        # ran just above), and the owner resizes freely from here on.
+        self.root.geometry(f"{min_w}x{min_h}")
         self._wire_persistence()
         # the maximize/restore + drag-resize watcher — seeded and bound
         # AFTER the saved geometry is applied, so startup's own
@@ -517,6 +538,14 @@ class BuildMixin:
             # 2026-08-03) — re-derive both from the new fonts
             self._icon_bar.refresh_measure()
             self._apply_min_size()
+            # every FlowRow band re-wraps at the new font size (owner
+            # 2026-08-03, slika 1: zooming in must push elements onto
+            # new rows, never cut them off)
+            for panel in (*self.agents.values(), self._tool_panels.get(
+                "api_image"
+            )):
+                if panel is not None and hasattr(panel, "reflow"):
+                    panel.reflow()
             self._schedule_save()
 
     def _apply_min_size(self) -> None:
@@ -531,16 +560,30 @@ class BuildMixin:
         Tk has ONE minsize per window, so the same minimum guards the
         setup/running views too (accepted consequence, predlog v2).
         Called at the end of ``__init__`` (fonts final) and again after
-        every font-zoom step."""
+        every font-zoom step. Returns the applied (W, H) so ``__init__``
+        can OPEN the window at exactly that size."""
         self.root.update_idletasks()
-        chrome_w = 2 * OUTER_PAD_PX + 2 * MENU_GRID_PADX
+        # + the vertical scrollbar's own width (owner 2026-08-03, slika
+        # 1): the bar auto-hides, but the moment it DOES show it eats
+        # that much of the canvas — at a minsize computed without it the
+        # first tile lost its border and clipped its text. Reserved
+        # always, so the grid fits bar or no bar.
+        chrome_w = (
+            2 * OUTER_PAD_PX + 2 * MENU_GRID_PADX
+            + self._scroll._vbar.winfo_reqwidth()
+        )
         chrome_h = (
             self._top_strip.winfo_reqheight()
             + self._menu_view.chrome_height()
             + 2 * OUTER_PAD_PX
         )
-        w, h = menu_min_size(len(MENU_TILES), chrome_w, chrome_h)
-        self.root.minsize(max(w, WINDOW_MIN_W), max(h, WINDOW_MIN_H))
+        w, h = menu_min_size(
+            len(MENU_TILES), chrome_w, chrome_h,
+            self._menu_view.cell_min_px(),
+        )
+        w, h = max(w, WINDOW_MIN_W), max(h, WINDOW_MIN_H)
+        self.root.minsize(w, h)
+        return w, h
 
     # --- global vertical scroll + collapse -----------------------------
 
