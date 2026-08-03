@@ -116,19 +116,40 @@ ASPECT RATIO exactly 1:1 — a perfect square image. ...
 ```
 ````
 
-- The `←` path is a READ-ONLY source image, resolved **relative to the
-  sheet's own folder** (`refs/obiwan.png` sits beside the sheet). A
-  `../shared/...` sibling location is fine — the tool only ever READS
-  it, never writes there.
+- The `←` path is a READ-ONLY source image, resolved at run time in
+  this BINDING order (faza 2, owner 2026-08-03): ① **relative to the
+  sheet's own folder** (`refs/obiwan.png` beside the sheet; a
+  `../shared/...` sibling is fine — the tool only ever READS it) →
+  ② **relative to the run's Reference folder** (the GUI's
+  Prompt + Image section — for reference stashes that live outside the
+  sheet's tree, e.g. a project's gitignored `UV/` folder; write the
+  path relative to the folder you will pick) → ③ an absolute path.
+  Found nowhere = that item is loudly skipped; the rest of the batch
+  runs.
 - It may be a `.png`, `.jpg`, `.jpeg` or `.webp` (a reference photo) —
   unlike the OUTPUT path, which is always `.png`.
+- **Several attachments = several `←` lines** (faza 2), one per file,
+  directly under each other. LINE ORDER IS ATTACH ORDER — a prompt
+  saying "the FIRST attached image … the SECOND attached image" means
+  the first and second `←` line. Each of the entry's TWO look
+  variants (bronze/colored) carries its OWN `←` line(s) — the parser
+  pairs per entry, never per section heading.
 - The tool behaves like a real user: it opens the composer's "+" menu,
-  picks the add-image option, attaches the file, WAITS for its preview
-  to appear, then pastes your prompt and sends. So write the prompt as
-  an INSTRUCTION about the attached image ("Place the attached
-  character into ...").
+  picks the add-image option, attaches the file(s), WAITS for the
+  preview to appear, then pastes your prompt and sends. So write the
+  prompt as an INSTRUCTION about the attached image ("Place the
+  attached character into ..." — "the ATTACHED IMAGE", never a
+  filename).
 - Optional — most entries have no `←` line. A `←` that does not name an
   image file is reported loudly (fix the sheet).
+- **PROMPT + IMAGE mode** (the GUI toggle beside "Select images…"):
+  with it ON, a run generates ONLY entries whose prompt AND every `←`
+  reference are both present — load a whole collection plus one
+  reference file on disk and exactly one image is generated. Entries
+  with no `←` line, or with a missing reference, are loudly listed
+  and skipped. This is how REFERENCE SHEETS run (the prompt describes
+  everything EXCEPT the figure; the likeness arrives as the attached
+  image — see the starwars reference sheet for the canonical form).
 
 ### 4. Notes and prose
 *(Italic paragraphs)* and any paragraph that does not carry an

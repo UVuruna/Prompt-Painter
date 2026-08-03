@@ -66,7 +66,12 @@ in here.**
    PER SITE (ChatGPT and Gemini each get their own selection);
    already-done items show green and RE-TICKABLE — ticking one
    REDOES it as the next `_vN` version file (owner 2026-07-27, see
-   The Run Loop). **"BG removal only..."**
+   The Run Loop). Beside it sits the **"Prompt + Image"** toggle
+   (faza 2, owner 2026-08-03): ON reveals the reference-run section
+   (Reference folder + live per-entry eligibility view) and narrows
+   the run to complete prompt+reference pairs — see 3b. The
+   functionality's name is **Website Image GEN** (renamed from
+   Website GEN, owner 2026-08-03). **"BG removal only..."**
    runs the background remover standalone, in place, over any
    existing folder of images.
 3. He picks the sites: **Gemini, ChatGPT, or BOTH IN PARALLEL** —
@@ -199,16 +204,27 @@ Per theme `.md` file:
 3. The FIRST fenced code block after that heading is the prompt —
    copied byte-identical into the chat box, plus the site's
    background suffix.
-3b. An entry may ALSO carry an OPTIONAL **input image** (owner
-   2026-07-23): a `← \`refs/photo.png\`` line under the arrow (mirror
-   of the `→` output arrow). It is a READ-ONLY source photo, resolved
-   RELATIVE TO THE SHEET'S OWN FOLDER at run time, that the tool
-   ATTACHES into the composer before the prompt (`submit_with_image`,
-   acting like a person: expand the "+" menu → pick the add-image
-   option → set the file → wait for the preview → send) — for "put
-   THIS character into that scene" prompts. Any of
+3b. An entry may ALSO carry OPTIONAL **input image(s)** (owner
+   2026-07-23; MULTI + faza 2 binding, owner 2026-08-03): one or more
+   `← \`refs/photo.png\`` lines under the arrow (mirror of the `→`
+   output arrow), LINE ORDER = ATTACH ORDER ("the FIRST/SECOND
+   attached image"). Each is a READ-ONLY source photo, resolved at run
+   time in the BINDING order ① sheet's own folder → ② the run's
+   **Reference folder** (the GUI Prompt+Image section) → ③ absolute,
+   then ATTACHED into the composer before the prompt
+   (`submit_with_image`, acting like a person: expand the "+" menu →
+   pick the add-image option → set the file(s) → wait for the preview
+   → send; the API job builds `inlineData` parts in the same order) —
+   for "put THIS character into that scene" prompts and for REFERENCE
+   SHEETS (the second sheet kind: the prompt describes everything
+   EXCEPT the figure, the likeness arrives as the attachment — the
+   starwars reference sheet is the canonical form). Any of
    `TOOL_IMAGE_EXTENSIONS` (png/jpg/jpeg/webp). A missing file is a
-   loud per-item SKIP; the rest of the batch runs. See
+   loud per-item SKIP; the rest of the batch runs. **PROMPT + IMAGE
+   mode** (the GUI toggle beside "Select images…", faza 2): ON = only
+   entries with prompt AND every reference present generate — load
+   all prompts plus 1 reference file and exactly 1 image runs; the
+   excluded rest is loudly listed. See
    [instructions.md](instructions.md) rule 3c.
 4. *(italic notes)* are skipped. Skip markers (REUSE / SUPERSEDED /
    DO-NOT-GENERATE, only inside `**bold**` spans; per entry, per
