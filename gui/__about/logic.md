@@ -13,7 +13,7 @@ aspect-filter/upscale-gate migrations `_migrate_legacy_aspect_filter`/
 (`_run_pipeline_steps`), the dashboard's per-scope stat formatter
 (`_scope_stats`), the fixer auto-dispatch decision (`_fixer_decision`),
 the manual-fix result-to-UI mapping (`_fix_result_ui`), and small pure
-view-layout helpers (`_visible_agent_slots`, `_menu_tile_columns`,
+view-layout helpers (`_visible_agent_slots`, `menu_min_size`,
 `_next_view`). Every function takes plain values (paths, dicts,
 duck-typed objects) and returns plain values — no widget is ever built
 or touched, so this module is directly unit-testable with no Tk
@@ -78,20 +78,31 @@ auto-navigates by itself, only a SUBSEQUENT explicit Menu click does.
 - [Doc Window](doc_window.md) — `_fix_result_ui` (the manual Fixer AI
   buttons' result-to-UI mapping)
 - [Main Menu + Icon Bar](menu.md) — `MainMenu` imports
-  `_menu_tile_columns`/`MENU_TILE_CELL_MIN_PX` directly (real-path,
-  post god-file split)
+  `MENU_TILE_CELL_MIN_PX` directly (real-path, post god-file split);
+  [Build Mixin](app_build.md) imports `menu_min_size` for
+  `_apply_min_size`'s computed `root.minsize` (owner 2026-08-03, UI
+  rework tačka 1 — replacing the deleted `_menu_tile_columns` reflow
+  math)
 - [Dashboard Job Panel Base + Site Panel](dash_panels.md) — `DashPanel`
   imports `_scope_stats`/`_STAT_KEYS` directly
 
 ## Design Decisions
 - **`MENU_TILE_CELL_MIN_PX` moved here too, not just the functions.**
-  `_menu_tile_columns`'s own docstring requires it to agree EXACTLY
-  with `MainMenu._reflow`'s grid `minsize` floor — the two must share
+  `menu_min_size`'s per-column footprint must agree EXACTLY with
+  `MainMenu`'s fixed-grid column `minsize` floor — the two must share
   one source of truth. It is defined here (derived from
   `painter.config`'s `MENU_TILE_W`/`MENU_TILE_GAP_PX`) and imported
   directly by `gui/menu.py`'s `MainMenu` (real-path, since step 6/8),
   plus still re-exported through `gui/__init__.py` for
   `test_gui_running_view.py`'s own `gui.MENU_TILE_CELL_MIN_PX` reads.
+- **`menu_min_size` replaced `_menu_tile_columns` outright (owner
+  2026-08-03, UI rework tačka 1).** The responsive column reflow is
+  reverted by decree ("uvek mora 4x2 grid") — the pure math now
+  answers the OPPOSITE question: not "how many columns fit this
+  width" but "how big must the window be so the FULL grid always
+  fits". Chrome (paddings, top strip, header at the current font
+  zoom) is measured by the Tk-facing caller and passed in, keeping
+  this half pure and testable.
 - **`_STAT_KEYS` moved alongside `_scope_stats`, for the same reason.**
   `DashPanel` (`gui/dash_panels.py`) iterates `_STAT_KEYS` right
   after calling `_scope_stats` — the two are inseparable in practice —

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- HOME (owner 2026-08-03, UI rework tacka 2): the nav strip's
+       leftmost button — plain paths only, QtSvg-renderable (no
+       clipPath/mask/filter, see gui/icons.py _QT_UNSUPPORTED_SVG) -->
+  <path fill="#4da3ff" d="M12 2.6 1.8 11.8h2.9V21h5.5v-5.6h3.6V21h5.5v-9.2h2.9L12 2.6z"/>
+  <path fill="#1f6fd0" d="M12 2.6 1.8 11.8h2.9L12 5.2l7.3 6.6h2.9L12 2.6z"/>
+</svg>

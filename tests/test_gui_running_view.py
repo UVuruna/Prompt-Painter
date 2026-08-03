@@ -110,47 +110,48 @@ def test_next_view_menu_click_from_main_when_idle_still_works():
 
 
 # ---------------------------------------------------------------------
-# gui._menu_tile_columns — pure, no Tk (owner 2026-07-21 workflow fix,
-# the responsive Main Menu — MainMenu._reflow itself is Tk-facing and
-# proven by a real-window screenshot, matching gui.py's "pure helpers
-# get pytest, real Tk/UI wiring gets a screenshot" convention)
+# gui.menu_min_size — pure, no Tk (owner 2026-08-03, UI rework tačka 1:
+# the FIXED 4x2 Main Menu grid; the window's computed minsize replaces
+# the retired responsive column reflow — the Tk-facing half,
+# BuildMixin._apply_min_size, is proven by a real-window screenshot,
+# matching gui.py's "pure helpers get pytest" convention)
 # ---------------------------------------------------------------------
 
 
-def test_menu_tile_columns_no_measurement_yet_falls_back_to_the_ideal():
-    assert gui._menu_tile_columns(0, 8) == gui.MENU_TILE_COLS
-    assert gui._menu_tile_columns(-5, 8) == gui.MENU_TILE_COLS
+def test_menu_min_size_width_covers_the_full_fixed_grid_plus_chrome():
+    """8 tiles at MENU_TILE_COLS=4 → the minimum width is exactly four
+    per-column footprints plus the caller-measured chrome."""
+    w, _h = gui.menu_min_size(8, chrome_w_px=64, chrome_h_px=0)
+    assert w == gui.MENU_TILE_COLS * gui.MENU_TILE_CELL_MIN_PX + 64
 
 
-def test_menu_tile_columns_never_exceeds_menu_tile_cols():
-    huge = gui.MENU_TILE_CELL_MIN_PX * (gui.MENU_TILE_COLS + 5)
-    assert gui._menu_tile_columns(huge, 8) == gui.MENU_TILE_COLS
+def test_menu_min_size_height_covers_every_row_plus_chrome():
+    """8 tiles at 4 columns = 2 rows of (tile height + gap), plus the
+    measured chrome height."""
+    _w, h = gui.menu_min_size(8, chrome_w_px=0, chrome_h_px=120)
+    assert h == 2 * (gui.MENU_TILE_H + gui.MENU_TILE_GAP_PX) + 120
 
 
-def test_menu_tile_columns_never_exceeds_tile_count():
-    """No empty trailing columns even when there is ample width."""
-    huge = gui.MENU_TILE_CELL_MIN_PX * 10
-    assert gui._menu_tile_columns(huge, 2) == 2
+def test_menu_min_size_a_ninth_tile_would_grow_a_third_row():
+    """The math follows the tile count — a future 9th functionality
+    raises the height floor by exactly one row."""
+    _w, h8 = gui.menu_min_size(8, 0, 0)
+    _w, h9 = gui.menu_min_size(9, 0, 0)
+    assert h9 - h8 == gui.MENU_TILE_H + gui.MENU_TILE_GAP_PX
 
 
-def test_menu_tile_columns_shrinks_as_width_shrinks():
-    per_tile = gui.MENU_TILE_CELL_MIN_PX
-    assert gui._menu_tile_columns(per_tile * 4, 8) == 4
-    assert gui._menu_tile_columns(per_tile * 3, 8) == 3
-    assert gui._menu_tile_columns(per_tile * 2, 8) == 2
-    assert gui._menu_tile_columns(per_tile * 1, 8) == 1
+def test_menu_min_size_never_below_one_column_and_row():
+    """tile_count 0 still returns a sane one-cell floor, never 0x0."""
+    w, h = gui.menu_min_size(0, 0, 0)
+    assert w == gui.MENU_TILE_CELL_MIN_PX
+    assert h == gui.MENU_TILE_H + gui.MENU_TILE_GAP_PX
 
 
-def test_menu_tile_columns_never_below_one():
-    assert gui._menu_tile_columns(1, 8) == 1
-
-
-def test_menu_tile_columns_agrees_with_reflows_own_minsize_floor():
-    """_menu_tile_columns's per-tile divisor and MainMenu._reflow's own
-    grid ``minsize`` MUST use the SAME constant — a stricter minsize
-    than this function assumed would make the grid wider than the
-    (non-horizontally-scrollable) viewport, trading squeezed-card
-    clipping for off-the-right-edge clipping instead."""
+def test_menu_min_size_agrees_with_the_grids_own_minsize_floor():
+    """menu_min_size's per-column footprint and MainMenu's fixed-grid
+    column ``minsize`` MUST use the SAME constant — a stricter grid
+    floor than the minsize math assumed would still clip the grid's
+    right edge at the computed minimum width."""
     assert gui.MENU_TILE_CELL_MIN_PX > gui.MENU_TILE_W + gui.MENU_TILE_GAP_PX
 
 
@@ -772,19 +773,57 @@ def test_icon_bar_api_image_gen_click_now_calls_on_select_too(root):
     assert clicked == ["api_image_gen"]
 
 
-def test_icon_bar_menu_button_calls_on_menu(root):
+def test_icon_bar_home_button_calls_on_menu(root):
+    """owner 2026-08-03 (UI rework tačka 2): the old right-side text
+    "Menu" button is gone — the HOME icon button (leftmost, the one
+    packed widget NOT keyed in _buttons) is the Menu affordance."""
     calls = []
     bar = gui.IconBar(
         root, on_select=lambda *_a: None, on_menu=lambda: calls.append(1),
     )
-    # the Menu button is the one packed widget NOT keyed in _buttons
-    menu_btn = [
+    extra = [
         w for w in bar.winfo_children()
         if w not in bar._buttons.values()
     ]
-    assert len(menu_btn) == 1
-    menu_btn[0].invoke()
+    assert extra == [bar._home]
+    bar._home.invoke()
     assert calls == [1]
+
+
+def test_icon_bar_home_button_is_icon_only_and_packed_first(root):
+    bar = gui.IconBar(root, on_select=lambda *_a: None, on_menu=lambda: None)
+    assert bar._home.cget("text") == ""
+    assert bar.pack_slaves()[0] is bar._home
+
+
+def test_icon_bar_icon_only_mode_drops_every_label_and_restores_all(root):
+    """owner 2026-08-03 (UI rework tačka 2): too narrow → EVERY tile
+    button drops its label at once (uniform, never a mixed strip);
+    wide again → every label returns."""
+    bar = gui.IconBar(root, on_select=lambda *_a: None, on_menu=lambda: None)
+    bar._set_icon_only(True)
+    assert all(btn.cget("text") == "" for btn in bar._buttons.values())
+    bar._set_icon_only(False)
+    for tile in MENU_TILES:
+        assert bar._buttons[tile.id].cget("text") == tile.label
+
+
+def test_icon_bar_restoring_labels_invalidates_the_measured_width(root):
+    """Coming back to text mode clears the cached full-text width so
+    the next <Configure> re-measures at the CURRENT font zoom."""
+    bar = gui.IconBar(root, on_select=lambda *_a: None, on_menu=lambda: None)
+    bar._full_w = 500
+    bar._set_icon_only(True)
+    assert bar._full_w == 500  # entering icon-only keeps the baseline
+    bar._set_icon_only(False)
+    assert bar._full_w == 0
+
+
+def test_icon_bar_refresh_measure_clears_the_cached_width(root):
+    bar = gui.IconBar(root, on_select=lambda *_a: None, on_menu=lambda: None)
+    bar._full_w = 400
+    bar.refresh_measure()
+    assert bar._full_w == 0
 
 
 def test_icon_bar_set_active_fills_active_tiles_and_outlines_the_rest(root):

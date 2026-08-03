@@ -69,10 +69,17 @@ class ScrollFrame(ttk.Frame):
         self._applied_w = -1  # the body width actually applied (deferred)
         self.canvas = tk.Canvas(self, highlightthickness=0)
         skin_canvas(self.canvas)  # registered so its bg re-tints on a flip
-        vbar = ttk.Scrollbar(
+        self._vbar = ttk.Scrollbar(
             self, orient="vertical", command=self.canvas.yview,
             bootstyle="round",
         )
+        # AUTO-HIDE (owner 2026-08-03, UI rework tačka 1: "X i Y skrol
+        # zabranjeni" on the menu): the vertical bar shows ONLY while
+        # the content actually overflows the viewport — see
+        # _update_vbar, re-checked on every settled re-fit. Views that
+        # fit (the Main Menu, by the computed root minsize) get no bar.
+        self._vbar_visible = True
+        vbar = self._vbar
         self.canvas.configure(yscrollcommand=vbar.set)
         self.body = ttk.Frame(self.canvas)
         self._win = self.canvas.create_window(
@@ -130,6 +137,31 @@ class ScrollFrame(ttk.Frame):
             self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         except tk.TclError:
             pass  # canvas destroyed between the schedule and the pass
+        self._update_vbar()
+
+    def _update_vbar(self) -> None:
+        """Show the vertical bar ONLY while the body genuinely
+        overflows the viewport (owner 2026-08-03). Compares the body's
+        REQUESTED height (invariant under fill_height's forced
+        allocation — see ``_apply_fill_height``) against the canvas
+        height, change-guarded: hiding widens the canvas, which can
+        only ever SHORTEN wrapped content, so a hide never bounces
+        back; showing narrows it, which only grows content, so a show
+        stays too — one settled pass converges either way."""
+        try:
+            fits = (
+                self.body.winfo_reqheight() <= self.canvas.winfo_height()
+            )
+        except tk.TclError:
+            return  # widgets destroyed between the schedule and the pass
+        show = not fits
+        if show == self._vbar_visible:
+            return
+        self._vbar_visible = show
+        if show:
+            self._vbar.pack(side="right", fill="y", before=self.canvas)
+        else:
+            self._vbar.pack_forget()
 
     def _apply_fill_height(self) -> None:
         """Stretch the body window to at least the canvas height so a

@@ -9,7 +9,6 @@
 flowchart TB
     subgraph ROOT["root window"]
         subgraph TOP["_top_strip (pinned, outside scroll)"]
-            MENU["Menu button"]
             TITLE["PromptPainter title"]
             CHECK["Check"]
             DASHBTN["grid/slider toggle"]

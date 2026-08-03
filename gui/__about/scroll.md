@@ -10,6 +10,15 @@ into `self.body`; without horizontal scroll the body stretches to the
 canvas width (content wraps, no x scrollbar), with it the body keeps
 its natural width and a horizontal bar appears.
 
+The vertical bar AUTO-HIDES while the content fits the viewport
+(`_update_vbar`, owner 2026-08-03 — UI rework tačka 1's "X i Y skrol
+zabranjeni" on the Main Menu, which always fits by the computed
+`root.minsize`): every settled re-fit compares the body's REQUESTED
+height (invariant under `fill_height`'s forced allocation) against
+the canvas height and packs/unpacks the bar, change-guarded — hiding
+widens the canvas, which can only ever shorten wrapped content, so
+the decision never oscillates.
+
 `fill_height=True` (the whole-window wrap uses it) additionally keeps
 the body at least as tall as the canvas, so a short window can always
 reach the true bottom of the content. This used to be self-healed by a

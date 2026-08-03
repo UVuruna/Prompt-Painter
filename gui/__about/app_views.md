@@ -41,8 +41,10 @@ explicit IconBar icon click (`_click_icon_bar_tile`) or a Pause (see
 [Site Jobs Mixin](app_jobs.md)'s `_toggle_pause_job` reveal).
 
 **F4b (owner 2026-07-29): the icon strip also shows on the "main"
-setup screen** — icons-only, above the settings, its own Menu button
-serving as HOME there too. A HOTFIX the same day (slika 2) makes
+setup screen** — above the settings, its leftmost HOME icon button
+(owner 2026-08-03 — the old text "Menu" buttons, both IconBar's and
+the pinned top-strip one, are gone) serving as the one way back to
+the Main Menu. A HOTFIX the same day (slika 2) makes
 entering "main" always expand the full controls — a persisted
 collapsed state used to leave only the thin compact strip on the setup
 screen (no visible settings, no way to start); another hotfix (slika
@@ -76,7 +78,7 @@ views and are unpacked entirely while on "menu".
 ### ViewMixin
 No `__init__` — every attribute it reads (`self._view`,
 `self._controls_box`, `self._compact_box`, `self._tool_panels`,
-`self._inline_kind`, `self._icon_bar`, `self._menu_btn`,
+`self._inline_kind`, `self._icon_bar`,
 `self._collapse_btn`, ...) is set by `BuildMixin.__init__`. Key
 methods: `_set_view`/`_go_view` (the animated view swap),
 `_select_tile`/`_tile_handler`/`_click_icon_bar_tile` (tile routing —

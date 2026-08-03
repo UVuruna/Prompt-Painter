@@ -34,6 +34,7 @@ from painter.config import (
     DEFAULT_OUT_DIR,
     JOB_ORDER,
     JOB_TOOL_KINDS,
+    MENU_TILES,
     RESIZE_SETTLE_MS,
     SITES,
     THEMES,
@@ -43,8 +44,8 @@ from . import widgets
 from .agent_panel import AgentPanel
 from .api_panel import ApiImageGenPanel
 from .dash_panels import DashPanel, JobPanel
-from .logic import _visible_agent_slots
-from .menu import IconBar, MainMenu
+from .logic import _visible_agent_slots, menu_min_size
+from .menu import MENU_GRID_PADX, IconBar, MainMenu
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
 from .switch import DayNightSwitch
 from .theme import (
@@ -68,8 +69,13 @@ from .widgets import rounded_button, rounded_entry, set_font_base, tk_font
 # The whole window is vertically scrollable so a stale-tall geometry can
 # never hide the bottom, and the upper control area collapses to a thin
 # per-agent strip so the Dashboard can take the full height.
-WINDOW_MIN_W = 900          # root.minsize width
-WINDOW_MIN_H = 640          # root.minsize height
+WINDOW_MIN_W = 900          # root.minsize FLOOR width (see _apply_min_size —
+WINDOW_MIN_H = 640          # the real minsize is COMPUTED from the menu grid
+#                             and only ever RAISED above these floors;
+#                             owner 2026-08-03, UI rework tačka 1)
+OUTER_PAD_PX = 8            # the scroll body's outer frame padding — shared
+#                             with _apply_min_size's chrome math so the
+#                             computed minsize and the real layout agree
 WINDOW_SCREEN_MARGIN_PX = 80  # taskbar + titlebar + slack subtracted from
 #                               screen w/h when clamping a restored geometry
 # HOTFIX (owner 2026-07-29, slika 1): the window OPENS at a modest
@@ -207,7 +213,7 @@ class BuildMixin:
         self._top_strip.pack(fill="x")
         self._scroll = ScrollFrame(shell, fill_height=True)
         self._scroll.pack(fill="both", expand=True)
-        outer = ttk.Frame(self._scroll.body, padding=8)
+        outer = ttk.Frame(self._scroll.body, padding=OUTER_PAD_PX)
         outer.pack(fill="both", expand=True)
 
         # GUI rework Phase 10: the Main Menu and the whole existing app
@@ -385,21 +391,12 @@ class BuildMixin:
             command=self._toggle_collapsed, icon_name="controls",
         )
         self._collapse_btn.pack(side="right", padx=(0, 8))
-        # "back to the Main Menu" affordance (GUI rework Phase 10): one
-        # plain-text button (no icon asset fits "menu/home" yet, and
-        # DESIGN.md's emoji policy rules out a hamburger glyph standing
-        # in for one) in the pinned top strip, like the switch/collapse
-        # toggle either side of it — reachable from "menu"/"main".
-        # GUI rework Phase 11: while "running", IconBar shows its OWN
-        # Menu button instead (one Menu affordance on screen at a time —
-        # see _set_view) and this one steps aside; both route through
-        # _request_menu, which REFUSES the jump while any job is still
-        # active (design: "back to menu only once nothing is running,
-        # and only on an explicit Menu click").
-        self._menu_btn = rounded_button(
-            self._top_strip, "Menu", command=self._request_menu,
-        )
-        self._menu_btn.pack(side="left")
+        # the old pinned top-strip "Menu" button is GONE (owner
+        # 2026-08-03, UI rework tačka 2): the ONE way back to the Main
+        # Menu is IconBar's leftmost HOME icon button (home.svg) — the
+        # bar shows on both working views (F4b), and both routes still
+        # go through _request_menu, which REFUSES the jump while any
+        # job is active ("back to menu only once nothing is running").
         # HOTFIX (owner 2026-07-29, slika 1): the app TITLE lives in
         # the top strip, in line with the theme switcher — centered
         # between the left buttons and the right toggles
@@ -423,6 +420,7 @@ class BuildMixin:
         self._set_collapsed(False)  # deterministic initial packing
         self._set_view("menu")      # ditto — every launch lands on the menu
         self._apply_settings(self._settings)  # may restore a saved state
+        self._apply_min_size()  # AFTER settings — fonts are final here
         self._wire_persistence()
         # the maximize/restore + drag-resize watcher — seeded and bound
         # AFTER the saved geometry is applied, so startup's own
@@ -470,7 +468,35 @@ class BuildMixin:
             self.status_var.set(
                 f"font size {widgets.FONT_BASE} (Ctrl+wheel / Ctrl+'+'/'-')"
             )
+            # zoom moves every measured height/width the minsize and
+            # the IconBar's text/icon-only threshold depend on (owner
+            # 2026-08-03) — re-derive both from the new fonts
+            self._icon_bar.refresh_measure()
+            self._apply_min_size()
             self._schedule_save()
+
+    def _apply_min_size(self) -> None:
+        """COMPUTED ``root.minsize`` (owner 2026-08-03, UI rework
+        tačka 1): the window can never shrink below what renders the
+        Main Menu's fixed 4x2 grid WHOLE — every tile at its minimum
+        size, no X/Y scrolling on the menu. ``gui.logic.menu_min_size``
+        owns the pure tile math; the chrome around the grid (outer
+        padding, the top strip and the menu header at the CURRENT font
+        zoom) is measured here. ``WINDOW_MIN_W``/``WINDOW_MIN_H`` stay
+        as absolute floors — the computed size only ever raises them.
+        Tk has ONE minsize per window, so the same minimum guards the
+        setup/running views too (accepted consequence, predlog v2).
+        Called at the end of ``__init__`` (fonts final) and again after
+        every font-zoom step."""
+        self.root.update_idletasks()
+        chrome_w = 2 * OUTER_PAD_PX + 2 * MENU_GRID_PADX
+        chrome_h = (
+            self._top_strip.winfo_reqheight()
+            + self._menu_view.chrome_height()
+            + 2 * OUTER_PAD_PX
+        )
+        w, h = menu_min_size(len(MENU_TILES), chrome_w, chrome_h)
+        self.root.minsize(max(w, WINDOW_MIN_W), max(h, WINDOW_MIN_H))
 
     # --- global vertical scroll + collapse -----------------------------
 

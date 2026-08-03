@@ -135,12 +135,10 @@ class ViewMixin:
                 # (spec item 4) — a fresh entry into "running" never
                 # inherits a stale inline toggle from a previous run
                 self._inline_kind = None
-            self._menu_btn.pack_forget()
             self._collapse_btn.configure(state="disabled")
             self._apply_running_layout()
         elif was_running:
             self._icon_bar.pack_forget()
-            self._menu_btn.pack(side="left")
             self._collapse_btn.configure(state="normal")
             self._set_collapsed(self._collapsed)
         # F4b (owner 2026-07-29): the icon strip shows on the SETUP
@@ -165,7 +163,8 @@ class ViewMixin:
         # CLEAN top strip — title + theme switch only; Check/Controls
         # belong to the working views. The [▦ grid] toggle shows ONLY
         # while the DASHBOARD itself is on screen (owner 2026-07-29).
-        self._menu_btn.pack_forget()  # IconBar's Menu is the one HOME
+        # (The old pinned top-strip Menu button is gone — IconBar's
+        # HOME icon button is the one affordance, owner 2026-08-03.)
         if view == "menu":
             self.btn_check.pack_forget()
             self._collapse_btn.pack_forget()
@@ -349,12 +348,12 @@ class ViewMixin:
         self._apply_running_layout()
 
     def _request_menu(self) -> None:
-        """The Menu affordance's shared handler (the pinned top-strip
-        button outside "running", IconBar's own copy during it) —
-        routed through ``_next_view`` so a click while any job is still
-        active is a safe, clearly-explained no-op (design: "back to
-        menu only once nothing is running, and only on an explicit
-        Menu click")."""
+        """The HOME affordance's handler (IconBar's leftmost home-icon
+        button, on both working views — owner 2026-08-03; the old
+        pinned top-strip Menu button is gone) — routed through
+        ``_next_view`` so a click while any job is still active is a
+        safe, clearly-explained no-op (design: "back to menu only once
+        nothing is running, and only on an explicit HOME click")."""
         active = self._active_kinds()
         target = _next_view(self._view, len(active), menu_requested=True)
         if target == self._view:

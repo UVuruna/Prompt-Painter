@@ -109,7 +109,7 @@ into [Viewer Shared Rules](__about/viewer_shared.md),
 | `dash_helpers.py` | Standard | shared dashboard helpers — badge dots, AI-check report/tag helpers, checkerboard — [about](__about/dash_helpers.md) |
 | `dash_panels.py` | Algorithmic | `JobPanel` base + `DashPanel` — one generation site's live dashboard view — [about](__about/dash_panels.md) · [flow](__flow/dash_panels.md) |
 | `tool_dash.py` | Algorithmic | `ToolPanel` + `AiCheckPanel` + `DashGrid` — the tool/checker dashboard panels and grid — [about](__about/tool_dash.md) · [flow](__flow/tool_dash.md) |
-| `menu.py` | Algorithmic | `MainMenu` + `IconBar` — the startup tile grid and the running-view top strip — [about](__about/menu.md) · [flow](__flow/menu.md) |
+| `menu.py` | Algorithmic | `MainMenu` + `IconBar` — the startup's fixed 4×2 tile grid and the HOME-led nav strip (setup + running views) — [about](__about/menu.md) · [flow](__flow/menu.md) |
 | `select_window.py` | Algorithmic | `SelectWindow` — the per-site tick-list Toplevel over the queued Collections — [about](__about/select_window.md) · [flow](__flow/select_window.md) |
 | `viewer_shared.py` | Standard | `DOC_*` window-sizing family + tiny shared viewer helpers — [about](__about/viewer_shared.md) |
 | `doc_window.py` | Algorithmic | `DocWindow` — the Markdown/prompt/image viewer + Fixer-AI manual buttons — [about](__about/doc_window.md) · [flow](__flow/doc_window.md) |

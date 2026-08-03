@@ -2,7 +2,7 @@
 (god-file refactor, Rule #20): the shared-filter engine helpers, the
 per-image post-save pipeline runner, legacy settings migrations, the
 fixer auto-dispatch decision, and small pure view-layout helpers
-(``_menu_tile_columns``/``_next_view``/``_visible_agent_slots``) plus
+(``menu_min_size``/``_next_view``/``_visible_agent_slots``) plus
 the dashboard's ``_scope_stats``. Every function here takes plain
 values (paths, dicts, duck-typed objects) and returns plain values —
 no widget is ever built or touched, so this module is directly
@@ -11,6 +11,7 @@ unit-testable with no Tk display required.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Callable
 
@@ -30,14 +31,14 @@ from painter.config import (
     FIXER_MODE_WEBSITE,
     MENU_TILE_COLS,
     MENU_TILE_GAP_PX,
+    MENU_TILE_H,
     MENU_TILE_W,
 )
 
-# --- Main Menu (GUI rework Phase 10) — the tile-grid column floor,
-# shared by _menu_tile_columns (below) and MainMenu._reflow (gui/
-# __init__.py), which re-imports it — the two must always agree, or a
-# stricter grid floor than this function assumed would make the grid
-# wider than the (non-horizontally-scrollable) viewport itself.
+# --- Main Menu — the tile-grid column floor, shared by MainMenu's
+# fixed grid (its per-column ``minsize``) and ``menu_min_size`` below,
+# which assumes the same per-column footprint — the two must always
+# agree, or the minsize window would still clip the grid's right edge.
 MENU_TILE_CELL_MIN_PX = MENU_TILE_W + MENU_TILE_GAP_PX + 24
 
 # ---------------------------------------------------------------------
@@ -493,35 +494,34 @@ def _fix_result_ui(
 
 
 # ---------------------------------------------------------------------
-# Main Menu (GUI rework Phase 10)
+# Main Menu (GUI rework Phase 10; fixed grid — owner 2026-08-03)
 # ---------------------------------------------------------------------
 
-def _menu_tile_columns(width_px: int, tile_count: int) -> int:
-    """How many ``MENU_TILES`` columns fit ``width_px`` without
-    shrinking a tile below ``MENU_TILE_CELL_MIN_PX`` (owner 2026-07-21
-    workflow fix — the grid used to hardcode ``MENU_TILE_COLS`` columns
-    regardless of the actual window width; at the narrow end of
-    ``WINDOW_MIN_W`` a slightly different font/DPI/scrollbar width was
-    enough to clip or overflow the fixed 4-wide layout). ``MainMenu.
-    _reflow`` enforces the SAME per-column floor as a real Tk
-    ``minsize`` — the two must always agree, or a stricter grid floor
-    than this function assumed would make the grid wider than the
-    (non-horizontally-scrollable) viewport itself, trading one clipping
-    failure mode for another at the right edge. Never more than
-    ``MENU_TILE_COLS`` (today's ideal 4x2 layout for 8 tiles) or more
-    than ``tile_count`` itself (no empty trailing columns), never fewer
-    than 1. ``width_px <= 0`` (no real measurement yet, e.g. the very
-    first pack before any ``<Configure>`` fires) falls back to the
-    ideal layout, exactly like today's fixed default. Pure, Tk-free —
-    mirrors ``_visible_agent_slots``/``_next_view``'s own split (the
-    Tk-facing half, ``MainMenu._reflow``, is proven by a real-window
-    screenshot, matching gui.py's established convention for widget
-    geometry — see ___tests.md)."""
-    ideal = min(MENU_TILE_COLS, max(1, tile_count))
-    if width_px <= 0:
-        return ideal
-    fit = max(1, width_px // MENU_TILE_CELL_MIN_PX)
-    return min(ideal, fit)
+def menu_min_size(
+    tile_count: int, chrome_w_px: int, chrome_h_px: int
+) -> tuple[int, int]:
+    """The window minsize (client-area W, H) that renders the Main
+    Menu's FIXED ``MENU_TILE_COLS``-wide grid whole, every tile at its
+    minimum size, with NO scrolling (owner 2026-08-03, UI rework
+    tačka 1: "uvek 4x2 grid, X i Y skrol zabranjeni" — replacing the
+    2026-07-21 responsive reflow, which solved narrow windows by
+    DROPPING columns; the owner's verdict is the opposite: the window
+    itself must never get that narrow).
+
+    ``chrome_w_px``/``chrome_h_px`` are everything AROUND the tile
+    grid, measured by the caller at runtime (paddings, the top strip
+    and menu header at the CURRENT font zoom, the scrollbar
+    allowance) — this function owns only the tile math, so the pure
+    half stays Tk-free and the measured half stays honest. Per-column
+    footprint is ``MENU_TILE_CELL_MIN_PX`` — the SAME constant
+    MainMenu's fixed grid enforces as each column's Tk ``minsize``, so
+    the two can never disagree. Never fewer than one column/row
+    (``tile_count`` 0 still returns a sane floor)."""
+    cols = min(MENU_TILE_COLS, max(1, tile_count))
+    rows = max(1, math.ceil(max(tile_count, 1) / cols))
+    w = cols * MENU_TILE_CELL_MIN_PX + chrome_w_px
+    h = rows * (MENU_TILE_H + MENU_TILE_GAP_PX) + chrome_h_px
+    return w, h
 
 
 def _next_view(

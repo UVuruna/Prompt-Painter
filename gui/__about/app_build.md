@@ -21,9 +21,19 @@ routing (`_bind_wheel_routing`/`_inner_wheel`), `_relayout_agents` (the
 per-site visibility reconciler `_build_compact` wires onto every
 `AgentPanel.visible_var`), the F4c shared both-sites mirror editor
 (`_set_agent_mirror` — live var mirroring from the primary site to the
-others while both are ticked and idle), and the drag-resize
+others while both are ticked and idle), `_apply_min_size` (owner
+2026-08-03, UI rework tačka 1: the COMPUTED `root.minsize` — the pure
+tile math from `gui.logic.menu_min_size` plus the chrome measured
+here at the current font zoom, so the Main Menu's fixed 4×2 grid
+always renders whole with no menu scrolling; `WINDOW_MIN_W`/`_H` stay
+as absolute floors, only ever raised; re-run after every `_zoom_step`,
+which also calls `IconBar.refresh_measure`), and the drag-resize
 event-buffering watcher (`_on_root_configure`/`_resize_settled`/
 `_clamp_geometry`) bound at the tail of `__init__`.
+
+The old pinned top-strip "Menu" button is GONE (owner 2026-08-03, UI
+rework tačka 2) — IconBar's leftmost HOME icon button (`home.svg`) is
+the single way back to the Main Menu.
 
 A window maximize/restore is tracked in `_on_root_configure` for
 bookkeeping ONLY (owner 2026-07-21 perf fix) — it is deliberately NOT
