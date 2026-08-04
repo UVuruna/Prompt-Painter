@@ -20,6 +20,8 @@ from .paths import (
     CHROME_LAUNCH_TIMEOUT_S,
     CHROME_PROFILE_DIR,
     DEFAULT_OUT_DIR,
+    DEFAULT_SHEETS_DIR,
+    GENERATED_ROOT,
     PROJECT_ROOT,
     REPORT_SUFFIX,
     SETTINGS_PATH,
@@ -277,7 +279,8 @@ from .sites import (
 __all__ = [
     # paths
     "CDP_PORT", "CDP_URL", "CHROME_CANDIDATES", "CHROME_LAUNCH_TIMEOUT_S",
-    "CHROME_PROFILE_DIR", "DEFAULT_OUT_DIR", "PROJECT_ROOT",
+    "CHROME_PROFILE_DIR", "DEFAULT_OUT_DIR", "DEFAULT_SHEETS_DIR",
+    "GENERATED_ROOT", "PROJECT_ROOT",
     "REPORT_SUFFIX", "SETTINGS_PATH", "STATE_DIRNAME", "dest_for",
     "versioned_dest_for",
     # formatters

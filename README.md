@@ -51,7 +51,9 @@ First consumer: DOMY Watch prompt sheets.
   📁 tests/             ← golden parser tests + offline loop tests
     📝 ___tests.md
     📁 fixtures/
-  📁 out/               ← images + progress + reports (gitignored)
+  📁 output/            ← EVERYTHING the program generates (gitignored)
+    📁 images/          ← the copy-ready assets/ mirror + progress + reports
+    📁 sheets/          ← the AI-generated prompt sheets
   📁 chrome-profile/    ← the automation Chrome profile (gitignored)
   📁 UV/                ← the owner's private material (gitignored)
 ```

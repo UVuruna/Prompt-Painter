@@ -14,7 +14,8 @@ the Fixer AI (owner 2026-07-17 through 2026-07-29 F7).
 ## Connections
 
 ### Uses
-- [Paths](paths.md) — `PROJECT_ROOT` (`SHEETS_DIR`)
+- [Paths](paths.md) — `DEFAULT_SHEETS_DIR` (re-exported here as
+  `SHEETS_DIR`, owner 2026-08-04)
 - [Sites Config](sites.md) — `SITES` (lazy import inside
   `prompt_suffix`, to resolve `BACKGROUND_DEFAULT` per site)
 

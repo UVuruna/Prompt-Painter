@@ -5,8 +5,10 @@
 
 ## Purpose
 
-Project paths, the CDP/Chrome launch block, the output layout (the
-`out/` tree that MIRRORS DOMY's `assets/` tree), and the settings
+Project paths, the CDP/Chrome launch block, the output layout (ONE
+`output/` root holding everything the program generates — the
+`images/` tree that MIRRORS DOMY's `assets/`, and the `sheets/` the
+AI wizard writes), and the settings
 file location. The one leaf every other config submodule that needs
 a project-relative path imports from (`PROJECT_ROOT`) — no dependency
 on any other config submodule.
@@ -36,7 +38,16 @@ Nothing — a leaf module.
 - `CHROME_PROFILE_DIR` — the project's own Chrome profile folder
   (Chrome 136+ refuses `--remote-debugging-port` on the default profile)
 - `CHROME_LAUNCH_TIMEOUT_S` — launch → CDP endpoint answering window
-- `DEFAULT_OUT_DIR` — `<project>/out`
+- `GENERATED_ROOT` — `<project>/output`, the ONE root for everything
+  the program produces (owner 2026-08-04): one folder to gitignore,
+  back up or empty, instead of product dirs scattered at the project
+  root — which is also what made a generated `.md` read as project
+  documentation and fail THE DOCS LAW
+- `DEFAULT_OUT_DIR` — `<generated>/images` (the copy-ready assets mirror)
+- `DEFAULT_SHEETS_DIR` — `<generated>/sheets`, re-exported by
+  [AI config](ai.md) as `SHEETS_DIR`; a SIBLING of the images, never
+  inside them, so a folder of sheets never travels with a copy of the
+  images tree
 - `STATE_DIRNAME` — `_state` (run state + reports, out of the copyable tree)
 - `REPORT_SUFFIX` — `_report.txt`
 - `SITE_FILE_SUFFIX` — site key → DOMY filename suffix (`chatgpt` →

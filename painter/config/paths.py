@@ -32,6 +32,15 @@ CHROME_LAUNCH_TIMEOUT_S = 30.0
 # ═══════════════════════════ OUTPUT LAYOUT ═══════════════════════════
 # --- Output ----------------------------------------------------------
 
+# EVERYTHING THE PROGRAM PRODUCES LIVES UNDER ONE ROOT (owner
+# 2026-08-04): the generated images AND the generated prompt sheets.
+# One folder to gitignore, one folder to back up, one folder to empty
+# — instead of a scatter of product dirs at the project root, which is
+# also what made a generated .md read as project documentation and
+# fail THE DOCS LAW. Both defaults below hang off it; each is still
+# freely overridable per run in the GUI (and by --out on the CLI).
+GENERATED_ROOT = PROJECT_ROOT / "output"
+
 # The out/ folder MIRRORS the DOMY assets/ tree so the owner can copy
 # its whole content straight into assets/ (owner 2026-07-18). Sheets
 # carry site-agnostic FULL drop paths ("assets/calendars/emotions/
@@ -43,7 +52,11 @@ CHROME_LAUNCH_TIMEOUT_S = 30.0
 # legacy relative drops keep the old folder layouts. Run state and
 # reports live OUT of the copyable tree, under <out>/_state/<site>/;
 # backup variants land under <out>/EXTRA/.
-DEFAULT_OUT_DIR = PROJECT_ROOT / "out"
+DEFAULT_OUT_DIR = GENERATED_ROOT / "images"
+# where the New Collection (AI) wizard saves its sheets — a SIBLING of
+# the images, never inside them: the images tree is copy-ready into
+# DOMY's assets/, and a sheets/ folder in there would travel with it.
+DEFAULT_SHEETS_DIR = GENERATED_ROOT / "sheets"
 STATE_DIRNAME = "_state"
 REPORT_SUFFIX = "_report.txt"
 

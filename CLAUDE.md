@@ -133,7 +133,7 @@ in here.**
    2026-07-22 — no per-site folders; `SITE_FILE_SUFFIX`: chatgpt
    `_gpt`, gemini `_gem`, api_image `_api`) —
    `assets/<rest>/<File>.png` → `<out>/<rest>/<File>_<sfx>.png`
-   (e.g. `out/emblem/mood/Glory_gem.png`) — so a finished
+   (e.g. `output/images/emblem/mood/Glory_gem.png`) — so a finished
    collection COPIES STRAIGHT into `DOMY Watch/assets/`. No
    approval step (owner 2026-07-17: saving IS the end of the
    tool's job). Run state + reports live under `<out>/_state/<site>/`
@@ -157,6 +157,17 @@ in here.**
    Tarkin). A category with no preamble is reported without a retry.
    Then it moves on. (A prompt-sheet file is called a COLLECTION in
    the UI — a set of images, not always a theme.)
+7b. **ONE generated-output root** (owner 2026-08-04): everything the
+   program produces lives under `output/` —
+   `output/images/` (`DEFAULT_OUT_DIR`, the copy-ready assets mirror
+   with its `_state/` + `EXTRA/`) and `output/sheets/`
+   (`SHEETS_DIR`, the New Collection (AI) wizard's `.md` files, a
+   SIBLING so a sheets folder never travels with a copy of the
+   images tree). `config.GENERATED_ROOT` is the ONE authority; the
+   whole root is gitignored — one folder to ignore, back up or
+   empty. Both remain freely overridable per run in the GUI (and by
+   `--out` on the CLI); nothing is ever moved automatically, so a
+   pre-2026-08-04 `out/`/`sheets/` folder simply stays where it is.
 8. **Sources are READ ONLY.** The tool writes ONLY under the chosen
    output folder (images, progress sidecars, reports, background
    fixes) and never touches the sheet's folder. The `UV/` folder is

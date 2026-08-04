@@ -6,7 +6,7 @@ API image generation, the Fixer AI) — owner 2026-07-17 through
 
 import re
 
-from .paths import PROJECT_ROOT
+from .paths import DEFAULT_SHEETS_DIR
 
 # ═══════════ PROMPT SUFFIX — BACKGROUND RULE + PROMPT HELPERS ══════════
 # --- Prompt rules appended per site (owner 2026-07-17) ---------------
@@ -492,9 +492,11 @@ def model_hint(name: str) -> str:
 # ═══════════════ AI SHEET GENERATOR — PROMPTS ═══════════════════════════
 # --- the AI sheet generator (owner's #2: follow-up questions) ---------
 AI_MAX_QUESTIONS = 6  # the clarifying poll is capped at this many
-# where AI-generated sheets are saved (owner content, NOT gitignored —
-# but never committed by an agent either; the dir is created on demand)
-SHEETS_DIR = PROJECT_ROOT / "sheets"
+# where AI-generated sheets are saved: under the ONE generated-output
+# root, beside the images (owner 2026-08-04 — see paths.py's
+# GENERATED_ROOT). Owner content: gitignored with the rest of that
+# root, created on demand, never committed by an agent.
+SHEETS_DIR = DEFAULT_SHEETS_DIR
 # FIRST call system prompt: the contract + "questions only". {contract}
 # is instructions.md verbatim; {max_q} is AI_MAX_QUESTIONS.
 AI_QUESTIONS_SYSTEM = (

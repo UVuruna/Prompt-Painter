@@ -18,18 +18,20 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 SKIP_DIRS = {
-    "build", "dist", "tools", "chrome-profile", "__pycache__", "out",
+    "build", "dist", "tools", "chrome-profile", "__pycache__",
+    # everything the program GENERATES (config.GENERATED_ROOT,
+    # owner 2026-08-04) plus the pre-move locations
+    "output", "out", "sheets",
     ".git", "UV", "venv", ".venv", ".pytest_cache",
 }
 
-# "sheets/" is config.SHEETS_DIR — where the New Collection (AI) wizard
-# SAVES the owner's generated prompt sheets. Those .md files are product
-# CONTENT, not project documentation: they are never linked from README
-# (they come and go with every run), so the navigation chain has nothing
-# to say about them. Governing them made THE DOCS LAW fail the moment
-# the wizard produced its first sheet — a guard failure with no doc to
-# fix (owner 2026-08-04).
-REACHABILITY_EXEMPT_DIRS = {"tests/fixtures", "sheets/"}
+# A generated sheet is product CONTENT, not project documentation —
+# governing it made THE DOCS LAW fail the moment the New Collection
+# (AI) wizard produced its first .md, a guard failure with no doc to
+# fix. It needs no exemption HERE any more: the whole generated-output
+# root is in SKIP_DIRS above, which is the truer statement (nothing
+# under it is a project file at all) — owner 2026-08-04.
+REACHABILITY_EXEMPT_DIRS = {"tests/fixtures"}
 
 LINK_RE = re.compile(r"\]\(([^)]+)\)")
 

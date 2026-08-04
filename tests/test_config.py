@@ -390,3 +390,46 @@ def test_tile_for_kind_returns_none_for_a_multi_kind_tile():
 
 def test_tile_for_kind_returns_none_for_an_unknown_kind():
     assert tile_for_kind("not-a-real-kind") is None
+
+
+# ═══════ ONE generated-output root (owner 2026-08-04) ══════════════════
+# Everything the program PRODUCES lives under config.GENERATED_ROOT:
+# the images and the AI-generated sheets. Scattered product folders at
+# the project root are what made a generated .md read as project
+# documentation and fail THE DOCS LAW; one root is one thing to
+# gitignore, back up or empty.
+
+
+def test_both_generated_defaults_live_under_the_one_root():
+    from painter.config import (
+        DEFAULT_OUT_DIR, DEFAULT_SHEETS_DIR, GENERATED_ROOT, SHEETS_DIR,
+    )
+
+    assert DEFAULT_OUT_DIR.parent == GENERATED_ROOT
+    assert DEFAULT_SHEETS_DIR.parent == GENERATED_ROOT
+    # ONE authority: the AI config re-exports the path, never redefines it
+    assert SHEETS_DIR == DEFAULT_SHEETS_DIR
+
+
+def test_the_sheets_dir_is_a_sibling_of_the_images_never_inside_them():
+    """The images tree is copied straight into DOMY's assets/ — a
+    folder of prompt sheets nested in it would travel along."""
+    from painter.config import DEFAULT_OUT_DIR, DEFAULT_SHEETS_DIR
+
+    assert DEFAULT_OUT_DIR not in DEFAULT_SHEETS_DIR.parents
+    assert DEFAULT_SHEETS_DIR not in DEFAULT_OUT_DIR.parents
+
+
+def test_the_generated_root_is_gitignored():
+    """The whole point of one root: ONE .gitignore line covers every
+    image, report and sheet the program will ever write."""
+    from painter.config import GENERATED_ROOT, PROJECT_ROOT
+
+    ignored = {
+        line.strip().rstrip("/")
+        for line in (PROJECT_ROOT / ".gitignore").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    assert GENERATED_ROOT.name in ignored

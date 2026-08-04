@@ -1,5 +1,12 @@
-# Generated images and run state
+# EVERYTHING the program generates — images, run state, reports and
+# the AI-generated prompt sheets — under ONE root (owner 2026-08-04,
+# config.GENERATED_ROOT). One folder to ignore, back up, or empty.
+output/
+
+# the pre-2026-08-04 locations, kept ignored so an existing run's
+# folder never shows up as untracked (nothing is moved automatically)
 out/
+sheets/
 
 # The owner's private material shown to agents (never committed)
 UV/

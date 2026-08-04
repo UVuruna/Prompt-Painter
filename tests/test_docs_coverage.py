@@ -22,7 +22,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 SKIP_DIRS = {
-    "build", "dist", "tools", "chrome-profile", "__pycache__", "out",
+    "build", "dist", "tools", "chrome-profile", "__pycache__",
+    # everything the program GENERATES (config.GENERATED_ROOT,
+    # owner 2026-08-04) plus the pre-move locations
+    "output", "out", "sheets",
     ".git", "UV", "venv", ".venv",
 }
 
