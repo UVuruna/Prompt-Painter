@@ -25,9 +25,25 @@ The driver tracks FOUR element states (owner's decree) and verifies
 every step — it never assumes: the composer TEXT, the SEND–BUSY
 button, the last SENT user turn, and the last IMAGE. Everything
 after a send is judged against a pre-submit `Baseline` snapshot
-(assistant-turn count + last generated image src), which makes
-"grab the last visible image" — the duplicate-save root cause —
-impossible. See the flow diagram for the full state machine.
+(assistant-turn count + last generated image src + user-turn count),
+which makes "grab the last visible image" — the duplicate-save root
+cause — impossible. See the flow diagram for the full state machine.
+
+**F1b — user-turn ANCHORING (owner 2026-08-04, the Padmé/Qui-Gon
+incident):** the confirmed prompt's normalized head (`_sent_head`)
+becomes the result's ANCHOR. `_anchor_state()` answers, on every
+poll, whether the newest user turn still holds it (and whether the
+user-turn count grew past the baseline — two colored-variant prompts
+share an identical 60-char head, so the count is what catches a
+vanish between identical heads): `ok` → the accepted result must
+FOLLOW our own user turn in the DOM (`_follows`,
+`compareDocumentPosition`) — the assistant-turn COUNT is ignored,
+because a long chat VIRTUALIZES old turns out of the DOM and the
+count can stand still while our answer is right there (the ChatGPT
+retry whose refusal sat in the DOM for 4 minutes and still stopped
+the site as "no new turn"); `vanished` (held `text_settle_s`) →
+`SendVanished`; `unavailable` (no `user_turn` selector, nothing
+confirmed) → the old count comparison stays as the fallback.
 
 1. `submit_prompt(prompt, log=print)` — `_ensure_ready` (stuck-busy
    guard) → `capture_baseline()` → `_paste_and_send` →
@@ -107,7 +123,10 @@ impossible. See the flow diagram for the full state machine.
    image-failed / refusal / quota markers; final text with NO image
    and the busy signal gone raises `NoImage(had_text=True)`; nothing
    new + no busy signal past `busy_appear_timeout_s` raises
-   `NoImage(had_text=False)` (the one nudge-eligible case).
+   `NoImage(had_text=False)` (the one nudge-eligible case) with the
+   REAL elapsed time in its message; our confirmed user turn GONE
+   from the chat (F1b, settled `text_settle_s`) raises
+   `SendVanished`.
 3. `click_error_retry(log) -> bool` — the first rung of the recovery
    ladder: click the site's native Retry button
    (`image_error_retry_button`) if present; True when clicked. Never
@@ -150,6 +169,14 @@ failing loudly — SPAs morph elements a beat after input events.
   market-scene incident). `had_text=False` = a truly empty/interrupted
   answer — the one case where a single `CONTINUE_NUDGE` is allowed.
   `NoImage` no longer stops the site.
+- `SendVanished` (F1b, owner 2026-08-04) — our CONFIRMED user turn is
+  no longer in the conversation: the site dropped the message after
+  `_confirm_sent` passed. In the live incident Gemini silently deleted
+  the sent Padmé prompt; the old "nothing happened" verdict then
+  allowed the content-blind continue nudge, Gemini REGENERATED THE
+  PREVIOUS request, and a Qui-Gon badge was saved as
+  `Padme_v3_gem.png`. The runner re-sends the item's OWN prompt (one
+  try), never the nudge; a second vanish is a loud per-item skip.
 - `ImageGenFailed` — ChatGPT's image tool failed outright while the
   busy/stop signal never clears, in one of two forms — its own
   "reply with 'retry'" text, or the generic "Hmm...something seems to

@@ -76,16 +76,27 @@ Pseudocode (language-neutral):
 
     FUNCTION submit_prompt(prompt):
         ensure_ready()                     # wait out a genuinely busy composer
-        baseline = capture_baseline()      # turn_count, last_img_src
+        baseline = capture_baseline()      # turn_count, last_img_src, user_turn_count
         type_into_box(prompt)              # clear-if-non-empty, insert, VERIFY
         click_send(prompt)                 # ONE reload-recovery retry on SelectorRot
         confirm_sent(prompt)               # poll: composer empty + our text is
                                             # the newest user turn; one mid-window retry
+        sent_head = prompt's normalized 60-char head   # the F1b anchor
 
     FUNCTION await_done():
         baseline = the captured Baseline
         WHILE elapsed < generation_timeout_s:
-            turn = last assistant turn IF conversation grew past baseline ELSE None
+            # F1b anchor (owner 2026-08-04): ok / vanished / unavailable
+            anchor = does the newest USER turn still hold sent_head
+                     AND did the user-turn count grow past baseline?
+            IF anchor == vanished FOR >= text_settle_s:
+                RAISE SendVanished          # site dropped our message —
+                                            # runner re-sends the item's OWN prompt
+            IF anchor == ok:
+                turn = last assistant turn IF it FOLLOWS our user turn
+                       in the DOM ELSE None          # count IGNORED (virtualization)
+            ELSE:  # unavailable — no user_turn selector / nothing confirmed
+                turn = last assistant turn IF conversation grew past baseline ELSE None
             IF turn has a loaded image with src != baseline.last_img_src:
                 busy_known_stuck = busy               # a still-set button IS stuck
                 RETURN                               # done
@@ -96,7 +107,7 @@ Pseudocode (language-neutral):
                 IF text matches refusal marker:      RAISE ItemRefused(category)
                 IF text stands alone (not busy) for >= text_settle_s:
                     RAISE NoImage(had_text=True)     # loud skip, never nudge
-            ELSE IF nothing new AND busy never appeared past busy_appear_timeout_s:
+            ELSE IF not vanished AND nothing new AND busy never appeared past busy_appear_timeout_s:
                 RAISE NoImage(had_text=False)        # the one nudge-eligible case
             SLEEP poll_interval
         RAISE GenerationTimeout

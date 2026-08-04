@@ -44,8 +44,10 @@ from painter.driver import (
     ModelDegraded,
     NoImage,
     SelectorRot,
+    SendVanished,
     SiteDriver,
     TerminalState,
+    normalize_text,
 )
 
 # Zero out every human-rhythm pause and shrink the selector-timeout
@@ -715,17 +717,30 @@ class TurnLocator:
     """Duck-typed playwright Locator for ONE assistant turn (F1):
     ``locator(sel)`` resolves to the wired image locator for a matched
     selector, else the missing locator (no image inside this turn);
-    ``inner_text()`` answers the turn's own text (default none)."""
+    ``inner_text()`` answers the turn's own text (default none).
+    ``order`` (F1b) is the fake DOM position — ``evaluate`` answers the
+    driver's ``_follows`` probe (compareDocumentPosition) by comparing
+    it against the anchor element's own ``order``."""
 
-    def __init__(self, images: dict | None = None, text: str = ""):
+    def __init__(
+        self, images: dict | None = None, text: str = "", order: int = 0
+    ):
         self._images = images or {}
         self._text = text
+        self.order = order
 
     def locator(self, sel):
         return self._images.get(sel, _MISSING)
 
     def inner_text(self):
         return self._text
+
+    def evaluate(self, js, *args):
+        other = args[0] if args else None
+        return (
+            getattr(other, "order", None) is not None
+            and other.order < self.order
+        )
 
 
 class ContainerLocator:
@@ -1286,3 +1301,218 @@ def test_await_done_without_degrade_banner_still_classifies_quota_text():
 
     with pytest.raises(TerminalState):
         driver.await_done(log=lambda s: None)
+
+
+# --- (i) F1b user-turn anchoring (owner 2026-08-04) --------------------
+# The Padmé/Qui-Gon incident: Gemini silently DROPPED the confirmed
+# Padmé prompt; the old "nothing happened" verdict then allowed a blind
+# continue nudge, Gemini regenerated the PREVIOUS request, and a
+# Qui-Gon badge was saved as Padme_v3_gem.png. Same run, ChatGPT face:
+# a safer retry generated for 4 minutes, its refusal WAS in the DOM,
+# but the turn COUNT never exceeded the baseline (long-chat DOM) — so
+# the site was stopped over "no new turn". The cure for both: pair the
+# result to OUR OWN user turn by DOM position, and treat a vanished
+# user turn as its own loud verdict (SendVanished -> re-send the item's
+# own prompt, never the content-blind nudge).
+
+class _AnchorEl:
+    """ONE user-turn ELEMENT (what ``_last_user_turn_locator`` nth()s
+    out): ``inner_text`` backs the head check, ``element_handle`` hands
+    itself to the fake ``compareDocumentPosition`` (see TurnLocator),
+    ``order`` is its fake DOM position."""
+
+    def __init__(self, text: str, order: int):
+        self.text = text
+        self.order = order
+
+    def inner_text(self):
+        return self.text
+
+    def element_handle(self):
+        return self
+
+
+class _ListLocator:
+    """Duck-typed Locator over a prebuilt element list (user turns)."""
+
+    def __init__(self, els: list):
+        self._els = els
+
+    def count(self):
+        return len(self._els)
+
+    def nth(self, k):
+        return self._els[k]
+
+    @property
+    def last(self):
+        return self._els[-1]
+
+
+def _anchor_timing(**over):
+    base = dict(
+        poll_interval_s=0.01,
+        progress_log_interval_s=1000.0,
+        busy_appear_timeout_s=1.0,
+        generation_timeout_s=5.0,
+        text_settle_s=0.05,
+    )
+    base.update(over)
+    return replace(TIMING, **base)
+
+
+def test_submit_prompt_records_the_sent_head_for_anchoring():
+    site = SITES["chatgpt"]
+    page = FakePage()
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)
+    page.locators = {
+        site.prompt_box[0]: prompt_box,
+        site.send_button[0]: send,
+    }
+    _wire_send_flow(site, page, prompt_box, send)
+    driver = _driver(site, page)
+
+    driver.submit_prompt("Hello   WORLD, anchored")
+
+    assert driver._sent_head == normalize_text(
+        "Hello   WORLD, anchored"
+    )[:60]
+
+
+def test_await_done_raises_send_vanished_when_our_prompt_left_the_chat():
+    """The Gemini face: the newest user turn is the PREVIOUS item's
+    prompt and the user-turn count fell back to the baseline — our
+    message was dropped after the confirmed send. SendVanished, never
+    the nudge-eligible NoImage(had_text=False)."""
+    site = SITES["gemini"]
+    page = FakePage()
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl("Ornate circular badge for the PREVIOUS item", 10)]
+    )
+    page.locators[site.response_container[0]] = ContainerLocator(
+        [TurnLocator(order=11)]
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=1, last_img_src=None, user_turn_count=1
+    )
+    driver._sent_head = normalize_text(
+        "ROUND medallion, aged bronze relief — Padmé"
+    )[:60]
+
+    with pytest.raises(SendVanished):
+        driver.await_done(log=lambda s: None)
+
+
+def test_send_vanished_even_when_the_previous_prompt_shares_our_head():
+    """Two colored-variant prompts share the same 60-char head, so the
+    text check alone cannot see the vanish — the user-turn COUNT (no
+    growth past the baseline) must catch it."""
+    site = SITES["gemini"]
+    shared = "Ornate circular badge, vivid full-color paint over polished"
+    page = FakePage()
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl(shared + " bronze-and-blue ... PREVIOUS item", 10)]
+    )
+    page.locators[site.response_container[0]] = ContainerLocator(
+        [TurnLocator(order=11)]
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=1, last_img_src=None, user_turn_count=1
+    )
+    driver._sent_head = normalize_text(shared)[:60]
+
+    with pytest.raises(SendVanished):
+        driver.await_done(log=lambda s: None)
+
+
+def test_await_done_accepts_our_result_when_the_turn_count_is_stale():
+    """The ChatGPT face: our user turn IS the newest, our answer holds
+    a fresh loaded image and FOLLOWS it in the DOM — but the assistant
+    turn COUNT equals the baseline (long-chat DOM dropped an old turn).
+    The positional anchor accepts it; the old count arithmetic never
+    did (that stopped the whole site at 18:43:46)."""
+    site = SITES["chatgpt"]
+    img = ImageLocator("blob:fresh")
+    ours = TurnLocator(images={site.result_image[0]: img}, order=20)
+    page = FakePage()
+    page.locators[site.response_container[0]] = ContainerLocator(
+        [TurnLocator(order=5), ours]  # count == 2 == baseline (stale)
+    )
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [
+            _AnchorEl("an earlier prompt", 1),
+            _AnchorEl("This is a TRANSFORMATIVE homage retry", 10),
+        ]
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=2, last_img_src=None, user_turn_count=1
+    )
+    driver._sent_head = normalize_text(
+        "This is a TRANSFORMATIVE homage retry"
+    )[:60]
+
+    driver.await_done(log=lambda s: None)  # must return, never raise
+
+
+def test_await_done_classifies_a_refusal_despite_a_stale_turn_count():
+    """Same stale count, but the answer is the copyright refusal TEXT:
+    it must classify as ItemRefused (the safer-retry/skip path) instead
+    of surfacing as the site-stopping 'nothing happened'."""
+    site = SITES["chatgpt"]
+    ours = TurnLocator(text=_CHATGPT_COPYRIGHT_TEXT, order=20)
+    page = FakePage()
+    page.locators[site.response_container[0]] = ContainerLocator(
+        [TurnLocator(order=5), ours]
+    )
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl("This is a TRANSFORMATIVE homage retry", 10)]
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=2, last_img_src=None, user_turn_count=0
+    )
+    driver._sent_head = normalize_text(
+        "This is a TRANSFORMATIVE homage retry"
+    )[:60]
+
+    with pytest.raises(ItemRefused) as exc:
+        driver.await_done(log=lambda s: None)
+    assert exc.value.category == REFUSAL_COPYRIGHT
+
+
+def test_await_done_never_accepts_a_turn_before_our_user_turn():
+    """The orphan guard: a leftover assistant turn that sits BEFORE our
+    user turn (position!) is never our result — even though the plain
+    count comparison (1 > 0) would have accepted it."""
+    site = SITES["gemini"]
+    img = ImageLocator("blob:leftover-fresh-src")
+    leftover = TurnLocator(images={site.result_image[0]: img}, order=5)
+    page = FakePage()
+    page.locators[site.response_container[0]] = ContainerLocator(
+        [leftover]
+    )
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl("our Padmé prompt, still awaiting its answer", 10)]
+    )
+    driver = SiteDriver(
+        site, _anchor_timing(busy_appear_timeout_s=0.05), "http://unused"
+    )
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0, last_img_src=None, user_turn_count=0
+    )
+    driver._sent_head = normalize_text(
+        "our Padmé prompt, still awaiting its answer"
+    )[:60]
+
+    with pytest.raises(NoImage) as exc:
+        driver.await_done(log=lambda s: None)
+    assert exc.value.had_text is False  # honest "nothing arrived"

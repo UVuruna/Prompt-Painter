@@ -37,10 +37,12 @@ from painter.config import (
     versioned_dest_for,
 )
 from painter.driver import (
+    GenerationTimeout,
     ImageGenFailed,
     ItemRefused,
     ModelDegraded,
     NoImage,
+    SendVanished,
     SiteDriver,
     TerminalState,
     sniff_format,
@@ -618,7 +620,17 @@ def run_sheet(
                 2026-07-23); returns (data, t_send) or (None, reason).
                 Shared by the first-attempt refusal AND a refusal that
                 surfaces inside the image-failed ladder (F1 root cause
-                3 — that one used to stop the whole site)."""
+                3 — that one used to stop the whole site).
+
+                The retry catches EVERY per-item driver verdict, not
+                just a second refusal (owner 2026-08-04, the 18:43:46
+                stop): a ``NoImage``/``GenerationTimeout``/
+                ``SendVanished`` raised INSIDE this handler used to fly
+                past the outer per-item catches — Python never routes
+                an exception from one ``except`` block to its siblings
+                — and killed the WHOLE site over one item's retry.
+                Quota (``TerminalState``) still propagates: that stop
+                is correct."""
                 reason = str(exc)
                 preamble = RETRY_PREAMBLES.get(exc.category)
                 if safer_retry and preamble is not None:
@@ -633,7 +645,12 @@ def run_sheet(
                         )
                         log("    safer retry SUCCEEDED")
                         return out, None
-                    except ItemRefused as exc2:
+                    except (
+                        ItemRefused,
+                        NoImage,
+                        GenerationTimeout,
+                        SendVanished,
+                    ) as exc2:
                         reason = str(exc2)
                 return None, reason
 
@@ -664,8 +681,34 @@ def run_sheet(
                     try:
                         data, t_send = generate_one(CONTINUE_NUDGE)
                         log("    continue nudge RECOVERED")
-                    except NoImage as exc2:
+                    except (NoImage, SendVanished) as exc2:
                         skip_reason = f"no image after nudge — {exc2}"
+            except SendVanished as exc:
+                # F1b (owner 2026-08-04, the Padmé/Qui-Gon incident):
+                # the site DROPPED our confirmed message. The recovery
+                # is the item's OWN prompt again — never the
+                # content-blind continue nudge, which regenerated the
+                # PREVIOUS request and saved a Qui-Gon badge as Padmé.
+                log(
+                    f"    SENT PROMPT VANISHED from the chat — {exc}"
+                )
+                log(
+                    "    re-sending the item's own prompt (1 try) ..."
+                )
+                emit({"type": "item_retry"})
+                try:
+                    data, t_send = generate_one(base, attach=input_paths)
+                    log("    re-send RECOVERED")
+                    retried = True
+                except (
+                    ItemRefused,
+                    NoImage,
+                    GenerationTimeout,
+                    SendVanished,
+                ) as exc2:
+                    skip_reason = (
+                        f"prompt vanished; re-send failed — {exc2}"
+                    )
             except ModelDegraded as exc:
                 # F2 (owner 2026-07-29): the site dropped to a weaker
                 # model (Gemini's Flash-Lite banner) and OUR turn got
@@ -733,7 +776,13 @@ def run_sheet(
                         data, t_send = generate_one(base, attach=input_paths)
                         digest = hashlib.sha1(data).digest()
                         retried = True
-                    except (ItemRefused, NoImage, ImageGenFailed) as exc:
+                    except (
+                        ItemRefused,
+                        NoImage,
+                        ImageGenFailed,
+                        GenerationTimeout,
+                        SendVanished,
+                    ) as exc:
                         skip_reason = f"duplicate image, retry failed: {exc}"
                     if skip_reason is None and digest == last_saved_digest:
                         skip_reason = (

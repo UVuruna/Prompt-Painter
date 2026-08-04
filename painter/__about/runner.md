@@ -46,7 +46,9 @@ STRUCTURE LAW split, faza 2) — behavior unchanged, see
 - [Sheet Parser](sheet_parser.md) — consumes `Sheet`
 - [CDP Driver](driver.md) — the per-item protocol, `sniff_format`,
   the `NoImage` exception (`had_text` decides loud-skip vs the one
-  allowed nudge), the `ImageGenFailed` exception (ChatGPT's own
+  allowed nudge), the `SendVanished` exception (the site dropped our
+  confirmed message — re-send the item's own prompt, F1b),
+  the `ImageGenFailed` exception (ChatGPT's own
   "image generation failed" answer, the retry-resend case), the
   `ModelDegraded` exception (Gemini's Flash-Lite degradation banner)
 - [Config (subfolder)](../config/___config.md) — `Timing`,
@@ -220,12 +222,23 @@ event) so the dashboard never stalls; the `item_done` event with
   A refusal (`ItemRefused`) skips just that item and the run
   continues; when `safer_retry` is on the item is re-sent ONCE with the
   preamble that matches the refusal's `category` — `RETRY_PREAMBLES[exc.
-  category]` — and only a second refusal counts as REFUSED. `NoImage`
+  category]` — and only a second refusal counts as REFUSED. The safer
+  retry catches EVERY per-item verdict of its own attempt
+  (`ItemRefused`, `NoImage`, `GenerationTimeout`, `SendVanished`), not
+  just a second refusal (owner 2026-08-04, the 18:43:46 stop: a
+  `NoImage` raised inside the retry flew past the outer per-item
+  catches — Python never routes an exception from one `except` block
+  to its siblings — and stopped the WHOLE site); quota
+  (`TerminalState`) still propagates. `NoImage`
   never stops the site: `had_text=True` is LOUD-SKIPPED immediately
   (never nudged); `had_text=False` with `continue_nudge` on (the
   default) sends `CONTINUE_NUDGE` ONCE and uses a recovered image as a
   normal success; a nudge that raises `NoImage` again loud-skips the
-  item. **Duplicate guard:** a result whose bytes hash identical to the
+  item. **`SendVanished`** (F1b, owner 2026-08-04 — the Padmé/Qui-Gon
+  incident): the site DROPPED our confirmed message — the recovery
+  re-sends the item's OWN prompt ONCE (never the content-blind nudge,
+  which regenerated the PREVIOUS request and saved a Qui-Gon badge as
+  `Padme_v3_gem.png`); a second vanish is a loud per-item skip. **Duplicate guard:** a result whose bytes hash identical to the
   PREVIOUS save this run means the site re-served the old image — one
   fresh re-submit, then a loud skip; a duplicate file is never silently
   saved. **Model degradation:** see the section above.

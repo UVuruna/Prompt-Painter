@@ -17,13 +17,19 @@ import pytest
 
 from painter import runner as runner_module
 from painter.config import (
+    CONTINUE_NUDGE,
     IMAGE_FAILED_RETRY_MAX,
     IMAGE_RETRY_NUDGE,
     REFUSAL_SAFETY,
     SITES,
     TIMING,
 )
-from painter.driver import ImageGenFailed, ItemRefused
+from painter.driver import (
+    ImageGenFailed,
+    ItemRefused,
+    NoImage,
+    SendVanished,
+)
 from painter.runner import run_sheet
 from painter.sheet_parser import PromptItem, Sheet, SkippedItem
 
@@ -347,3 +353,103 @@ def test_image_gen_failed_does_not_regress_a_normal_run(tmp_path):
     assert generated == 2
     assert IMAGE_RETRY_NUDGE not in driver.submitted
     assert not any(e["type"] == "item_retry" for e in events)
+
+
+# --- F1b (owner 2026-08-04) — the 18:43:46 stop + the Padmé incident --
+
+def test_safer_retry_failing_with_no_image_skips_only_the_item(tmp_path):
+    """The 18:43:46 stop: a NoImage raised INSIDE the safer retry used
+    to fly past the outer per-item catches (Python never routes an
+    exception from one ``except`` block to its siblings) and stop the
+    WHOLE site. Now it is the same loud per-item skip as any other
+    failed retry — the next item still runs."""
+    class RefusedThenNoImage(FakeDriver):
+        def __init__(self, site):
+            super().__init__(site)
+            self._n = 0
+
+        def extract_image(self):
+            self._n += 1
+            if self._n == 1:
+                raise ItemRefused(
+                    "ChatGPT: prompt refused", category=REFUSAL_SAFETY
+                )
+            if self._n == 2:  # the safer retry's own verdict
+                raise NoImage("TEXT but no image", had_text=True)
+            return super().extract_image()
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = RefusedThenNoImage(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST,
+        log=logs.append, safer_retry=True,
+    )  # must not raise — the site survives the failed retry
+
+    assert generated == 1  # item 0 skipped, item 1 saved
+    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert any("REFUSED/SKIPPED" in line for line in logs)
+
+
+def test_send_vanished_resends_the_items_own_prompt(tmp_path):
+    """The Padmé/Qui-Gon incident: the site DROPPED our confirmed
+    message. The recovery re-sends the item's OWN prompt — never the
+    content-blind continue nudge (which regenerated the PREVIOUS
+    request and saved a Qui-Gon badge under Padmé's name)."""
+    class VanishesOnce(FakeDriver):
+        def __init__(self, site):
+            super().__init__(site)
+            self._n = 0
+
+        def await_done(self, log=print):
+            self._n += 1
+            if self._n == 1:
+                raise SendVanished(
+                    "Gemini: our sent prompt is NO LONGER the newest"
+                    " user turn"
+                )
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    events: list[dict] = []
+    driver = VanishesOnce(SITES["gemini"])
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST,
+        log=logs.append, on_event=events.append,
+    )
+
+    assert generated == 1
+    # the item's own prompt went out twice — and the nudge NEVER did
+    assert driver.submitted == ["prompt 0", "prompt 0"]
+    assert CONTINUE_NUDGE not in driver.submitted
+    assert any("SENT PROMPT VANISHED" in line for line in logs)
+    assert any("re-send RECOVERED" in line for line in logs)
+    assert any(e["type"] == "item_retry" for e in events)
+
+
+def test_send_vanished_twice_skips_the_item_not_the_site(tmp_path):
+    """The re-send gets ONE try: a second vanish is a loud per-item
+    skip and the run continues."""
+    class AlwaysVanishes(FakeDriver):
+        def await_done(self, log=print):
+            raise SendVanished("Gemini: our sent prompt vanished")
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = AlwaysVanishes(SITES["gemini"])
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST, log=logs.append,
+    )  # must not raise
+
+    assert generated == 0
+    # per item: the original send + exactly ONE re-send
+    assert driver.submitted == [
+        "prompt 0", "prompt 0", "prompt 1", "prompt 1",
+    ]
+    assert sum(
+        1 for line in logs if "REFUSED/SKIPPED" in line
+    ) == 2

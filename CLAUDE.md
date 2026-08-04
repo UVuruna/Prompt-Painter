@@ -327,7 +327,16 @@ TEXT answers loud-skip the item (`NoImage.had_text` — the continue
 nudge fires ONLY on truly empty answers); a refusal inside the
 image-failed ladder skips the item instead of stopping the site; a
 byte-identical result to the previous save is re-submitted once then
-loud-skipped (the duplicate-save bug). Details in
+loud-skipped (the duplicate-save bug). **F1b (owner 2026-08-04, the
+Padmé/Qui-Gon incident):** the result is additionally ANCHORED to our
+own user turn — accepted only when it FOLLOWS it in the DOM (turn
+COUNTS lie in long chats: the site virtualizes old turns away); a
+confirmed message the site then silently DROPS raises `SendVanished`
+and the runner re-sends the item's OWN prompt once — NEVER the
+content-blind continue nudge, which regenerated the PREVIOUS request
+and saved a Qui-Gon badge as `Padme_v3_gem.png`; and a safer retry's
+own failure of ANY per-item kind skips the item instead of stopping
+the site (the 18:43:46 ChatGPT stop). Details in
 [CDP Driver](painter/__about/driver.md) and [Run Loop](painter/__about/runner.md).
 
 `parse(sheet) → queue` → per pending item: paste (+ suffix) →

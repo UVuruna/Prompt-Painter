@@ -16,10 +16,15 @@ flowchart TB
     E -- none --> N
     E -- ItemRefused --> F{safer_retry on and
     preamble for category?}
-    F -- yes --> F1[resend once with preamble] --> F2{refused again?}
+    F -- yes --> F1[resend once with preamble] --> F2{retry failed?
+    refused / NoImage / timeout / vanished}
     F2 -- yes --> S1[["skip_reason = refused"]]
     F2 -- no --> N
     F -- no --> S1
+    E -- SendVanished --> V[re-send the item's OWN prompt once
+    — never the content-blind nudge] --> V2{failed again?}
+    V2 -- yes --> S5[["skip_reason = prompt vanished"]]
+    V2 -- no --> N
     E -- NoImage had_text=True --> S2[["skip_reason = no image (text) — never nudge"]]
     E -- NoImage had_text=False --> G{continue_nudge on?}
     G -- yes --> G1[send CONTINUE_NUDGE once] --> G2{NoImage again?}
@@ -53,6 +58,7 @@ flowchart TB
     S2 --> P
     S3 --> P
     S4 --> P
+    S5 --> P
 ```
 
 Pseudocode (language-neutral):
@@ -69,12 +75,20 @@ Pseudocode (language-neutral):
                 (data, t_send) = generate_one(item.prompt + suffix, input_path)
             CATCH ItemRefused AS exc:
                 (data, t_send) = try_safer_retry(exc) OR skip_reason = "refused"
+                # the retry's OWN failure (refused / NoImage / timeout /
+                # vanished) is caught there too — never stops the site
             CATCH NoImage AS exc:
                 IF exc.had_text: skip_reason = "no image (text)"     # never nudge
                 ELSE IF continue_nudge:
                     TRY (data, t_send) = generate_one(CONTINUE_NUDGE)
-                    CATCH NoImage: skip_reason = "no image after nudge"
+                    CATCH NoImage/SendVanished: skip_reason = "no image after nudge"
                 ELSE: skip_reason = "no image"
+            CATCH SendVanished AS exc:                               # F1b 2026-08-04
+                # the site DROPPED our confirmed message — re-send the
+                # item's OWN prompt, never the content-blind nudge
+                TRY (data, t_send) = generate_one(item.prompt + suffix, input_path)
+                CATCH refused/NoImage/timeout/vanished:
+                    skip_reason = "prompt vanished; re-send failed"
             CATCH ModelDegraded AS exc:
                 choice = on_degrade(exc.retry_after_s) OR "wait"
                 IF choice == "continue": skip_reason = "model degraded"

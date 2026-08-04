@@ -125,6 +125,17 @@ class ImageGenFailed(DriverError):
     on the item."""
 
 
+class SendVanished(DriverError):
+    """Our CONFIRMED user turn is no longer in the conversation — the
+    site dropped the message after ``_confirm_sent`` passed (the
+    Padmé/Qui-Gon incident, owner 2026-08-04: Gemini silently deleted
+    the sent prompt; the old 'nothing happened' verdict then allowed a
+    blind continue nudge, which made Gemini REGENERATE THE PREVIOUS
+    request and the result was saved under this item's name). The
+    runner must RE-SEND the item's OWN prompt — never the content-blind
+    nudge."""
+
+
 class AttachNotConfigured(DriverError):
     """Image attach (``submit_with_image``) is disabled for this site —
     its ``attach_menu_path`` is empty in ``SITES``. Used by BOTH the
@@ -195,10 +206,16 @@ class Baseline:
     it — a result is accepted only from an assistant turn NEWER than
     ``turn_count``, holding an image whose src differs from
     ``last_img_src``. This is what makes "grab the last visible image"
-    (root cause of the duplicate-save bug) impossible."""
+    (root cause of the duplicate-save bug) impossible.
+
+    ``user_turn_count`` (F1b, owner 2026-08-04) is the number of USER
+    turns before the submit — our sent prompt must ADD one; when the
+    count falls back to (or below) this value the site DROPPED our
+    message (``SendVanished``)."""
 
     turn_count: int
     last_img_src: str | None
+    user_turn_count: int = 0
 
 
 def sniff_format(data: bytes) -> str | None:
@@ -224,6 +241,10 @@ class SiteDriver:
         # F1 protocol: the pre-submit snapshot every await/extract is
         # judged against; set by submit_prompt/submit_with_image
         self._baseline: Baseline | None = None
+        # F1b (owner 2026-08-04): the normalized head of the LAST
+        # CONFIRMED prompt — the anchor every result is paired to. The
+        # newest user turn must still hold it, or the send VANISHED.
+        self._sent_head: str | None = None
         # LIVE-RUN FIX (owner 2026-08-04): True when the LAST await_done
         # returned on the image while the busy signal was STILL set —
         # i.e. the site's stop button is provably STUCK, not a running
@@ -362,6 +383,26 @@ class SiteDriver:
                 return loc.last.inner_text()
         return None
 
+    def _user_turns_count(self) -> int:
+        """How many USER turns the conversation currently holds."""
+        if not self.site.user_turn:
+            return 0
+        for sel in self.site.user_turn:
+            n = self.page.locator(sel).count()
+            if n:
+                return n
+        return 0
+
+    def _last_user_turn_locator(self) -> Locator | None:
+        """The newest USER turn element (the F1b anchor); None when no
+        selector matches."""
+        for sel in self.site.user_turn:
+            loc = self.page.locator(sel)
+            n = loc.count()
+            if n:
+                return loc.nth(n - 1)
+        return None
+
     def _last_image_src(self) -> str | None:
         """src of the last generated image anywhere on the page — the
         pre-submit fingerprint a result image must DIFFER from."""
@@ -377,6 +418,7 @@ class SiteDriver:
         self._baseline = Baseline(
             turn_count=self._turns_count(),
             last_img_src=self._last_image_src(),
+            user_turn_count=self._user_turns_count(),
         )
         return self._baseline
 
@@ -554,6 +596,7 @@ class SiteDriver:
         self.capture_baseline()
         self._paste_and_send(prompt, log)
         self._confirm_sent(prompt, log)
+        self._sent_head = normalize_text(prompt)[:VERIFY_PREFIX_CHARS]
 
     def _confirm_sent(self, prompt: str, log: Log) -> None:
         """Block until the send is CONFIRMED (owner 2026-07-29): the
@@ -665,6 +708,7 @@ class SiteDriver:
             prompt, log, reattach=lambda: self._attach_image(image_path)
         )
         self._confirm_sent(prompt, log)
+        self._sent_head = normalize_text(prompt)[:VERIFY_PREFIX_CHARS]
 
     def _attach_image(self, image_path: str | list[str]) -> None:
         """Walk the "+" menu like a person and attach ``image_path`` (one
@@ -772,6 +816,9 @@ class SiteDriver:
         - nothing new and busy never appeared within the appear
           window -> ``NoImage(had_text=False)`` (empty/interrupted —
           the one nudge-eligible case);
+        - our confirmed user turn GONE from the chat (settled
+          ``text_settle_s``) -> ``SendVanished`` — the runner re-sends
+          the item's OWN prompt (F1b, owner 2026-08-04);
         - the hard ``generation_timeout_s`` still bounds everything.
         """
         t = self._timing
@@ -786,6 +833,10 @@ class SiteDriver:
         # whose generation was mid-flight (then the next submit killed
         # it — the send/interrupt/send loop caught live).
         text_only_since: float | None = None
+        # F1b (owner 2026-08-04): "our sent prompt left the chat" must
+        # HOLD for text_settle_s before it is terminal — a re-rendering
+        # conversation can transiently mis-read the newest user turn.
+        vanished_since: float | None = None
         while True:
             now = time.monotonic()
             if now > deadline:
@@ -795,6 +846,22 @@ class SiteDriver:
                 )
             turn = self._new_turn()
             busy = self._busy()
+            vanished = self._anchor_state() == "vanished"
+            if vanished:
+                if vanished_since is None:
+                    vanished_since = now
+                elif now - vanished_since >= t.text_settle_s:
+                    raise SendVanished(
+                        f"{self.site.name}: our sent prompt is NO"
+                        " LONGER the newest user turn — the site"
+                        " dropped the message after the confirmed send"
+                        f" (noticed {now - start:.0f}s in, held"
+                        f" {t.text_settle_s:.0f}s). Re-send the item's"
+                        " own prompt; a blind continue nudge here would"
+                        " regenerate the PREVIOUS request."
+                    )
+            else:
+                vanished_since = None
             if turn is not None:
                 if self._turn_image(turn) is not None:
                     # our image is loaded — done, button ignored. When
@@ -822,12 +889,17 @@ class SiteDriver:
                         )
                 else:
                     text_only_since = None  # busy again / image incoming
-            elif not busy and now > quiet_deadline:
+            elif not vanished and not busy and now > quiet_deadline:
+                # the message used to hardcode busy_appear_timeout_s,
+                # which read as "gave up after 30s" even when a stale
+                # busy signal had honestly held this branch off for
+                # minutes (the 18:43:46 stop) — report REAL elapsed
                 raise NoImage(
-                    f"{self.site.name}: nothing happened after the"
-                    f" confirmed send ({t.busy_appear_timeout_s:.0f}s:"
-                    " no new turn, no busy signal) — empty/interrupted"
-                    " answer",
+                    f"{self.site.name}: nothing arrived for OUR turn"
+                    f" ({now - start:.0f}s after the confirmed send:"
+                    " no new turn, and no busy signal within"
+                    f" {t.busy_appear_timeout_s:.0f}s) —"
+                    " empty/interrupted answer",
                     had_text=False,
                 )
             if now - last_log >= t.progress_log_interval_s:
@@ -876,15 +948,87 @@ class SiteDriver:
             )
         return self._baseline
 
+    def _anchor_state(self) -> str:
+        """Is our confirmed prompt still the newest USER turn? (F1b,
+        owner 2026-08-04 — the Padmé/Qui-Gon incident.)
+
+        - ``"ok"``: the newest user turn holds our prompt's head AND the
+          user-turn count grew past the baseline — the anchor stands.
+        - ``"vanished"``: the site DROPPED our message after the send
+          was confirmed (the newest user turn is someone else's, or the
+          count fell back to the pre-submit value — two colored-variant
+          prompts share the same 60-char head, so the count check is
+          what catches a vanish between IDENTICAL heads).
+        - ``"unavailable"``: no anchor possible (no ``user_turn``
+          selector configured / matching, or nothing confirmed yet) —
+          callers fall back to the count-based F1 comparison.
+        """
+        if not self._sent_head or not self.site.user_turn:
+            return "unavailable"
+        base = self._require_baseline()
+        for sel in self.site.user_turn:
+            loc = self.page.locator(sel)
+            n = loc.count()
+            if not n:
+                continue
+            if n <= base.user_turn_count:
+                return "vanished"
+            try:
+                text = loc.nth(n - 1).inner_text()
+            except Exception:
+                return "unavailable"  # transiently detached — this
+                # poll falls back; the next one re-reads
+            if self._sent_head in normalize_text(text):
+                return "ok"
+            return "vanished"
+        return "unavailable"
+
+    def _follows(self, anchor: Locator, turn: Locator) -> bool:
+        """Does ``turn`` come AFTER ``anchor`` in the DOM? The pairing
+        test that replaces turn-count arithmetic (F1b): the accepted
+        result must FOLLOW our own user turn — a leftover earlier
+        answer never can. False on any transient failure (the next
+        poll re-checks)."""
+        try:
+            handle = anchor.element_handle()
+            return bool(
+                turn.evaluate(
+                    "(el, other) => !!(other.compareDocumentPosition(el)"
+                    " & Node.DOCUMENT_POSITION_FOLLOWING)",
+                    handle,
+                )
+            )
+        except Exception:
+            return False
+
     def _new_turn(self) -> Locator | None:
-        """The LAST assistant turn, but only when the conversation has
-        MORE turns than the pre-submit baseline — else None."""
+        """The assistant turn holding OUR result, else None.
+
+        F1b (owner 2026-08-04): when the user-turn anchor is available,
+        the verdict is POSITIONAL — the last assistant turn counts as
+        ours only when it FOLLOWS our own user turn in the DOM. The old
+        count comparison ("more turns than the baseline") stays only as
+        the fallback for an unavailable anchor: in a long chat the site
+        VIRTUALIZES old turns out of the DOM, so the count can stand
+        still while our answer is right there (the ChatGPT retry that
+        killed the whole site after 4 minutes of honest generation).
+        """
         base = self._require_baseline()
         for sel in self.site.response_container:
             loc = self.page.locator(sel)
             n = loc.count()
-            if n:
-                return loc.nth(n - 1) if n > base.turn_count else None
+            if not n:
+                continue
+            turn = loc.nth(n - 1)
+            state = self._anchor_state()
+            if state == "ok":
+                anchor = self._last_user_turn_locator()
+                if anchor is not None and self._follows(anchor, turn):
+                    return turn
+                return None
+            if state == "vanished":
+                return None  # await_done raises SendVanished (settled)
+            return turn if n > base.turn_count else None
         return None
 
     def _turn_image(self, turn: Locator) -> Locator | None:
@@ -928,8 +1072,9 @@ class SiteDriver:
         # the fresh composer must be there before the next paste
         self._require(self.site.prompt_box, "the prompt box (new chat)")
         # a fresh conversation restarts the turn numbering — the next
-        # submit captures a fresh baseline (F1)
+        # submit captures a fresh baseline (F1) and its own anchor (F1b)
         self._baseline = None
+        self._sent_head = None
         log("    new chat opened")
 
     def click_error_retry(self, log: Log = print) -> bool:
@@ -962,6 +1107,13 @@ class SiteDriver:
             last_img_src=(
                 prev.last_img_src if prev is not None
                 else self._last_image_src()
+            ),
+            # the regeneration is IN PLACE — no new user turn, so the
+            # F1b anchor (our user turn + the pre-submit user count)
+            # carries over unchanged
+            user_turn_count=(
+                prev.user_turn_count if prev is not None
+                else max(0, self._user_turns_count() - 1)
             ),
         )
         log("    clicked the site's Retry button")
