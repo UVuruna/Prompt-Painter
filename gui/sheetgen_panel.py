@@ -283,6 +283,13 @@ class SheetGenPanel(ttk.Frame):
         ).pack(anchor="w", pady=(6, 0))
         self._draft_box.pack_forget()
         self._questions_box.pack(fill="x")
+        # the ASK worker is finished — clear busy here (owner 2026-08-04:
+        # "Generate sheet" did nothing, because _busy was still True from
+        # _ask and _generate's first line returns on it)
+        self._set_idle(
+            "Answer what you care about (empty = the model's choice),"
+            " then Generate sheet."
+        )
         self._gui._scroll.refresh()
 
     # --- step ②→③: generate + preview -----------------------------------

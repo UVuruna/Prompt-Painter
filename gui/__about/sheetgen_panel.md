@@ -25,7 +25,10 @@ The ENGINE is unchanged (`painter.ai`: `contract_text` /
 `ask_questions` / `generate_sheet` / `save_sheet` — the same two-call
 flow + one automatic repair round the dialog drove); workers run on
 background threads with the private queue + `self.after` poll
-convention. **Save re-validates whatever is in the draft box with the
+convention. Every worker result ENDS the busy state — `_show_questions`
+clears it too (owner 2026-08-04: **Generate sheet** did nothing,
+because `_busy` was still True from `_ask` and `_generate`'s first
+line returns on it). **Save re-validates whatever is in the draft box with the
 REAL parser** — problems are listed and BLOCK the save (the owner
 fixes the draft right there; no DocWindow detour anymore); a clean
 save lands under the picked folder and "+ Add to queue" also queues
