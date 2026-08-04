@@ -16,7 +16,10 @@ switch's own canvas, revealed as the cover fades away.
 CRISP art: tkinter `Canvas` has no anti-aliasing, so the pill
 composites anti-aliased PIL images instead of raw ovals — the two
 track pills straight from the owner's website SVGs, the sun/moon
-knobs from `gui.icons`' supersampled radial-gradient renderers. All
+knobs from `gui.icons.render_knob` — which serves the owner's OWN
+`theme/{sun,moon}.svg` or the in-code radial-gradient renderers,
+whichever `config.SWITCH_KNOB_SOURCE` names (owner 2026-08-04; both
+versions are kept, flipping that one value is the whole switch-back). All
 six images (two tracks, sun/moon at rest, sun/moon hover) are built
 ONCE at construction and held on `self._imgs` so tkinter cannot
 garbage-collect them; every `_redraw` after that just re-places the
