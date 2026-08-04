@@ -722,6 +722,15 @@ class ExpandableSwitch(ttk.Frame):
                 self.sub.pack(fill="x", padx=(28, 0), pady=(2, 4))
         else:
             self.sub.pack_forget()
+            if self._sub_host is not None:
+                # Tk quirk (owner 2026-08-04, slika 1+2): removing the
+                # LAST slave of a container leaves the container's
+                # REQUESTED size at that slave's — the full-width host
+                # is empty after a collapse, so it kept the fine-tune's
+                # height as dead space below the band. Reset it by hand;
+                # geometry propagation takes the height back over the
+                # moment any fine-tune re-opens into the host.
+                self._sub_host.configure(height=1)
         self._render_caret()
         self._on_layout_change()
 

@@ -104,6 +104,13 @@ plain switch. Every expand/collapse calls `on_layout_change` AFTER
 the pack/forget, so an outer `ScrollFrame` can re-fit content whose
 height just changed several parents below it.
 
+With a `sub_host` (the setup panels' full-width band host) a COLLAPSE
+also resets `sub_host`'s requested height to 1 — Tk's `pack` leaves a
+container's requested size at its LAST slave's when that slave is
+removed, so an emptied host kept the fine-tune's height as DEAD SPACE
+below the band (owner 2026-08-04, slika 1+2). Propagation takes the
+height back over the moment any fine-tune re-opens into the host.
+
 An already-ON switch starts COLLAPSED — the auto-expand is a live
 click reaction. Since Tk write-traces cannot tell a settings-restore
 `.set()` from a click, the restoring host wraps its round-trip in
