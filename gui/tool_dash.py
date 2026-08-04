@@ -402,11 +402,11 @@ class AiCheckPanel(JobPanel):
         actions.pack(fill="x", pady=(6, 0))
         self.btn_resend = rounded_button(
             actions, "Send flagged to generator",
-            command=self._do_resend, kind="info",
+            icon_name="send", command=self._do_resend, kind="info",
         )
         self.btn_resend.pack(side="left")
         self.btn_clear = rounded_button(
-            actions, "Clear flags", command=self._do_clear,
+            actions, "Clear flags", icon_name="clear", command=self._do_clear,
             kind="danger-outline",
         )
         self.btn_clear.pack(side="left", padx=6)
@@ -599,7 +599,7 @@ class DashGrid(ttk.Frame):
         # the slider mode's nav row (built once, gridded on demand)
         self._nav = ttk.Frame(self)
         self._nav_prev = rounded_button(
-            self._nav, "◀", command=lambda: self._slide(-1), kind="link",
+            self._nav, "◀", icon_name="back", command=lambda: self._slide(-1), kind="link",
         )
         self._nav_prev.pack(side="left")
         self._nav_label = ttk.Label(
@@ -607,7 +607,7 @@ class DashGrid(ttk.Frame):
         )
         self._nav_label.pack(side="left", expand=True, fill="x")
         self._nav_next = rounded_button(
-            self._nav, "▶", command=lambda: self._slide(1), kind="link",
+            self._nav, "▶", icon_name="next", command=lambda: self._slide(1), kind="link",
         )
         self._nav_next.pack(side="right")
         self.bind("<Configure>", self._on_configure)

@@ -117,7 +117,7 @@ class _FilterConditionRow(ttk.Frame):
         )
         self._unit = ttk.Label(self, text="")
         rounded_button(
-            self, "✕", command=lambda: self._on_remove(self),
+            self, "✕", icon_name="close", command=lambda: self._on_remove(self),
             kind="danger-outline", width=INPUT_HEIGHT,
         ).pack(side="right")
 
@@ -234,13 +234,13 @@ class FilterEditor(ttk.Frame):
         )
         self._preset_combo.pack(side="left", padx=(0, 6))
         rounded_button(
-            preset_row, "Save", command=self._save_preset, kind="success",
+            preset_row, "Save", icon_name="save", command=self._save_preset, kind="success",
         ).pack(side="left", padx=(0, 4))
         rounded_button(
-            preset_row, "Load", command=self._load_preset, kind="info",
+            preset_row, "Load", icon_name="load", command=self._load_preset, kind="info",
         ).pack(side="left", padx=(0, 4))
         rounded_button(
-            preset_row, "Delete", command=self._delete_preset,
+            preset_row, "Delete", icon_name="delete", command=self._delete_preset,
             kind="danger-outline",
         ).pack(side="left")
 

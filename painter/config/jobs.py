@@ -36,24 +36,26 @@ JOB_LABEL = {
     "aicheck": "AI check",
 }
 
-# EVERY job carries an icon (assets/icons/<stem>) beside its coloured
-# NAME on the tool button + panel header: the two gen sites their brand
-# logo, the four tools the owner's dedicated PNG icons (owner 2026-07-19,
-# replacing the old emoji marks). gui.icon() resolves each stem — svg
-# where Qt can render it, png otherwise (the tool icons ARE png), so the
-# stems double as the png basenames. Supersedes the old gui._SITE_ICON.
-# "api_image" reuses the Gemini logo (GUI rework Phase 19) — the paid
-# image model IS Gemini, just driven through its REST API, same as
-# MENU_TILES's own api_image_gen tile already picked.
+# EVERY job carries an icon beside its coloured NAME on the tool button
+# + panel header: the two gen sites their brand logo, the tools their
+# own mark. Values are BARE STEMS — gui.icon() finds which grouping
+# folder holds each (owner 2026-08-04), svg where Qt can render it, png
+# otherwise (crop/upscale/aspect are still the owner's PNGs).
+# Supersedes the old gui._SITE_ICON.
+#
+# Owner 2026-08-04: "api_image" no longer borrows the Gemini logo and
+# "aicheck" no longer shares the sheet generator's mark — the two AI
+# doors used to render the SAME ai.png, so nothing on screen told them
+# apart. Each now has its own drawing, in its own JOB_COLORS accent.
 JOB_LOGO = {
     "chatgpt": "chatGPT",
     "gemini": "gemini",
-    "api_image": "gemini",
+    "api_image": "apigen",
     "bg": "bg",
     "crop": "crop",
     "upscale": "upscale",
     "aspect": "aspect",
-    "aicheck": "ai",
+    "aicheck": "aicheck",
 }
 
 # per-job (day, night) colour pair — the header name + the tool button
@@ -236,7 +238,7 @@ MENU_TILES: tuple[MenuTile, ...] = (
             "Ask Gemini to draft a new prompt sheet from your request"
             " — questions first, then a ready-to-run .md"
         ),
-        icon="ai", color=("#a16207", "#facc15"),  # yellow
+        icon="sheetgen", color=("#a16207", "#facc15"),  # yellow
     ),
     # GUI rework Phase 19: wired up — the adapter/panel/gating below.
     # Reads its accent back from JOB_COLORS (this job kind's own entry,

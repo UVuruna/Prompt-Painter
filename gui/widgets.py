@@ -257,11 +257,17 @@ def rounded_button(
     opts.setdefault("bg_color", theme_pair("bg"))
     opts.update(kwargs)
     cls = EdgeIconButton if icon_edge else ctk.CTkButton
+    # a monochrome mark takes the button's OWN label colour, per theme
+    # (owner 2026-08-04: the black-on-dark Delete/Stop) — see gui.icon's
+    # tint. Coloured marks ignore it, so this is safe for every kind.
     return cls(
         parent, text=text, command=command, width=width,
         height=BTN_HEIGHT, corner_radius=BTN_RADIUS,
         font=ctk_font("bold"),
-        image=icon(icon_name) if icon_name else None,
+        image=(
+            icon(icon_name, tint=opts.get("text_color"))
+            if icon_name else None
+        ),
         compound=compound, **opts,
     )
 

@@ -59,7 +59,13 @@ imported name, which would freeze a stale copy at import time.
   `button_fill_pair`/`button_text_pair`/`job_color_pair`/
   `status_pair`/`theme_pair`
 - [Icon Loading + Switch Art](icons.md) — `icon()` (the optional icon
-  drawn on a `rounded_button`)
+  drawn on a `rounded_button`). Since owner 2026-08-04 the button
+  hands `icon()` its OWN `text_color` pair as the tint, so a
+  monochrome mark is always the same colour as the label beside it —
+  white on a solid fill, the accent on an outline kind, in either
+  theme. Without it QtSvg painted every `currentColor` mark BLACK,
+  which disappeared on the dark outline buttons. Coloured marks
+  (`jobs/`, `files/`) ignore the tint.
 
 ### Used by
 - [GUI (folder)](../___gui.md) — `__init__.py` re-exports the full API

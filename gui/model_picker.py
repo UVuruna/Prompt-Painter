@@ -53,7 +53,7 @@ class ModelPickerRow(ttk.Frame):
         row = ttk.Frame(self)
         row.pack(fill="x", pady=(0, 2))
         self._refresh_btn = rounded_button(
-            row, "Refresh models", command=self._refresh, kind="info",
+            row, "Refresh models", icon_name="refresh", command=self._refresh, kind="info",
         )
         self._refresh_btn.pack(side="left")
         ttk.Label(row, text=f"{label}:").pack(side="left", padx=(10, 0))

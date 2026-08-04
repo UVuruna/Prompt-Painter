@@ -187,11 +187,11 @@ class ToolSettingsPanel(ttk.Frame):
         pick_row = ttk.Frame(left)
         pick_row.pack(fill="x")
         rounded_button(
-            pick_row, "Folder…", command=self._pick_folder, kind="info",
+            pick_row, "Folder…", icon_name="browse", command=self._pick_folder, kind="info",
             width=90,
         ).pack(side="left")
         rounded_button(
-            pick_row, "Files…", command=self._pick_files, kind="info",
+            pick_row, "Files…", icon_name="file", command=self._pick_files, kind="info",
             width=90,
         ).pack(side="left", padx=(6, 0))
         # its OWN row, full LEFT-column width to wrap into (owner 2026-07-21
@@ -263,14 +263,14 @@ class ToolSettingsPanel(ttk.Frame):
         # (no filled/outline availability dance), exactly like
         # AgentPanel.btn_pause.
         self.btn_pause = rounded_button(
-            btn_row, "Pause", command=lambda: self._on_pause(self.slot),
+            btn_row, "Pause", icon_name="pause", command=lambda: self._on_pause(self.slot),
             kind="secondary", width=70,
         )
         self.btn_pause.pack(side="left", padx=6)
         # Stop (GUI rework Phase 14) — filled/outline availability like
         # AgentPanel.btn_stop, styled by set_run_state below.
         self.btn_stop = rounded_button(
-            btn_row, "Stop", command=lambda: self._on_stop(self.slot),
+            btn_row, "Stop", icon_name="stop", command=lambda: self._on_stop(self.slot),
             kind="danger-outline", width=70,
         )
         self.btn_stop.pack(side="left", padx=(0, 6))

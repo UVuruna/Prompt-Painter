@@ -110,11 +110,11 @@ class ImageCheckerSettingsPanel(ToolSettingsPanel):
         row = ttk.Frame(box)
         row.pack(fill="x", pady=2)
         rounded_button(
-            row, "Sheet file…", command=self._pick_sheets_file,
+            row, "Sheet file…", icon_name="file", command=self._pick_sheets_file,
             kind="info", width=110,
         ).pack(side="left")
         rounded_button(
-            row, "Sheets folder…", command=self._pick_sheets_folder,
+            row, "Sheets folder…", icon_name="browse", command=self._pick_sheets_folder,
             kind="info", width=110,
         ).pack(side="left", padx=(6, 0))
         self._sheets_var = tk.StringVar(

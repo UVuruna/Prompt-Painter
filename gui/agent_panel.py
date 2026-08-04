@@ -467,12 +467,12 @@ class AgentPanel(ttk.Labelframe):
         # (no filled/outline availability dance like Start/Stop below):
         # its label alone flips Pause <-> Resume, always clickable.
         self.btn_pause = rounded_button(
-            row, "Pause", command=partial(on_pause, site_key),
+            row, "Pause", icon_name="pause", command=partial(on_pause, site_key),
             kind="secondary", width=70,
         )
         self.btn_pause.pack(side="left", padx=6)
         self.btn_stop = rounded_button(
-            row, "Stop", command=partial(on_stop, site_key),
+            row, "Stop", icon_name="stop", command=partial(on_stop, site_key),
             kind="danger-outline", width=70,
         )
         self.btn_stop.pack(side="left", padx=6)
@@ -847,7 +847,7 @@ class AgentPanel(ttk.Labelframe):
         start.pack(side="left")
         stop = rounded_button(
             cluster, "Stop",
-            command=partial(self._on_stop, self.site_key),
+            icon_name="stop", command=partial(self._on_stop, self.site_key),
             kind="danger-outline", width=70,
         )
         stop.pack(side="left", padx=6)

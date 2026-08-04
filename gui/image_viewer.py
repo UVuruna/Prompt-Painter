@@ -160,12 +160,12 @@ class ImageViewer(tk.Toplevel):
     def _build_nav_row(self) -> None:
         nav = ttk.Frame(self, padding=6)
         nav.pack(fill="x")
-        self._prev_btn = rounded_button(nav, "◀ Prev", command=self._go_prev)
+        self._prev_btn = rounded_button(nav, "◀ Prev", icon_name="back", command=self._go_prev)
         self._prev_btn.pack(side="left")
-        self._next_btn = rounded_button(nav, "Next ▶", command=self._go_next)
+        self._next_btn = rounded_button(nav, "Next ▶", icon_name="next", command=self._go_next)
         self._next_btn.pack(side="left", padx=(6, 0))
         self._delete_btn = rounded_button(
-            nav, "Delete", command=self._delete_current, kind="danger",
+            nav, "Delete", icon_name="delete", command=self._delete_current, kind="danger",
         )
         self._delete_btn.pack(side="right")
 
@@ -183,7 +183,7 @@ class ImageViewer(tk.Toplevel):
         )
         self._back_btn = rounded_button(
             self._image_block, "Back to current", kind="link",
-            command=self._clear_step_view,
+            icon_name="back", command=self._clear_step_view,
         )
 
     def _build_prompt_block(self, body) -> None:
@@ -192,7 +192,7 @@ class ImageViewer(tk.Toplevel):
         ttk.Label(bar, text="Prompt", style="Head.TLabel").pack(side="left")
         rounded_button(
             bar, "Copy (for AI)", command=self._copy_prompt, kind="info",
-            icon_name="ai",
+            icon_name="copy",
         ).pack(side="right")
         self._prompt_txt = tk.Text(
             body, wrap="word", font=tk_font("mono"), height=8,
@@ -424,7 +424,7 @@ class ImageViewer(tk.Toplevel):
             if self._restore_cb is not None:
                 rounded_button(
                     block, "Restore to this step", kind="danger",
-                    command=partial(self._restore_this_step, label),
+                    icon_name="restore", command=partial(self._restore_this_step, label),
                 ).pack()
 
     def _view_step_thumb(self, label: str, path: Path, _event=None) -> None:

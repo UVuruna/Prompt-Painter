@@ -147,15 +147,15 @@ class SelectWindow(tk.Toplevel):
             style="Muted.TLabel",
         ).pack(side="left")
         rounded_button(
-            bar, "Expand all", command=self._expand_all,
+            bar, "Expand all", icon_name="expand", command=self._expand_all,
             kind="secondary-outline",
         ).pack(side="right")
         rounded_button(
-            bar, "Collapse all", command=self._collapse_all,
+            bar, "Collapse all", icon_name="collapse", command=self._collapse_all,
             kind="secondary-outline",
         ).pack(side="right", padx=4)
         rounded_button(
-            bar, "Close", command=self.destroy,
+            bar, "Close", icon_name="close", command=self.destroy,
         ).pack(side="right", padx=4)
 
         # --- the colour legend (own row under the hint bar so it never

@@ -9,7 +9,8 @@ SVG-first icon loading for every button in the app (`icon()`, cached
 per `(name, size)` for the whole process), rasterized through Qt's
 `QSvgRenderer` (PySide6, already a monorepo build dependency) at 4x
 and LANCZOS-downscaled for crispness. PNG is the fallback for icons
-with no svg (`web`, `ai`) AND for svgs QtSvg's *Tiny* profile cannot
+with no svg (`crop`/`upscale`/`aspect`, the owner's own marks) AND
+for svgs QtSvg's *Tiny* profile cannot
 render — detected by tag-sniffing the raw bytes for `<clipPath`/
 `<mask`/`<filter`. `gemini.svg` is the concrete case: an Illustrator
 raster-trace export, 12 embedded rasters under 28 `clipPath`s, which
@@ -19,6 +20,38 @@ missing icon — or a Tiny-unrenderable svg with no png sibling — raises
 `FileNotFoundError` loudly (root Rule #1), never a silent icon-less
 button; callers keep the button's own text visible via
 `compound="left"` regardless.
+
+## The grouping folders (owner 2026-08-04)
+
+The ~45 marks are filed **by kinship**, not in one flat heap:
+
+| Folder | Holds |
+|--------|-------|
+| `jobs/` | one mark per functionality — the Home tiles + dashboard headers |
+| `actions/` | verbs — every button that DOES something |
+| `nav/` | navigation & view (home, back/next, close, expand/collapse, grid/slider, the cog) |
+| `files/` | inputs & documents (reference, papyrus, key) |
+| `brand/` | third-party marks — never redrawn |
+| `theme/` | the Day/Night switch tracks + the owner's sun/moon SVGs |
+
+**Call sites never name a folder.** They pass a BARE STEM
+(`icon("crop")`, `icon_name="save"`, `JOB_LOGO`, `MenuTile.icon`);
+`icon_paths()` walks `ICON_GROUPS` and answers where that stem lives.
+Identity is the stem, filing is the folder — so a mark can be re-filed
+without touching a widget. Two folders claiming one stem would make
+the answer depend on `ICON_GROUPS` order rather than on intent, so
+`tests/test_icons.py` fails on any such clash, on any stem the GUI
+asks for that has no file, on any asked mark that will not actually
+render, and on any project-drawn SVG using `clipPath`/`mask`/`filter`.
+
+The coloured `jobs/` + `files/` marks are drawn in each job's own
+`JOB_COLORS` accent, from plain shapes and gradients ONLY — the SVG
+Tiny limitation above is a design constraint, not just a loader note.
+The regrouping also cost one live crash worth remembering:
+`_render_switch_track` built its path off the flat `ICON_DIR`, so
+filing the two track SVGs into `theme/` raised inside
+`DayNightSwitch.__init__` and took the WHOLE window down at startup.
+It resolves through `icon_paths` now, pinned by a regression test.
 
 Also holds the Day/Night switch's hand-rendered art, all built on the
 same SVG->PIL rasterizer as the button icons:

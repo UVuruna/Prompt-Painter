@@ -91,7 +91,7 @@ class BeforeAfterWindow(tk.Toplevel):
             bar, restore_label, command=self._do_restore, kind="danger",
         )
         self._restore_btn.pack(side="right")
-        rounded_button(bar, "Close", command=self.destroy).pack(
+        rounded_button(bar, "Close", icon_name="close", command=self.destroy).pack(
             side="right", padx=4
         )
 
@@ -225,7 +225,7 @@ class StepRestoreWindow(tk.Toplevel):
             " to here' reverts the LIVE file to that stage.",
             style="Muted.TLabel",
         ).pack(side="left")
-        rounded_button(bar, "Close", command=self.destroy).pack(side="right")
+        rounded_button(bar, "Close", icon_name="close", command=self.destroy).pack(side="right")
 
         self._scroll = ScrollFrame(self, horizontal=True)
         self._scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -267,7 +267,7 @@ class StepRestoreWindow(tk.Toplevel):
             if step is not None:
                 rounded_button(
                     block, "Restore to here", kind="danger",
-                    command=partial(self._do_restore, step),
+                    icon_name="restore", command=partial(self._do_restore, step),
                 ).pack()
             else:
                 ttk.Label(block, text="(current)", style="Muted.TLabel").pack()

@@ -155,13 +155,13 @@ class AiKeyWizard(_AiDialog):
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(6, 0))
         rounded_button(
-            btns, "Save key", command=self._save, kind="success",
+            btns, "Save key", icon_name="save", command=self._save, kind="success",
         ).pack(side="right")
         self._test_btn = rounded_button(
-            btns, "Test key", command=self._test, kind="info",
+            btns, "Test key", icon_name="testkey", command=self._test, kind="info",
         )
         self._test_btn.pack(side="right", padx=6)
-        rounded_button(btns, "Cancel", command=self.destroy).pack(
+        rounded_button(btns, "Cancel", icon_name="close", command=self.destroy).pack(
             side="right", padx=(0, 6)
         )
 

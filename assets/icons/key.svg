@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <!-- KEY (owner 2026-08-03, slika 1): the "AI key…" button icon —
-       plain paths only, QtSvg-renderable (no clipPath/mask/filter,
-       see gui/icons.py _QT_UNSUPPORTED_SVG) -->
-  <path fill="#e8b53a" d="M9.9 13.6 18.2 5.3l1.7 1.7 1.6-1.6-1.7-1.7 1.5-1.5 2.4 2.4-9.3 9.3z"/>
-  <circle cx="7" cy="16.5" r="5.5" fill="#e8b53a"/>
-  <circle cx="7" cy="16.5" r="2.2" fill="#7a5a10"/>
-</svg>

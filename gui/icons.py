@@ -56,6 +56,15 @@ ICON_DIR = PROJECT_ROOT / "assets" / "icons"
 ICON_TARGET_PX = 20  # max icon side inside a button / beside a switch
 SVG_OVERSAMPLE = 4  # rasterize at 4x, then LANCZOS down
 
+# The icons are GROUPED BY KINSHIP into folders (owner 2026-08-04), so
+# ~45 marks stay findable by a human. Call sites keep passing a BARE
+# STEM (``icon("crop")``) — the stem is the icon's identity, its folder
+# is only filing — so a mark can be re-filed without touching a single
+# widget. Searched in this order, the flat root LAST so a legacy file
+# still resolves while it lives there. Stems are unique across folders
+# (asserted by tests/test_icons.py) — no folder ever shadows another.
+ICON_GROUPS = ("jobs", "actions", "nav", "files", "brand", "theme", "")
+
 # QtSvg implements the SVG Tiny profile: clipPath/mask/filter (typical
 # of Illustrator raster-trace exports like gemini.svg, 12 embedded
 # rasters under 28 clipPaths) render as garbage — such files need a
@@ -78,18 +87,30 @@ _QT_APP = None
 
 
 
-def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
+def _svg_to_pil(
+    path: Path, target_px: int, recolor: str | None = None
+) -> Image.Image:
     """Rasterize one SVG via QSvgRenderer: aspect-fit ``target_px`` on
     the longer side, rendered at SVG_OVERSAMPLE x and LANCZOS-downscaled
-    so ~20 px icons stay crisp."""
+    so ~20 px icons stay crisp.
+
+    ``recolor`` substitutes one hex for the markup's ``currentColor``
+    keyword before rasterizing — QtSvg cannot resolve it itself (see
+    ``icon``'s tint)."""
     global _QT_APP
-    from PySide6.QtCore import QBuffer, Qt
+    from PySide6.QtCore import QBuffer, QByteArray, Qt
     from PySide6.QtGui import QGuiApplication, QImage, QPainter
     from PySide6.QtSvg import QSvgRenderer
 
     if _QT_APP is None:
         _QT_APP = QGuiApplication.instance() or QGuiApplication([])
-    renderer = QSvgRenderer(str(path))
+    if recolor:
+        markup = path.read_text(encoding="utf-8").replace(
+            "currentColor", recolor
+        )
+        renderer = QSvgRenderer(QByteArray(markup.encode("utf-8")))
+    else:
+        renderer = QSvgRenderer(str(path))
     if not renderer.isValid():
         raise ValueError(f"unrenderable SVG: {path}")
     base = renderer.defaultSize()
@@ -115,21 +136,64 @@ def _svg_to_pil(path: Path, target_px: int) -> Image.Image:
     return pil.resize(final, Image.LANCZOS)
 
 
-def icon(name: str, size: int = ICON_TARGET_PX) -> ctk.CTkImage:
-    """The named icon, loaded once per (name, size) and scaled to fit.
+def icon_paths(name: str) -> tuple[Path, Path]:
+    """Where one bare STEM lives: its (svg, png) paths, resolved
+    through ``ICON_GROUPS``. The first folder holding EITHER extension
+    wins, so a stem's two forms never split across folders; a stem
+    found nowhere falls back to the flat root, which is what makes the
+    "missing icon" error below name a sensible path."""
+    for group in ICON_GROUPS:
+        folder = ICON_DIR / group if group else ICON_DIR
+        svg_path, png_path = folder / f"{name}.svg", folder / f"{name}.png"
+        if svg_path.is_file() or png_path.is_file():
+            return svg_path, png_path
+    return ICON_DIR / f"{name}.svg", ICON_DIR / f"{name}.png"
 
-    ``name.svg`` wins when Qt can render it; ``name.png`` covers the
-    rest (web/ai have no svg; gemini.svg needs its pre-rasterized
-    sibling). A missing/unrenderable icon is a loud error (root
-    Rule #1) — no silent icon-less fallback.
+
+def icon(
+    name: str,
+    size: int = ICON_TARGET_PX,
+    tint: tuple[str, str] | str | None = None,
+) -> ctk.CTkImage:
+    """The named icon, loaded once per (name, size, tint) and scaled
+    to fit.
+
+    ``name`` is a BARE STEM — ``icon_paths`` finds which grouping
+    folder holds it. ``name.svg`` wins when Qt can render it;
+    ``name.png`` covers the rest (the three kept tool marks are png;
+    gemini.svg needs its pre-rasterized sibling). A missing/
+    unrenderable icon is a loud error (root Rule #1) — no silent
+    icon-less fallback.
+
+    ``tint`` is a (day, night) hex pair — or one hex for both — and
+    applies ONLY to a mark that declares ``currentColor``, i.e. one
+    drawn to take its surroundings' colour. That declaration is the
+    icon's own request: QtSvg has no CSS context, so it resolves
+    ``currentColor`` to BLACK, which is invisible on a dark outline
+    button (owner 2026-08-04, the greyed-out Delete/Stop). Substituting
+    the caller's text colour before rasterizing makes the mark and its
+    label always the same colour — including while disabled. The two
+    ends are rendered separately into ONE CTkImage, so a Day/Night flip
+    repaints them with no re-walk, exactly like the button's own fill.
+    Coloured marks (jobs/, files/, brand/, theme/) name their own hues
+    and are returned untouched.
     """
-    key = (name, size)
+    key = (name, size, tint if isinstance(tint, str) else tuple(tint or ()))
     if key not in _ICONS:
-        svg_path = ICON_DIR / f"{name}.svg"
-        png_path = ICON_DIR / f"{name}.png"
+        svg_path, png_path = icon_paths(name)
         svg_ok = svg_path.is_file() and not any(
             tag in svg_path.read_bytes() for tag in _QT_UNSUPPORTED_SVG
         )
+        if svg_ok and tint and b"currentColor" in svg_path.read_bytes():
+            day, night = (tint, tint) if isinstance(tint, str) else tint
+            pair = tuple(
+                _svg_to_pil(svg_path, size, recolor=shade)
+                for shade in (day, night)
+            )
+            _ICONS[key] = ctk.CTkImage(
+                light_image=pair[0], dark_image=pair[1], size=pair[0].size
+            )
+            return _ICONS[key]
         if svg_ok:
             img = _svg_to_pil(svg_path, size)
         elif png_path.is_file():
@@ -311,10 +375,15 @@ def _render_theme_cover_icon(target_name: str, min_dim: int) -> Image.Image:
 
 
 def _render_switch_track(stem: str, w: int, h: int) -> Image.Image:
-    """One track pill: the owner's website switch SVG (in assets/icons),
-    rasterized anti-aliased through the icon SVG->PIL path and sized to
-    the exact pill box. A missing SVG is a loud error (Rule #1)."""
-    svg_path = ICON_DIR / f"{stem}.svg"
+    """One track pill: the owner's website switch SVG, rasterized
+    anti-aliased through the icon SVG->PIL path and sized to the exact
+    pill box. A missing SVG is a loud error (Rule #1).
+
+    Resolved through ``icon_paths`` like every other mark (owner
+    2026-08-04) — the two tracks now live in ``assets/icons/theme/``,
+    and hardcoding the flat root here crashed the whole window at
+    startup the moment they were filed."""
+    svg_path, _png = icon_paths(stem)
     if not svg_path.is_file():
         raise FileNotFoundError(
             f"Day/Night switch track SVG missing: {svg_path}"

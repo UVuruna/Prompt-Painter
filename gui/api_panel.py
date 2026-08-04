@@ -192,7 +192,7 @@ class ApiImageGenPanel(ttk.Frame):
         models_row = ttk.Frame(left)
         models_row.pack(fill="x", pady=(0, 2))
         self._models_btn = rounded_button(
-            models_row, "Refresh models", command=self._refresh_models,
+            models_row, "Refresh models", icon_name="refresh", command=self._refresh_models,
             kind="info",
         )
         self._models_btn.pack(side="left")
@@ -236,7 +236,7 @@ class ApiImageGenPanel(ttk.Frame):
         gate_row = ttk.Frame(left)
         gate_row.pack(fill="x", pady=(2, 4))
         self._gate_btn = rounded_button(
-            gate_row, "Check API access", command=self._probe_access,
+            gate_row, "Check API access", icon_name="testkey", command=self._probe_access,
             kind="info",
         )
         self._gate_btn.pack(side="left")
@@ -358,12 +358,12 @@ class ApiImageGenPanel(ttk.Frame):
         )
         self.btn_start.pack(side="left")
         self.btn_pause = rounded_button(
-            btn_row, "Pause", command=partial(self._on_pause, "api_image"),
+            btn_row, "Pause", icon_name="pause", command=partial(self._on_pause, "api_image"),
             kind="secondary", width=70,
         )
         self.btn_pause.pack(side="left", padx=6)
         self.btn_stop = rounded_button(
-            btn_row, "Stop", command=partial(self._on_stop, "api_image"),
+            btn_row, "Stop", icon_name="stop", command=partial(self._on_stop, "api_image"),
             kind="danger-outline", width=70,
         )
         self.btn_stop.pack(side="left", padx=(0, 6))

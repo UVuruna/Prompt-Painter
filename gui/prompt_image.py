@@ -75,7 +75,7 @@ class PromptImageSection(ttk.Labelframe):
         rounded_entry(row, textvariable=self.ref_dir_var).pack(
             side="left", fill="x", expand=True, padx=(6, 0)
         )
-        rounded_button(row, "Browse…", command=self._pick_ref_dir).pack(
+        rounded_button(row, "Browse…", icon_name="browse", command=self._pick_ref_dir).pack(
             side="left", padx=(8, 0)
         )
 

@@ -76,7 +76,7 @@ class SheetGenPanel(ttk.Frame):
         head = ttk.Frame(self)
         head.pack(fill="x")
         ctk.CTkLabel(
-            head, text="", image=icon("ai"), width=22,
+            head, text="", image=icon("sheetgen"), width=22,
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(
@@ -134,7 +134,7 @@ class SheetGenPanel(ttk.Frame):
         rounded_entry(row, textvariable=self.save_dir_var).pack(
             side="left", fill="x", expand=True
         )
-        rounded_button(row, "Browse…", command=self._pick_save_dir).pack(
+        rounded_button(row, "Browse…", icon_name="browse", command=self._pick_save_dir).pack(
             side="left", padx=(8, 0)
         )
 
@@ -151,7 +151,10 @@ class SheetGenPanel(ttk.Frame):
         ).pack(anchor="w", pady=(8, 4))
         self._ask_btn = rounded_button(
             left, "Ask questions", command=self._ask, kind="success",
-            icon_name="ai",
+            # step ① -> ②: this button MOVES the wizard on, so it wears
+            # the nav arrow — "sheetgen" belongs to the one button that
+            # actually produces the sheet (owner 2026-08-04)
+            icon_name="next",
         )
         self._ask_btn.pack(anchor="w", pady=(2, 0))
 
@@ -172,14 +175,14 @@ class SheetGenPanel(ttk.Frame):
         btns = ttk.Frame(self._draft_box)
         btns.pack(fill="x", pady=(6, 0))
         rounded_button(
-            btns, "Regenerate", command=self._generate, kind="info",
+            btns, "Regenerate", icon_name="refresh", command=self._generate, kind="info",
         ).pack(side="left")
         rounded_button(
-            btns, "Save .md", command=lambda: self._save(queue_it=False),
+            btns, "Save .md", icon_name="save", command=lambda: self._save(queue_it=False),
         ).pack(side="left", padx=8)
         rounded_button(
             btns, "Save + Add to queue",
-            command=lambda: self._save(queue_it=True), kind="success",
+            icon_name="add", command=lambda: self._save(queue_it=True), kind="success",
         ).pack(side="left")
 
         self._set_step(0)
@@ -279,7 +282,7 @@ class SheetGenPanel(ttk.Frame):
             self._answer_vars.append(var)
         rounded_button(
             self._questions_box, "Generate sheet", command=self._generate,
-            kind="success", icon_name="ai",
+            kind="success", icon_name="sheetgen",
         ).pack(anchor="w", pady=(6, 0))
         self._draft_box.pack_forget()
         self._questions_box.pack(fill="x")

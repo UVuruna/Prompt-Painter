@@ -78,10 +78,10 @@ class DocWindow(tk.Toplevel):
             ttk.Label(bar, text=hint, style="Muted.TLabel").pack(side="left")
         rounded_button(
             bar, "Copy (for AI)", command=self._copy_all, kind="info",
-            icon_name="ai",
+            icon_name="copy",
         ).pack(side="right")
         rounded_button(
-            bar, "Close", command=self.destroy,
+            bar, "Close", icon_name="close", command=self.destroy,
         ).pack(side="right", padx=4)
 
         # the Fixer AI's manual buttons (GUI rework Phase 20, owner's
@@ -107,13 +107,13 @@ class DocWindow(tk.Toplevel):
             if on_website_fix is not None:
                 self.btn_website_fix = rounded_button(
                     fix_bar, "WEBSITE FIX",
-                    command=partial(self._run_fix, "website"), kind="info",
+                    icon_name="web", command=partial(self._run_fix, "website"), kind="info",
                 )
                 self.btn_website_fix.pack(side="right")
             if on_image_fix is not None:
                 self.btn_image_fix = rounded_button(
                     fix_bar, "IMAGE FIX",
-                    command=partial(self._run_fix, "image"), kind="info",
+                    icon_name="reference", command=partial(self._run_fix, "image"), kind="info",
                 )
                 self.btn_image_fix.pack(side="right", padx=(0, 4))
             self._fix_status_var = tk.StringVar(value="")

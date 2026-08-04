@@ -115,7 +115,7 @@ class JobPanel(ttk.Frame):
         ).pack(side="left")
         # revealed by finish(); removes the panel + clears its temp
         self._close_btn = rounded_button(
-            header, "✕ Close", command=self._do_close,
+            header, "✕ Close", icon_name="close", command=self._do_close,
             kind="danger-outline", width=76,
         )
         # a folder-based job (ToolPanel / AiCheckPanel) owns its OWN
@@ -125,7 +125,7 @@ class JobPanel(ttk.Frame):
         self.btn_pause: ctk.CTkButton | None = None
         if self._on_pause is not None:
             self.btn_pause = rounded_button(
-                header, "Pause", command=partial(self._on_pause, kind),
+                header, "Pause", icon_name="pause", command=partial(self._on_pause, kind),
                 kind="secondary", width=70,
             )
             self.btn_pause.pack(side="right", padx=(0, 6))
@@ -355,12 +355,12 @@ class DashPanel(JobPanel):
         ).pack(side="left")
         rounded_button(
             hdr, "Show", command=self._show_selected, kind="link",
-            icon_name="right", compound="right",
+            icon_name="next", compound="right",
         ).pack(side="right")
         # F3 (owner 2026-07-29): the ONLY wipe surface — Start never
         # clears the table any more (begin_run appends/continues)
         rounded_button(
-            hdr, "Clear", command=self._confirm_clear, kind="link",
+            hdr, "Clear", icon_name="clear", command=self._confirm_clear, kind="link",
         ).pack(side="right", padx=(0, 6))
         # the per-step restore filmstrip (GUI rework Phase 9) — a
         # SEPARATE button from 'Show' above (same focused-row idiom,
@@ -369,14 +369,14 @@ class DashPanel(JobPanel):
         # dedicated icon exists yet for "restore a pipeline stage", so
         # this is plain text (flagged in the phase report).
         rounded_button(
-            hdr, "Steps…", command=self._show_steps, kind="link",
+            hdr, "Steps…", icon_name="restore", command=self._show_steps, kind="link",
         ).pack(side="right", padx=(0, 6))
         # the parallel Checker AI's per-row report (GUI rework Phase
         # 16) — a THIRD separate surface from 'Show' (prompt+image) and
         # 'Steps…' (pipeline restore), same focused-row idiom, never
         # overloaded onto either (mirrors _show_steps's own reasoning)
         rounded_button(
-            hdr, "Check…", command=self._show_check, kind="link",
+            hdr, "Check…", icon_name="check", command=self._show_check, kind="link",
         ).pack(side="right", padx=(0, 6))
         # the tiny badge legend — one ●+label per config.BADGES entry,
         # each in its own badge colour (theme-agnostic mid-tones, so ONE

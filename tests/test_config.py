@@ -288,11 +288,13 @@ def test_menu_tiles_have_a_label_description_and_a_real_icon_file():
     for tile in MENU_TILES:
         assert tile.label.strip()
         assert tile.description.strip()
-        svg = _ICONS_DIR / f"{tile.icon}.svg"
-        png = _ICONS_DIR / f"{tile.icon}.png"
-        assert svg.is_file() or png.is_file(), (
-            f"{tile.id}: no assets/icons/{tile.icon}.(svg|png)"
-        )
+        # a tile's icon is a BARE STEM; since owner 2026-08-04 the marks
+        # live in kinship folders (jobs/ nav/ files/ ...), so the file
+        # is looked up ANYWHERE under assets/icons, not just flat in it
+        assert any(
+            p.stem == tile.icon and p.suffix in (".svg", ".png")
+            for p in _ICONS_DIR.rglob("*")
+        ), f"{tile.id}: no assets/icons/**/{tile.icon}.(svg|png)"
         day, night = tile.color
         assert day.startswith("#") and len(day) == 7
         assert night.startswith("#") and len(night) == 7

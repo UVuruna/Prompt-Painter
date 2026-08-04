@@ -99,24 +99,24 @@ class CollectionsColumn(ttk.Frame):
             side="left", fill="x", expand=True
         )
         rounded_button(
-            row, "Browse…", command=gui._pick_out,
+            row, "Browse…", icon_name="browse", command=gui._pick_out,
         ).pack(side="left", padx=(8, 0))
 
         row = ttk.Frame(top)
         row.pack(fill="x", pady=(4, 0))
         self.btn_select = rounded_button(
-            row, "Select images…", command=gui._select_images,
+            row, "Select images…", icon_name="select", command=gui._select_images,
         )
         self.btn_select.pack(side="left")
         self.btn_prompt_image = rounded_button(
-            row, "Prompt + Image", command=gui._toggle_prompt_image,
+            row, "Prompt + Image", icon_name="reference", command=gui._toggle_prompt_image,
         )
         self.btn_prompt_image.pack(side="left", padx=(8, 0))
         # "Check" lives HERE (owner 2026-08-03), not in the top strip:
         # it validates the queue this very column shows, so it sits in
         # the same row as the other queue doors.
         self.btn_check = rounded_button(
-            row, "Check", command=gui._check_sheets,
+            row, "Check", icon_name="check", command=gui._check_sheets,
         )
         self.btn_check.pack(side="left", padx=(8, 0))
 

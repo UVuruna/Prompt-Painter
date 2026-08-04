@@ -43,7 +43,9 @@ answers itself — both hosts render the same queue).
   (`SHEETS_DIR`, `theme_pair`); `painter.ai` (lazy, in the workers);
   `painter.sheet_parser` (`parse_sheet` — the Save re-validation)
 - [Model Picker Row](model_picker.md) — the TEXT purpose's picker
-- [Icons](icons.md) — `icon("ai")` (the header logo)
+- [Icons](icons.md) — `icon("sheetgen")` (the header logo — its OWN
+  mark since owner 2026-08-04; it used to share `ai.png` with the
+  image checker, so nothing on screen told the two AI doors apart)
 - [The Theme Engine](theme.md) — `skin_text` (the request/draft boxes)
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`/
   `rounded_entry`/`tk_font`
