@@ -320,14 +320,16 @@ def test_submit_with_image_sequence_chatgpt_hidden_input():
     assert loc["file_input"].set_files == "C:/out/hero.png"
     calls = page.calls
     i_plus = calls.index(("click", "plus"))
-    i_option = calls.index(("click", "option"))
     i_files = calls.index(
         ("set_input_files", "file_input", "C:/out/hero.png")
     )
     i_text = calls.index(("insert_text", "put the hero in the scene"))
     i_send = calls.index(("click", "send"))
-    # a person's path: expand "+", pick add-image, attach, THEN paste+send
-    assert i_plus < i_option < i_files < i_text < i_send
+    # a person's path: expand "+", attach, THEN paste+send. The
+    # add-image ROW is never clicked when the input is already there —
+    # that click opens the native OS dialog (owner 2026-08-04)
+    assert ("click", "option") not in calls
+    assert i_plus < i_files < i_text < i_send
 
 
 def test_submit_with_image_sequence_gemini_file_chooser():
@@ -347,6 +349,21 @@ def test_submit_with_image_sequence_gemini_file_chooser():
     i_text = calls.index(("insert_text", "put the hero in"))
     i_send = calls.index(("click", "send"))
     assert i_plus < i_option < i_files < i_text < i_send
+
+
+def test_submit_with_image_lazy_input_falls_back_to_the_chooser():
+    """A menu that renders its <input type=file> only on the row click
+    still attaches: the driver clicks the row inside file-chooser
+    interception, so a native dialog is CONSUMED, never left open."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    _wire_attach(site, page, with_input=False)
+    driver = _driver(site, page)
+
+    driver.submit_with_image("C:/out/hero.png", "put the hero in")
+
+    assert page.chooser_files == "C:/out/hero.png"
+    assert ("click", "option") in page.calls
 
 
 def test_submit_with_image_list_passes_all_paths_in_order():
@@ -393,9 +410,9 @@ def test_submit_with_image_attaches_before_typing():
         if call[0] in ("set_input_files", "file_chooser_set_files"):
             break
         before_upload.append(call)
-    # only the "+" expand and the add-image click happen before upload —
-    # no prompt-box interaction starts early
-    assert before_upload == [("click", "plus"), ("click", "option")]
+    # only the "+" expand happens before upload — no prompt-box
+    # interaction starts early
+    assert before_upload == [("click", "plus")]
 
 
 def test_submit_with_image_waits_for_the_preview_before_sending():

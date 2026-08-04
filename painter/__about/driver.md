@@ -78,11 +78,19 @@ impossible. See the flow diagram for the full state machine.
    input-image sheet entries (the `← \`ref\`` reference photo — "put
    THIS character into that scene") and by WEBSITE FIX (re-attaching a
    flagged output for a focused correction). Acts like a PERSON: walk
-   `attach_menu_path` — EXPAND the "+" menu, then click the add-image
-   option — each step `_hesitate()`-paced. Then attach the file(s): if
-   the site exposes `file_input` (ChatGPT's `#upload-photos`),
-   `set_input_files` on it directly; else (Gemini) the option opens
-   the OS dialog, caught with `page.expect_file_chooser()`. Then WAIT
+   `attach_menu_path` — EXPAND the "+" menu — each step
+   `_hesitate()`-paced. Then attach the file(s): if the site exposes
+   `file_input` (ChatGPT's `#upload-photos`) and it is ALREADY in the
+   DOM once the menu is open, `set_input_files` on it directly and
+   close the menu with Escape — the add-image ROW is deliberately NOT
+   clicked, because ChatGPT's "Add photos & files" row IS the "Upload
+   from computer" action and its click opens the NATIVE OS file dialog
+   that Playwright cannot close (owner 2026-08-04: every attach left an
+   Explorer window standing open beside the browser). Only a menu whose
+   input renders lazily falls back to clicking the row — wrapped in
+   `expect_file_chooser()` so a dialog that does open is consumed, with
+   a second fallback to the revealed input on chooser timeout. Gemini
+   (no `file_input`) keeps the plain chooser-interception path. Then WAIT
    for the composer's `attach_preview` before sending. Raises
    `AttachNotConfigured` immediately while the site's
    `attach_menu_path` is empty. A send-button reload recovery for

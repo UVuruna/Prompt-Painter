@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from playwright.sync_api import Locator, Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from painter.config import (
     MIN_IMAGE_PX,
@@ -697,21 +698,44 @@ class SiteDriver:
             self._hesitate()
             control.click()
             self._hesitate()
-        option = self._require(steps[-1], "the add-image menu option")
         if self.site.file_input:
-            # the option drives a hidden <input type=file> — click it
-            # (opens the submenu / reveals the input), then set files.
-            # File inputs are routinely hidden by design, so the lookup
-            # does not filter on is_visible().
-            self._hesitate()
-            option.click()
-            self._hesitate()
-            file_input = self._require(
-                self.site.file_input, "the file input",
-                require_visible=False,
+            # the option drives a hidden <input type=file>. LIVE-RUN FIX
+            # (owner 2026-08-04): ChatGPT's "Add photos & files" row is
+            # itself the "Upload from computer" action — clicking it
+            # opens the NATIVE OS file dialog, which Playwright cannot
+            # close, so every attach left an Explorer window standing
+            # open beside the browser. The input is already in the DOM
+            # once the "+" menu is expanded, so we set files on it
+            # DIRECTLY and never click the row. The click stays only as
+            # the fallback for a menu that renders its input lazily —
+            # wrapped in file-chooser interception so a dialog that does
+            # open is consumed, not left on screen.
+            file_input = self._query(
+                self.site.file_input, require_visible=False
             )
-            file_input.set_input_files(image_path)
+            if file_input is None:
+                option = self._require(
+                    steps[-1], "the add-image menu option"
+                )
+                self._hesitate()
+                try:
+                    with self.page.expect_file_chooser() as chooser:
+                        option.click()
+                    chooser.value.set_files(image_path)
+                except PlaywrightTimeoutError:
+                    # the click only REVEALED the input, no dialog
+                    self._require(
+                        self.site.file_input, "the file input",
+                        require_visible=False,
+                    ).set_input_files(image_path)
+            else:
+                file_input.set_input_files(image_path)
+                # the "+" menu is still expanded — close it so the
+                # composer is clean before the prompt is typed
+                self.page.keyboard.press("Escape")
+            self._hesitate()
         else:
+            option = self._require(steps[-1], "the add-image menu option")
             # no exposed input — the option opens the OS file dialog;
             # Playwright intercepts it and we set the file programmatically
             self._hesitate()
