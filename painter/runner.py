@@ -487,11 +487,18 @@ def run_sheet(
         The send timestamp marks when SEND was pressed, so the caller
         can time the pure generation (send -> image) apart from the
         input hesitation inside the submit.
+
+        ``log`` is passed into the SUBMIT calls too (owner 2026-08-04):
+        it used to be omitted, so every submit-phase diagnostic — the
+        pre-send busy wait, the send retry, the send-button reload
+        recovery — went to stdout ``print`` and was INVISIBLE in the GUI
+        and the report. A live run showed 7 unexplained silent minutes
+        because of exactly that.
         """
         if attach:
-            driver.submit_with_image(attach, text)
+            driver.submit_with_image(attach, text, log)
         else:
-            driver.submit_prompt(text)
+            driver.submit_prompt(text, log)
         t_send = time.monotonic()
         driver.await_done(log)
         return driver.extract_image(), t_send

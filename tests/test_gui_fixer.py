@@ -752,7 +752,7 @@ class _FakeSiteDriverConfigured:
         self.calls.append("attach")
         return "tab"
 
-    def submit_with_image(self, image_path, prompt):
+    def submit_with_image(self, image_path, prompt, log=print):
         self.calls.append(("submit_with_image", image_path, prompt))
 
     def await_done(self, log=print):
@@ -808,7 +808,7 @@ class _FakeSiteDriverNotConfigured:
     def attach(self):
         return "tab"
 
-    def submit_with_image(self, image_path, prompt):
+    def submit_with_image(self, image_path, prompt, log=print):
         raise driver_module.AttachNotConfigured("attach_menu_path empty")
 
     def close(self):

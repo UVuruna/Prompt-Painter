@@ -31,7 +31,22 @@ impossible. See the flow diagram for the full state machine.
 
 1. `submit_prompt(prompt, log=print)` — `_ensure_ready` (stuck-busy
    guard) → `capture_baseline()` → `_paste_and_send` →
-   `_confirm_sent`. EVERY DOM interaction is preceded by
+   `_confirm_sent`. **The `log` is not optional in practice** (owner
+   2026-08-04): `run_sheet` threads its own run log in, so every
+   diagnostic below lands in the GUI and the report. It used to be
+   omitted at the call site — the whole submit phase printed to stdout
+   and a live ChatGPT run showed 7 unexplained SILENT minutes.
+
+   **The pre-send busy wait** (`_ensure_ready`) never sends over a busy
+   composer, and has its OWN budget `busy_stuck_timeout_s` (90s) —
+   never the far longer `generation_timeout_s` it used to borrow (the
+   7 minutes above). Two branches, both loud: a busy signal that
+   `await_done` already saw STILL SET at the moment OUR image loaded is
+   provably a stuck stop button (`_busy_known_stuck`) and the page is
+   refreshed AT ONCE, no wait; any other busy signal may be a previous
+   generation honestly finishing, so it gets the full budget (progress
+   logged every `progress_log_interval_s`, with the budget named) and
+   then a refresh. EVERY DOM interaction is preceded by
    `_hesitate()` — a random human-like pause from the config's
    action-delay range, so nothing ever fires machine-instant. The
    typing body lives in `_type_into_box(prompt)` (clears the box
@@ -78,7 +93,9 @@ impossible. See the flow diagram for the full state machine.
    stuck button and could not tell our generation from a leftover one.
    Each poll (bounded by the hard `generation_timeout_s`) looks for an
    assistant turn NEWER than the baseline: a loaded image with a fresh
-   src = done (even mid-stuck-button); turn text is scanned for
+   src = done (even mid-stuck-button — and when the busy signal IS
+   still set at that moment, `_busy_known_stuck` records it so the NEXT
+   submit refreshes instead of waiting it out); turn text is scanned for
    image-failed / refusal / quota markers; final text with NO image
    and the busy signal gone raises `NoImage(had_text=True)`; nothing
    new + no busy signal past `busy_appear_timeout_s` raises

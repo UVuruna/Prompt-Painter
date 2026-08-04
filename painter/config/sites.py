@@ -31,6 +31,14 @@ class Timing:
     # the previous item blocks a new send — wait this long for it to
     # clear, then page-REFRESH (never send over a busy composer)
     busy_clear_grace_s: float = 6.0
+    # LIVE-RUN FIX (owner 2026-08-04): the pre-send busy wait's OWN
+    # budget. It used to borrow generation_timeout_s (420s), so a stuck
+    # ChatGPT stop button cost a real run 7 SILENT minutes between two
+    # items. A previous generation that is honestly still running
+    # finishes well inside this; anything longer is a stuck button and
+    # earns a page refresh. (A button already known stuck — busy still
+    # set when OUR image loaded — skips the wait entirely.)
+    busy_stuck_timeout_s: float = 90.0
     # F1 protocol: after the send click, "SENT" must be CONFIRMED
     # (composer emptied + our text visible as the new user turn)
     # within this window; at half of it the send is retried once

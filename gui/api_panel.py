@@ -831,7 +831,13 @@ class ApiImageAdapter:
     def close(self) -> None:
         pass
 
-    def submit_prompt(self, prompt: str) -> None:
+    def submit_prompt(
+        self, prompt: str, log: Callable[[str], None] = print,
+    ) -> None:
+        # ``log`` is unused here (the API job has no composer to narrate)
+        # but MUST be accepted: run_sheet's generate_one passes it
+        # positionally since 2026-08-04 — the same shape as
+        # submit_with_image/await_done below.
         self._prompt = prompt
         # a plain text submit never carries a stale attach forward —
         # without this, a PREVIOUS item's submit_with_image would leak

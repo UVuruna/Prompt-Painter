@@ -417,7 +417,7 @@ class CheckerFixerMixin:
         driver = SiteDriver(SITES[site_key], TIMING, CDP_URL)
         try:
             driver.attach()
-            driver.submit_with_image(str(live), prompt)
+            driver.submit_with_image(str(live), prompt, log)
             driver.await_done(log=log)
             fixed = driver.extract_image()
         except AttachNotConfigured as exc:

@@ -293,7 +293,7 @@ class _FakeAttachableDriver:
     def close(self):
         self.closed = True
 
-    def submit_prompt(self, prompt):
+    def submit_prompt(self, prompt, log=print):
         self.submitted.append(prompt)
 
     def await_done(self, log=print):

@@ -223,6 +223,13 @@ class SiteDriver:
         # F1 protocol: the pre-submit snapshot every await/extract is
         # judged against; set by submit_prompt/submit_with_image
         self._baseline: Baseline | None = None
+        # LIVE-RUN FIX (owner 2026-08-04): True when the LAST await_done
+        # returned on the image while the busy signal was STILL set —
+        # i.e. the site's stop button is provably STUCK, not a running
+        # generation. The next _ensure_ready then refreshes at once
+        # instead of honestly waiting the signal out (that wait cost a
+        # real run 7 minutes between two items).
+        self._busy_known_stuck: bool = False
 
     # --- lifecycle ----------------------------------------------------
 
@@ -377,28 +384,62 @@ class SiteDriver:
         STUCK button). LIVE-RUN HOTFIX (owner 2026-07-29): a busy
         signal here can be a PREVIOUS generation still honestly
         running (e.g. after a per-item skip) — refreshing after a
-        short grace KILLED it mid-work. Now the driver WAITS it out,
-        up to the full generation timeout (progress logged); only a
-        busy signal that outlives even that is treated as stuck and
-        cleared with a refresh."""
+        short grace KILLED it mid-work. Now the driver WAITS it out —
+        but only for ``busy_stuck_timeout_s``, its OWN budget, never
+        the full ``generation_timeout_s``.
+
+        LIVE-RUN FIX (owner 2026-08-04, read off a real run's log): the
+        previous item's stop button stayed set AFTER its image had been
+        saved, and this wait honestly burned the whole 420s generation
+        timeout — 7 silent minutes between two ChatGPT items. Two
+        changes: (a) when ``await_done`` already saw the busy signal set
+        at the moment OUR image loaded, the button is PROVABLY stuck and
+        the page is refreshed AT ONCE — no wait at all; (b) an otherwise
+        unexplained busy signal gets ``busy_stuck_timeout_s`` and then a
+        refresh. Every branch says out loud what it is doing and how
+        long it intends to wait."""
         if not self._busy():
+            self._busy_known_stuck = False
+            return
+        t = self._timing
+        if self._busy_known_stuck:
+            log(
+                f"    {self.site.name}: busy signal STILL set although"
+                " our previous image already arrived — the stop button"
+                " is stuck, not a running generation; refreshing the"
+                " page now instead of waiting it out"
+            )
+            self._busy_known_stuck = False
+            self.refresh(log)
             return
         log(
             f"    {self.site.name}: site still busy before send —"
-            " waiting for the previous generation to finish"
+            " waiting up to"
+            f" {t.busy_stuck_timeout_s:.0f}s for the previous"
+            " generation to finish (then a page refresh)"
         )
-        deadline = time.monotonic() + self._timing.generation_timeout_s
-        last_log = time.monotonic()
+        start = time.monotonic()
+        deadline = start + t.busy_stuck_timeout_s
+        last_log = start
         while time.monotonic() < deadline:
             if not self._busy():
+                log(
+                    "    the previous generation finished after"
+                    f" {time.monotonic() - start:.0f}s — sending now"
+                )
                 return
             now = time.monotonic()
-            if now - last_log >= self._timing.progress_log_interval_s:
-                log("    ... still busy (previous generation running)")
+            if now - last_log >= t.progress_log_interval_s:
+                log(
+                    "    ... still busy before send"
+                    f" ({now - start:.0f}s of"
+                    f" {t.busy_stuck_timeout_s:.0f}s)"
+                )
                 last_log = now
-            time.sleep(self._timing.poll_interval_s)
+            time.sleep(t.poll_interval_s)
         log(
-            "    busy signal outlived the whole generation timeout —"
+            "    busy signal outlived its"
+            f" {t.busy_stuck_timeout_s:.0f}s budget — treating it as"
             " stuck; refreshing the page before send"
         )
         self.refresh(log)
@@ -732,7 +773,12 @@ class SiteDriver:
             busy = self._busy()
             if turn is not None:
                 if self._turn_image(turn) is not None:
-                    return  # our image is loaded — done, button ignored
+                    # our image is loaded — done, button ignored. When
+                    # the busy signal is STILL set at this moment it is
+                    # provably stuck (our result exists), so record it
+                    # for the next _ensure_ready (owner 2026-08-04).
+                    self._busy_known_stuck = busy
+                    return
                 text = self._safe_text(turn)
                 if text:
                     self._check_degrade_banner()

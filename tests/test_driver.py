@@ -968,13 +968,13 @@ def test_sites_declare_a_user_turn_selector():
 def test_ensure_ready_refreshes_over_a_stuck_busy_signal():
     """F1 root cause 1 (owner 2026-07-29): a busy signal STILL PRESENT
     from the previous item must never be sent over. LIVE-RUN HOTFIX:
-    the driver now WAITS OUT the whole generation window first (a busy
-    site may honestly be finishing the previous item — refreshing
-    early KILLED it mid-work); only a busy signal that outlives even
-    that is stuck, and only then does the pre-send REFRESH happen —
-    still strictly BEFORE the send click."""
+    the driver now WAITS OUT a busy window first (a busy site may
+    honestly be finishing the previous item — refreshing early KILLED
+    it mid-work); only a busy signal that outlives ``busy_stuck_timeout_s``
+    is stuck, and only then does the pre-send REFRESH happen — still
+    strictly BEFORE the send click."""
     site = SITES["gemini"]
-    timing = replace(FAST, generation_timeout_s=0.05)
+    timing = replace(FAST, busy_stuck_timeout_s=0.05)
     page = FakePage()
     page.locators[site.busy_signal[0]] = PresentLocator()  # never clears
     prompt_box = FakeLocator("prompt_box", page)
@@ -992,6 +992,94 @@ def test_ensure_ready_refreshes_over_a_stuck_busy_signal():
     i_send = page.calls.index(("click", "send"))
     assert i_reload < i_send
     assert any("stuck" in line.lower() for line in logs)
+
+
+# --- the 7-silent-minutes bug (owner 2026-08-04) ----------------------
+# A live ChatGPT run lost 7m06s between two items: the previous item's
+# stop button stayed set AFTER its image was saved, and the pre-send
+# busy wait honestly burned the whole 420s generation_timeout_s — with
+# NOTHING in the GUI log, because run_sheet called submit_prompt without
+# passing its log. Both halves get a regression test.
+
+def test_ensure_ready_busy_wait_uses_its_own_budget_not_generation():
+    """The pre-send busy wait must be bounded by ``busy_stuck_timeout_s``
+    — never by the (far longer) ``generation_timeout_s`` it used to
+    borrow."""
+    site = SITES["gemini"]
+    timing = replace(
+        FAST, busy_stuck_timeout_s=0.05, generation_timeout_s=600.0
+    )
+    page = FakePage()
+    page.locators[site.busy_signal[0]] = PresentLocator()  # never clears
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)
+    page.locators[site.prompt_box[0]] = prompt_box
+    page.locators[site.send_button[0]] = send
+    _wire_send_flow(site, page, prompt_box, send)
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+
+    started = time.monotonic()
+    driver.submit_prompt("hello gemini", lambda s: None)
+
+    # bounded by busy_stuck_timeout_s (0.05s), not generation (600s)
+    assert time.monotonic() - started < 30.0
+    assert ("reload",) in page.calls
+
+
+def test_ensure_ready_refreshes_at_once_when_busy_is_known_stuck():
+    """When ``await_done`` returned on OUR loaded image while the busy
+    signal was STILL set, the stop button is PROVABLY stuck — the next
+    submit must refresh IMMEDIATELY instead of waiting the signal out
+    (the 7 lost minutes)."""
+    site = SITES["gemini"]
+    timing = replace(FAST, busy_stuck_timeout_s=600.0)
+    page = FakePage()
+    page.locators[site.busy_signal[0]] = PresentLocator()  # never clears
+    prompt_box = FakeLocator("prompt_box", page)
+    send = FakeLocator("send", page)
+    page.locators[site.prompt_box[0]] = prompt_box
+    page.locators[site.send_button[0]] = send
+    _wire_send_flow(site, page, prompt_box, send)
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    driver._busy_known_stuck = True  # what await_done recorded
+    logs: list[str] = []
+
+    started = time.monotonic()
+    driver.submit_prompt("hello gemini", logs.append)
+
+    # no wait at all, despite a 600s busy budget
+    assert time.monotonic() - started < 30.0
+    assert ("reload",) in page.calls
+    assert any("stuck" in line.lower() for line in logs)
+    # the flag is consumed, never left latched for the next item
+    assert driver._busy_known_stuck is False
+
+
+def test_await_done_records_a_stuck_busy_signal_for_the_next_submit():
+    """The flag the fix above depends on: an image that loads while the
+    busy signal is still set marks the button stuck."""
+    site = SITES["chatgpt"]
+    timing = replace(
+        TIMING,
+        poll_interval_s=0.01,
+        progress_log_interval_s=1000.0,
+        busy_appear_timeout_s=1.0,
+        generation_timeout_s=5.0,
+    )
+    page = FakePage()
+    img = ImageLocator("blob:fresh")
+    turn = TurnLocator(images={site.result_image[0]: img})
+    page.locators[site.response_container[0]] = ContainerLocator([turn])
+    page.locators[site.busy_signal[0]] = PresentLocator()  # never clears
+    driver = SiteDriver(site, timing, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src=None)
+
+    driver.await_done(log=lambda s: None)
+
+    assert driver._busy_known_stuck is True
 
 
 def test_type_into_box_retypes_once_on_composer_mismatch():

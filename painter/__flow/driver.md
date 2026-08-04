@@ -9,8 +9,9 @@
 flowchart TB
     subgraph SUBMIT["submit_prompt(prompt) / submit_with_image(image, prompt)"]
         direction TB
-        S0[_ensure_ready: wait out a busy
-        composer, refresh only if stuck] --> S1[capture_baseline:
+        S0[_ensure_ready: known-stuck button
+        refreshes at once, else wait up to
+        busy_stuck_timeout_s then refresh] --> S1[capture_baseline:
         turn_count, last_img_src]
         S1 --> S2{submit_with_image?}
         S2 -- yes --> S3[_attach_image: walk '+' menu,
@@ -86,6 +87,7 @@ Pseudocode (language-neutral):
         WHILE elapsed < generation_timeout_s:
             turn = last assistant turn IF conversation grew past baseline ELSE None
             IF turn has a loaded image with src != baseline.last_img_src:
+                busy_known_stuck = busy               # a still-set button IS stuck
                 RETURN                               # done
             IF turn has text:
                 IF degrade_banner up:               RAISE ModelDegraded

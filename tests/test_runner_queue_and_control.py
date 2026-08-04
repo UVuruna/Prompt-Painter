@@ -608,3 +608,32 @@ def test_stop_interrupts_a_paused_run(tmp_path, monkeypatch):
         encoding="utf-8"
     )
     assert "stopped on request" in report
+
+
+def test_submit_phase_diagnostics_reach_the_run_log(tmp_path):
+    """The 7-silent-minutes bug's second half (owner 2026-08-04):
+    ``run_sheet`` used to call ``submit_prompt``/``submit_with_image``
+    WITHOUT its log, so every submit-phase diagnostic (the pre-send busy
+    wait, the send retry, the send-button reload recovery) went to
+    stdout ``print`` and was invisible in the GUI and the report — a
+    real run showed 7 unexplained silent minutes because of it. The log
+    must now be threaded into BOTH submit calls."""
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+
+    class TalkingDriver(FakeDriver):
+        def submit_prompt(self, prompt, log=print):
+            log("    gemini: site still busy before send — waiting")
+            super().submit_prompt(prompt, log)
+
+        def submit_with_image(self, image_path, prompt, log=print):
+            log("    gemini: site still busy before send — waiting")
+            super().submit_with_image(image_path, prompt, log)
+
+    logs: list[str] = []
+    run_sheet(
+        sheet, TalkingDriver(SITES["gemini"]), out, "gemini", FAST,
+        log=logs.append,
+    )
+
+    assert any("still busy before send" in line for line in logs)
