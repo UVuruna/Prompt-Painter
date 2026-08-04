@@ -49,6 +49,8 @@ from __future__ import annotations
 import threading
 import tkinter as tk
 from tkinter import ttk
+
+import customtkinter as ctk
 from types import SimpleNamespace
 
 import pytest
@@ -212,8 +214,12 @@ class FakeGui:
 
         self._controls_box = ttk.Frame(root)
         self._compact_box = ttk.Frame(root)
-        # the real top-strip title label _render_title writes into
-        self._title_label = ttk.Label(root, text="PromptPainter")
+        # the real top-strip title BOX _render_title writes into: the
+        # open card's logo + its name (owner 2026-08-04)
+        self._title_box = ttk.Frame(root)
+        self._title_icon = ctk.CTkLabel(self._title_box, text="")
+        self._title_label = ttk.Label(self._title_box, text="PromptPainter")
+        self._title_label.pack(side="left")
         # ALL SEVEN persistent settings-panel stand-ins (bg/crop, GUI
         # rework Phase 13; upscale/aspect, Phase 14; the AI checker,
         # Phase 15; API Image GEN, Phase 19; New Collection (AI),

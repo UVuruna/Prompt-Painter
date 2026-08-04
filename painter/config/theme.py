@@ -233,6 +233,21 @@ RESIZE_SETTLE_MS = 150
 SWITCH_TRACK_NIGHT_SVG = "switch_night"  # OFF track: dark #212736 starfield pill
 SWITCH_TRACK_DAY_SVG = "switch_day"      # ON track: sky #5ea7ee + clouds pill
 
+# WHICH sun/moon the knob (and the theme-flip cover icon) uses — the
+# owner keeps BOTH versions on disk and picks here (owner 2026-07-16,
+# reaffirmed 2026-08-04 when he chose his own SVGs):
+#   "svg"   -> assets/icons/theme/{sun,moon}.svg, HIS artwork, the
+#              same files his website uses beside the two track pills
+#   "drawn" -> the in-code PIL renderers below (radial-gradient sphere,
+#              7 craters with lit rims, terminator shading, mottling)
+# Every SWITCH_MOON_*/SWITCH_SUN_* constant below serves "drawn" and is
+# deliberately KEPT while "svg" is active — flipping this one value is
+# the whole switch-back, no code edit (owner: "sačuvaj obe verzije pa
+# ćemo da odlučimo kad ćemo koje koristiti").
+SWITCH_KNOB_SOURCE = "svg"
+SWITCH_SUN_SVG = "sun"    # stem, resolved in assets/icons/theme/
+SWITCH_MOON_SVG = "moon"
+
 # both knobs are lit from this point (fraction of the knob box) so the
 # radial gradient reads as a 3D sphere, not a flat disc
 SWITCH_KNOB_HILIGHT = (0.40, 0.36)

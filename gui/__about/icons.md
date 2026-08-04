@@ -63,6 +63,13 @@ same SVG->PIL rasterizer as the button icons:
   the SUN is a gold gradient disc over a blurred glow;
 - the track-pill rasterizer (`_render_switch_track`, the owner's
   website switch SVGs resized to the exact pill box);
+- `render_knob(kind, d, ss)` — WHICH sun/moon the switch and the
+  theme-flip cover wear, per `config.SWITCH_KNOB_SOURCE` (owner
+  2026-08-04): `"svg"` (the default now) rasterizes HIS OWN
+  `theme/{sun,moon}.svg`, the same artwork his website uses beside
+  the two track pills; `"drawn"` keeps the in-code renderers below.
+  Both versions stay on disk and in code — flipping that ONE config
+  value is the whole switch-back, no code edit;
 - the big theme-cover icon renderer (`_render_theme_cover_icon`,
   reusing the same knob renderers at `SWITCH_COVER_ICON_FRAC` — 30% —
   of the theme-flip cover window's smaller dimension).
@@ -89,8 +96,8 @@ other `gui` submodule.
   optional icon)
 - [The Theme Engine](theme.md) — `_render_theme_cover_icon` (the
   big sun/moon riding the theme-flip snapshot cover)
-- [DayNightSwitch](switch.md) — `_render_sun_knob`/
-  `_render_moon_knob`/`_render_switch_track`
+- [DayNightSwitch](switch.md) — `render_knob` (the SOURCE-aware door)
+  + `_render_switch_track`
 
 ## Functions
 
@@ -106,6 +113,10 @@ other `gui` submodule.
 - `_render_moon_knob(d_px, ss) -> Image.Image` /
   `_render_sun_knob(d_px, ss) -> Image.Image` — the switch knob art
   (see Purpose above).
+- `render_knob(kind, d_px, ss) -> Image.Image` — the sun/moon from
+  whichever SOURCE `config.SWITCH_KNOB_SOURCE` names ("svg" = the
+  owner's `theme/{sun,moon}.svg`, "drawn" = the two renderers above).
+  The ONE door the switch and the theme cover both go through.
 - `_render_theme_cover_icon(target_name, min_dim) -> Image.Image` —
   the big sun (day) or moon (night) for the theme-flip cover.
 - `_render_switch_track(stem, w, h) -> Image.Image` — one track pill,

@@ -25,6 +25,7 @@ from painter.config import (
     MENU_TILE_COLS,
     MENU_TILE_GAP_PX,
     MENU_TILE_H,
+    JOB_ICON_PX,
     MENU_TILE_ICON_PX,
     MENU_TILE_RADIUS,
     MENU_TILE_W,
@@ -258,6 +259,8 @@ class IconBar(ttk.Frame):
     ):
         super().__init__(parent, padding=(0, 4))
         self._buttons: dict[str, ctk.CTkButton] = {}
+        self._active_ids: set[str] = set()   # tiles with a live job
+        self._selected: str | None = None    # the tile whose card is open
         self._icon_only = False
         self._full_w = 0  # measured lazily (first <Configure> in text mode)
         self._home = rounded_button(
@@ -267,6 +270,9 @@ class IconBar(ttk.Frame):
         for tile in MENU_TILES:
             btn = rounded_button(
                 self, tile.label, icon_name=tile.icon,
+                # the functionality marks render BIGGER than an action
+                # glyph — they carry a picture (owner 2026-08-04)
+                icon_px=JOB_ICON_PX,
                 command=partial(on_select, tile.id) if tile.enabled else None,
             )
             btn.pack(side="left", padx=(0, ICON_BAR_GAP_PX))
@@ -317,9 +323,26 @@ class IconBar(ttk.Frame):
         """Recolour every ENABLED tile: FILLED while its id is in
         ``active_ids``, a quiet outline otherwise. Called by
         ``PainterGui`` after every change to the running job set."""
+        self._active_ids = set(active_ids)
+        self._restyle()
+
+    def set_selected(self, tile_id: str | None) -> None:
+        """Which card is OPEN right now (owner 2026-08-04): it wears
+        the SAME filled/inverted state a running job does, so the strip
+        answers "where am I" the way the title does — two readings of
+        one fact, never two sources of it. ``PainterGui`` calls this
+        from the ONE layout packer, off the same state the title reads
+        (see ``ViewMixin._render_title``)."""
+        self._selected = tile_id
+        self._restyle()
+
+    def _restyle(self) -> None:
+        """The ONE place a tile's look is decided — filled when it is
+        the open card OR has a live job, quiet outline otherwise. Both
+        inputs are held as state so either can change alone without the
+        other's caller having to know it."""
         for tile in MENU_TILES:
             if not tile.enabled:
                 continue
-            _style_icon_bar_button(
-                self._buttons[tile.id], tile.color, tile.id in active_ids
-            )
+            lit = tile.id in self._active_ids or tile.id == self._selected
+            _style_icon_bar_button(self._buttons[tile.id], tile.color, lit)

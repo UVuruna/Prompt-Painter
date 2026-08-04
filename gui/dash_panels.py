@@ -34,6 +34,7 @@ from painter import jobtemp
 from painter.config import (
     BADGES,
     JOB_LABEL,
+    JOB_ICON_PX,
     JOB_LOGO,
     JOBTEMP_CAP_BANNER_TEXT,
     badge_keys_for,
@@ -105,7 +106,7 @@ class JobPanel(ttk.Frame):
         # the coloured job NAME. The four tools got dedicated PNG icons
         # (owner 2026-07-19), replacing the old emoji marks.
         ctk.CTkLabel(
-            header, text="", image=icon(JOB_LOGO[kind]), width=24,
+            header, text="", image=icon(JOB_LOGO[kind], JOB_ICON_PX), width=JOB_ICON_PX + 2,
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 6))
         ctk.CTkLabel(

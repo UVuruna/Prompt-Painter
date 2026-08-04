@@ -27,6 +27,7 @@ import customtkinter as ctk
 from painter import filters
 from painter.config import (
     JOB_LABEL,
+    JOB_ICON_PX,
     JOB_LOGO,
     iter_images,
     selection_base_and_rels,
@@ -160,7 +161,7 @@ class ToolSettingsPanel(ttk.Frame):
         head = ttk.Frame(self)
         head.pack(fill="x")
         ctk.CTkLabel(
-            head, text="", image=icon(JOB_LOGO[self.slot]), width=22,
+            head, text="", image=icon(JOB_LOGO[self.slot], JOB_ICON_PX), width=JOB_ICON_PX + 2,
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(

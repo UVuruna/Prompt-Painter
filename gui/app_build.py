@@ -27,17 +27,21 @@ from functools import partial
 from pathlib import Path
 from tkinter import ttk
 
+import customtkinter as ctk
+
 from painter import jobtemp
 from painter.config import (
     DASH_MODE_GRID,
     DASH_MODE_SLIDER,
     DEFAULT_OUT_DIR,
+    JOB_ICON_PX,
     JOB_ORDER,
     JOB_TOOL_KINDS,
     MENU_TILES,
     RESIZE_SETTLE_MS,
     SITES,
     THEMES,
+    theme_pair,
 )
 from painter.settings import load_settings
 from . import widgets
@@ -469,11 +473,24 @@ class BuildMixin:
         # it; a packed spacer still claims the strip's width/height so
         # the placed label never has to carry the layout.
         ttk.Frame(self._top_strip).pack(side="left", expand=True, fill="both")
+        # the title is a BOX, not a bare label (owner 2026-08-04): the
+        # open card's own LOGO rides beside its name, so the strip says
+        # where you are twice over — mark and word. The box is what gets
+        # placed (centred on the whole strip); the two children pack
+        # inside it, so the pair stays centred as the name changes
+        # length. The image lives on a CTkLabel because CTkImage is not
+        # a Tk PhotoImage — the same pairing every panel header uses.
+        self._title_box = ttk.Frame(self._top_strip)
+        self._title_icon = ctk.CTkLabel(
+            self._title_box, text="", width=JOB_ICON_PX + 2,
+            fg_color="transparent", bg_color=theme_pair("bg"),
+        )
         self._title_label = ttk.Label(
-            self._top_strip, text="PromptPainter", style="Head.TLabel",
+            self._title_box, text="PromptPainter", style="Head.TLabel",
             anchor="center",
         )
-        self._title_label.place(relx=0.5, rely=0.5, anchor="center")
+        self._title_label.pack(side="left")
+        self._title_box.place(relx=0.5, rely=0.5, anchor="center")
         # F4g (owner 2026-07-29): the "Open Chrome (login)" button is
         # GONE — starting an agent ensures Chrome itself (launches it
         # with the automation profile when needed, opens the site tab,

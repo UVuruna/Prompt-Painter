@@ -34,7 +34,7 @@ from painter.config import (
     theme_pair,
 )
 
-from .icons import icon
+from .icons import ICON_TARGET_PX, icon
 
 
 ACTIVE_THEME = "night"
@@ -246,6 +246,7 @@ def rounded_button(
     compound: str = "left",
     width: int = 0,
     icon_edge: bool = False,
+    icon_px: int | None = None,
     **kwargs,
 ) -> ctk.CTkButton:
     """Every GUI button: a rounded CTkButton in the darkly palette —
@@ -265,7 +266,10 @@ def rounded_button(
         height=BTN_HEIGHT, corner_radius=BTN_RADIUS,
         font=ctk_font("bold"),
         image=(
-            icon(icon_name, tint=opts.get("text_color"))
+            icon(
+                icon_name, icon_px or ICON_TARGET_PX,
+                tint=opts.get("text_color"),
+            )
             if icon_name else None
         ),
         compound=compound, **opts,
@@ -815,9 +819,14 @@ def _style_icon_bar_button(
     next tool (IconBar itself disables the ONE permanently-disabled
     placeholder tile separately)."""
     if active:
+        # INVERTED (owner 2026-08-04): the accent becomes the FILL and
+        # the label takes the window's own background colour, so a
+        # lit/selected tile reads as a solid block of its own hue from
+        # across the room — not a bordered box with a white label that
+        # looked much like every other bordered box.
         btn.configure(
             fg_color=color, border_width=0,
-            hover_color=_darken_pair(color), text_color=status_pair("btn_text"),
+            hover_color=_darken_pair(color), text_color=theme_pair("bg"),
         )
     else:
         btn.configure(

@@ -42,7 +42,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import customtkinter as ctk
 
-from painter.config import SHEETS_DIR, theme_pair
+from painter.config import JOB_ICON_PX, SHEETS_DIR, theme_pair
 from .icons import icon
 from .model_picker import ModelPickerRow
 from .theme import skin_text
@@ -76,7 +76,8 @@ class SheetGenPanel(ttk.Frame):
         head = ttk.Frame(self)
         head.pack(fill="x")
         ctk.CTkLabel(
-            head, text="", image=icon("sheetgen"), width=22,
+            head, text="", image=icon("sheetgen", JOB_ICON_PX),
+            width=JOB_ICON_PX + 2,
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(

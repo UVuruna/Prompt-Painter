@@ -61,6 +61,12 @@ rename follows automatically). The generic app name "PromptPainter" is
 now the HOME page's own title only; the bare running dashboard (no
 card packed) reads "Dashboard".
 
+The title carries the card's own LOGO beside its name (`_title_icon`,
+at `config.JOB_ICON_PX`), and `_render_title` also hands the answer to
+`IconBar.set_selected` — so the strip lights the SAME card the title
+names, two readings of ONE fact rather than two sources that can
+drift.
+
 **Running view default is the DASHBOARD ALONE** (owner 2026-07-29,
 current behavior — supersedes the legacy `gui.md`'s account of Website
 GEN's controls auto-showing after Start): `_apply_running_layout`

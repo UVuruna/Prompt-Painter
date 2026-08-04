@@ -45,6 +45,7 @@ from painter.config import (
     FIXER_MODE_API,
     FIXER_MODE_CHOICES,
     JOBTEMP_KEEP_ALL_STEPS_DEFAULT,
+    JOB_ICON_PX,
     JOB_LOGO,
     NEW_CHAT_CHOICES,
     SITES,
@@ -167,7 +168,7 @@ class AgentPanel(ttk.Labelframe):
         # the labelframe title: the site's logo + name
         head = ttk.Frame(self)
         ctk.CTkLabel(
-            head, text="", image=icon(JOB_LOGO[site_key]), width=22,
+            head, text="", image=icon(JOB_LOGO[site_key], JOB_ICON_PX), width=JOB_ICON_PX + 2,
             fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         self._head_name = ttk.Label(head, text=site.name, style="Head.TLabel")
@@ -180,7 +181,7 @@ class AgentPanel(ttk.Labelframe):
         # names are joined in.
         self._extra_logos = [
             ctk.CTkLabel(
-                head, text="", image=icon(JOB_LOGO[key]), width=22,
+                head, text="", image=icon(JOB_LOGO[key], JOB_ICON_PX), width=JOB_ICON_PX + 2,
                 fg_color="transparent", bg_color=theme_pair("bg"),
             )
             for key in sorted(SITES)
@@ -833,7 +834,7 @@ class AgentPanel(ttk.Labelframe):
         filled/outline availability as the full panel's pair."""
         cluster = ttk.Frame(parent)
         ctk.CTkLabel(
-            cluster, text="", image=icon(JOB_LOGO[self.site_key]),
+            cluster, text="", image=icon(JOB_LOGO[self.site_key], JOB_ICON_PX),
             width=22, fg_color="transparent", bg_color=theme_pair("bg"),
         ).pack(side="left", padx=(0, 4))
         ttk.Label(

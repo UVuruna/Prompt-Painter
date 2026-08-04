@@ -46,6 +46,17 @@ Neither class decides what picking a tile DOES — both only call back
 into `PainterGui` (`_select_tile`/`_click_icon_bar_tile`;
 `on_menu=_request_menu` for HOME).
 
+**A tile is FILLED when it is the OPEN CARD or has a live job**
+(owner 2026-08-04). `set_active` (which jobs run) and `set_selected`
+(which card is on screen) each hold their own state and both feed
+ONE renderer, `_restyle` — so either can change alone without its
+caller knowing about the other. The filled state is INVERTED: the
+accent becomes the fill and the label takes the window background,
+so a lit tile reads as a solid block of its own hue rather than one
+more bordered box. `PainterGui` calls `set_selected` from the ONE
+layout packer, off the same state the title reads, so the strip and
+the title can never disagree about where you are.
+
 ## Connections
 
 ### Uses

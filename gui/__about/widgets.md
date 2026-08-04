@@ -59,7 +59,9 @@ imported name, which would freeze a stale copy at import time.
   `button_fill_pair`/`button_text_pair`/`job_color_pair`/
   `status_pair`/`theme_pair`
 - [Icon Loading + Switch Art](icons.md) — `icon()` (the optional icon
-  drawn on a `rounded_button`). Since owner 2026-08-04 the button
+  drawn on a `rounded_button`; `icon_px` sizes it — the FUNCTIONALITY
+  marks pass `config.JOB_ICON_PX`, bigger than the default action
+  glyph, because they carry a picture, owner 2026-08-04). Since 2026-08-04 the button
   hands `icon()` its OWN `text_color` pair as the tint, so a
   monochrome mark is always the same colour as the label beside it —
   white on a solid fill, the accent on an outline kind, in either

@@ -166,3 +166,62 @@ def test_title_on_the_bare_running_dashboard_says_dashboard(root):
     fake._inline_kind = None
     assert _title(fake) == "Dashboard"
 
+
+
+# --- the strip and the title agree on the OPEN CARD (owner 2026-08-04) -
+# The selected tile wears the SAME filled/inverted state a running job
+# does, so "where am I" is answered twice from ONE fact — never two
+# sources that can drift apart.
+
+
+def test_the_open_card_is_the_selected_tile_in_the_strip(root):
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._inline_kind = "upscale"
+    gui.PainterGui._pack_main_stack(fake)
+    assert fake._icon_bar._selected == "upscale"
+
+
+def test_leaving_a_card_deselects_it_in_the_strip(root):
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._inline_kind = "bg"
+    gui.PainterGui._pack_main_stack(fake)
+    fake._inline_kind = None
+    gui.PainterGui._pack_main_stack(fake)
+    assert fake._icon_bar._selected is None
+
+
+def test_a_selected_tile_is_filled_even_with_no_job_running(root):
+    """Selection alone lights the tile — the owner must see WHICH card
+    is open, not only which job runs."""
+    bar = gui.IconBar(root, on_select=lambda _i: None, on_menu=lambda: None)
+    bar.set_active(set())
+    bar.set_selected("crop")
+    assert bar._buttons["crop"].cget("border_width") == 0     # filled
+    assert bar._buttons["bg"].cget("border_width") == 1       # outline
+
+
+def test_a_tile_stays_filled_while_its_job_runs_after_deselect(root):
+    """The two inputs are independent: dropping the selection must not
+    darken a tile whose job is still live."""
+    bar = gui.IconBar(root, on_select=lambda _i: None, on_menu=lambda: None)
+    bar.set_active({"crop"})
+    bar.set_selected("crop")
+    bar.set_selected(None)
+    assert bar._buttons["crop"].cget("border_width") == 0
+
+
+def test_the_title_carries_the_open_cards_logo(root):
+    """Owner 2026-08-04: the title shows the mark we drew, beside the
+    name — and drops it when no card is open."""
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._inline_kind = "aspect"
+    gui.PainterGui._pack_main_stack(fake)
+    assert fake._title_icon.cget("image") is not None
+    assert fake._title_icon.winfo_manager() == "pack"
+
+    fake._view = "menu"
+    gui.PainterGui._pack_main_stack(fake)
+    assert fake._title_icon.winfo_manager() == ""  # HOME has no card

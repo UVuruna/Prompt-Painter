@@ -167,6 +167,7 @@ from .icons import (
     _radial_disc,
     _render_moon_knob,
     _render_sun_knob,
+    render_knob,
     _render_switch_track,
     _render_theme_cover_icon,
     _svg_to_pil,

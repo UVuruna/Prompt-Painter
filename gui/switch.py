@@ -27,7 +27,7 @@ from painter.config import (
 )
 
 from . import widgets
-from .icons import _render_moon_knob, _render_sun_knob, _render_switch_track
+from .icons import _render_switch_track, render_knob
 from .theme import apply_theme, skin_canvas
 
 
@@ -94,10 +94,13 @@ class DayNightSwitch(tk.Canvas):
                     SWITCH_TRACK_DAY_SVG, self._track_w, self._h
                 )
             ),
-            "moon": ImageTk.PhotoImage(_render_moon_knob(d, ss)),
-            "moon_hover": ImageTk.PhotoImage(_render_moon_knob(dh, ss)),
-            "sun": ImageTk.PhotoImage(_render_sun_knob(d, ss)),
-            "sun_hover": ImageTk.PhotoImage(_render_sun_knob(dh, ss)),
+            # SOURCE per config.SWITCH_KNOB_SOURCE — the owner's own
+            # theme/{sun,moon}.svg by default, the in-code PIL spheres
+            # when it says "drawn" (owner 2026-08-04, both kept)
+            "moon": ImageTk.PhotoImage(render_knob("moon", d, ss)),
+            "moon_hover": ImageTk.PhotoImage(render_knob("moon", dh, ss)),
+            "sun": ImageTk.PhotoImage(render_knob("sun", d, ss)),
+            "sun_hover": ImageTk.PhotoImage(render_knob("sun", dh, ss)),
         }
 
     # --- public API ----------------------------------------------------

@@ -22,9 +22,11 @@ from typing import Callable
 from painter.config import (
     DASH_MODE_GRID,
     DASH_MODE_SLIDER,
+    JOB_ICON_PX,
     MENU_TILES,
     TILE_JOB_KINDS,
 )
+from .icons import icon
 from .logic import _next_view
 from .theme import smooth_transition
 
@@ -124,17 +126,23 @@ class ViewMixin:
         return "website_gen"  # the setup view IS the site controls
 
     def _render_title(self) -> None:
-        """Title = the open card's own name (owner 2026-08-04, tačka 1).
+        """Title = the open card's own LOGO + name (owner 2026-08-04).
         The generic app name stays exactly where it belongs — the HOME
-        page; the bare running dashboard, which is no card, says so."""
+        page; the bare running dashboard, which is no card, says so.
+        The IconBar's selected tile lights up from the SAME answer, so
+        the two readings can never disagree."""
         card = self._open_card_id()
-        if card is None:
+        tile = next((t for t in MENU_TILES if t.id == card), None)
+        if tile is None:
             text = "Dashboard" if self._view == "running" else "PromptPainter"
+            self._title_icon.pack_forget()   # no card -> no logo
         else:
-            text = next(
-                (tile.label for tile in MENU_TILES if tile.id == card), card
-            )
+            text = tile.label
+            self._title_icon.configure(image=icon(tile.icon, JOB_ICON_PX))
+            self._title_icon.pack(before=self._title_label,
+                                  side="left", padx=(0, 6))
         self._title_label.configure(text=text)
+        self._icon_bar.set_selected(card)
 
     def _set_collapsed(self, collapsed: bool) -> None:
         """Swap the full controls for the thin per-agent strip (or back).

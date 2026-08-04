@@ -197,6 +197,13 @@ MENU_TILE_H = 140              # minimum tile height, px
 MENU_TILE_GAP_PX = 16          # gap between tiles (DESIGN.md 8pt grid, 2 units)
 MENU_TILE_ICON_PX = 40         # icon side inside a tile (ICON_TARGET_PX=20 is
 #                                 the smaller button-icon size, gui.py-local)
+# The FUNCTIONALITY marks (JOB_LOGO / MenuTile.icon — the coloured
+# drawings) render BIGGER than a plain action icon wherever they name a
+# job: the IconBar strip, the panel headers, the window title (owner
+# 2026-08-04). They carry a picture, not a glyph, so 20 px throws away
+# what they were drawn for; the action marks stay at ICON_TARGET_PX so
+# a button never grows a taller row than its text needs.
+JOB_ICON_PX = 28
 MENU_TILE_BORDER_PX = 2        # accent border width, at rest
 MENU_TILE_BORDER_HOVER_PX = 4  # accent border width, hovered (the one thing
 #                                 that changes on hover — see gui.MainMenu)

@@ -27,6 +27,8 @@ from painter.config import (
     SWITCH_CRATER_RIM_ARC_DEG,
     SWITCH_CRATER_RIM_FRAC,
     SWITCH_KNOB_HILIGHT,
+    SWITCH_KNOB_SOURCE,
+    SWITCH_MOON_SVG,
     SWITCH_MOON_CENTER,
     SWITCH_MOON_DARK_FLOOR,
     SWITCH_MOON_EDGE,
@@ -38,6 +40,7 @@ from painter.config import (
     SWITCH_SUN_CELL_SCALE,
     SWITCH_SUN_CENTER,
     SWITCH_SUN_EDGE,
+    SWITCH_SUN_SVG,
     SWITCH_SUN_GLOW,
     SWITCH_SUN_GLOW_ALPHA,
     SWITCH_SUN_GLOW_BLUR,
@@ -360,6 +363,31 @@ def _render_sun_knob(d_px: int, ss: int) -> Image.Image:
     return glow.resize((cell, cell), Image.LANCZOS)
 
 
+def render_knob(kind: str, d_px: int, ss: int) -> Image.Image:
+    """The sun or moon knob at ``d_px``, from whichever SOURCE
+    ``config.SWITCH_KNOB_SOURCE`` names (owner 2026-08-04):
+
+    - ``"svg"`` — the owner's own ``theme/{sun,moon}.svg``, the same
+      artwork his website wears beside the two track pills. Rendered
+      through the shared SVG->PIL path, so it is anti-aliased and
+      resolution-independent like every other mark.
+    - ``"drawn"`` — the in-code PIL renderers (radial-gradient sphere,
+      craters, terminator shading). Kept whole and reachable: the
+      owner asked for BOTH versions to survive so he can compare.
+
+    ``ss`` is the supersample factor the drawn path needs; the SVG path
+    oversamples internally and ignores it.
+    """
+    if SWITCH_KNOB_SOURCE == "svg":
+        stem = SWITCH_SUN_SVG if kind == "sun" else SWITCH_MOON_SVG
+        svg_path, _png = icon_paths(stem)
+        pil = _svg_to_pil(svg_path, d_px)
+        if pil.size != (d_px, d_px):
+            pil = pil.resize((d_px, d_px), Image.LANCZOS)
+        return pil
+    return (_render_sun_knob if kind == "sun" else _render_moon_knob)(d_px, ss)
+
+
 def _render_theme_cover_icon(target_name: str, min_dim: int) -> Image.Image:
     """The BIG centred icon that rides the theme cross-fade cover: the
     SUN of the theme being switched TO (day) or the MOON (night), the
@@ -369,9 +397,9 @@ def _render_theme_cover_icon(target_name: str, min_dim: int) -> Image.Image:
     (owner 2026-07-19)."""
     d = max(round(min_dim * SWITCH_COVER_ICON_FRAC), 1)
     ss = SWITCH_COVER_ICON_SS
-    if THEMES[target_name]["switch_on"]:   # going to day -> the sun
-        return _render_sun_knob(d, ss)
-    return _render_moon_knob(d, ss)        # going to night -> the moon
+    # day -> the sun, night -> the moon; SOURCE per SWITCH_KNOB_SOURCE
+    kind = "sun" if THEMES[target_name]["switch_on"] else "moon"
+    return render_knob(kind, d, ss)
 
 
 def _render_switch_track(stem: str, w: int, h: int) -> Image.Image:
