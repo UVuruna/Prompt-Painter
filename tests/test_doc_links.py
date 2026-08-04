@@ -22,7 +22,14 @@ SKIP_DIRS = {
     ".git", "UV", "venv", ".venv", ".pytest_cache",
 }
 
-REACHABILITY_EXEMPT_DIRS = {"tests/fixtures"}
+# "sheets/" is config.SHEETS_DIR — where the New Collection (AI) wizard
+# SAVES the owner's generated prompt sheets. Those .md files are product
+# CONTENT, not project documentation: they are never linked from README
+# (they come and go with every run), so the navigation chain has nothing
+# to say about them. Governing them made THE DOCS LAW fail the moment
+# the wizard produced its first sheet — a guard failure with no doc to
+# fix (owner 2026-08-04).
+REACHABILITY_EXEMPT_DIRS = {"tests/fixtures", "sheets/"}
 
 LINK_RE = re.compile(r"\]\(([^)]+)\)")
 
