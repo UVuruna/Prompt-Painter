@@ -50,6 +50,17 @@ settings. Order is no longer inferred from anchors, so it cannot drift;
 `_set_collapsed`/`_apply_running_layout` now only set state and call
 this. Pinned by tests/test_gui_main_stack.py.
 
+**The top-strip TITLE names the OPEN CARD** (owner 2026-08-04, tačka
+1). `_pack_main_stack` also calls `_render_title`, so the title is
+derived from the very state the packer renders from — it can never
+name a card that is not on screen. `_open_card_id` reads `_view` +
+`_inline_kind`: "menu" → no card, "main" → `"website_gen"` (the setup
+view IS the site controls), "running" → whatever `_inline_kind` names.
+The label itself comes from `MENU_TILES` (one home, Rule #5 — a tile
+rename follows automatically). The generic app name "PromptPainter" is
+now the HOME page's own title only; the bare running dashboard (no
+card packed) reads "Dashboard".
+
 **Running view default is the DASHBOARD ALONE** (owner 2026-07-29,
 current behavior — supersedes the legacy `gui.md`'s account of Website
 GEN's controls auto-showing after Start): `_apply_running_layout`

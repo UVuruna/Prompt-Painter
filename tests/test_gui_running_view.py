@@ -186,6 +186,11 @@ class FakeGui:
     # (owner 2026-08-03) — aliased like every other real body here, so
     # these tests still exercise the PRODUCTION packing, not a copy
     _pack_main_stack = gui.PainterGui._pack_main_stack
+    # the top-strip title the packer re-renders on every layout pass
+    # (owner 2026-08-04) — aliased real, like every other body here, so
+    # a fake never drifts from what the window actually titles itself
+    _open_card_id = gui.PainterGui._open_card_id
+    _render_title = gui.PainterGui._render_title
     _toggle_pause_job = gui.PainterGui._toggle_pause_job
     _tool_panel_key = gui.PainterGui._tool_panel_key
     _open_tool_panel = gui.PainterGui._open_tool_panel
@@ -207,6 +212,8 @@ class FakeGui:
 
         self._controls_box = ttk.Frame(root)
         self._compact_box = ttk.Frame(root)
+        # the real top-strip title label _render_title writes into
+        self._title_label = ttk.Label(root, text="PromptPainter")
         # ALL SEVEN persistent settings-panel stand-ins (bg/crop, GUI
         # rework Phase 13; upscale/aspect, Phase 14; the AI checker,
         # Phase 15; API Image GEN, Phase 19; New Collection (AI),

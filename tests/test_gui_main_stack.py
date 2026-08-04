@@ -31,6 +31,7 @@ from types import SimpleNamespace
 import pytest
 
 import gui
+from painter.config import MENU_TILES
 from test_gui_running_view import FakeGui
 
 
@@ -115,4 +116,53 @@ def test_pack_main_stack_on_the_menu_packs_nothing(root):
     gui.PainterGui._pack_main_stack(fake)
 
     assert _stack(fake) == []
+
+
+# --- the top-strip title names the OPEN CARD (owner 2026-08-04) --------
+# The title used to be the frozen app name on every screen, so the one
+# thing that always says WHERE you are said nothing. It is rendered by
+# the SAME packer that decides what is on screen, from the same two
+# state fields, so it can never name a card the layout is not showing.
+
+
+def _title(fake) -> str:
+    gui.PainterGui._pack_main_stack(fake)
+    return fake._title_label.cget("text")
+
+
+def test_title_on_the_home_page_is_the_app_name(root):
+    fake = FakeGui(root)
+    fake._view = "menu"
+    assert _title(fake) == "PromptPainter"
+
+
+def test_title_on_the_setup_view_names_website_image_gen(root):
+    """The setup screen IS the site controls — i.e. the Website Image
+    GEN card, whose label comes from MENU_TILES (never a literal)."""
+    fake = FakeGui(root)
+    fake._view = "main"
+    label = next(t.label for t in MENU_TILES if t.id == "website_gen")
+    assert _title(fake) == label
+
+
+@pytest.mark.parametrize("tile_id", ["bg", "crop", "upscale", "aspect",
+                                     "image_checker", "api_image_gen",
+                                     "ai_sheet_gen"])
+def test_title_while_running_names_the_open_tool_panel(root, tile_id):
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._inline_kind = tile_id
+    label = next(t.label for t in MENU_TILES if t.id == tile_id)
+    assert _title(fake) == label
+
+
+def test_title_on_the_bare_running_dashboard_says_dashboard(root):
+    """Nothing but the dashboard is packed — no card is open, so the
+    title must not keep claiming the last one."""
+    fake = FakeGui(root)
+    fake._view = "running"
+    fake._inline_kind = "crop"
+    _title(fake)
+    fake._inline_kind = None
+    assert _title(fake) == "Dashboard"
 

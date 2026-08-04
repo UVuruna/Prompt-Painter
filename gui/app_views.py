@@ -22,6 +22,7 @@ from typing import Callable
 from painter.config import (
     DASH_MODE_GRID,
     DASH_MODE_SLIDER,
+    MENU_TILES,
     TILE_JOB_KINDS,
 )
 from .logic import _next_view
@@ -79,6 +80,10 @@ class ViewMixin:
             self.notebook, *self._tool_panels.values(),
         ):
             widget.pack_forget()
+        # the top-strip title NAMES the open card (owner 2026-08-04,
+        # tačka 1): the app name is the HOME page's own title, every
+        # other view shows the MENU_TILES label of the card on screen.
+        self._render_title()
         if self._view == "menu":
             self._scroll.refresh()
             return
@@ -105,6 +110,31 @@ class ViewMixin:
         if self._view == "running" or self._dashgrid.active():
             self.notebook.pack(fill="both", expand=True)
         self._scroll.refresh()
+
+    def _open_card_id(self) -> str | None:
+        """The MENU_TILES id of the card currently ON SCREEN, or None on
+        the Main Menu / the bare dashboard. Derived from the SAME two
+        state fields ``_pack_main_stack`` packs from (``_view`` +
+        ``_inline_kind``), so the title can never name a card the
+        layout is not actually showing."""
+        if self._view == "menu":
+            return None
+        if self._view == "running":
+            return self._inline_kind
+        return "website_gen"  # the setup view IS the site controls
+
+    def _render_title(self) -> None:
+        """Title = the open card's own name (owner 2026-08-04, tačka 1).
+        The generic app name stays exactly where it belongs — the HOME
+        page; the bare running dashboard, which is no card, says so."""
+        card = self._open_card_id()
+        if card is None:
+            text = "Dashboard" if self._view == "running" else "PromptPainter"
+        else:
+            text = next(
+                (tile.label for tile in MENU_TILES if tile.id == card), card
+            )
+        self._title_label.configure(text=text)
 
     def _set_collapsed(self, collapsed: bool) -> None:
         """Swap the full controls for the thin per-agent strip (or back).
