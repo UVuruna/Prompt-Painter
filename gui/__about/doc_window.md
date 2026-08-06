@@ -81,6 +81,17 @@ width, before render), `_fit_height` (post-map content-height fit),
 Fixer-AI worker-thread + poll loop).
 
 ## Design Decisions
+**Top bar hint wraps via `gui.widgets.wrap_bar_label`; the Text carries
+`width=1, height=1`** (2026-08-06, THE SPACE & LEGIBILITY LAW rollout,
+`tests/test_layout_audit_tk.py`): the top bar's `hint` Label used to have
+no wraplength, so a realistic hint (a sheet path + line number) could force
+the bar past `DOC_MIN_W`; it now wraps into the bar's live remaining width
+instead. `self.txt`'s `width=1, height=1` removes Tk's own default 80x24
+character-grid request (meaningless here — the widget's real size is fully
+driven by `_apply_width`/`_fit_height` below) from ever acting as a hidden
+minimum on `wrap`, the frame that holds it — the same convention
+`gui.sheetgen_panel`'s two Text widgets already used.
+
 **`AI_POLL_MS` lives in `gui.dialogs`, not here.** `_AiDialog` (the key
 wizard, the sheet generator) is the class that actually paces its
 worker-queue poll loop with it, so it moved there rather than staying

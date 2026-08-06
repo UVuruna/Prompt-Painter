@@ -74,3 +74,9 @@ that don't follow ttk styles).
 See [GUI (folder)](../___gui.md)'s own "Design Decisions" section for
 why the `DOC_*` sizing constants live in `gui.viewer_shared` rather
 than duplicated here.
+
+**The top bar's hint wraps via `gui.widgets.wrap_bar_label`** (2026-08-06,
+THE SPACE & LEGIBILITY LAW rollout, `tests/test_layout_audit_tk.py`): the
+production legend/hint line ("Tick = generate. Done = green ...") is long
+enough on its own to force the bar past `SELECT_MIN_W` alongside the three
+action buttons — it now wraps into the bar's live remaining width instead.

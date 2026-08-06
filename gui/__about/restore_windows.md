@@ -86,6 +86,14 @@ ordering contract `StepRestoreWindow._render` and
 `SettingsMixin._image_viewer_steps_lookup` both rely on.
 
 ## Design Decisions
+**Both windows' top bars wrap their hint/subtitle via
+`gui.widgets.wrap_bar_label`** (2026-08-06, THE SPACE & LEGIBILITY LAW
+rollout, `tests/test_layout_audit_tk.py`): `BeforeAfterWindow`'s own
+PRODUCTION MULTI-mode subtitle and `StepRestoreWindow`'s own fixed hint
+string are each long enough, on their own, to force the bar past
+`DOC_MIN_W` — both now wrap into the bar's live remaining width instead of
+widening the window.
+
 **Why the two windows share a module.** They are the same
 responsibility in two shapes — "show the earlier state of this image
 and restore it" — over the same `JobTemp` backups and the same

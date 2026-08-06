@@ -72,6 +72,13 @@ re-implements `JobTemp.restore_to`); `_delete_current` (unlinks
 `entry['dest']`, marks the entry deleted, advances or closes).
 
 ## Design Decisions
+**`_prompt_txt`/`_check_txt` carry `width=1`** (2026-08-06, THE SPACE &
+LEGIBILITY LAW rollout, `tests/test_layout_audit_tk.py`): a bare `tk.Text`
+with no explicit width requests Tk's default 80-character grid, unrelated
+to real content — `width=1` removes it as a hidden minimum on the outer
+vertical `ScrollFrame` at the window's own declared minimum; both already
+had an explicit `height=8`, so only width needed the fix.
+
 **Opened through a PLAIN real-path import, not the deferred
 `import gui; gui.DocWindow(...)` idiom its sibling viewers use.** No
 test needs `monkeypatch.setattr(gui, "ImageViewer", fake)` (unlike

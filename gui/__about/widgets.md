@@ -138,6 +138,22 @@ for had every ON switch unfolding at startup), while a restored-OFF
 switch still hides an open sub-panel. Released on the way out even if
 the restore raises.
 
+### wrap_bar_label (function)
+Wires a top-bar's hint/subtitle `ttk.Label` to wrap into whatever width
+the bar has left over, LIVE (THE SPACE & LEGIBILITY LAW, rules/GUI.md —
+ladder step 2, reflow before raising a minimum). Added 2026-08-06 (the
+layout-audit rollout, MIGRATE-LAYOUT.md): `DocWindow`, `BeforeAfterWindow`,
+`StepRestoreWindow` and `SelectWindow` each pair a hint/subtitle Label with
+action buttons on one packed row; several of their PRODUCTION hint strings
+(not test-invented — e.g. `BeforeAfterWindow`'s MULTI-mode subtitle,
+`SelectWindow`'s legend line) are long enough to force the row past the
+window's own declared minimum width. `wrap_bar_label(bar, label, *reserved)`
+binds the bar's `<Configure>` to recompute the label's `wraplength` from
+`event.width` minus the reserved buttons' own live `winfo_reqwidth()` — so
+the wrap always tracks the REAL current window width, never a guessed
+constant. Shared by all four callers (Rule #5) rather than reimplemented
+per window.
+
 ### Field parsers
 One per numeric field SHAPE, all sharing the same "raise `ValueError`
 naming the field that failed" contract so a panel's Start reports
