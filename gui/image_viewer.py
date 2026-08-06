@@ -195,7 +195,7 @@ class ImageViewer(tk.Toplevel):
             icon_name="copy",
         ).pack(side="right")
         self._prompt_txt = tk.Text(
-            body, wrap="word", font=tk_font("mono"), height=8,
+            body, wrap="word", font=tk_font("mono"), height=8, width=1,
             padx=10, pady=8, cursor="arrow",
         )
         skin_text(self._prompt_txt)
@@ -219,7 +219,7 @@ class ImageViewer(tk.Toplevel):
         )
         self._check_txt = tk.Text(
             self._check_body, wrap="word", font=tk_font("mono"), height=8,
-            padx=10, pady=8, cursor="arrow",
+            width=1, padx=10, pady=8, cursor="arrow",
         )
         skin_text(self._check_txt)
         self._check_txt.pack(fill="both", expand=True)

@@ -763,6 +763,28 @@ def quiet_restore(*switches: ExpandableSwitch):
 
 
 
+def wrap_bar_label(bar: ttk.Frame, label: ttk.Label, *reserved) -> None:
+    """Wire a top-bar's hint/subtitle LABEL to wrap into whatever width
+    the bar has left over, live — instead of forcing the bar (and the
+    window under it) wider than its declared minimum (THE SPACE &
+    LEGIBILITY LAW, rules/GUI.md — ladder step 2, reflow before raising
+    a minimum). ``reserved`` are the bar's OTHER packed widgets (the
+    action buttons): their live ``winfo_reqwidth()`` is subtracted from
+    the bar's own allocated width on every resize, so the wrap tracks
+    real content instead of a guessed constant — shared by every
+    viewer/dialog Toplevel with this same hint-label-plus-buttons bar
+    shape (``DocWindow``, ``BeforeAfterWindow``, ``StepRestoreWindow``,
+    ``SelectWindow``)."""
+
+    def _on_configure(event) -> None:
+        reserve = (
+            sum(w.winfo_reqwidth() for w in reserved) + 16 * (len(reserved) + 1)
+        )
+        label.configure(wraplength=max(event.width - reserve, 140))
+
+    bar.bind("<Configure>", _on_configure)
+
+
 def folder_of(drop_path: str) -> str:
     """The POSIX parent directory of a drop path — the L2 folder
     identity shared by the dashboard tree and the Select window

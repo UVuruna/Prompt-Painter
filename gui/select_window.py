@@ -23,7 +23,7 @@ from painter.sheet_parser import Sheet
 from .scroll import ScrollFrame
 from .theme import THEME_TOPLEVELS, skin_toplevel
 from .viewer_shared import DOC_HEIGHT_FRAC, DOC_MAX_FRAC
-from .widgets import folder_of, rounded_button, status, tk_font
+from .widgets import folder_of, rounded_button, status, tk_font, wrap_bar_label
 
 # --- Select-images window geometry (Rule #4) --------------------------
 # The three-level tree (collection -> folder -> image) is a frame-tree
@@ -139,24 +139,32 @@ class SelectWindow(tk.Toplevel):
         # --- the top bar (CTk allowed here, OUTSIDE the scroll body)
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
-        ttk.Label(
+        hint_lbl = ttk.Label(
             bar,
             text="Tick = generate.  Done = green (re-tick → saves a new"
             " _v2/_v3… file, the old one stays)."
             "  ⚠ advice off.  Click a count = all/none.",
             style="Muted.TLabel",
-        ).pack(side="left")
-        rounded_button(
+        )
+        hint_lbl.pack(side="left")
+        expand_btn = rounded_button(
             bar, "Expand all", icon_name="expand", command=self._expand_all,
             kind="secondary-outline",
-        ).pack(side="right")
-        rounded_button(
+        )
+        expand_btn.pack(side="right")
+        collapse_btn = rounded_button(
             bar, "Collapse all", icon_name="collapse", command=self._collapse_all,
             kind="secondary-outline",
-        ).pack(side="right", padx=4)
-        rounded_button(
+        )
+        collapse_btn.pack(side="right", padx=4)
+        close_btn = rounded_button(
             bar, "Close", icon_name="close", command=self.destroy,
-        ).pack(side="right", padx=4)
+        )
+        close_btn.pack(side="right", padx=4)
+        # THE SPACE & LEGIBILITY LAW (rules/GUI.md): this hint alone
+        # overflows SELECT_MIN_W at the three-button worst case — wrap
+        # it into the bar's live remaining width (ladder step 2).
+        wrap_bar_label(bar, hint_lbl, expand_btn, collapse_btn, close_btn)
 
         # --- the colour legend (own row under the hint bar so it never
         # crowds the Close/Collapse/Expand buttons off-screen). Each swatch

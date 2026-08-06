@@ -44,7 +44,7 @@ from .viewer_shared import (
     _copy_to_clipboard,
     _readonly_text_keys,
 )
-from .widgets import rounded_button, status, tk_font
+from .widgets import rounded_button, status, tk_font, wrap_bar_label
 
 
 class DocWindow(tk.Toplevel):
@@ -74,15 +74,25 @@ class DocWindow(tk.Toplevel):
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
         self._bar = bar  # measured by _fit_height for the non-text chrome
+        hint_lbl = None
         if hint:
-            ttk.Label(bar, text=hint, style="Muted.TLabel").pack(side="left")
-        rounded_button(
+            hint_lbl = ttk.Label(bar, text=hint, style="Muted.TLabel")
+            hint_lbl.pack(side="left")
+        copy_btn = rounded_button(
             bar, "Copy (for AI)", command=self._copy_all, kind="info",
             icon_name="copy",
-        ).pack(side="right")
-        rounded_button(
+        )
+        copy_btn.pack(side="right")
+        close_btn = rounded_button(
             bar, "Close", icon_name="close", command=self.destroy,
-        ).pack(side="right", padx=4)
+        )
+        close_btn.pack(side="right", padx=4)
+        # THE SPACE & LEGIBILITY LAW (rules/GUI.md): the hint can be
+        # longer than the window's declared minimum leaves room for on
+        # one line — wrap it into the bar's live remaining width instead
+        # of forcing the bar (and DOC_MIN_W) wider (ladder step 2).
+        if hint_lbl is not None:
+            wrap_bar_label(bar, hint_lbl, copy_btn, close_btn)
 
         # the Fixer AI's manual buttons (GUI rework Phase 20, owner's
         # UV/prompt.txt item 2: "Checker double click -> ... gore buttone
@@ -129,6 +139,14 @@ class DocWindow(tk.Toplevel):
         self.txt = tk.Text(
             wrap, wrap="word", font=tk_font("root"), padx=14, pady=12,
             spacing1=2, spacing3=2, cursor="arrow",
+            # width=1/height=1 (the same convention gui.sheetgen_panel
+            # already uses): Tk's Text defaults to an 80x24 CHARACTER
+            # GRID request, unrelated to real content - this widget's
+            # real size is fully driven by _apply_width/_fit_height
+            # below, so its own default request must never act as a
+            # hidden minimum the window can't shrink under (THE SPACE &
+            # LEGIBILITY LAW, rules/GUI.md).
+            width=1, height=1,
         )
         skin_text(self.txt)
         vsb = ttk.Scrollbar(

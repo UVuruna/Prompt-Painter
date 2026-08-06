@@ -30,7 +30,7 @@ from .viewer_shared import (
     DOC_MIN_W,
     _restore_step,
 )
-from .widgets import rounded_button
+from .widgets import rounded_button, wrap_bar_label
 
 # --- Before/after viewer (the tool panels' Restore viewer) ------------
 BEFORE_AFTER_W = 760          # viewer width; before/after images scale into it
@@ -86,14 +86,21 @@ class BeforeAfterWindow(tk.Toplevel):
                 "Before / after of every changed image — RESTORE ALL"
                 " reverts the whole job."
             )
-        ttk.Label(bar, text=subtitle, style="Muted.TLabel").pack(side="left")
+        subtitle_lbl = ttk.Label(bar, text=subtitle, style="Muted.TLabel")
+        subtitle_lbl.pack(side="left")
         self._restore_btn = rounded_button(
             bar, restore_label, command=self._do_restore, kind="danger",
         )
         self._restore_btn.pack(side="right")
-        rounded_button(bar, "Close", icon_name="close", command=self.destroy).pack(
-            side="right", padx=4
+        close_btn = rounded_button(
+            bar, "Close", icon_name="close", command=self.destroy,
         )
+        close_btn.pack(side="right", padx=4)
+        # THE SPACE & LEGIBILITY LAW (rules/GUI.md): the MULTI-mode
+        # subtitle is long enough to overflow the window's declared
+        # minimum on its own — wrap it into the bar's live remaining
+        # width instead (ladder step 2, see gui.widgets.wrap_bar_label).
+        wrap_bar_label(bar, subtitle_lbl, self._restore_btn, close_btn)
 
         self._scroll = ScrollFrame(self, horizontal=False)
         self._scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
@@ -219,13 +226,21 @@ class StepRestoreWindow(tk.Toplevel):
 
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
-        ttk.Label(
+        hint_lbl = ttk.Label(
             bar,
             text="Every kept pipeline stage for this image — 'Restore"
             " to here' reverts the LIVE file to that stage.",
             style="Muted.TLabel",
-        ).pack(side="left")
-        rounded_button(bar, "Close", icon_name="close", command=self.destroy).pack(side="right")
+        )
+        hint_lbl.pack(side="left")
+        close_btn = rounded_button(
+            bar, "Close", icon_name="close", command=self.destroy,
+        )
+        close_btn.pack(side="right")
+        # THE SPACE & LEGIBILITY LAW (rules/GUI.md): this hint alone
+        # overflows the window's declared minimum — wrap it into the
+        # bar's live remaining width (ladder step 2).
+        wrap_bar_label(bar, hint_lbl, close_btn)
 
         self._scroll = ScrollFrame(self, horizontal=True)
         self._scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
