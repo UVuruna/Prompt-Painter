@@ -23,6 +23,9 @@ SKIP_DIRS = {
     # owner 2026-08-04) plus the pre-move locations
     "output", "out", "sheets",
     ".git", "UV", "venv", ".venv", ".pytest_cache",
+    # harness state, not product docs (rules/PLAN.md - the session task
+    # list and the layout proof live here per session)
+    ".claude",
 }
 
 # A generated sheet is product CONTENT, not project documentation —

@@ -21,10 +21,14 @@ TESTS_DIR = Path(__file__).resolve().parent
 FAST_GUARDS = [
     "test_structure_law.py",
     "test_config_sections.py",
+    # the static half of THE SPACE & LEGIBILITY LAW - a grep, costs nothing
+    "test_layout_law.py",
 ]
 ALL_GUARDS = FAST_GUARDS + [
     "test_docs_coverage.py",
     "test_doc_links.py",
+    # the runtime half - builds the real window off-screen and measures it
+    "test_layout_audit_tk.py",
 ]
 
 

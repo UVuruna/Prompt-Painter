@@ -184,7 +184,7 @@ class MainMenu(ttk.Frame):
             border_width=MENU_TILE_BORDER_PX, border_color=accent,
             width=MENU_TILE_W, height=MENU_TILE_H,
         )
-        card.grid_propagate(False)
+        card.grid_propagate(False)  # layout-law: exempt - tile box computed by gui.logic.menu_min_size, and _apply_min_size raises the window minsize so the whole 4x2 grid always renders
         content = ctk.CTkFrame(card, fg_color=surface, bg_color=surface)
         content.pack(expand=True)
         ctk.CTkLabel(
