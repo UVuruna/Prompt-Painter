@@ -28,6 +28,17 @@ TRANSPARENT where the background was cleared, so `_scaled_photo`'s
 checkerboard so the removed area visibly reads as removed rather than
 looking unchanged.
 
+`_scaled_photo` fits an image to `avail_px` wide and, when the caller
+passes `avail_h`, to that height as well — the smaller of the two ratios
+wins, so the aspect holds and the result lands inside both bounds. A
+WIDTH-only fit is what starved `BeforeAfterWindow`'s tall plates (owner
+2026-08-07): a 1664x2550 image fitted to a 344px column still wanted
+527px of height. `allow_upscale=True` additionally lets a SMALL image
+grow into the box it was given instead of sitting tiny in a window
+opened for it. Both parameters are optional and default to the old
+never-upscale, width-only behaviour, so `DocWindow` and `ImageViewer`
+are unaffected.
+
 ## Connections
 
 ### Uses

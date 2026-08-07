@@ -36,6 +36,10 @@ from .widgets import rounded_button, wrap_bar_label
 BEFORE_AFTER_W = 760          # viewer width; before/after images scale into it
 BEFORE_AFTER_IMG_PAD_PX = 60  # slack subtracted from the width for the images
 BEFORE_AFTER_COL_GAP_PX = 12  # gap between the side-by-side before/after cols
+BEFORE_AFTER_PAIR_CHROME_PX = 90   # bar-excluded vertical chrome per pair
+BEFORE_AFTER_MIN_IMG_H = 200       # never squeeze a picture below this
+BEFORE_AFTER_RESIZE_STEP_PX = 40   # ignore width jitter smaller than this
+BEFORE_AFTER_RESIZE_DEBOUNCE_MS = 180  # settle before re-scaling on resize
 
 # --- Per-step restore viewer (GUI rework Phase 9) ---------------------
 # a horizontal filmstrip, so its own width geometry is independent of
@@ -67,16 +71,13 @@ class BeforeAfterWindow(tk.Toplevel):
         THEME_TOPLEVELS.append(self)
         self._restore_cb = restore_cb
         self._photos: list = []  # keep the PhotoImages alive
+        self._pairs = list(pairs)
+        self._max_w = int(self.winfo_screenwidth() * DOC_MAX_FRAC)
+        self._max_h = int(self.winfo_screenheight() * DOC_MAX_FRAC)
+        self._rendered_w = 0      # the width the current photos were built for
+        self._resize_job = None   # debounce handle for <Configure>
 
-        width = min(
-            int(self.winfo_screenwidth() * DOC_MAX_FRAC),
-            max(BEFORE_AFTER_W, DOC_MIN_W),
-        )
-        height = min(
-            max(int(self.winfo_screenheight() * DOC_HEIGHT_FRAC), DOC_MIN_H),
-            int(self.winfo_screenheight() * DOC_MAX_FRAC),
-        )
-        self.geometry(f"{width}x{height}")
+        width = min(self._max_w, max(BEFORE_AFTER_W, DOC_MIN_W))
 
         bar = ttk.Frame(self, padding=6)
         bar.pack(fill="x")
@@ -103,16 +104,74 @@ class BeforeAfterWindow(tk.Toplevel):
         # width instead (ladder step 2, see gui.widgets.wrap_bar_label).
         wrap_bar_label(bar, subtitle_lbl, self._restore_btn, close_btn)
 
+        self._bar = bar
         self._scroll = ScrollFrame(self, horizontal=False)
         self._scroll.pack(fill="both", expand=True, padx=6, pady=(0, 6))
-        avail = max(width - BEFORE_AFTER_IMG_PAD_PX, 320)
         self.update_idletasks()
-        for pair in pairs:
-            self._add_pair(pair, avail)
-
+        self._render(width)
+        # THE WINDOW OPENS AT THE SIZE OF WHAT IS IN IT (owner 2026-08-07):
+        # the old fixed `screen_h * DOC_HEIGHT_FRAC` height was blind to the
+        # content and left a 1664x2550 pair sitting in the top third of a
+        # 1382px-tall window — "elements must never take less than 50 % of
+        # the window". Now the geometry is MEASURED off the laid-out
+        # content, clamped to the screen and to the declared minimum.
+        self._fit_to_content(width)
+        self.bind("<Configure>", self._on_configure)
         self.bind("<Destroy>", self._on_destroy)
 
-    def _add_pair(self, pair: dict, avail: int) -> None:
+    # --- sizing -------------------------------------------------------
+    def _render(self, width: int) -> None:
+        """(Re)build every pair's images for a window `width` wide."""
+        for child in self._scroll.body.winfo_children():
+            child.destroy()
+        self._photos.clear()
+        avail = max(width - BEFORE_AFTER_IMG_PAD_PX, 320)
+        # HEIGHT BUDGET PER PAIR: with one pair the picture may use the
+        # whole viewport; with several, each still gets a readable slice
+        # and the window scrolls between them (ladder step 4 — scroll only
+        # after reflow). Either way the fit obeys BOTH axes, so a tall
+        # plate can never demand a window taller than the screen.
+        chrome = self._bar.winfo_reqheight() + BEFORE_AFTER_PAIR_CHROME_PX
+        budget = max(self._max_h - chrome, BEFORE_AFTER_MIN_IMG_H)
+        if len(self._pairs) > 1:
+            budget = max(budget // 2, BEFORE_AFTER_MIN_IMG_H)
+        for pair in self._pairs:
+            self._add_pair(pair, avail, budget)
+        self._rendered_w = width
+
+    def _fit_to_content(self, width: int) -> None:
+        """Size the window to the content it just laid out."""
+        self.update_idletasks()
+        needed_h = (
+            self._bar.winfo_reqheight()
+            + self._scroll.body.winfo_reqheight()
+            + BEFORE_AFTER_PAIR_CHROME_PX
+        )
+        height = max(min(needed_h, self._max_h), DOC_MIN_H)
+        self.geometry(f"{width}x{height}")
+
+    def _on_configure(self, event) -> None:
+        """A user resize must grow the CONTENT too, not just the frame
+        (owner 2026-08-07). Debounced, and only for a REAL width change,
+        so the re-render cannot chase its own <Configure> events."""
+        if event.widget is not self:
+            return
+        if abs(event.width - self._rendered_w) < BEFORE_AFTER_RESIZE_STEP_PX:
+            return
+        if self._resize_job is not None:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(
+            BEFORE_AFTER_RESIZE_DEBOUNCE_MS, self._apply_resize
+        )
+
+    def _apply_resize(self) -> None:
+        self._resize_job = None
+        if not self.winfo_exists():
+            return
+        self._render(self.winfo_width())  # no _fit_to_content: the user
+        # chose this frame size; only the pictures follow it.
+
+    def _add_pair(self, pair: dict, avail: int, budget: int) -> None:
         block = ttk.Frame(self._scroll.body, padding=(4, 8))
         block.pack(fill="x", anchor="w")
         ttk.Label(block, text=pair["rel"], style="Head.TLabel").pack(
@@ -122,8 +181,8 @@ class BeforeAfterWindow(tk.Toplevel):
         # tall plate stacked vertically pushed the "After" a full screen
         # below the "Before", so the one comparison the window exists for
         # never fit in the eye at once. Each column gets half the width
-        # minus the gap, so the pair still lands inside `avail` and the
-        # window keeps scrolling vertically only.
+        # minus the gap, and `budget` caps the height, so the pair lands
+        # inside the viewport on BOTH axes.
         row = ttk.Frame(block)
         row.pack(fill="x", anchor="w")
         col_w = max((avail - BEFORE_AFTER_COL_GAP_PX) // 2, 160)
@@ -135,8 +194,13 @@ class BeforeAfterWindow(tk.Toplevel):
             ttk.Label(col, text=tag, style="Muted.TLabel").pack(anchor="w")
             try:
                 # composite over a checker so a cleared/transparent AFTER
-                # reads as removed, not as the window colour
-                photo = _scaled_photo(path, col_w, on_checker=True)
+                # reads as removed, not as the window colour; `allow_upscale`
+                # so a SMALL image grows into the column instead of sitting
+                # tiny in a window opened for it
+                photo = _scaled_photo(
+                    path, col_w, on_checker=True, avail_h=budget,
+                    allow_upscale=True,
+                )
             except OSError as exc:
                 ttk.Label(
                     col, text=f"({tag} unreadable: {exc})"

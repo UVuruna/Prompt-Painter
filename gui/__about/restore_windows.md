@@ -73,10 +73,27 @@ scrolls between PAIRS — each pair is itself horizontal).
 
 ## Classes
 ### BeforeAfterWindow
-See the Purpose section above. `_add_pair` builds one horizontal `row`
-holding two columns — Before left, After right — each scaled into
-`(avail - BEFORE_AFTER_COL_GAP_PX) // 2` and composited over a
-checkerboard via `_scaled_photo(..., on_checker=True)`.
+See the Purpose section above. Three collaborating methods own the
+sizing:
+
+- `_render(width)` rebuilds every pair's photos for a given window
+  width. `_add_pair` builds one horizontal `row` holding two columns —
+  Before left, After right — each scaled into
+  `(avail - BEFORE_AFTER_COL_GAP_PX) // 2` wide AND a per-pair height
+  `budget`, composited over a checkerboard via
+  `_scaled_photo(..., on_checker=True, avail_h=budget, allow_upscale=True)`.
+  With more than one pair the budget halves, so several pairs each keep
+  a readable slice and the window scrolls between them.
+- `_fit_to_content(width)` measures the laid-out content
+  (`bar.winfo_reqheight() + scroll.body.winfo_reqheight() + chrome`) and
+  sets the geometry to it, clamped to `DOC_MAX_FRAC` of the screen and
+  to `DOC_MIN_H`.
+- `_on_configure` / `_apply_resize` re-render the photos after a user
+  resize — debounced `BEFORE_AFTER_RESIZE_DEBOUNCE_MS`, and only past a
+  `BEFORE_AFTER_RESIZE_STEP_PX` width change, so a re-render cannot
+  chase its own `<Configure>` events. `_apply_resize` deliberately does
+  NOT call `_fit_to_content`: the user chose that frame size, only the
+  pictures follow it.
 
 ### StepRestoreWindow
 See the Purpose section above; built from `_filmstrip_stages`.
@@ -98,6 +115,20 @@ owner had to scroll and remember. Side by side, each column takes half
 the available width; the whole pair now fits in a 760x1382 window with
 nothing clipped (THE SPACE & LEGIBILITY LAW: reflow before raising the
 minimum).
+
+**A window opens at the size of what is IN it, and a resize grows the
+CONTENT** (owner 2026-08-07, stated after an independent grader failed
+the first side-by-side pass at 4/10). The first fix laid the pair out
+correctly but kept the old blind `screen_h * DOC_HEIGHT_FRAC` height, so
+the 1664x2550 pair sat in the top third of a 1382px-tall window with
+over half the frame empty — the owner's rule is that the elements must
+never occupy less than 50 % of the window. Two consequences in the code:
+`_scaled_photo` now fits BOTH axes (a width-only fit is what starved the
+tall plate) and can upscale into its box, and the geometry is MEASURED
+off the laid-out content instead of guessed from the screen. The same
+pair now opens 760x730. `_on_configure` closes the other half of the
+rule: enlarging the window re-renders the pictures at the new width
+rather than adding dead space around them.
 
 **Both windows' top bars wrap their hint/subtitle via
 `gui.widgets.wrap_bar_label`** (2026-08-06, THE SPACE & LEGIBILITY LAW

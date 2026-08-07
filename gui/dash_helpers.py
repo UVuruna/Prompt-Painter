@@ -184,22 +184,39 @@ def _has_alpha(img: Image.Image) -> bool:
 
 
 def _scaled_photo(
-    path: Path, avail_px: int, on_checker: bool = False
+    path: Path, avail_px: int, on_checker: bool = False,
+    avail_h: int | None = None, allow_upscale: bool = False,
 ) -> ImageTk.PhotoImage:
-    """One image loaded and scaled to fit ``avail_px`` wide (never
-    upscaled), as a live PhotoImage the caller must keep a ref to.
-    Shared by DocWindow's prompt image and the BeforeAfterWindow viewer
-    (Rule #5). With ``on_checker`` a transparent image is composited over
-    a checkerboard so the transparency is VISIBLE (the tool viewer's
-    AFTER — a cleared background — otherwise shows the panel colour and
-    looks unchanged). Raises OSError on an unreadable file (the caller
-    reports it)."""
+    """One image loaded and scaled to fit ``avail_px`` wide — and, when
+    ``avail_h`` is given, ALSO within that height — as a live PhotoImage
+    the caller must keep a ref to. Shared by DocWindow's prompt image and
+    the BeforeAfterWindow viewer (Rule #5). With ``on_checker`` a
+    transparent image is composited over a checkerboard so the
+    transparency is VISIBLE (the tool viewer's AFTER — a cleared
+    background — otherwise shows the panel colour and looks unchanged).
+    Raises OSError on an unreadable file (the caller reports it).
+
+    ``avail_h`` exists because a WIDTH-only fit starves tall images: a
+    1664x2550 plate fitted to a 344px column still wants 527px of height,
+    so a viewer that also had to obey a height budget ended up a tall
+    window with the picture in its top third (owner 2026-08-07). Fitting
+    the smaller of the two ratios keeps the aspect and lands inside both.
+
+    ``allow_upscale`` lets a SMALL image grow into the box it was given
+    instead of sitting tiny in a window opened for it — the owner's rule
+    that a resize must grow the CONTENT, not just the frame. Off by
+    default, so every existing caller keeps the old never-upscale
+    behaviour."""
     img = Image.open(path)
     img.load()
-    if img.width > avail_px:
-        scale = avail_px / img.width
+    ratio = avail_px / img.width
+    if avail_h:
+        ratio = min(ratio, avail_h / img.height)
+    if ratio < 1.0 or (allow_upscale and ratio > 1.0):
         img = img.resize(
-            (avail_px, max(round(img.height * scale), 1)), Image.LANCZOS
+            (max(round(img.width * ratio), 1),
+             max(round(img.height * ratio), 1)),
+            Image.LANCZOS,
         )
     if on_checker and _has_alpha(img):
         rgba = img.convert("RGBA")
