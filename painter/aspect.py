@@ -38,7 +38,6 @@ from painter.config import (
     ASPECT_FILTER_OFF,
     ASPECT_LABEL_DECIMALS,
     ASPECT_TOL,
-    PNG_SAVE_KWARGS,
 )
 
 Log = Callable[[str], None]
@@ -113,31 +112,34 @@ def change_aspect(
 
     from PIL import Image
 
+    from painter import imagesession
+
     try:
-        with Image.open(path) as im:
-            width, height = im.size
-            target = ratio_w / ratio_h
-            cur = width / height
-            # optional input filter on the CURRENT ratio — a filtered-out
-            # image is a plain skip, byte-unchanged
-            if filter_mode != ASPECT_FILTER_OFF:
-                in_range = filter_from <= cur <= filter_to
-                if filter_mode == ASPECT_FILTER_IF and not in_range:
-                    return "nothing"
-                if filter_mode == ASPECT_FILTER_IF_NOT and in_range:
-                    return "nothing"
-            if abs(cur - target) <= tol:
+        # decode ONCE for the whole chain (painter.imagesession)
+        im = imagesession.load(path)
+        width, height = im.size
+        target = ratio_w / ratio_h
+        cur = width / height
+        # optional input filter on the CURRENT ratio — a filtered-out
+        # image is a plain skip, byte-unchanged
+        if filter_mode != ASPECT_FILTER_OFF:
+            in_range = filter_from <= cur <= filter_to
+            if filter_mode == ASPECT_FILTER_IF and not in_range:
                 return "nothing"
-            if cur < target:
-                # too tall/narrow for the target — grow the WIDTH
-                new_w, new_h = round(height * ratio_w / ratio_h), height
-            else:
-                # too wide for the target — grow the HEIGHT
-                new_w, new_h = width, round(width * ratio_h / ratio_w)
-            # a deliberate non-proportional stretch; resize keeps the
-            # source mode, so RGBA (real alpha) survives as RGBA
-            resized = im.resize((new_w, new_h), Image.LANCZOS)
-        resized.save(path, "PNG", **PNG_SAVE_KWARGS)
+            if filter_mode == ASPECT_FILTER_IF_NOT and in_range:
+                return "nothing"
+        if abs(cur - target) <= tol:
+            return "nothing"
+        if cur < target:
+            # too tall/narrow for the target — grow the WIDTH
+            new_w, new_h = round(height * ratio_w / ratio_h), height
+        else:
+            # too wide for the target — grow the HEIGHT
+            new_w, new_h = width, round(width * ratio_h / ratio_w)
+        # a deliberate non-proportional stretch; resize keeps the
+        # source mode, so RGBA (real alpha) survives as RGBA
+        resized = im.resize((new_w, new_h), Image.LANCZOS)
+        imagesession.store(path, resized)
     except AspectError:
         raise
     except Exception as exc:

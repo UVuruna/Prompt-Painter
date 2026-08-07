@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Callable
 
 from painter.config import (
-    PNG_SAVE_KWARGS,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
     UPSCALE_DIR,
@@ -178,14 +177,21 @@ def upscale_if_small(
     """
     from PIL import Image
 
-    with Image.open(path) as im:
-        width, height = im.size
+    from painter import imagesession
+
+    # the GATE reads only the size — free inside a pipeline session, and
+    # the two "nothing" exits below then cost no file I/O at all
+    width, height = imagesession.load(path).size
     ratio = width / height
     if not (aspect_min <= ratio <= aspect_max):
         return "nothing"
     if width >= min_width and height >= min_height:
         return "nothing"
 
+    # Real-ESRGAN is a SEPARATE PROCESS reading `path` off disk, so the
+    # chain's in-flight image must be written before it runs — this is
+    # the one step that cannot stay in memory (painter.imagesession).
+    imagesession.flush()
     exe = ensure_binary(log)
     # ALWAYS the model's native 4x: non-native -s 2/3 with the
     # x4plus model CORRUPTS the output (verified live 2026-07-18 on
@@ -214,7 +220,7 @@ def upscale_if_small(
              max(1, round(out.height * factor))),
             Image.LANCZOS,
         )
-    out.save(path, "PNG", **PNG_SAVE_KWARGS)
+    imagesession.store(path, out)
     log(
         f"    upscaled {width}x{height} -> {out.width}x{out.height}"
         f" (Real-ESRGAN x4 + LANCZOS)"

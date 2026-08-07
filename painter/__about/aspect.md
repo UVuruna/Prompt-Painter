@@ -44,6 +44,9 @@ is written back as PNG. Verified by hand (must reproduce exactly):
   `ASPECT_FILTER_IF` / `ASPECT_FILTER_IF_NOT` (the input-filter
   modes), and `ASPECT_LABEL_DECIMALS` (the visual editor's live-label
   rounding, GUI rework Phase 5)
+- [Image Session](imagesession.md) — `load`/`store`: the step no longer
+  opens or writes the file itself, so a chained pipeline decodes once
+  and encodes once (owner 2026-08-07, Priority A)
 - Pillow (LANCZOS resize, PNG save)
 - `math.gcd` (the stdlib `math` module) — `reduced_ratio`'s
   smallest-integer reduction

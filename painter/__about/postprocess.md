@@ -86,6 +86,9 @@ overrides them, per run.
   `CLEAN_EDGE_ENABLE`, `BG_MODE_*`, `BG_COLOR_DEFAULT`,
   `BG_COLOR_TOLERANCE_PCT`, `SAFETY_MAX_REMOVE_FRAC`,
   `SAFETY_MAX_REMOVE_FRAC_WHITE`, `SAFETY_MAX_REMOVE_FRAC_COLOR`
+- [Image Session](imagesession.md) — `load`/`store`: the step no longer
+  opens or writes the file itself, so a chained pipeline decodes once
+  and encodes once (owner 2026-08-07, Priority A)
 - [Background Remover](bg_remove.md) — `plan`, `apply_plan`,
   `parse_hex_color`, `content_bbox`, `clean_edge_halo`; imported
   lazily (numpy/scipy load only when a step actually runs)

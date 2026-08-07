@@ -53,6 +53,11 @@ detail.
 ### Uses
 - [Config (subfolder)](../config/___config.md) — the `UPSCALE_*`
   block, `fmt_size`
+- [Image Session](imagesession.md) — `load` (the size gate reads it for
+  free), and the ONE `flush()` the external Real-ESRGAN process forces:
+  it reads the file off disk, so the chain's in-flight image must be
+  written first. This is the only pipeline step that cannot stay in
+  memory.
 - Pillow (LANCZOS correction), `urllib`/`zipfile` (the one-time
   download), `subprocess` (the binary)
 

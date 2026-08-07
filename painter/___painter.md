@@ -20,6 +20,7 @@ the driver touches a browser.
 | `postprocess.py` | Algorithmic | composed post-save hook: background removal + transparent crop — [about](__about/postprocess.md) · [flow](__flow/postprocess.md) |
 | `upscale.py` | Algorithmic | upscale gating + Real-ESRGAN invocation — [about](__about/upscale.md) · [flow](__flow/upscale.md) |
 | `aspect.py` | Algorithmic | batch DEFORM tool — stretch every image in a folder to a target ratio — [about](__about/aspect.md) · [flow](__flow/aspect.md) |
+| `imagesession.py` | Standard | decode-once / encode-once buffer between the chained pipeline steps and the disk — [about](__about/imagesession.md) |
 | `filters.py` | Algorithmic | shared stackable "what should this tool touch" gate — [about](__about/filters.md) · [flow](__flow/filters.md) |
 | `jobtemp.py` | Algorithmic | the four in-place tools' backup/restore safety net — [about](__about/jobtemp.md) · [flow](__flow/jobtemp.md) |
 | `config/` | — | every tunable value, split by domain — [Config (subfolder)](config/___config.md) |

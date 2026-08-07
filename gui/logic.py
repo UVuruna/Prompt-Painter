@@ -17,7 +17,7 @@ from typing import Callable
 
 from PIL import Image
 
-from painter import filters, jobtemp
+from painter import filters, imagesession, jobtemp
 from painter.config import (
     ASPECT_FILTER_DEFAULT_FROM,
     ASPECT_FILTER_DEFAULT_TO,
@@ -327,23 +327,40 @@ def _run_pipeline_steps(
     rel = path.relative_to(temp.folder).as_posix() if temp is not None else ""
     parts = []
     took_original = False
-    for label, step_name, fn in steps:
-        backed_up_as = None
-        if temp is not None:
-            if not took_original:
-                temp.backup(path, rel, step="original")
-                took_original = True
-            elif not keep_all_steps:
-                pass  # the owner's own choice — silent skip, no banner
-            elif not temp.over_cap():
-                temp.backup(path, rel, step=step_name)
-                backed_up_as = step_name
-            else:
-                on_cap()
-        status = fn(path)
-        if backed_up_as is not None and status != "done":
-            temp.drop(rel, step=backed_up_as)  # a no-op — nothing to restore
-        parts.append(f"{label}: {status}")
+    # DECODE ONCE, ENCODE ONCE (owner decree 2026-08-07, Priority A). The
+    # steps hand their result to painter.imagesession instead of writing
+    # it, so the next step reads it straight out of memory: N chained
+    # steps cost ONE encode instead of N. The session writes the final
+    # image on the way out of this `with` — including when a step raised,
+    # so a failure halfway never discards the steps that did succeed.
+    #
+    # A `flush()` is required before ANY read of the file from outside
+    # the chain. There is exactly one such read here — a JobTemp backup
+    # COPIES the file — so the intermediate is written when, and only
+    # when, a restore point genuinely needs it on disk (`keep_all_steps`,
+    # which is the whole point of that toggle). With it off, nothing is
+    # written between steps at all.
+    with imagesession.session():
+        for label, step_name, fn in steps:
+            backed_up_as = None
+            if temp is not None:
+                if not took_original:
+                    # the pristine baseline — the file is still untouched
+                    # here (no step has run), so no flush is needed
+                    temp.backup(path, rel, step="original")
+                    took_original = True
+                elif not keep_all_steps:
+                    pass  # the owner's own choice — silent skip, no banner
+                elif not temp.over_cap():
+                    imagesession.flush()  # the backup COPIES the file
+                    temp.backup(path, rel, step=step_name)
+                    backed_up_as = step_name
+                else:
+                    on_cap()
+            status = fn(path)
+            if backed_up_as is not None and status != "done":
+                temp.drop(rel, step=backed_up_as)  # no-op — nothing to restore
+            parts.append(f"{label}: {status}")
     return ", ".join(parts)
 
 

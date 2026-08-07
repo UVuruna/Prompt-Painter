@@ -39,7 +39,6 @@ from painter.config import (
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
     CROP_MIN_INK_PX,
-    PNG_SAVE_KWARGS,
     SAFETY_MAX_REMOVE_FRAC,
     SAFETY_MAX_REMOVE_FRAC_COLOR,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
@@ -109,8 +108,7 @@ def remove_background(
     every caller that passes none keeps today's exact behaviour;
     ``BgSettingsPanel`` is the one caller that overrides them, per run.
     """
-    from PIL import Image
-
+    from painter import imagesession
     from painter.bg_remove import apply_plan, parse_hex_color, plan
 
     if mode == BG_MODE_COLOR:
@@ -122,32 +120,34 @@ def remove_background(
     }
 
     try:
-        with Image.open(path) as im:
-            removal = plan(
-                im, mode, color=color, tolerance_pct=tolerance_pct
+        # decode ONCE for the whole chain (painter.imagesession) — the
+        # step no longer opens or writes the file itself
+        im = imagesession.load(path)
+        removal = plan(
+            im, mode, color=color, tolerance_pct=tolerance_pct
+        )
+        if removal.action == "skip-transparent":
+            return "nothing"
+        if removal.action == "skip-ambiguous":
+            # name the sniffed border colour: the owner can paste it
+            # straight into the BG panel's custom-colour field
+            # instead of being told only that we gave up (Rule #1)
+            log(
+                f"    background UNCLEAR (not white/black, and the"
+                f" four corners disagree; border ≈"
+                f" {removal.border_hex}) — left untouched:"
+                f" {path.name}; set BG mode to Custom color to"
+                f" clear it"
             )
-            if removal.action == "skip-transparent":
-                return "nothing"
-            if removal.action == "skip-ambiguous":
-                # name the sniffed border colour: the owner can paste it
-                # straight into the BG panel's custom-colour field
-                # instead of being told only that we gave up (Rule #1)
-                log(
-                    f"    background UNCLEAR (not white/black, and the"
-                    f" four corners disagree; border ≈"
-                    f" {removal.border_hex}) — left untouched:"
-                    f" {path.name}; set BG mode to Custom color to"
-                    f" clear it"
-                )
-                return "unclear"
-            if mode == BG_MODE_AUTO and removal.action == BG_MODE_COLOR:
-                # an AUTO-DETECTED colour is a decision the owner did not
-                # make — say which colour was cleared, never silently
-                log(
-                    f"    background color auto-detected from the four"
-                    f" corners: {removal.border_hex} ({path.name})"
-                )
-            out, removed = apply_plan(im, removal, reach)
+            return "unclear"
+        if mode == BG_MODE_AUTO and removal.action == BG_MODE_COLOR:
+            # an AUTO-DETECTED colour is a decision the owner did not
+            # make — say which colour was cleared, never silently
+            log(
+                f"    background color auto-detected from the four"
+                f" corners: {removal.border_hex} ({path.name})"
+            )
+        out, removed = apply_plan(im, removal, reach)
         # SAFETY GUARD: never destroy an image. A removal that clears
         # more than the path's guard fraction ate the subject (a dark
         # subject keyed as black background, or a flood that leaked
@@ -167,7 +167,7 @@ def remove_background(
                 f" removal → Advanced, or do it manually"
             )
             return "unclear"
-        out.save(path, "PNG", **PNG_SAVE_KWARGS)
+        imagesession.store(path, out)
         return "done"
     except Exception as exc:
         raise PostprocessError(
@@ -210,13 +210,14 @@ def crop_transparent(
     reproduces today's exact byte-for-byte behaviour; ``CropSettingsPanel``'s
     Advanced collapsible is the one caller that overrides them, per run.
     """
-    from PIL import Image
-
+    from painter import imagesession
     from painter.bg_remove import clean_edge_halo, content_bbox
 
     try:
-        with Image.open(path) as im:
-            rgba = im.convert("RGBA")
+        # decode ONCE for the whole chain — inside a pipeline session
+        # this is the image remove_background just produced, with no
+        # write and no re-read in between (painter.imagesession)
+        rgba = imagesession.load(path).convert("RGBA")
 
         if clean_edge_enable:
             rgba, _ = clean_edge_halo(rgba, clean_edge_alpha)
@@ -239,9 +240,7 @@ def crop_transparent(
         # cleanup, which is discarded rather than saved.
         if (right - left) == width and (bottom - top) == height:
             return "nothing"  # output resolution == input -> no crop
-        rgba.crop((left, top, right, bottom)).save(
-            path, "PNG", **PNG_SAVE_KWARGS
-        )
+        imagesession.store(path, rgba.crop((left, top, right, bottom)))
         return "done"
     except Exception as exc:
         raise PostprocessError(
