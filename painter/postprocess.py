@@ -39,6 +39,7 @@ from painter.config import (
     CROP_INK_ALPHA,
     CROP_MARGIN_PX,
     CROP_MIN_INK_PX,
+    PNG_SAVE_KWARGS,
     SAFETY_MAX_REMOVE_FRAC,
     SAFETY_MAX_REMOVE_FRAC_COLOR,
     SAFETY_MAX_REMOVE_FRAC_WHITE,
@@ -166,7 +167,7 @@ def remove_background(
                 f" removal → Advanced, or do it manually"
             )
             return "unclear"
-        out.save(path, "PNG", optimize=True)
+        out.save(path, "PNG", **PNG_SAVE_KWARGS)
         return "done"
     except Exception as exc:
         raise PostprocessError(
@@ -238,7 +239,9 @@ def crop_transparent(
         # cleanup, which is discarded rather than saved.
         if (right - left) == width and (bottom - top) == height:
             return "nothing"  # output resolution == input -> no crop
-        rgba.crop((left, top, right, bottom)).save(path, "PNG", optimize=True)
+        rgba.crop((left, top, right, bottom)).save(
+            path, "PNG", **PNG_SAVE_KWARGS
+        )
         return "done"
     except Exception as exc:
         raise PostprocessError(

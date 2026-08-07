@@ -5,7 +5,8 @@
 
 ## Purpose
 
-Background-removal and crop thresholds (owner workflow step 6): crop
+Background-removal and crop thresholds (owner workflow step 6): the
+PNG write settings every pipeline step saves through, crop
 margin/ink thresholds, the border-connected edge-halo cleanup, the
 black-void removal + per-path safety guards, the BACKGROUND MODE
 block (auto/black/white/custom colour), the REACH choice (flood-fill
@@ -24,13 +25,33 @@ Nothing — a leaf module.
   block, the three `SAFETY_MAX_REMOVE_FRAC*` guards
 - [Background Remover](../../__about/bg_remove.md)
   (`painter/bg_remove.py`) — the same crop/cleanup constants plus
-  `BLACK_VOID_MAX`, imported package-or-standalone
+  `BLACK_VOID_MAX` and `PNG_SAVE_KWARGS`, imported package-or-standalone
+- [Aspect Filter](../../__about/aspect.md) and
+  [Upscaler](../../__about/upscale.md) — `PNG_SAVE_KWARGS` only
 - GUI BG panel — the mode dropdown, the custom-colour picker, the
   Advanced fine-tune (guards shown/taken as PERCENT, converted at the
   panel edge from the engine's FRACTION values)
 - Re-exported by [Config Package Index](__init__.md)
 
 ## Constants
+
+**PNG write settings** (owner 2026-08-07):
+- `PNG_COMPRESS_LEVEL`, `PNG_SAVE_KWARGS` — THE one authority for how
+  every pipeline step writes its PNG back. All four writers
+  (`bg_remove.process_file`, `postprocess.remove_background` /
+  `crop_transparent`, `aspect`, `upscale`) splat `PNG_SAVE_KWARGS`;
+  no module passes compression arguments of its own.
+
+  **Why level 6 and not `optimize=True`.** Measured on the owner's
+  1664x2550 Greek-alphabet plate: the whole removal ALGORITHM —
+  decode, Chebyshev colour distance, connected-component flood, alpha
+  ramp — costs **0.3 s**, while `Image.save(..., optimize=True)` cost
+  **9.5 s**, because Pillow then re-tries every PNG scanline filter.
+  For that it bought a 4.6 % smaller file (4.32 MB vs 4.52 MB). Plain
+  zlib level 6 takes **1.2 s** and keeps almost all of the size win,
+  turning a 10 s image into ~1.5 s end to end. Level 1 would be 0.3 s
+  but 28 % bigger (5.5 MB), which is the wrong trade for an asset the
+  owner copies into DOMY.
 
 **Crop thresholds:**
 - `CROP_MARGIN_PX` — safety margin kept around the content box

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable
 
 from painter.config import (
+    PNG_SAVE_KWARGS,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
     UPSCALE_DIR,
@@ -213,7 +214,7 @@ def upscale_if_small(
              max(1, round(out.height * factor))),
             Image.LANCZOS,
         )
-    out.save(path, "PNG", optimize=True)
+    out.save(path, "PNG", **PNG_SAVE_KWARGS)
     log(
         f"    upscaled {width}x{height} -> {out.width}x{out.height}"
         f" (Real-ESRGAN x4 + LANCZOS)"

@@ -69,6 +69,7 @@ try:
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
         CROP_MIN_INK_PX,
+        PNG_SAVE_KWARGS,
         SAFETY_MAX_REMOVE_FRAC,
         SAFETY_MAX_REMOVE_FRAC_COLOR,
         SAFETY_MAX_REMOVE_FRAC_WHITE,
@@ -90,6 +91,7 @@ except ImportError:  # standalone: script's own dir is on sys.path
         CLEAN_EDGE_ALPHA,
         CROP_INK_ALPHA,
         CROP_MIN_INK_PX,
+        PNG_SAVE_KWARGS,
         SAFETY_MAX_REMOVE_FRAC,
         SAFETY_MAX_REMOVE_FRAC_COLOR,
         SAFETY_MAX_REMOVE_FRAC_WHITE,
@@ -497,7 +499,7 @@ def process_file(src: Path, dst: Path, mode: str, crop: bool,
     if crop:
         out = autocrop(out)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    out.save(dst, "PNG", optimize=True)
+    out.save(dst, "PNG", **PNG_SAVE_KWARGS)
     return removal.action
 
 

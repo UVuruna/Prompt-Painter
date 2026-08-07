@@ -38,6 +38,7 @@ from painter.config import (
     ASPECT_FILTER_OFF,
     ASPECT_LABEL_DECIMALS,
     ASPECT_TOL,
+    PNG_SAVE_KWARGS,
 )
 
 Log = Callable[[str], None]
@@ -136,7 +137,7 @@ def change_aspect(
             # a deliberate non-proportional stretch; resize keeps the
             # source mode, so RGBA (real alpha) survives as RGBA
             resized = im.resize((new_w, new_h), Image.LANCZOS)
-        resized.save(path, "PNG", optimize=True)
+        resized.save(path, "PNG", **PNG_SAVE_KWARGS)
     except AspectError:
         raise
     except Exception as exc:

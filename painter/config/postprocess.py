@@ -7,6 +7,22 @@ ambiguous -> unclear, left untouched); crop_transparent autocrops
 a transparent image to its content bounding box.
 """
 
+# ═══════════════════════════ PNG WRITE SETTINGS ════════════════════════
+# HOW every pipeline step writes its PNG back (owner 2026-08-07, the
+# "why does BG removal take 10 s on one image" measurement). The whole
+# removal ALGORITHM on a 1664x2550 plate — decode, colour distance,
+# connected-component flood, alpha ramp — costs 0.3 s; the save cost 9.5 s,
+# because Pillow's `optimize=True` re-tries every PNG scanline filter for
+# a 4.6 % smaller file (4.32 MB vs 4.52 MB). That trade is nonsense for an
+# asset the owner copies into DOMY: zlib level 6 keeps ~95 % of the size
+# win at 1/7 the time, turning a 10 s image into ~1.7 s.
+#
+# PNG_SAVE_KWARGS is THE one authority — every `Image.save(..., "PNG")`
+# in the pipeline (bg_remove, postprocess crop, aspect, upscale) splats it
+# and no module passes its own compression arguments.
+PNG_COMPRESS_LEVEL = 6  # zlib level 0-9; 6 = Pillow's default, 9 ~= optimize
+PNG_SAVE_KWARGS = {"compress_level": PNG_COMPRESS_LEVEL}
+
 # ═══════════════════════════ CROP THRESHOLDS ═══════════════════════════
 CROP_MARGIN_PX = 4  # safety margin kept around the content box
 

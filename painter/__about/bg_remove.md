@@ -92,6 +92,14 @@ background and ate the dark stone frame of the bible/dark rondels
   ones included (it has a real alpha channel a colour key knows
   nothing about) — this is what makes re-running a folder safe.
 
+### How the result is written
+
+`process_file` saves through `config.PNG_SAVE_KWARGS` — never with
+Pillow's `optimize=True`, which on a 4 Mpx plate costs 9.5 s to save
+4.6 % of file size against a 0.3 s removal. See
+[Postprocess Config](../config/__about/postprocess.md) → PNG write
+settings for the measurement.
+
 ### The SAFETY GUARD
 
 `remove_color_background` returns `(rgba, removed_frac)`, and the
