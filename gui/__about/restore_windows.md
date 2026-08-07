@@ -14,8 +14,9 @@ step ran, and put it back. Split out of the former `gui/viewers.py`
   AFTER of a BG removal/crop is TRANSPARENT where the background was
   cleared, every image with alpha is composited over a neutral
   checkerboard so the removed area visibly reads as removed rather
-  than looking unchanged against the window's own background. A
-  stacked single column inside a vertical `ScrollFrame`.
+  than looking unchanged against the window's own background. Each
+  pair lays its Before and After SIDE BY SIDE (owner 2026-08-07), the
+  pairs themselves stacked inside a vertical `ScrollFrame`.
 - **`_filmstrip_stages(temp, rel, live_path)`** — a PURE, Tk-free
   module function: the per-image pipeline-stage list, one
   `(label, path)` pair per named stage the job's temp-backup store
@@ -40,7 +41,8 @@ step ran, and put it back. Split out of the former `gui/viewers.py`
 
 Structurally the one real difference between the two windows: a
 HORIZONTAL scroll frame for the filmstrip (pipeline stages read
-left-to-right) versus `BeforeAfterWindow`'s stacked vertical one.
+left-to-right) versus `BeforeAfterWindow`'s vertical one (which
+scrolls between PAIRS — each pair is itself horizontal).
 
 ## Connections
 ### Uses
@@ -71,8 +73,10 @@ left-to-right) versus `BeforeAfterWindow`'s stacked vertical one.
 
 ## Classes
 ### BeforeAfterWindow
-See the Purpose section above. `_add_pair` composites each Before/
-After image over a checkerboard via `_scaled_photo(..., on_checker=True)`.
+See the Purpose section above. `_add_pair` builds one horizontal `row`
+holding two columns — Before left, After right — each scaled into
+`(avail - BEFORE_AFTER_COL_GAP_PX) // 2` and composited over a
+checkerboard via `_scaled_photo(..., on_checker=True)`.
 
 ### StepRestoreWindow
 See the Purpose section above; built from `_filmstrip_stages`.
@@ -86,6 +90,15 @@ ordering contract `StepRestoreWindow._render` and
 `SettingsMixin._image_viewer_steps_lookup` both rely on.
 
 ## Design Decisions
+**Before/after reads LEFT to RIGHT, not top to bottom** (owner
+2026-08-07). Stacked vertically, a tall plate (the 1664x2550 Greek
+alphabet sheet) pushed the After a full screen below the Before, so the
+one comparison the window exists for could never be seen at once — the
+owner had to scroll and remember. Side by side, each column takes half
+the available width; the whole pair now fits in a 760x1382 window with
+nothing clipped (THE SPACE & LEGIBILITY LAW: reflow before raising the
+minimum).
+
 **Both windows' top bars wrap their hint/subtitle via
 `gui.widgets.wrap_bar_label`** (2026-08-06, THE SPACE & LEGIBILITY LAW
 rollout, `tests/test_layout_audit_tk.py`): `BeforeAfterWindow`'s own

@@ -35,6 +35,7 @@ from .widgets import rounded_button, wrap_bar_label
 # --- Before/after viewer (the tool panels' Restore viewer) ------------
 BEFORE_AFTER_W = 760          # viewer width; before/after images scale into it
 BEFORE_AFTER_IMG_PAD_PX = 60  # slack subtracted from the width for the images
+BEFORE_AFTER_COL_GAP_PX = 12  # gap between the side-by-side before/after cols
 
 # --- Per-step restore viewer (GUI rework Phase 9) ---------------------
 # a horizontal filmstrip, so its own width geometry is independent of
@@ -117,21 +118,32 @@ class BeforeAfterWindow(tk.Toplevel):
         ttk.Label(block, text=pair["rel"], style="Head.TLabel").pack(
             anchor="w", pady=(0, 4)
         )
+        # SIDE BY SIDE (owner 2026-08-07): before LEFT, after RIGHT — a
+        # tall plate stacked vertically pushed the "After" a full screen
+        # below the "Before", so the one comparison the window exists for
+        # never fit in the eye at once. Each column gets half the width
+        # minus the gap, so the pair still lands inside `avail` and the
+        # window keeps scrolling vertically only.
+        row = ttk.Frame(block)
+        row.pack(fill="x", anchor="w")
+        col_w = max((avail - BEFORE_AFTER_COL_GAP_PX) // 2, 160)
         for tag, path in (
             ("Before", pair["before"]), ("After", pair["after"])
         ):
-            ttk.Label(block, text=tag, style="Muted.TLabel").pack(anchor="w")
+            col = ttk.Frame(row)
+            col.pack(side="left", anchor="n", padx=(0, BEFORE_AFTER_COL_GAP_PX))
+            ttk.Label(col, text=tag, style="Muted.TLabel").pack(anchor="w")
             try:
                 # composite over a checker so a cleared/transparent AFTER
                 # reads as removed, not as the window colour
-                photo = _scaled_photo(path, avail, on_checker=True)
+                photo = _scaled_photo(path, col_w, on_checker=True)
             except OSError as exc:
                 ttk.Label(
-                    block, text=f"({tag} unreadable: {exc})"
+                    col, text=f"({tag} unreadable: {exc})"
                 ).pack(anchor="w")
                 continue
             self._photos.append(photo)
-            lbl = ttk.Label(block, image=photo)
+            lbl = ttk.Label(col, image=photo)
             lbl.image = photo  # belt-and-braces ref
             lbl.pack(anchor="w", pady=(0, 6))
         ttk.Separator(block).pack(fill="x", pady=(2, 0))
