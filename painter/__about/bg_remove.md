@@ -160,7 +160,21 @@ run is the other. Pinned by
   source left untouched, nothing written). The standalone CLI's engine
   — the per-save pipeline goes through [Postprocess](postprocess.md)
   instead.
-- `plan(img, mode, *, color, tolerance_pct) -> RemovalPlan` — decides
+- `rgba_array(img) -> np.ndarray` — the image as ONE `(H, W, 4)` uint8
+  array: THE single decode + mode-convert the whole removal shares
+  (owner decree 2026-08-07, Priority A). One image used to be converted
+  FIVE times per removal — `plan` built an RGBA copy for the alpha check
+  and an RGB copy for the border sniff, `remove_color_background` built
+  its own RGB copy of the same pixels, and `clean_edge_halo` another
+  RGBA one; every convert walks every pixel and allocates a full frame.
+  Callers now build it once and pass it as the optional `rgba=` argument
+  to `plan`/`apply_plan`/`remove_color_background`; RGB inside them is a
+  free VIEW (`arr[:, :, :3]`), never a fourth copy. Omitting the
+  argument still works and simply builds the array itself, so every
+  external caller keeps working unchanged. Measured on a 1664x2550
+  plate: a single background removal 1.45s -> 1.29s, output
+  byte-identical (verified by sha1 against the previous commit).
+- `plan(img, mode, *, color, tolerance_pct, rgba=None) -> RemovalPlan` — decides
   how ONE image is treated (see the modes above). The named tuple
   carries `action`, the `target` colour, `dist_full`/`dist_edge`,
   `sigma`, and `border_hex` (always the colour it saw, so an ambiguous
@@ -168,7 +182,7 @@ run is the other. Pinned by
 - `corner_background_color(rgb, corner_px, agree_max) -> (r,g,b) |
   None` — the four-corner colour vote (see `BG_MODE_AUTO` above);
   `None` when the corners disagree.
-- `apply_plan(img, removal, reach) -> (rgba, removed_frac)` — run the
+- `apply_plan(img, removal, reach, rgba=None) -> (rgba, removed_frac)` — run the
   engine with one plan's parameters. `reach` is NOT part of the plan:
   it is orthogonal to WHICH colour is the background, so it stays the
   caller's choice rather than something detection decides.

@@ -109,7 +109,12 @@ def remove_background(
     ``BgSettingsPanel`` is the one caller that overrides them, per run.
     """
     from painter import imagesession
-    from painter.bg_remove import apply_plan, parse_hex_color, plan
+    from painter.bg_remove import (
+        apply_plan,
+        parse_hex_color,
+        plan,
+        rgba_array,
+    )
 
     if mode == BG_MODE_COLOR:
         parse_hex_color(color)  # loud NOW, not once per image
@@ -123,8 +128,13 @@ def remove_background(
         # decode ONCE for the whole chain (painter.imagesession) — the
         # step no longer opens or writes the file itself
         im = imagesession.load(path)
+        # ONE mode-convert + ONE array for the whole removal: the plan's
+        # alpha check and border sniff, and the engine's own distance
+        # maths, all read this (painter.bg_remove.rgba_array)
+        pixels = rgba_array(im)
         removal = plan(
-            im, mode, color=color, tolerance_pct=tolerance_pct
+            im, mode, color=color, tolerance_pct=tolerance_pct,
+            rgba=pixels,
         )
         if removal.action == "skip-transparent":
             return "nothing"
@@ -147,7 +157,7 @@ def remove_background(
                 f"    background color auto-detected from the four"
                 f" corners: {removal.border_hex} ({path.name})"
             )
-        out, removed = apply_plan(im, removal, reach)
+        out, removed = apply_plan(im, removal, reach, rgba=pixels)
         # SAFETY GUARD: never destroy an image. A removal that clears
         # more than the path's guard fraction ate the subject (a dark
         # subject keyed as black background, or a flood that leaked
@@ -217,7 +227,11 @@ def crop_transparent(
         # decode ONCE for the whole chain — inside a pipeline session
         # this is the image remove_background just produced, with no
         # write and no re-read in between (painter.imagesession)
-        rgba = imagesession.load(path).convert("RGBA")
+        # convert ONLY when the mode differs — PIL's convert() to the
+        # SAME mode still copies every pixel, and inside a chained
+        # pipeline the image arriving here is already RGBA
+        live = imagesession.load(path)
+        rgba = live if live.mode == "RGBA" else live.convert("RGBA")
 
         if clean_edge_enable:
             rgba, _ = clean_edge_halo(rgba, clean_edge_alpha)

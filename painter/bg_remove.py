@@ -183,6 +183,21 @@ def color_distance(rgb: np.ndarray, target) -> np.ndarray:
     return np.abs(rgb - np.asarray(target, dtype=np.float32)).max(axis=2)
 
 
+def rgba_array(img: Image.Image) -> np.ndarray:
+    """The image as ONE ``(H, W, 4)`` uint8 array — THE single decode +
+    mode-convert every consumer below shares (owner decree 2026-08-07,
+    Priority A).
+
+    One image used to be converted FIVE times per removal: ``plan``
+    built an RGBA copy for the alpha check and an RGB copy for the
+    border sniff, then ``remove_color_background`` built its own RGB
+    copy of the same pixels, and ``clean_edge_halo`` another RGBA one.
+    Every convert walks every pixel and allocates a full frame. Now the
+    caller builds this once and hands it down; RGB is a free VIEW of it
+    (``arr[:, :, :3]``), and the alpha channel is ``arr[:, :, 3]``."""
+    return np.asarray(img.convert("RGBA") if img.mode != "RGBA" else img)
+
+
 def edge_connected_background(candidate: np.ndarray) -> np.ndarray:
     """Boolean mask: candidate pixels that touch, or connect to, the border."""
     labels, n = ndimage.label(candidate)          # 4-connectivity (default)
@@ -202,6 +217,7 @@ def remove_color_background(img: Image.Image,
                             dist_edge: int,
                             sigma: float = 0.0,
                             reach: str = BG_REACH_DEFAULT,
+                            rgba: np.ndarray | None = None,
                             ) -> tuple[Image.Image, float]:
     """(RGBA copy, removed_frac) — the region within ``dist_edge`` of
     ``target`` made transparent. THE engine: white, black and custom
@@ -236,7 +252,10 @@ def remove_color_background(img: Image.Image,
     ``removed_frac`` is the fraction the mask clears; the caller's
     SAFETY guard aborts when it is too high (the flood leaked along a
     dark ring and ate the subject)."""
-    rgb = np.asarray(img.convert("RGB"), dtype=np.float32)
+    # ``rgba``: the caller's already-built array (see rgba_array) —
+    # RGB is a view of it, float32 for the distance maths
+    source = rgba_array(img) if rgba is None else rgba
+    rgb = source[:, :, :3].astype(np.float32)
     dist = color_distance(rgb, target)
     match = dist <= dist_edge
     background = (
@@ -257,7 +276,9 @@ def remove_color_background(img: Image.Image,
 
 def apply_plan(img: Image.Image,
                removal: "RemovalPlan",
-               reach: str = BG_REACH_DEFAULT) -> tuple[Image.Image, float]:
+               reach: str = BG_REACH_DEFAULT,
+               rgba: np.ndarray | None = None,
+               ) -> tuple[Image.Image, float]:
     """Run the engine with one ``plan()`` result's parameters.
 
     ``reach`` is NOT part of the plan: it is orthogonal to WHICH colour
@@ -266,7 +287,7 @@ def apply_plan(img: Image.Image,
     detection decides."""
     return remove_color_background(
         img, removal.target, removal.dist_full, removal.dist_edge,
-        removal.sigma, reach,
+        removal.sigma, reach, rgba,
     )
 
 
@@ -307,7 +328,7 @@ def clean_edge_halo(img: Image.Image,
     untouched (this is deliberately NOT a global ``alpha[alpha<K]=0``,
     which would nibble genuine soft edges). Returns the cleaned RGBA
     copy and the count of pixels that actually lost visible alpha."""
-    arr = np.asarray(img.convert("RGBA")).copy()
+    arr = rgba_array(img).copy()
     alpha = arr[:, :, 3]
     halo = edge_connected_background(alpha < edge_alpha)
     cleaned = int(np.count_nonzero(halo & (alpha > 0)))
@@ -418,6 +439,7 @@ def plan(img: Image.Image,
          *,
          color: str = BG_COLOR_DEFAULT,
          tolerance_pct: float = BG_COLOR_TOLERANCE_PCT,
+         rgba: np.ndarray | None = None,
          ) -> RemovalPlan:
     """Decide how to treat one image (see ``RemovalPlan``).
 
@@ -433,11 +455,11 @@ def plan(img: Image.Image,
     included: it has a real alpha channel that a colour key knows
     nothing about and would overwrite, and this is what makes re-running
     a folder safe."""
-    rgba = img.convert("RGBA")
-    if (np.asarray(rgba)[:, :, 3] < 250).mean() > TRANSPARENT_FRAC:
+    source = rgba_array(img) if rgba is None else rgba
+    if (source[:, :, 3] < 250).mean() > TRANSPARENT_FRAC:
         return RemovalPlan("skip-transparent", *SKIP_PLAN_COLOR, "")
 
-    rgb = np.asarray(rgba.convert("RGB"))
+    rgb = source[:, :, :3]  # a VIEW, not a third copy of the pixels
     border = _border_pixels(rgb)
     border_hex = format_hex_color(np.median(border, axis=0))
 
@@ -486,14 +508,18 @@ def process_file(src: Path, dst: Path, mode: str, crop: bool,
     overrides, still expressed as WHITENESS levels (--white-full /
     --white-edge) and converted to distances from #FFFFFF here."""
     with Image.open(src) as im:
-        removal = plan(im, mode, color=color, tolerance_pct=tolerance_pct)
+        pixels = rgba_array(im)  # ONE convert for plan + engine both
+        removal = plan(
+            im, mode, color=color, tolerance_pct=tolerance_pct,
+            rgba=pixels,
+        )
         if removal.action.startswith("skip"):
             return removal.action
         if force_full is not None:
             removal = removal._replace(dist_full=255 - force_full)
         if force_edge is not None:
             removal = removal._replace(dist_edge=255 - force_edge)
-        out, removed = apply_plan(im, removal, reach)
+        out, removed = apply_plan(im, removal, reach, rgba=pixels)
     if removed > SAFETY_GUARD_DEFAULT[removal.action]:
         return "skip-risky"  # ate the subject — leave the source untouched
     if crop:
