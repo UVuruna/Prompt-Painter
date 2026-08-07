@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="sr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  PromptPainter — Protokol razgovora sa sajtom.
+
+  THE BINDING DESCRIPTION of the per-item conversation protocol: every
+  branch painter/driver.py and painter/runner.py recognise, the exact
+  action each one takes, and the incident that put it there. Standalone
+  page — no external assets, opens straight from disk in any browser.
+
+  Keep it in step with the code (THE DOCS LAW): when a branch, a marker
+  or a timeout changes, this page changes in the same commit. The
+  module-level detail lives in painter/__about/driver.md and
+  painter/__about/runner.md; this page is the one view of the WHOLE
+  protocol end to end.
+-->
+<title>PromptPainter — Protokol razgovora sa sajtom</title>
+<style>
+  :root {
+    --bg: #F5F7F7; --panel: #FFFFFF; --ink: #1C2426; --muted: #5C6B6E;
+    --line: #D9E1E1; --accent: #0E7C86; --accent-soft: #E3EFF0;
+    --code-bg: #EDF2F2;
+    --done: #257A4C; --done-bg: #E2F1E8;
+    --skip: #9A6200; --skip-bg: #F6ECD9;
+    --retry: #33589F; --retry-bg: #E4EAF7;
+    --stop: #AC3830; --stop-bg: #F6E3E1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101617; --panel: #171F21; --ink: #DCE5E5; --muted: #93A4A6;
+      --line: #2A3538; --accent: #4CB8C2; --accent-soft: #14282B;
+      --code-bg: #1E292B;
+      --done: #6CCE97; --done-bg: #15291E;
+      --skip: #E0A954; --skip-bg: #2C2415;
+      --retry: #8FAEF0; --retry-bg: #182238;
+      --stop: #EF8078; --stop-bg: #301A18;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101617; --panel: #171F21; --ink: #DCE5E5; --muted: #93A4A6;
+    --line: #2A3538; --accent: #4CB8C2; --accent-soft: #14282B;
+    --code-bg: #1E292B;
+    --done: #6CCE97; --done-bg: #15291E;
+    --skip: #E0A954; --skip-bg: #2C2415;
+    --retry: #8FAEF0; --retry-bg: #182238;
+    --stop: #EF8078; --stop-bg: #301A18;
+  }
+  :root[data-theme="light"] {
+    --bg: #F5F7F7; --panel: #FFFFFF; --ink: #1C2426; --muted: #5C6B6E;
+    --line: #D9E1E1; --accent: #0E7C86; --accent-soft: #E3EFF0;
+    --code-bg: #EDF2F2;
+    --done: #257A4C; --done-bg: #E2F1E8;
+    --skip: #9A6200; --skip-bg: #F6ECD9;
+    --retry: #33589F; --retry-bg: #E4EAF7;
+    --stop: #AC3830; --stop-bg: #F6E3E1;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.55 "Segoe UI", system-ui, -apple-system, sans-serif;
+    margin: 0; padding: 0 20px 80px;
+  }
+  main { max-width: 920px; margin: 0 auto; }
+  code, .sel {
+    font-family: "Cascadia Code", Consolas, "SF Mono", monospace;
+    font-size: 0.86em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 3px; white-space: nowrap;
+  }
+  h1, h2, h3 { text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 30px; font-weight: 650; margin: 48px 0 6px; }
+  h2 {
+    font-size: 21px; font-weight: 650; margin: 56px 0 4px;
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  h2 .faza {
+    font: 600 11px/1 "Cascadia Code", Consolas, monospace;
+    letter-spacing: 0.12em; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 3px;
+    padding: 4px 7px; white-space: nowrap; transform: translateY(-2px);
+  }
+  h3 { font-size: 16px; font-weight: 650; margin: 30px 0 10px; }
+  p { max-width: 70ch; }
+  .lead { color: var(--muted); margin: 0 0 8px; max-width: 74ch; }
+  .kicker {
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 650; margin-top: 42px;
+  }
+  .intro { color: var(--muted); max-width: 74ch; }
+
+  /* outcome chips */
+  .chip {
+    display: inline-block; font: 650 10.5px/1 "Segoe UI", system-ui, sans-serif;
+    letter-spacing: 0.09em; text-transform: uppercase;
+    padding: 5px 9px; border-radius: 20px; white-space: nowrap;
+  }
+  .chip.done  { color: var(--done);  background: var(--done-bg); }
+  .chip.skip  { color: var(--skip);  background: var(--skip-bg); }
+  .chip.retry { color: var(--retry); background: var(--retry-bg); }
+  .chip.stop  { color: var(--stop);  background: var(--stop-bg); }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 10px 22px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 16px 18px; margin: 22px 0 8px;
+  }
+  .legend div { display: flex; align-items: center; gap: 9px; font-size: 14px; }
+  .legend span.desc { color: var(--muted); }
+
+  /* branch cards */
+  .branch {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 14px 16px 12px; margin: 12px 0;
+  }
+  .b-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 14px; margin-bottom: 8px;
+  }
+  .b-sit { font-weight: 650; font-size: 15px; }
+  .b-row { display: flex; gap: 12px; margin: 5px 0; font-size: 14.5px; }
+  .b-k {
+    flex: 0 0 104px; color: var(--muted); font-size: 11px; font-weight: 650;
+    letter-spacing: 0.1em; text-transform: uppercase; padding-top: 3px;
+  }
+  .b-v { flex: 1; min-width: 0; }
+  .b-note {
+    margin-top: 9px; padding-top: 8px; border-top: 1px dashed var(--line);
+    color: var(--muted); font-size: 13px;
+  }
+  .b-note b { color: var(--ink); font-weight: 650; }
+
+  /* phase container accent */
+  section.phase { border-left: 3px solid var(--accent-soft); padding-left: 18px; margin-left: -21px; }
+  @media (max-width: 700px) { section.phase { margin-left: 0; padding-left: 12px; } }
+
+  figure { margin: 26px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; overflow-x: auto; }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption { color: var(--muted); font-size: 13.5px; margin-top: 10px; max-width: 74ch; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 14px 10px; margin: 14px 0; }
+  th { text-align: left; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 10px 14px 6px 0; border-bottom: 1px solid var(--line); }
+  td { padding: 8px 14px 8px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+
+  .invariants { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 18px 0; }
+  .inv { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 13px 15px; font-size: 14px; }
+  .inv b { display: block; margin-bottom: 4px; }
+
+  a { color: var(--accent); }
+  .ordered { padding-left: 22px; }
+  .ordered li { margin: 7px 0; max-width: 70ch; }
+</style>
+
+</head>
+<body>
+<main>
+  <div class="kicker">PromptPainter · painter/driver.py + painter/runner.py · stanje 2026-08-04 (v0.0.230)</div>
+  <h1>Protokol razgovora sa sajtom</h1>
+  <p class="lead">Kompletan tok jedne stavke — od reda čekanja do snimljenog fajla — sa
+  svakim grananjem koje program prepoznaje i tačnom akcijom u svakoj situaciji.
+  Važi za oba sajta (ChatGPT i Gemini); razlike su označene u mestu.</p>
+
+  <div class="legend">
+    <div><span class="chip done">Done</span><span class="desc">slika snimljena, sledeća stavka</span></div>
+    <div><span class="chip retry">Oporavak</span><span class="desc">ponovni pokušaj iste stavke</span></div>
+    <div><span class="chip skip">Skip stavke</span><span class="desc">glasno preskoči, run ide dalje</span></div>
+    <div><span class="chip stop">Stop sajta</span><span class="desc">ceo sajt staje; restart nastavlja iz fajlova</span></div>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 860 300" role="img" aria-label="Mapa toka: submit, await, extract, save, pauza; izlazi u oporavak, skip stavke i stop sajta">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="20"  y="40" width="130" height="46" rx="6"/>
+        <rect x="200" y="40" width="130" height="46" rx="6"/>
+        <rect x="380" y="40" width="130" height="46" rx="6"/>
+        <rect x="560" y="40" width="130" height="46" rx="6"/>
+        <rect x="720" y="40" width="120" height="46" rx="6"/>
+      </g>
+      <g font-size="13" fill="currentColor" text-anchor="middle" font-weight="600">
+        <text x="85"  y="59">2 · SUBMIT</text><text x="85"  y="76" font-weight="400" font-size="11">poruka poslata</text>
+        <text x="265" y="59">3 · AWAIT</text><text x="265" y="76" font-weight="400" font-size="11">čekamo NAŠ odgovor</text>
+        <text x="445" y="59">5 · EXTRACT</text><text x="445" y="76" font-weight="400" font-size="11">bajtovi iz DOM-a</text>
+        <text x="625" y="59">6 · SAVE</text><text x="625" y="76" font-weight="400" font-size="11">fajl + obrada</text>
+        <text x="780" y="59">PAUZA</text><text x="780" y="76" font-weight="400" font-size="11">tempo</text>
+      </g>
+      <g stroke="currentColor" stroke-width="1.4" marker-end="url(#arr)" fill="none">
+        <line x1="150" y1="63" x2="196" y2="63"/>
+        <line x1="330" y1="63" x2="376" y2="63"/>
+        <line x1="510" y1="63" x2="556" y2="63"/>
+        <line x1="690" y1="63" x2="716" y2="63"/>
+        <path d="M 780 40 C 780 12, 85 12, 85 36"/>
+      </g>
+      <text x="432" y="26" font-size="11" fill="currentColor" text-anchor="middle">sledeća stavka iz reda</text>
+
+      <!-- exits -->
+      <g stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#arr)" fill="none">
+        <line x1="245" y1="86" x2="185" y2="146"/>
+        <line x1="285" y1="86" x2="345" y2="146"/>
+        <line x1="265" y1="86" x2="265" y2="216"/>
+        <line x1="625" y1="86" x2="625" y2="146"/>
+      </g>
+      <g fill="none" stroke-width="1.4">
+        <rect x="90"  y="150" width="190" height="52" rx="6" stroke="#4a7ddc"/>
+        <rect x="330" y="150" width="190" height="52" rx="6" stroke="#c2913a"/>
+        <rect x="170" y="220" width="190" height="52" rx="6" stroke="#cf574d"/>
+        <rect x="530" y="150" width="190" height="52" rx="6" stroke="#c2913a"/>
+      </g>
+      <g font-size="12" fill="currentColor" text-anchor="middle">
+        <text x="185" y="171" font-weight="600">OPORAVAK</text>
+        <text x="185" y="188" font-size="11">safer retry · nudge · re-send · merdevine</text>
+        <text x="425" y="171" font-weight="600">SKIP STAVKE</text>
+        <text x="425" y="188" font-size="11">glasno u log + report, run ide dalje</text>
+        <text x="265" y="241" font-weight="600">STOP SAJTA</text>
+        <text x="265" y="258" font-size="11">kvota · rot selektora · iscrpljene merdevine</text>
+        <text x="625" y="171" font-weight="600">DUPLIKAT-ČUVAR</text>
+        <text x="625" y="188" font-size="11">isti bajtovi → 1 ponovni pokušaj → skip</text>
+      </g>
+      <g stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 4" marker-end="url(#arr)" fill="none">
+        <path d="M 90 176 C 40 176, 40 70, 60 70" />
+      </g>
+      <text x="46" y="130" font-size="10.5" fill="currentColor" text-anchor="middle">nazad u</text>
+      <text x="46" y="143" font-size="10.5" fill="currentColor" text-anchor="middle">submit/await</text>
+      <text x="380" y="290" font-size="11" fill="currentColor" text-anchor="middle">STOP SAJTA nije kraj podataka: „done" = fajl na disku, pa restart preskače sve već snimljeno</text>
+    </svg>
+    <figcaption>Glavna petlja i njena tri izlaza. Pune strelice su srećan put; isprekidane su
+    grananja opisana po fazama ispod. Svaka grana se završava jednim od četiri ishoda iz legende.</figcaption>
+  </figure>
+
+  <!-- ============ FAZA 0 ============ -->
+  <section class="phase">
+  <h2><span class="faza">FAZA 0</span> Pre run-a — Chrome, tab, login (jednom po startu)</h2>
+  <p class="intro">Sve pre prve stavke. Ovde nema po-stavki grananja — svaka greška je poruka vlasniku, ne tiha improvizacija.</p>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Automation Chrome nije podignut</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Program sâm pokreće Chrome sa <code>--remote-debugging-port=9222</code> i sopstvenim profilom <code>chrome-profile/</code> (Chrome 136+ odbija CDP na podrazumevanom profilu). Sesije (logini) žive u profilu na disku.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">CDP konekcija odbijena</span><span class="chip stop">Stop sajta</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v"><code>DriverError</code> sa uputstvom kako se Chrome pokreće — nikad tiho.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Tab sajta ne postoji / postoji više njih</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Više tabova → vozimo POSLEDNJI (najskorije otvoren). Nijedan → driver sâm otvara tab i ide na URL sajta.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Stranica je login ekran (nema composera)</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v">Selektor prompt boxa (<code>prompt_box</code>) se ne pojavljuje.</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Čekamo da se vlasnik ručno uloguje — status u logu na svakih 15 s; posle isteka budžeta glasna greška „uloguj se pa Start ponovo".</span></div>
+  </div>
+  </section>
+
+  <!-- ============ FAZA 1 ============ -->
+  <section class="phase">
+  <h2><span class="faza">FAZA 1</span> Priprema stavke (runner, pre slanja)</h2>
+  <p class="intro">Red čekanja dolazi iz parsiranog sheeta. Pravilo iznad svih: <b>„done" = fajl postoji na disku</b> — folder je jedini izvor istine.</p>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Fajl stavke već postoji na disku</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Nenadgledani run je preskače (besplatan resume). Fajl se NIKAD ne prepisuje.</span></div>
+    <div class="b-note"><b>Izuzetak — svesni REDO:</b> eksplicitno štiklirana done stavka se generiše ponovo i snima kao sledeći <code>_vN</code> brat (<code>Figure_v2_gem.png</code> …), verzija PRE terminalnog sufiksa generatora. Original ostaje.</div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Stavka nosi ulazne reference (<code>←</code> linije), fajl ne postoji</span><span class="chip skip">Skip stavke</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v">Referenca se razrešava redom: ① folder sheeta → ② Reference folder run-a → ③ apsolutna putanja.</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Fajl koji nedostaje = glasan skip TE stavke; ostatak reda normalno radi. U „Prompt + Image" modu ulaze samo stavke sa promptom I svim referencama — isključene se glasno izlistaju.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Red menja folder (opcija „new chat per folder")</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Otvaramo svežu konverzaciju (<code>new_chat</code>). Ako New-chat dugme ne postoji: glasno u log, ali run nastavlja u starom chatu — nikad fatalno.</span></div>
+  </div>
+  <p>Na sâm prompt se uvek dodaje <b>pravilo sajta</b> (background sufiks; Gemini dobija i NO-reflections zakon, ChatGPT ANTI-GRAIN zakon), plus eventualna napomena AI-checkera za ponovljeno slanje.</p>
+  </section>
+
+  <!-- ============ FAZA 2 ============ -->
+  <section class="phase">
+  <h2><span class="faza">FAZA 2</span> SUBMIT — poruka mora dokazano da ode</h2>
+  <p class="intro">Svaki korak se VERIFIKUJE čitanjem 4 elementa stanja: tekst composera, send/stop dugme,
+  poslednji poslati user turn, poslednja slika. Ništa se ne pretpostavlja.</p>
+
+  <h3>2a · Pre slanja: <code>_ensure_ready</code></h3>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Sajt nije zauzet</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Šaljemo odmah.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Stop dugme svetli, a prošli item je već DOKAZANO završen</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v"><code>await_done</code> je prošli put video sliku UČITANU dok je stop dugme još stajalo → zapisao <code>_busy_known_stuck</code>.</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">REFRESH stranice ODMAH, bez ikakvog čekanja — dugme je provereno zaglavljeno, ne živa generacija.</span></div>
+    <div class="b-note"><b>Poreklo:</b> 7 tihih minuta između dve ChatGPT stavke (2026-08-04) — pošteno čekanje zaglavljenog dugmeta pojelo je ceo generation timeout.</div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Stop dugme svetli iz nepoznatog razloga</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Čekamo do <b>90 s</b> (sopstveni budžet <code>busy_stuck_timeout_s</code>, nikad generation timeout) uz progres u logu; ako se ugasi — šaljemo; ako nadživi budžet — refresh pa slanje.</span></div>
+  </div>
+
+  <h3>2b · Snimak stanja: <code>capture_baseline</code></h3>
+  <p>Pre svakog slanja pamtimo: broj asistentskih turnova, src poslednje slike, broj user turnova.
+  Sve posle slanja se sudi RELATIVNO na ovaj snimak — zato je „zgrabi poslednju vidljivu sliku" nemoguće.</p>
+
+  <h3>2c · Prilaganje referenci: <code>submit_with_image</code> (samo stavke sa <code>←</code>)</h3>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Sajt nema snimljene selektore „+" menija</span><span class="chip stop">Stop sajta</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v"><code>AttachNotConfigured</code> ODMAH, pre ijednog dodira stranice — selektori se snimaju uživo, nikad ne pogađaju.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">ChatGPT: skriveni <code>&lt;input type=file&gt;</code> je u DOM-u</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Otvorimo „+" meni, fajlove postavimo DIREKTNO na input (bez klika na red menija!), Escape zatvori meni. Više referenci ide kroz JEDNU interakciju, redosled = redosled <code>←</code> linija.</span></div>
+    <div class="b-note"><b>Poreklo:</b> klik na „Add photos &amp; files" otvara NATIVNI OS dijalog koji Playwright ne ume da zatvori — svaki attach je ostavljao Explorer prozor pored browsera (2026-08-04).</div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Input se renderuje lenjo / Gemini (nema input)</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Klik na opciju menija UNUTAR presretanja file-choosera — dijalog koji se otvori biva programski konzumiran; fallback na otkriveni input ako dijaloga nema.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Preview attachmenta se ne pojavljuje</span><span class="chip stop">Stop sajta</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Čekamo upload do isteka image-ready budžeta; bez preview-a NIKAD ne šaljemo (prompt ne sme da pretekne sliku) — glasan <code>SelectorRot</code>.</span></div>
+  </div>
+
+  <h3>2d · Kucanje: <code>_type_into_box</code></h3>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Composer drži zaostali tekst</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Ctrl+A + Delete SAMO kad ima teksta (prazan box se ne dira), pa insert prompta — sve sa ljudskim pauzama (<code>_hesitate</code>).</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Composer NE drži naš tekst posle kucanja</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v">Normalizovanih prvih 60 znakova prompta nije početak sadržaja boxa.</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Jedno tiho ponovno kucanje; ako opet ne drži → glasan <code>DriverError</code> (stop sajta).</span></div>
+  </div>
+
+  <h3>2e · Klik na send: <code>_click_send</code></h3>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Send dugme se ne nalazi ni po jednom selektoru</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">JEDNOKRATNO: reload stranice → ponovo priloži slike (reload ih briše!) → ponovo otkucaj → probaj send još jednom. Drugi promašaj = <code>SelectorRot</code>, stop sajta.</span></div>
+    <div class="b-note"><b>Poreklo:</b> stvaran pad 2026-07-21 koji je ručni refresh rešio.</div>
+  </div>
+
+  <h3>2f · Potvrda slanja: <code>_confirm_sent</code> (≤ 20 s)</h3>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Poruka je dokazano otišla</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v">Naših 60 znakova je u NAJNOVIJEM user turnu I (composer prazan ILI sajt zauzet — busy je jednak dokaz).</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Pamtimo <code>sent_head</code> — SIDRO za celu fazu čekanja (F1b).</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Selektor user turna ništa ne hvata</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Dokumentovani fallback: „composer prazan + busy se pojavio" — uz GLASNU napomenu u logu da se selektori provere.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Na pola prozora još nema potvrde</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Jedan ponovni pokušaj slanja (klik + Enter) — ali NIKAD dok je sajt busy: composer dugme je tada STOP dugme i klik bi ubio našu generaciju.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Prozor istekao bez potvrde</span><span class="chip stop">Stop sajta</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Glasan <code>DriverError</code> sa stanjem composera — runner nikad ne nastavlja preko neposlate poruke (koren starih tihih preskoka).</span></div>
+  </div>
+  </section>
+
+  <!-- ============ FAZA 3 ============ -->
+  <section class="phase">
+  <h2><span class="faza">FAZA 3</span> AWAIT — čekamo NAŠ odgovor (poll petlja, tvrdi limit 420 s)</h2>
+  <p class="intro">Primarni signal je REZULTAT, ne dugme. Svaki poll prolazi kroz iste provere, ovim redosledom.
+  „Naš turn" = poslednji asistentski turn koji u DOM-u <b>sledi iza našeg user turna</b> (F1b sidro);
+  brojanje turnova je samo fallback kad user-turn selektor ne postoji — jer u dugom chatu sajt
+  izbacuje stare turnove iz DOM-a i brojka laže.</p>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">① Naša poruka je NESTALA iz chata</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v">Najnoviji user turn više ne drži naš <code>sent_head</code>, ILI se broj user turnova vratio na predsubmit vrednost (to hvata i nestanak između dva IDENTIČNA heada — colored varijante dele istih 60 znakova). Mora da SE DRŽI 6 s (treptaj re-rendera nije nestanak).</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v"><code>SendVanished</code> → runner ponovo šalje SOPSTVENI prompt stavke, jednom (sa referencama). Nikad slepi „Continue". Drugi nestanak = skip stavke.</span></div>
+    <div class="b-note"><b>Poreklo:</b> Padmé/Qui-Gon incident (2026-08-04) — Gemini je tiho obrisao potvrđenu poruku, nudge je regenerisao PRETHODNI zahtev i Qui-Gon bedž se snimio kao <code>Padme_v3_gem.png</code>.</div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">② Naš turn drži UČITANU sliku sa svežim src</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v"><code>&lt;img&gt;</code> je <code>complete</code> sa širinom ≥ minimuma i <code>src</code> RAZLIČIT od poslednje slike iz baseline snimka (prethodna stavka nikad nije naša).</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">GOTOVO — dugme ignorišemo. Ako stop dugme JOŠ svetli u tom trenutku: zapiši <code>_busy_known_stuck</code> pa sledeći submit refreshuje odmah.</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">③ Turn ima tekst → klasifikacija markera (redosled bitan)</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Provere idu OVIM redom, prva pogođena dobija stavku:</span></div>
+    <div class="b-row"><span class="b-k">1</span><span class="b-v"><b>Degradacioni baner</b> (Gemini „Continuing with Flash-Lite") → <code>ModelDegraded</code> — pre kvota markera, jer prateći tekst hvata i njih. Vidi FAZA 4.</span></div>
+    <div class="b-row"><span class="b-k">2</span><span class="b-v"><b>Image-failed markeri</b> (ChatGPT, oba lica: „reply with 'retry'" i „Hmm…something seems to have gone wrong") → <code>ImageGenFailed</code> — dizano ODMAH, jer se busy za ovo stanje nikad ne gasi; bez ovoga bi izgoreo ceo timeout.</span></div>
+    <div class="b-row"><span class="b-k">3</span><span class="b-v"><b>Kvota / rate-limit markeri</b> (EN + srpski; „limit resets…") → <code>TerminalState</code> sa isparsiranim vremenom reseta.</span></div>
+    <div class="b-row"><span class="b-k">4</span><span class="b-v"><b>Odbijenice po kategorijama, najspecifičnija prva</b>: COPYRIGHT („third-party content"…) se proverava PRE SAFETY, jer copyright poruka sadrži i generičke safety fraze → <code>ItemRefused(category)</code>.</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">④ Tekst bez ijednog markera, busy ugašen, stoji 6 s</span><span class="chip skip">Skip stavke</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v">Model je ODGOVORIO nečim što ne prepoznajemo. Settle od 6 s postoji jer ChatGPT-jev busy treperi između tekst i image faze — trenutna presuda je preskakala žive generacije.</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v"><code>NoImage(had_text=True)</code> → glasan skip sa početkom teksta u logu. <b>Nudge se ovde NIKAD ne šalje.</b></span></div>
+    <div class="b-note"><b>Poreklo:</b> market-scene incident (2026-07-25) — nudge posle neprepoznate odbijenice naterao je Gemini da nacrta nasumičnu sliku koja se snimila pod imenom stavke.</div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">⑤ NIŠTA: nema novog turna, busy se nije pojavio 30 s</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v"><code>NoImage(had_text=False)</code> — jedini nudge-podoban slučaj: runner šalje „Continue…" JEDNOM (ako je opcija uključena); oporavljena slika = normalan uspeh; ponovni <code>NoImage</code>/<code>SendVanished</code> = skip stavke. Poruka greške prijavljuje STVARNO proteklo vreme.</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">⑥ Tvrdi timeout: 420 s bez rezultata</span><span class="chip stop">Stop sajta</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v"><code>GenerationTimeout</code> — propagira i zaustavlja sajt; fajlovi na disku čuvaju progres.</span></div>
+  </div>
+  </section>
+
+  <!-- ============ FAZA 4 ============ -->
+  <section class="phase">
+  <h2><span class="faza">FAZA 4</span> Reakcije runnera — šta svaka presuda znači za run</h2>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit"><code>ItemRefused</code> — sajt odbio OVAJ prompt</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Safer retry (ako je uključen i kategorija ima preambulu): JEDNO ponovno slanje sa reframing preambulom po SCENARIJU — alegorija za safety blok, homage/editorial za copyright blok — sa ponovo priloženim referencama. Uspeh = normalan rezultat (badge „safer retry").</span></div>
+    <div class="b-row"><span class="b-k">Ako padne</span><span class="b-v">BILO KOJI per-item ishod retry-ja (nova odbijenica, <code>NoImage</code>, timeout, <code>SendVanished</code>) = skip stavke — nikad stop sajta. Kvota unutar retry-ja i dalje legitimno zaustavlja sajt.</span></div>
+    <div class="b-note"><b>Poreklo:</b> pad u 18:43:46 (2026-08-04) — <code>NoImage</code> iz retry-ja je iskliznuo pored spoljnih hendlera (Python ne prosleđuje izuzetak iz jednog <code>except</code> bloka susednom) i ugasio ceo sajt.</div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit"><code>SendVanished</code> — poruka obrisana posle potvrde</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Ponovno slanje SOPSTVENOG prompta stavke (jednom, sa referencama) — log: „SENT PROMPT VANISHED… / re-send RECOVERED". Drugi pad = skip stavke.</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit"><code>ModelDegraded</code> — Gemini pao na slabiji model</span><span class="chip skip">Skip stavke</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Pitamo izbor (jednom po run-u): <b>„continue"</b> = ova stavka skip, run živi na slabijem modelu (naredne prosto uspevaju ako slabiji model renderuje); <b>„wait"</b> = ponaša se kao kvota — <code>TerminalState</code> sa vremenom reseta iz samog banera, auto-restart na reset. Baner se proverava i POSLE svakog snimanja (slika ume da stigne i dok je baner gore).</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit"><code>ImageGenFailed</code> — ChatGPT-jev alat za slike pukao</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">MERDEVINE oporavka (dijagram ispod). Prva prečka koja da sliku nastavlja run; SVE potrošene = stop sajta (bez per-item skipa za ovaj kvar). Svako čekanje anketira Stop dugme GUI-ja. Odbijenica usred merdevina ide u safer-retry put iznad.</span></div>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 820 210" role="img" aria-label="Merdevine oporavka od ImageGenFailed: retry dugme, pa tekst retry, pa dve eskalacione runde, pa stop sajta">
+      <defs>
+        <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="15"  y="30" width="150" height="58" rx="6"/>
+        <rect x="215" y="30" width="150" height="58" rx="6"/>
+        <rect x="415" y="30" width="170" height="58" rx="6"/>
+        <rect x="635" y="30" width="170" height="58" rx="6"/>
+      </g>
+      <g font-size="12.5" fill="currentColor" text-anchor="middle">
+        <text x="90" y="50" font-weight="600">1 · Retry DUGME</text>
+        <text x="90" y="66" font-size="11">nativno, regeneriše u mestu</text>
+        <text x="90" y="80" font-size="11">(baseline vraćen 1 turn)</text>
+        <text x="290" y="50" font-weight="600">2 · tekst „retry"</text>
+        <text x="290" y="66" font-size="11">×2, razmak 1–3 min</text>
+        <text x="290" y="80" font-size="11">(nasumično — ljudski tempo)</text>
+        <text x="500" y="50" font-weight="600">3 · eskalacija ×2</text>
+        <text x="500" y="66" font-size="11">čekaj (1–3 min / 22–36 min)</text>
+        <text x="500" y="80" font-size="11">→ refresh → nova sesija → ceo prompt</text>
+        <text x="720" y="54" font-weight="600" fill="#cf574d">SVE POTROŠENO</text>
+        <text x="720" y="72" font-size="11">stop sajta · resume iz fajlova</text>
+      </g>
+      <g stroke="currentColor" stroke-width="1.3" marker-end="url(#arr2)" fill="none">
+        <line x1="165" y1="59" x2="211" y2="59"/>
+        <line x1="365" y1="59" x2="411" y2="59"/>
+        <line x1="585" y1="59" x2="631" y2="59"/>
+        <path d="M 90 88 L 90 150 L 400 150"/>
+        <line x1="290" y1="88" x2="290" y2="146"/>
+        <line x1="500" y1="88" x2="500" y2="146"/>
+      </g>
+      <g fill="none" stroke="#3f9e6b" stroke-width="1.6">
+        <rect x="404" y="150" width="200" height="40" rx="20"/>
+      </g>
+      <text x="504" y="175" font-size="12.5" font-weight="600" fill="currentColor" text-anchor="middle">slika stigla → run nastavlja</text>
+      <text x="204" y="141" font-size="11" fill="currentColor" text-anchor="middle">prva prečka koja da sliku</text>
+    </svg>
+    <figcaption>Merdevine za <code>ImageGenFailed</code>. Svaka prečka se pokušava tek kad prethodna
+    ne da sliku; „nova sesija" znači new chat + ponovno slanje CELOG prompta (sa referencama).
+    Sa isključenom opcijom <code>image_failed_retry</code> prvi kvar odmah zaustavlja sajt.</figcaption>
+  </figure>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit"><code>TerminalState</code> — kvota / rate limit</span><span class="chip stop">Stop sajta</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Nikad slepi retry. Vreme reseta se parsira iz same poruke (EN i srpski); GUI zakazuje AUTO-RESTART na reset. Report dobija razlog stanja.</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit"><code>SelectorRot</code> / ostali <code>DriverError</code> — nepoznato DOM stanje</span><span class="chip stop">Stop sajta</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Root pravilo #1: kad nijedan fallback selektor ne pogodi, NE pogađamo — glasna greška sa citiranim početkom odgovora; popravka ide u config blok selektora.</span></div>
+  </div>
+  </section>
+
+  <!-- ============ FAZA 5 ============ -->
+  <section class="phase">
+  <h2><span class="faza">FAZA 5</span> EXTRACT — bajtovi direktno iz DOM-a</h2>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Čitanje slike (bez Download klika)</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v"><b>CANVAS-FIRST:</b> <code>drawImage</code> + <code>toDataURL</code> u samoj stranici — radi i pod Gemini CSP-om koji blokira <code>fetch()</code> nad <code>blob:</code> adresama, i uvek daje pravi PNG. Fallback: <code>fetch(src)</code> + FileReader (ChatGPT-jev potpisani URL, sa session kolačićima).</span></div>
+    <div class="b-row"><span class="b-k">Čuvar</span><span class="b-v">Slika se uzima ISKLJUČIVO iz našeg turna i samo sa src različitim od baseline — nikad „poslednja vidljiva na strani".</span></div>
+  </div>
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Bajtovi nisu PNG</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Magic-bytes provera (<code>sniff_format</code>) → UPOZORENJE u logu, fajl se ipak snima pod imenom iz sheeta (sheet imenuje fajl).</span></div>
+  </div>
+  </section>
+
+  <!-- ============ FAZA 6 ============ -->
+  <section class="phase">
+  <h2><span class="faza">FAZA 6</span> SAVE i posle — čuvari, obrada, izveštaj, tempo</h2>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Bajtovi identični PRETHODNOM snimanju (sha1)</span><span class="chip retry">Oporavak</span></div>
+    <div class="b-row"><span class="b-k">Prepoznajemo</span><span class="b-v">Sajt je re-servirao staru sliku (duplicate-save bug).</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">JEDNO sveže ponovno slanje; i dalje identično → skip stavke. Duplikat fajl se nikad tiho ne snima.</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Snimanje</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Direktno u assets ogledalo: <code>&lt;out&gt;/&lt;rest&gt;/&lt;File&gt;_gem|_gpt.png</code> (generator = terminalni sufiks iz <code>SITE_FILE_SUFFIX</code>; nepoznat generator = glasan KeyError). Štikliran redo → sledeći <code>_vN</code>. Postojeći fajl se NIKAD ne prepisuje.</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Postprocess hook (3 koraka, svaki isključiv, default ON)</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">① <code>remove_background</code> (auto-detekcija po uglovima / forsirana bela-crna / custom boja ±%; flood-fill od ivice po defaultu — zatvorene regije unutar subjekta ostaju) → ② <code>crop_transparent</code> (autocrop + margina) → ③ <code>upscale_if_small</code> (Real-ESRGAN, samo ~kvadratne slike ispod 800 px).</span></div>
+    <div class="b-row"><span class="b-k">Ako padne</span><span class="b-v">GLASNO u log i report — ali nikad ne ubija run.</span></div>
+  </div>
+
+  <div class="branch">
+    <div class="b-head"><span class="b-sit">Knjigovodstvo i tempo</span><span class="chip done">Done</span></div>
+    <div class="b-row"><span class="b-k">Radimo</span><span class="b-v">Report txt + dashboard eventi (<code>item_progress</code>/<code>item_done</code> nose <code>rel</code> — STVARNU putanju, i badge <code>retried</code> kad je oporavak dao sliku); dva vremena po slici (AI generate + naše vreme — „sve se računa"); zatim slučajna pauza iz opsega (paced run) uz proveru Stop/Pause dugmadi između stavki. Pa sledeća stavka → FAZA 1.</span></div>
+  </div>
+  </section>
+
+  <!-- ============ invariants ============ -->
+  <h2><span class="faza">ZAKONI</span> Invarijante koje važe u svakoj grani</h2>
+  <div class="invariants">
+    <div class="inv"><b>Folder je izvor istine</b>„Done" = fajl postoji; nema sidecar stanja. Restart je uvek besplatan resume; ništa se ne prepisuje.</div>
+    <div class="inv"><b>Glasno ili nikako (Rule #1)</b>Nepoznato DOM stanje nikad se ne pogađa — svaka nepogođena situacija je greška sa citiranim tekstom.</div>
+    <div class="inv"><b>Rezultat mora biti NAŠ</b>Sidro na sopstveni user turn + svež src: tuđa, stara ili orphan slika ne može dobiti ime naše stavke.</div>
+    <div class="inv"><b>Ljubaznost prema sajtu</b>Ljudski tempo (nasumične pauze), jedan prozor po sajtu, stop na svaki signal bloka; nudge/retry su odmereni i ograničeni.</div>
+    <div class="inv"><b>Izvori su read-only</b>Sheet-ovi i reference se samo čitaju; piše se isključivo pod izabranim output folderom.</div>
+    <div class="inv"><b>Oporavak pre odustajanja, stavka pre sajta</b>Svaki kvar prvo dobija najjeftiniju prečku oporavka; tek dokazano terminalna stanja (kvota, rot selektora, iscrpljene merdevine) zaustavljaju sajt.</div>
+  </div>
+
+  <h2><span class="faza">ISTORIJA</span> Incidenti koji su oblikovali pravila</h2>
+  <div class="tablewrap">
+  <table>
+    <tr><th>Datum</th><th>Incident</th><th>Pravilo koje je rodio</th></tr>
+    <tr><td>2026-07-21</td><td>„No selector for send button… site stopped" — ručni refresh rešio</td><td>Jednokratni reload-recovery za send dugme</td></tr>
+    <tr><td>2026-07-25</td><td>Market-scene: nudge posle neprepoznate odbijenice → nasumična slika snimljena</td><td>Tekst bez markera = skip, nudge samo na PRAZAN odgovor</td></tr>
+    <tr><td>2026-07-29</td><td>Zaglavljen stop button + send/interrupt/send petlja</td><td>F1: rezultat je primarni done-edge; potvrda slanja; settle 6 s; nikad retry preko busy</td></tr>
+    <tr><td>2026-08-04</td><td>7 tihih minuta između dve stavke</td><td>Sopstveni busy budžet (90 s) + trenutni refresh za dokazano zaglavljeno dugme</td></tr>
+    <tr><td>2026-08-04</td><td>Explorer prozor posle svakog attacha</td><td>Direktan set na skriveni input; chooser-presretanje kao fallback</td></tr>
+    <tr><td>2026-08-04</td><td>Padmé/Qui-Gon: obrisana poruka → nudge regenerisao prethodni zahtev</td><td>F1b: sidro na user turn, <code>SendVanished</code> → re-send sopstvenog prompta</td></tr>
+    <tr><td>2026-08-04</td><td>18:43:46: <code>NoImage</code> iz safer retry-ja ugasio ceo sajt</td><td>Retry hvata SVAKI per-item ishod; skip stavke umesto stopa sajta</td></tr>
+  </table>
+  </div>
+
+  <p class="intro" style="margin-top:40px">Izvor: <code>painter/driver.py</code>, <code>painter/runner.py</code> i njihovi
+  <code>__about</code>/<code>__flow</code> dokumenti; vremena iz <code>painter/config/sites.py</code>
+  (selector 10 s · busy-appear 30 s · confirm 20 s · settle 6 s · busy-stuck 90 s · generation 420 s).</p>
+</main>
+</body>
+</html>

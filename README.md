@@ -60,6 +60,14 @@ First consumer: DOMY Watch prompt sheets.
 
 ## Documentation
 
+- [**Protokol razgovora sa sajtom**](PROTOCOL.html) — the whole
+  per-item conversation protocol on ONE page (open it in a browser):
+  the main loop and its three exits, phases 0–6, every branch
+  `painter/driver.py` and `painter/runner.py` recognise with its exact
+  action and outcome (Done / Oporavak / Skip stavke / Stop sajta), the
+  invariants, and the incident that put each rule there. The
+  module-level detail lives in [CDP Driver](painter/__about/driver.md)
+  and [Run Loop](painter/__about/runner.md)
 - [Sheet-authoring instructions](instructions.md) — the contract a
   sheet author (person or agent) follows; also behind the GUI's
   **Instructions** button
