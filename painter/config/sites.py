@@ -15,9 +15,14 @@ class Timing:
 
     # human-like hesitation between UI actions (click box -> paste,
     # paste -> send ...): a random delay drawn from this range, like
-    # a person doing Ctrl+V and then Enter
-    action_delay_min_s: float = 0.2
-    action_delay_max_s: float = 0.6
+    # a person doing Ctrl+V and then Enter.
+    # NOT USER-TUNABLE (owner 2026-08-07) — see PACE section below.
+    # Widened from 0.2-0.6 when the GUI spinners were removed: a narrow
+    # range is a MORE regular rhythm, and regularity is what a bot
+    # detector reads. The whole cost is 3-4 draws per image, about a
+    # second against a ~60 s generation, so the wider spread is free.
+    action_delay_min_s: float = 0.3
+    action_delay_max_s: float = 0.9
     # a required element (prompt box, send button) must appear;
     # SPAs morph elements a beat after input events, so lookups
     # poll instead of failing on a one-shot snapshot
@@ -65,9 +70,55 @@ class Timing:
     progress_log_interval_s: float = 15.0
     # polite pause between prompts (image quotas are real): a RANDOM
     # duration drawn uniformly from [min, max], fractional seconds
-    # included (e.g. 12.56s) — less robotic pacing
-    pause_min_s: float = 30.0
-    pause_max_s: float = 75.0
+    # included (e.g. 12.56s) — less robotic pacing. The DEFAULT is the
+    # POLITE pace; a run overrides the pair from PACE_RANGES via the
+    # GUI's "Polite pace" switch (see below).
+    pause_min_s: float = 12.0
+    pause_max_s: float = 36.0
+
+
+# ═════════════════════════════ THE PACE ═════════════════════════════════
+# --- The two paces (owner 2026-08-07) --------------------------------
+#
+# The owner USED to type four numbers per site in the GUI — pause
+# from/to and action-delay from/to. Those are protocol MECHANICS, not a
+# product choice, and they were the only fields in the app exposing
+# them, so they moved here and the GUI kept ONE switch: "Polite pace".
+#
+# The two ranges are not a speed dial; they are two PEOPLE (the owner's
+# own model, and the reason they are allowed to OVERLAP):
+#
+#   POLITE  12-36 s  — someone running this alongside other work, coming
+#                      back to the tab every half minute or so
+#   FAST     2-13 s  — someone sitting on it, focused, next prompt as
+#                      soon as the last image lands
+#
+# Neither is zero, and that is deliberate. Driving the consumer web UI
+# breaches both sites' automation clauses (README -> Honesty Notes); the
+# realistic consequence is account-level (captcha walls, rate limits,
+# suspension), and the gap between requests is the largest part of what
+# has kept the owner's runs unremarkable. A perfectly regular zero-gap
+# cadence is the single most recognisable pattern there is, so the FAST
+# pace still breathes.
+#
+# The site sees pause + GENERATION (~60 s), not the pause alone, so the
+# real request cadence is ~72-96 s polite vs ~62-73 s fast — the daily
+# image quota bites long before either becomes a rate problem.
+PACE_POLITE_S = (12.0, 36.0)
+PACE_FAST_S = (2.0, 13.0)
+
+
+def pace_range(polite: bool) -> tuple[float, float]:
+    """The (min, max) pause between images for the GUI switch's state.
+
+    THE one authority — `gui.app_jobs` reads it for both the site runs
+    and the API job, so the two can never drift apart."""
+    return PACE_POLITE_S if polite else PACE_FAST_S
+
+
+# The GUI switch's own default: ON. A fresh install is polite until the
+# owner says otherwise.
+PACE_POLITE_DEFAULT = True
 
 
 TIMING = Timing()

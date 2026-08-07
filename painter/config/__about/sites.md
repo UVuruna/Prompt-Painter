@@ -37,6 +37,27 @@ Nothing at module scope — a leaf module.
 - `PAUSE_POLL_INTERVAL_S` — the GUI Pause toggle's own wait-loop step
   (distinct from `Timing.pause_min_s`/`_max_s`, the between-prompts
   pacing wait)
+
+**The pace** (owner 2026-08-07) — the between-images wait and the
+action delay are protocol MECHANICS, so they left the GUI and live
+here; the GUI kept ONE switch, **Polite pace**:
+- `PACE_POLITE_S` = (12, 36) s — the switch ON
+- `PACE_FAST_S` = (2, 13) s — the switch OFF
+- `pace_range(polite)` — THE one authority both `_start_site` and the
+  API job read, so the two jobs can never drift apart
+- `PACE_POLITE_DEFAULT` — the switch's default (ON)
+- `Timing.action_delay_min_s`/`_max_s` = 0.3 / 0.9 s — the hesitation
+  between UI actions within one image, no longer owner-editable
+
+The two ranges are not a speed dial but two PEOPLE (the owner's own
+model, and why they may OVERLAP): polite = someone running this
+alongside other work, fast = someone sitting on it, focused. Neither is
+zero — a perfectly regular zero-gap cadence is the most recognisable
+pattern there is, and the gap between requests is the largest part of
+what keeps a run unremarkable (README → Honesty Notes). The site sees
+pause + generation (~60 s), so the real cadence is ~72–96 s polite vs
+~62–73 s fast; the daily image quota bites long before either becomes
+a rate problem.
 - `MIN_IMAGE_PX` — an `<img>` narrower than this is a placeholder
 - `SEND_RELOAD_RECOVERY` — one page-reload retry when only the send
   button specifically cannot be found

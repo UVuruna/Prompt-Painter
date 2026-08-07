@@ -40,9 +40,12 @@ Prompt+Image mode (`_start_api_image` passes
 `reference_dir`/`require_input_image` like every site Start).
 Pipeline switches ALL default ON — unlike `AgentPanel`'s own
 BG/Crop/Upscale-ON-but-Aspect-OFF defaults — because the paid image
-model cannot render a real transparent background. A pause RANGE
-only — no action-delay pair, since that is `SiteDriver._hesitate()`'s
-DOM-hesitation concept, meaningless for a pure REST call. The
+model cannot render a real transparent background. It carries the same
+**Polite pace** switch `AgentPanel` does and reads the pause range from
+the same `config.pace_range` (owner 2026-08-07, replacing this panel's
+own pause spinners); the action delay never applied here anyway, being
+`SiteDriver._hesitate()`'s DOM-hesitation concept and meaningless for a
+pure REST call. The
 Background dropdown defaults to "white" (a colour the model CAN
 render, for BG removal to key out) since this panel has no
 `SiteConfig` to read a site default from. `get_settings()`/

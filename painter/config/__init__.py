@@ -272,7 +272,11 @@ from .ai import (
 from .sites import (
     MIN_IMAGE_PX,
     NEW_CHAT_CHOICES,
+    PACE_FAST_S,
+    PACE_POLITE_DEFAULT,
+    PACE_POLITE_S,
     PAUSE_POLL_INTERVAL_S,
+    pace_range,
     REFUSAL_COPYRIGHT,
     REFUSAL_SAFETY,
     SEND_RELOAD_RECOVERY,
@@ -381,7 +385,9 @@ __all__ = [
     "SHEETS_DIR", "SITE_PROMPT_RULES", "STYLE_CHOICES", "STYLE_DEFAULT",
     "STYLES", "parse_quota_reset", "prompt_suffix",
     # sites
-    "MIN_IMAGE_PX", "NEW_CHAT_CHOICES", "PAUSE_POLL_INTERVAL_S",
+    "MIN_IMAGE_PX", "NEW_CHAT_CHOICES", "PACE_FAST_S",
+    "PACE_POLITE_DEFAULT", "PACE_POLITE_S", "PAUSE_POLL_INTERVAL_S",
     "REFUSAL_COPYRIGHT", "REFUSAL_SAFETY",
     "SEND_RELOAD_RECOVERY", "SITES", "TIMING", "SiteConfig", "Timing",
+    "pace_range",
 ]

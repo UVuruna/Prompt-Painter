@@ -312,20 +312,10 @@ class SiteJobsMixin:
             return
 
         panel = self.agents[key]
-        try:
-            pause_min, pause_max, act_min, act_max = panel.pace_floats()
-        except ValueError:
-            messagebox.showerror(
-                "PromptPainter",
-                f"{SITES[key].name}: pause/delay must be numbers.",
-            )
-            return
-        if pause_min > pause_max or act_min > act_max:
-            messagebox.showerror(
-                "PromptPainter",
-                f"{SITES[key].name}: FROM must be <= TO (pause and delay).",
-            )
-            return
+        # THE PACE is a switch, not four typed numbers (owner
+        # 2026-08-07) — so there is nothing to parse and nothing to
+        # order-check here any more; the action delay is config-only.
+        pause_min, pause_max = panel.pace()
         if panel.upscale_var.get():
             try:
                 up = panel.upscale_params()
@@ -370,12 +360,10 @@ class SiteJobsMixin:
                     " both be positive.",
                 )
                 return
+        # only the PAUSE varies per run (the Polite pace switch); the
+        # action delay is TIMING's own, identical for every run
         timing = replace(
-            TIMING,
-            pause_min_s=pause_min,
-            pause_max_s=pause_max,
-            action_delay_min_s=act_min,
-            action_delay_max_s=act_max,
+            TIMING, pause_min_s=pause_min, pause_max_s=pause_max,
         )
 
         # F4g (owner 2026-07-29): no "is Chrome running" gate any more
@@ -583,18 +571,7 @@ class SiteJobsMixin:
             return
         if not self._ensure_ai_key():
             return
-        try:
-            pause_min, pause_max = panel.pace_floats()
-        except ValueError:
-            messagebox.showerror(
-                "PromptPainter", "API Image GEN: pause must be numbers."
-            )
-            return
-        if pause_min > pause_max:
-            messagebox.showerror(
-                "PromptPainter", "API Image GEN: FROM must be <= TO (pause)."
-            )
-            return
+        pause_min, pause_max = panel.pace()  # the Polite pace switch
         if panel.upscale_var.get():
             try:
                 up = panel.upscale_params()

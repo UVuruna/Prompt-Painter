@@ -48,10 +48,13 @@ from painter.config import (
     JOB_ICON_PX,
     JOB_LOGO,
     NEW_CHAT_CHOICES,
+    PACE_FAST_S,
+    PACE_POLITE_DEFAULT,
+    PACE_POLITE_S,
     SITES,
     STYLE_CHOICES,
     STYLE_DEFAULT,
-    TIMING,
+    pace_range,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
     UPSCALE_MINDIM_STEP,
@@ -105,8 +108,9 @@ class AgentPanel(ttk.Labelframe):
         "background_custom",
         # UI-SKETCH (owner 2026-07-29): BG removal's own fine-tune
         "bg_mode", "bg_color", "bg_tolerance", "bg_reach",
-        "new_chat", "pause_min",
-        "pause_max", "act_min", "act_max",
+        "new_chat", "polite_pace",
+        # ("pause_min"/"pause_max"/"act_min"/"act_max" retired 2026-08-07
+        # — the pace is config now; an old stored key is simply ignored)
         # ("settings_collapsed" retired with the gear, UI-SKETCH
         # 2026-07-29 — every fine-tune lives under its own switch's
         # expander now; an old stored key is simply ignored)
@@ -271,14 +275,11 @@ class AgentPanel(ttk.Labelframe):
         )
         self.bg_reach_var = tk.StringVar(value=BG_REACH_DEFAULT)
         self.new_chat_var = tk.StringVar(value="collection")
-        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
-        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
-        self.act_min_var = tk.StringVar(
-            value=f"{TIMING.action_delay_min_s:.1f}"
-        )
-        self.act_max_var = tk.StringVar(
-            value=f"{TIMING.action_delay_max_s:.1f}"
-        )
+        # THE PACE is ONE switch (owner 2026-08-07). The four numbers
+        # that used to live here — pause from/to, action delay from/to —
+        # are protocol mechanics, not a product choice, and now live in
+        # config (`PACE_POLITE_S` / `PACE_FAST_S`, `Timing.action_delay_*`).
+        self.polite_pace_var = tk.BooleanVar(value=PACE_POLITE_DEFAULT)
         # per-agent upscale-gate fine-tune (owner 2026-07-19; GUI rework
         # Phase 6: ONE min-SIDE spinner — the shipped default reproduces
         # the old locked rule (800px) — plus an embedded FilterEditor
@@ -656,24 +657,22 @@ class AgentPanel(ttk.Labelframe):
         ).pack(anchor="w", pady=(0, 2))
 
     def _build_pacing_sub(self, flow) -> None:
-        """Run pacing: the paced pause range, the human action-delay
-        range and the F2 on-degrade choice — THREE flow CELLS (owner
-        2026-08-03, slika 1), so a narrow window wraps them onto
-        further rows instead of cutting the last one off. Labels lost
-        their fixed width=12 for the same reason: every px of the band
-        is width some element can still use."""
+        """Run pacing: the Polite pace switch and the F2 on-degrade
+        choice — flow CELLS (owner 2026-08-03, slika 1), so a narrow
+        window wraps them onto further rows instead of cutting the last
+        one off. Labels lost their fixed width=12 for the same reason:
+        every px of the band is width some element can still use.
+
+        The four pace spinners this group used to hold retired
+        2026-08-07 — see `polite_var` and `config.pace_range`."""
         cell = flow.cell()
-        ttk.Label(cell, text="pause").pack(side="left", padx=(0, 4))
-        Spinner(cell, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(cell, text="–").pack(side="left", padx=2)
-        Spinner(cell, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(cell, text="s").pack(side="left", padx=(2, 0))
-        cell = flow.cell()
-        ttk.Label(cell, text="action delay").pack(side="left", padx=(0, 4))
-        Spinner(cell, self.act_min_var, step=0.1).pack(side="left")
-        ttk.Label(cell, text="–").pack(side="left", padx=2)
-        Spinner(cell, self.act_max_var, step=0.1).pack(side="left")
-        ttk.Label(cell, text="s").pack(side="left", padx=(2, 0))
+        rounded_switch(cell, "Polite pace", self.polite_pace_var).pack(side="left")
+        ttk.Label(
+            cell,
+            text=f"{PACE_POLITE_S[0]:.0f}–{PACE_POLITE_S[1]:.0f}s between"
+                 f" images; off = {PACE_FAST_S[0]:.0f}–{PACE_FAST_S[1]:.0f}s",
+            style="Muted.TLabel",
+        ).pack(side="left", padx=(8, 0))
         cell = flow.cell()
         ttk.Label(cell, text="on degrade").pack(side="left", padx=(0, 4))
         rounded_combo(
@@ -946,15 +945,13 @@ class AgentPanel(ttk.Labelframe):
             for logo in self._extra_logos:
                 logo.pack_forget()
 
-    def pace_floats(self) -> tuple[float, float, float, float]:
-        """The four pace numbers — ValueError propagates to the
-        caller's validation message."""
-        return (
-            float(self.pause_min_var.get()),
-            float(self.pause_max_var.get()),
-            float(self.act_min_var.get()),
-            float(self.act_max_var.get()),
-        )
+    def pace(self) -> tuple[float, float]:
+        """This agent's (pause_min, pause_max) — the config range its
+        Polite pace switch selects. Replaces the old `pace_floats`, which
+        returned four owner-typed numbers and could raise ValueError on a
+        mistyped field; a switch cannot be mistyped, so the caller's
+        number/order validation went away with it (owner 2026-08-07)."""
+        return pace_range(self.polite_pace_var.get())
 
     # --- settings round-trip -------------------------------------------
 
@@ -982,10 +979,7 @@ class AgentPanel(ttk.Labelframe):
             "bg_tolerance": self.bg_tolerance_var,
             "bg_reach": self.bg_reach_var,
             "new_chat": self.new_chat_var,
-            "pause_min": self.pause_min_var,
-            "pause_max": self.pause_max_var,
-            "act_min": self.act_min_var,
-            "act_max": self.act_max_var,
+            "polite_pace": self.polite_pace_var,
             "up_minside": self.up_minside_var,
             "force_aspect": self.force_aspect_var,
             "force_aspect_w": self.force_aspect_w_var,

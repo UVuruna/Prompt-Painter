@@ -22,8 +22,17 @@ folds/unfolds by hand, OFF hides it entirely):
   checker itself is on, plus its api/website mode).
 - **Pacing** — its OWN group, ALWAYS OPEN (owner 2026-08-03, UV
   tačka 3 "Pacing uvek otvoren" — the old folded ExpandableSection
-  inside Run behavior is gone): pause range, action-delay range, the
-  F2 on-degrade choice, in plain sight before every Start.
+  inside Run behavior is gone): the **Polite pace** switch and the
+  F2 on-degrade choice, in plain sight before every Start. The four
+  numeric fields this group used to hold — pause from/to and
+  action-delay from/to — retired 2026-08-07: they were the only place
+  in the app exposing protocol MECHANICS rather than a product choice,
+  and they now live in `painter/config/sites.py` (`PACE_POLITE_S` /
+  `PACE_FAST_S` / `Timing.action_delay_*`). `pace()` returns
+  `config.pace_range(switch)` — the same call `ApiImageGenPanel.pace`
+  makes, so the two jobs cannot pace differently by accident. Because a
+  switch cannot be mistyped, `_start_site`'s old "must be numbers" and
+  "FROM must be <= TO" validation went away with the fields.
 - **Prompt** — Background (with the F7 custom-colour wheel + swatch),
   Style, New chat mode, the F7 prompt-helper toggles.
 

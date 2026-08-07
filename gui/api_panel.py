@@ -42,9 +42,12 @@ from painter.config import (
     JOB_LABEL,
     JOB_ICON_PX,
     JOB_LOGO,
+    PACE_FAST_S,
+    PACE_POLITE_DEFAULT,
+    PACE_POLITE_S,
     STYLE_CHOICES,
     STYLE_DEFAULT,
-    TIMING,
+    pace_range,
     UPSCALE_ASPECT_MAX,
     UPSCALE_ASPECT_MIN,
     UPSCALE_MINDIM_STEP,
@@ -329,17 +332,21 @@ class ApiImageGenPanel(ttk.Frame):
         # model cannot render real transparency.
         flow, _host = group("Run behavior · Pacing · Prompt")
         self.report_var = tk.BooleanVar(value=True)
-        self.pause_min_var = tk.StringVar(value=f"{TIMING.pause_min_s:.0f}")
-        self.pause_max_var = tk.StringVar(value=f"{TIMING.pause_max_s:.0f}")
+        # THE PACE is ONE switch (owner 2026-08-07) — the same contract as
+        # AgentPanel's, so the two jobs can never pace differently by
+        # accident. The pause spinners retired with it.
+        self.polite_pace_var = tk.BooleanVar(value=PACE_POLITE_DEFAULT)
         self.background_var = tk.StringVar(value="white")
         self.style_var = tk.StringVar(value=STYLE_DEFAULT)
         flow.switch("Report txt", self.report_var)
         cell = flow.cell()
-        ttk.Label(cell, text="pause").pack(side="left", padx=(0, 4))
-        Spinner(cell, self.pause_min_var, step=1.0).pack(side="left")
-        ttk.Label(cell, text="–").pack(side="left", padx=2)
-        Spinner(cell, self.pause_max_var, step=1.0).pack(side="left")
-        ttk.Label(cell, text="s").pack(side="left", padx=(2, 0))
+        rounded_switch(cell, "Polite pace", self.polite_pace_var).pack(side="left")
+        ttk.Label(
+            cell,
+            text=f"{PACE_POLITE_S[0]:.0f}–{PACE_POLITE_S[1]:.0f}s between"
+                 f" images; off = {PACE_FAST_S[0]:.0f}–{PACE_FAST_S[1]:.0f}s",
+            style="Muted.TLabel",
+        ).pack(side="left", padx=(8, 0))
         cell = flow.cell()
         ttk.Label(cell, text="Background:").pack(side="left", padx=(0, 4))
         rounded_combo(
@@ -490,11 +497,11 @@ class ApiImageGenPanel(ttk.Frame):
     def upscale_conditions(self) -> list[filters.FilterCondition]:
         return self.upscale_filter.get_conditions()
 
-    def pace_floats(self) -> tuple[float, float]:
-        """ValueError propagates to the caller's Start validation, same
-        contract as ``AgentPanel.pace_floats`` (narrower here — no
-        action-delay pair)."""
-        return (float(self.pause_min_var.get()), float(self.pause_max_var.get()))
+    def pace(self) -> tuple[float, float]:
+        """This job's (pause_min, pause_max) — identical contract to
+        ``AgentPanel.pace``, so the API job and the site runs read the
+        SAME config ranges (owner 2026-08-07)."""
+        return pace_range(self.polite_pace_var.get())
 
     # --- gating: "Check API access" probe -------------------------------
 
@@ -730,8 +737,7 @@ class ApiImageGenPanel(ttk.Frame):
             "up_minside": self.up_minside_var.get(),
             "report": self.report_var.get(),
             "keep_all_steps": self.keep_all_steps_var.get(),
-            "pause_min": self.pause_min_var.get(),
-            "pause_max": self.pause_max_var.get(),
+            "polite_pace": self.polite_pace_var.get(),
             "conditions": [
                 filters.condition_to_dict(c)
                 for c in self.upscale_filter.get_conditions()
@@ -746,13 +752,14 @@ class ApiImageGenPanel(ttk.Frame):
         every other panel's ``apply_settings`` in this file."""
         string_fields = (
             "background", "style", "up_minside", "force_aspect_w",
-            "force_aspect_h", "pause_min", "pause_max",
-        )
+            "force_aspect_h",
+        )  # "pause_min"/"pause_max" retired 2026-08-07 — the pace is a
+        # switch now; an old stored key is simply ignored
         for key in string_fields:
             if key in stored:
                 getattr(self, f"{key}_var").set(stored[key])
         bool_fields = ("bg_removal", "crop", "force_aspect", "upscale",
-                       "report", "keep_all_steps")
+                       "report", "keep_all_steps", "polite_pace")
         # a RESTORE must not auto-expand the two ExpandableSwitches —
         # Tk cannot tell a restoring .set() from a click, and a panel
         # has to open compact (the SAME contract AgentPanel.

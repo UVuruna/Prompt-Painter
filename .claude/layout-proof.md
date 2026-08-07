@@ -11,12 +11,16 @@ Session change under review, in two commits:
   1664x2550 plate in the top third of a 1382px frame. See
   `.claude/visual-proof.json`.
 
-Those two files are the only GUI files this session edited; every window
-below was re-shot by `tests/test_layout_audit_tk.py` in this session and
-OPENED and graded here against DESIGN.md.
+* `THE PACE` — `AgentPanel` and `ApiImageGenPanel` lost their four/two
+  pace spinners for ONE "Polite pace" switch (gui/agent_panel.py,
+  gui/api_panel.py, gui/app_jobs.py). The Pacing group is now one switch
+  plus its range hint and the on-degrade combo.
+
+Every window below was re-shot by `tests/test_layout_audit_tk.py` in
+this session and OPENED and graded here against DESIGN.md.
 
 - PainterGui menu (gui/app.py + gui/menu.py) - MIN 1099x640 - SHOT .claude/shots/PainterGui_menu.png - GRADE 9/10 - audit: PASS - python tests/test_layout_audit_tk.py, minimum + minimum+50% + 2560x1400
-- PainterGui main (gui/app.py + gui/app_views.py) - MIN 1099x640 - SHOT .claude/shots/PainterGui_main.png - GRADE 8/10 - audit: PASS - same run
+- PainterGui main (gui/app.py + gui/app_views.py + gui/agent_panel.py) - MIN 1099x640 - SHOT .claude/shots/PainterGui_main.png - GRADE 9/10 - audit: PASS - same run
 - PainterGui running (gui/app.py + gui/tool_dash.py) - MIN 1099x640 - SHOT .claude/shots/PainterGui_running.png - GRADE 9/10 - audit: PASS - same run
 - DocWindow (gui/doc_window.py) - MIN 520x400 - SHOT .claude/shots/DocWindow.png - GRADE 8/10 - audit: PASS - python tests/test_layout_audit_tk.py, minimum + minimum+50%
 - ImageViewer (gui/image_viewer.py) - MIN 420x560 - SHOT .claude/shots/ImageViewer.png - GRADE 8/10 - audit: PASS - same run
@@ -51,11 +55,15 @@ glyphs — the frame and the content grow together. Both states graded
 icon/title/description rhythm, per-tile accent colours distinct, gutters
 even, no orphaned text. Nothing to fix.
 
-**PainterGui main 8/10.** Dense but honest: settings column left, queue
-column right, labels aligned to their controls, the "0 prompt(s) - 0
-complete pair(s) -> 0 will run" eligibility line reads clearly. At the
-MINIMUM the left column's last section scrolls rather than being cut —
-ladder step 4, correct, and the reason this is an 8 and not a 9.
+**PainterGui main 9/10.** Re-opened after the Polite pace change.
+Settings column left, queue column right, labels aligned to their
+controls, the "0 prompt(s) - 0 complete pair(s) -> 0 will run"
+eligibility line reads clearly. The Pacing group is now ONE switch
+("Polite pace") with its range hint "12-36s between images; off =
+2-13s" beside it, then the on-degrade combo on its own row — where four
+spinners used to sit. Raised from 8/10 because losing them shortened the
+left column enough that the Prompt group (Background / Style) now
+reaches the fold instead of scrolling out of sight at the MINIMUM size.
 
 **PainterGui running 9/10.** Empty-state dashboard: tabs, toolbar,
 centred "No jobs yet — press a site Start, or a tool button above."
