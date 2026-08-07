@@ -1,9 +1,8 @@
 {
-  "commit": "ad8f4738744efaa3875a10ef7afc8f4893ffb5ad",
+  "commit": "dbd81326d29f4c6ca52b12ae89a737ef2ae46c26",
   "implementer": "Claude Opus 5 (1M context)",
   "grader": "independent-grader (sonnet subagent)",
   "items": [
-    {"ruling": "Before/after reads left to right, not top to bottom. BeforeAfterWindow lays each Before/After pair SIDE BY SIDE - Before left, After right. A window opens at the size of what is IN it: its width and height follow the elements it holds, and the elements must never occupy less than 50% of the window. A user resize grows the window AND the elements in it. THE SPACE & LEGIBILITY LAW: nothing the user must read is cut off, and nothing starves while its window holds empty space.", "image": ".claude/shots/proof_BeforeAfterWindow_sidebyside.png", "grade": 9},
-    {"ruling": "Before/after reads left to right, not top to bottom. BeforeAfterWindow lays each Before/After pair SIDE BY SIDE - Before left, After right. A window opens at the size of what is IN it: its width and height follow the elements it holds, and the elements must never occupy less than 50% of the window. A user resize grows the window AND the elements in it. THE SPACE & LEGIBILITY LAW: nothing the user must read is cut off, and nothing starves while its window holds empty space.", "image": ".claude/shots/proof_BeforeAfterWindow_resized.png", "grade": 9}
+    {"ruling": "The Pacing group presents the pace as ONE switch, 'Polite pace', with its range plainly readable beside it - no numeric fields for the owner to tune. THE SPACE & LEGIBILITY LAW: nothing the user must read is cut off or elided, the group is aligned and uncrowded, and nothing starves while the window holds empty space.", "image": ".claude/shots/proof_PolitePace_panel.png", "grade": 9}
   ]
 }
