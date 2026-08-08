@@ -5,16 +5,32 @@ the monorepo root [CLAUDE.md](../../CLAUDE.md)** (the constitution) —
 read that first, then use its Router table to load only the rulebook
 your job needs (`../../rules/`). This file states ONLY what is
 specific to PromptPainter — decisions, workflow, DOM states — and
-never restates a root rule. Communicate with the owner in Serbian
-(Latin); everything in files stays English.
+never restates a root rule. Language follows root
+[CLAUDE.md](../../CLAUDE.md) → Universal Conduct (Serbian/Latin with
+the owner, English in all files) — no project-specific tightening.
 
-**Enforcement (installed 2026-08-01):** the four standard guard tests
-(`tests/test_structure_law.py`, `tests/test_config_sections.py`,
-`tests/test_docs_coverage.py`, `tests/test_doc_links.py`) run via
-`tests/run_guards.py` and are wired into `.claude/settings.json`
-(PostToolUse fast pass + Stop full pass) — see
+**Enforcement (installed 2026-08-01, layout teeth added since):** six
+guard tests run via `tests/run_guards.py`, wired into
+`.claude/settings.json` (PostToolUse fast pass + Stop full pass) — see
 [Code Rules](../../rules/CODE.md) → Enforcement for the spec this
 project follows.
+
+- **Fast pass** (every Edit/Write): `tests/test_structure_law.py`,
+  `tests/test_config_sections.py`, `tests/test_layout_law.py` (the
+  static half of THE SPACE & LEGIBILITY LAW — a banned-API grep, costs
+  nothing).
+- **Full pass** (Stop, session end): the three above plus
+  `tests/test_docs_coverage.py`, `tests/test_doc_links.py`, and
+  `tests/test_layout_audit_tk.py` (the runtime half — builds the real
+  Tk window off-screen at its declared minimum and measures it).
+
+GUI work here is ALSO governed by Zubi v2 — Algorithmic Teeth & Grader
+v2 ([GUI Rules](../../rules/GUI.md#zubi-v2)). Status: **pending
+rollout** — this project's stack is Tk, and Zubi v2's only live
+template is the Qt library (`rules/templates/layout_checks_qt.py`); no
+Tk template exists yet, so `test_layout_audit_tk.py` / `test_layout_law.py`
+above are this project's OWN pre-existing layout guards, not a Zubi v2
+install.
 
 ---
 
@@ -262,7 +278,7 @@ Per theme `.md` file:
 ## The DOM States (keep in ONE config block, with fallbacks)
 
 Selectors rot with every reskin — when none match, FAIL LOUDLY
-(root Rule #1), never guess.
+(No Error Masking, [Code Rules](../../rules/CODE.md)), never guess.
 
 - **ChatGPT** (verified against the live DOM by the owner,
   2026-07-17): prompt box `#prompt-textarea` (ProseMirror
@@ -352,7 +368,8 @@ then 22–36 min: wait → REFRESH → NEW SESSION → whole prompt). Every
 wait polls Stop. The first rung that yields an image continues the run;
 exhausting all rungs STOPS the site (no per-item skip for this failure)
 — resume is by the files already on disk. Progress logging per item
-(elapsed, done/total — root Rule #10). **DONE = the FILE EXISTS at its output path**
+(elapsed, done/total — Progress Logging for Long Tasks,
+[Code Rules](../../rules/CODE.md)). **DONE = the FILE EXISTS at its output path**
 (`<out>/dest_for(...)`), checked on disk — not a sidecar record
 (the `.progress.json` state file was removed 2026-07-19). RESUMABLE
 for free: the folder is ALWAYS the source of truth (owner 2026-07-21)
