@@ -1,8 +1,0 @@
-{
-  "commit": "dbd81326d29f4c6ca52b12ae89a737ef2ae46c26",
-  "implementer": "Claude Opus 5 (1M context)",
-  "grader": "independent-grader (sonnet subagent)",
-  "items": [
-    {"ruling": "The Pacing group presents the pace as ONE switch, 'Polite pace', with its range plainly readable beside it - no numeric fields for the owner to tune. THE SPACE & LEGIBILITY LAW: nothing the user must read is cut off or elided, the group is aligned and uncrowded, and nothing starves while the window holds empty space.", "image": ".claude/shots/proof_PolitePace_panel.png", "grade": 9}
-  ]
-}
