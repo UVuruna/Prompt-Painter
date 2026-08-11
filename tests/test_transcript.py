@@ -218,3 +218,40 @@ def test_unmatched_text_answer_is_mined_as_matched_null(tmp_path):
     assert rows[0]["matched"] is None
     assert rows[0]["raw_text"] == "Here is a poem about your emblem instead."
     assert rows[0]["action"] == "skip"
+
+
+def test_ask_text_falls_back_to_the_last_turn(monkeypatch):
+    """The anchor fallback (owner-approved 2026-08-11, the Obi-Wan
+    case): the deadline passes with NOTHING anchored, but the LAST
+    assistant turn on the page holds a NEW text (differs from what
+    stood there BEFORE the question) — ask_text returns it and flags
+    ``ask_used_fallback``. A page still showing only the OLD refusal
+    yields "" (a refusal never poses as its own diagnosis)."""
+    from dataclasses import replace as _replace
+    from painter.driver import SiteDriver
+
+    fast = _replace(
+        TIMING, generation_timeout_s=0.2, poll_interval_s=0.01,
+        text_settle_s=0.01,
+    )
+    driver = SiteDriver(SITES["gemini"], fast, "http://unused")
+    monkeypatch.setattr(driver, "submit_prompt", lambda q, log=print: None)
+    monkeypatch.setattr(driver, "_new_turn", lambda: None)
+    monkeypatch.setattr(driver, "_busy", lambda: False)
+
+    # page shows the OLD refusal before AND after -> no fallback
+    monkeypatch.setattr(
+        driver, "_last_turn_text_any", lambda: "I can't help with that."
+    )
+    assert driver.ask_text("why?", log=lambda _l: None) == ""
+    assert driver.ask_used_fallback is False
+
+    # a NEW last turn appeared after the question -> fallback returns it
+    texts = iter(["I can't help with that.", "The likeness is blocked."])
+    monkeypatch.setattr(
+        driver, "_last_turn_text_any",
+        lambda: next(texts, "The likeness is blocked."),
+    )
+    answer = driver.ask_text("why?", log=lambda _l: None)
+    assert answer == "The likeness is blocked."
+    assert driver.ask_used_fallback is True

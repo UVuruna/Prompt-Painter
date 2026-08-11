@@ -251,3 +251,14 @@ browser).
   Done = newest assistant turn's text stable for `text_settle_s` with
   the busy signal gone; returns whatever arrived by
   `generation_timeout_s` ("" = nothing).
+
+### 2026-08-11c — the ask_text anchor fallback (owner-approved)
+When the deadline passes with nothing ANCHORED (a vanished composer
+breaks the anchor while the answer renders anyway — the Obi-Wan case),
+`ask_text` reads the LAST assistant turn via `_last_turn_text_any()`
+(anchor/baseline ignored) and returns it IF it differs from the text
+that stood there BEFORE the question — so a still-visible refusal
+never poses as its own diagnosis. `ask_used_fallback` flags the lower
+confidence; the runner writes the transcript row as
+`logged (anchor=fallback)`. Acceptable only for diagnostics — a
+mis-attributed answer is a mislabeled log line, never a saved image.

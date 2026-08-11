@@ -763,7 +763,15 @@ def run_sheet(
                         t_rec(
                             "diagnosis",
                             matched=refused_exc.category,
-                            action="logged",
+                            # anchor=fallback marks the lower-confidence
+                            # last-turn read (owner-approved 2026-08-11)
+                            action=(
+                                "logged (anchor=fallback)"
+                                if getattr(
+                                    driver, "ask_used_fallback", False
+                                )
+                                else "logged"
+                            ),
                         )
                     else:
                         log("    no diagnostic answer arrived")

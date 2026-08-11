@@ -256,6 +256,9 @@ class SiteDriver:
         # assistant answer this driver read — the exceptions truncate
         # it for their messages, the transcript log wants all of it
         self.last_response_text: str = ""
+        # True when the LAST ask_text answer came from the anchor
+        # fallback (lower confidence) — see ask_text
+        self.ask_used_fallback: bool = False
 
     # --- lifecycle ----------------------------------------------------
 
@@ -958,7 +961,22 @@ class SiteDriver:
         same settle idiom as ``await_done``'s text-only branch).
         Returns whatever arrived by ``generation_timeout_s`` — "" when
         nothing did; the SUBMIT itself still fails loudly (the caller
-        decides that a failed diagnostic never fails the run)."""
+        decides that a failed diagnostic never fails the run).
+
+        ANCHOR FALLBACK (owner-approved 2026-08-11, the Obi-Wan case):
+        when the deadline passes with NOTHING anchored — a vanished
+        composer breaks the anchor while the answer renders anyway —
+        the fallback reads the LAST assistant turn on the page, anchor
+        ignored, and returns it IF it differs from the text that stood
+        there BEFORE the question (so a still-visible refusal never
+        poses as its own diagnosis). ``ask_used_fallback`` tells the
+        caller to mark the row's lower confidence (``anchor=fallback``
+        in the transcript). Acceptable ONLY here: a mis-attributed
+        diagnostic is a mislabeled log line, never a saved image."""
+        self.ask_used_fallback = False
+        # the page's answer text BEFORE the question — the fallback's
+        # "is this actually new?" yardstick
+        prior = self._last_turn_text_any()
         self.submit_prompt(question, log)
         t = self._timing
         deadline = time.monotonic() + t.generation_timeout_s
@@ -981,6 +999,16 @@ class SiteDriver:
             else:
                 stable_since = None
             time.sleep(t.poll_interval_s)
+        if not last:
+            fallback = self._last_turn_text_any()
+            if fallback and fallback != prior:
+                log(
+                    "    diagnostic answer taken from the LAST assistant"
+                    " turn (anchor lost — lower confidence)"
+                )
+                self.ask_used_fallback = True
+                self.last_response_text = fallback
+                return fallback
         if last:
             self.last_response_text = last
         return last  # "" = the site answered nothing in time
@@ -1106,6 +1134,17 @@ class SiteDriver:
             return turn.inner_text()
         except Exception:
             return ""  # transiently detached turn — next poll re-reads
+
+    def _last_turn_text_any(self) -> str:
+        """The LAST assistant turn's text, anchor and baseline IGNORED
+        — ``ask_text``'s fallback yardstick/source ONLY (a result this
+        loosely attributed must never feed an image save)."""
+        for sel in self.site.response_container:
+            loc = self.page.locator(sel)
+            n = loc.count()
+            if n:
+                return self._safe_text(loc.nth(n - 1))
+        return ""
 
     def new_chat(self, log: Log = print) -> None:
         """Open a fresh conversation (the sidebar's New chat control).
