@@ -1,7 +1,7 @@
 """Guard test - THE SPACE & LEGIBILITY LAW, runtime half, Tkinter (rules/GUI.md).
 
 Installed per MIGRATE-LAYOUT.md (owner order 2026-08-06 - the design-review
-rollout), at the reference level of Remote User's Qt audit, translated to Tk:
+rollout), at the reference level of Vibe Coder's Qt audit, translated to Tk:
 
   A. CLIPPED   - a mapped widget was allocated less than its own requested
                  size (winfo_width < winfo_reqwidth) - Tk clips silently
