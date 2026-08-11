@@ -29,6 +29,10 @@ ALL_GUARDS = FAST_GUARDS + [
     "test_doc_links.py",
     # the runtime half - builds the real window off-screen and measures it
     "test_layout_audit_tk.py",
+    # Zubi v2 Tk (owner's order 2026-08-11): ALG-5/6/7 over the same
+    # registry + the long-refusal ImageViewer fixture, with its own
+    # planted-violation self-test
+    "test_layout_zubi_tk.py",
 ]
 
 

@@ -25,12 +25,17 @@ project follows.
   Tk window off-screen at its declared minimum and measures it).
 
 GUI work here is ALSO governed by Zubi v2 — Algorithmic Teeth & Grader
-v2 ([GUI Rules](../../rules/GUI.md#zubi-v2)). Status: **pending
-rollout** — this project's stack is Tk, and Zubi v2's only live
-template is the Qt library (`rules/templates/layout_checks_qt.py`); no
-Tk template exists yet, so `test_layout_audit_tk.py` / `test_layout_law.py`
-above are this project's OWN pre-existing layout guards, not a Zubi v2
-install.
+v2 ([GUI Rules](../../rules/GUI.md#zubi-v2)). Status: **FIRST Tk
+ROLLOUT (2026-08-11, owner's order)** — this project authored the Tk
+template (`tests/layout_checks_tk.py`, copied to
+`rules/templates/layout_checks_tk.py` for the next Tk project):
+ALG-5 uniform siblings, ALG-6 radius tiers (judged on the RENDERED
+radius — CTk clamps to half the shorter side), ALG-7 empty band (the
+measured form of BUG A), run by `tests/test_layout_zubi_tk.py` over
+the whole window registry PLUS the long-refusal ImageViewer fixture,
+with a planted-violation self-test; wired into the Stop full guard
+pass. Documented gaps (grader checklist, as in the Qt template):
+ALG-2 contrast, ALG-3 hover, ALG-8 live profile, ALG-9 taxonomy.
 
 ---
 

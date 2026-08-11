@@ -102,6 +102,13 @@ the report's `WHY (site's answer)` line and the `item_refused`
 event's `diagnosis`, and a `NoImage(had_text=True)` unknown answer
 recorded verbatim with `matched: null`.
 
+### `test_layout_zubi_tk.py` + `layout_checks_tk.py` — Zubi v2 (Tk)
+The first Tk rollout of the algorithmic teeth (owner's order
+2026-08-11): ALG-5/6/7 measured over the audit's whole window registry
+plus the LONG-refusal ImageViewer fixture (the content class the old
+short fixtures missed), with a planted-violation self-test. In the
+Stop full guard pass via run_guards.py.
+
 ### `test_driver.py` — CDP Driver, F1/F2 Protocol
 Duck-typed Locator/Page fakes over `SiteDriver` (no browser — see the
 module's own docstring for the exact fakes). The F1 turn-based
