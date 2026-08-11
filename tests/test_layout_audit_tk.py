@@ -45,7 +45,7 @@ a single widget at the window manager's default on-screen position; it
 also neutralises ``wait_window`` so a modal dialog's own nested event loop
 never blocks the audit). Win32 `PrintWindow(PW_RENDERFULLCONTENT)` renders
 each window into a bitmap regardless -
-`.claude/shots/<Window>.png`, the DESIGN REVIEW input the session must
+`.claude/shots/layout-audit/<Window>.png`, the DESIGN REVIEW input the session must
 OPEN and grade >= 8/10 in `.claude/layout-proof.md`
 (rules/hooks/layout_guard.py verifies image, opening, and grade).
 
@@ -78,7 +78,14 @@ sys.path.insert(0, str(PROJECT))
 
 FLOOR_WIDTH, FLOOR_HEIGHT = 1280, 720
 
-SHOT_DIR = PROJECT / ".claude" / "shots"
+# a TOPIC subfolder, never the shots ROOT (owner 2026-08-11): the Stop
+# hook runs this full pass itself, so writing to the root re-dropped the
+# same nine files there every single session and rules/hooks/layout_guard
+# .py flagged them as an undated dump every single time. "layout-audit"
+# says what the folder holds: the automatic per-window audit renders,
+# refreshed each pass. Hand-curated proof sets keep their own named
+# folders (shots/dashboard-stop-pause/, shots/refused-view-legibility/).
+SHOT_DIR = PROJECT / ".claude" / "shots" / "layout-audit"
 
 #: px of tolerance before an allocation counts as clipping (Tk borders
 #: round by a pixel here and there)
