@@ -138,3 +138,12 @@ one-time migrations), `_wire_persistence`/`_schedule_save`/`_save_now`/
   migration helper in this file follows the same "read the old key
   once, write only the new shape, never rewrite the old key" contract
   so stale keys naturally drop off disk over time.
+
+## 2026-08-11 — real refusal reasons in the viewer
+
+`_image_viewer_entries` now fills `refused_reason` from the dashboard
+panel's `_refused_info` (the `item_refused` event's `reason` +
+`diagnosis`, owner 2026-08-11): a refused item's double-click shows
+`REFUSED — <actual message>` plus `WHY (site's own answer)` when the
+diagnostic question got one; items with no stored refusal keep the
+generic "No saved file ..." note.

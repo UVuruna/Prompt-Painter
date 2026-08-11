@@ -41,7 +41,7 @@ prompt-sheet `.md` files by driving his ALREADY OPEN, already
 logged-in Gemini/ChatGPT browser tab: paste a prompt, wait for the
 generation to finish, capture the image, save it under the sheet's
 own filename into the theme's folder. The sheets live in his other
-projects (first consumer: DOMY Watch `research/prompts/`); this tool
+projects (first consumer: Watch Academy `research/prompts/`); this tool
 only consumes them.
 
 The full design discussion lives in [PLAN.md](PLAN.md) — this file
@@ -120,7 +120,7 @@ in here.**
    composable steps (owner's #7, 2026-07-18), each toggleable per
    run, all defaulting ON: `remove_background`
    (`painter/postprocess.py` over the IN-HOUSE
-   `painter/bg_remove.py` internals — moved from DOMY Watch tools,
+   `painter/bg_remove.py` internals — moved from Watch Academy tools,
    owner 2026-07-17: no part of this program lives in another
    project; ONE colour-keyed engine clears the border-connected
    region around a target colour, and its MODE (owner 2026-07-28)
@@ -150,7 +150,7 @@ in here.**
    `_gpt`, gemini `_gem`, api_image `_api`) —
    `assets/<rest>/<File>.png` → `<out>/<rest>/<File>_<sfx>.png`
    (e.g. `output/images/emblem/mood/Glory_gem.png`) — so a finished
-   collection COPIES STRAIGHT into `DOMY Watch/assets/`. No
+   collection COPIES STRAIGHT into `Watch Academy/assets/`. No
    approval step (owner 2026-07-17: saving IS the end of the
    tool's job). Run state + reports live under `<out>/_state/<site>/`
    and backup variants under `<out>/EXTRA/` — neither pollutes the
@@ -390,13 +390,28 @@ which then lands as the NEXT version). At
 the end the owner reviews
 quality; unsatisfying prompts get reworked in the sheet or re-ticked.
 
+**TRANSCRIPT + REFUSAL DIAGNOSTIC (owner 2026-08-11):** every text the
+site answers is appended verbatim to
+`<out>/_state/<site>/transcript.jsonl` (`painter/transcript.py` —
+event, full raw text, matched category or `null`, action taken), so a
+new unknown site state is diagnosed FROM THE RECORD instead of by
+re-provoking the failure live (`matched: null` rows are where new
+markers are mined from). And when a refusal survives the safer retry,
+the runner asks the site ONE text-only question
+(`REFUSAL_DIAGNOSTIC_QUESTION` — which specific element trips the
+policy?) instead of a third blind attempt; the answer lands in the
+transcript, the report txt (`WHY (site's answer)` line) and the
+`item_refused` event, and the Dashboard's double-click viewer shows
+the ACTUAL refusal message + that answer where the image would be.
+Both are best-effort diagnostics — they never fail or stop a run.
+
 **GitHub:** [UVuruna/Prompt-Painter](https://github.com/UVuruna/Prompt-Painter)
 (`origin`, branch `main`).
 
 ## Build Order (steps 1–3 built 2026-07-17; GUI layer the same day)
 
 1. **The sheet parser first** — pure, offline-testable against the
-   REAL sheets in `../DOMY Watch/research/prompts/archetype/`
+   REAL sheets in `../Watch Academy/research/prompts/archetype/`
    (golden tests: file → expected (name, path, prompt) tuples,
    REUSE skipping, unpaired-heading reporting).
 2. The CDP driver second (config block of selectors, the done-edge

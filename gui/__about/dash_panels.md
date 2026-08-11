@@ -113,3 +113,13 @@ One generation site's live view — see Purpose above.
   `JobPanel`/`DashPanel`'s own widget construction; no test or sibling
   module reaches them by name, so they moved with their one caller
   instead of staying behind as re-exports nothing needs.
+
+## 2026-08-11 — the refusal's WHY
+
+`DashPanel._refused_info` (drop path -> `{"reason", "diagnosis"}`)
+keeps each `item_refused` event's actual refusal message + the site's
+diagnostic answer — panel-lifetime scoped like `_refused_drops`, but
+stored even on the duplicate-refusal early-out so a rerun's fresher
+reason replaces the stale one. Consumed by `app_settings.py`'s
+`_image_viewer_entries` (the double-click viewer shows it where the
+image would be).

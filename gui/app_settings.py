@@ -182,12 +182,17 @@ class SettingsMixin:
         file, which may be a redo's ``_vN`` sibling — see REWORK.md's
         Run Loop; every OTHER item in the list uses the plain canonical
         ``dest_for``, same simplification the old single-image 'Show'
-        already made). No per-item refusal reason is tracked anywhere
-        reachable here (the runner logs it to the report txt, never
-        back to the GUI — see ``painter.runner``), so a missing file
-        reads as a generic note rather than a fabricated specific
+        already made). A refused item shows its ACTUAL refusal message
+        + the site's own diagnostic answer (owner 2026-08-11) — the
+        ``item_refused`` event's reason/diagnosis kept by
+        ``DashPanel._refused_info``; items with no stored refusal fall
+        back to the generic note rather than a fabricated specific
         reason."""
         out_base = self._out_base()
+        panel = getattr(self, "panels", {}).get(site_key)
+        refused_info = (
+            getattr(panel, "_refused_info", {}) if panel is not None else {}
+        )
         clicked_drop = info.get("drop")
         entries: list[dict] = []
         start = 0
@@ -198,17 +203,28 @@ class SettingsMixin:
                 rel = dest_for(item.drop_path, site_key)
             dest = out_base / rel
             exists = dest.is_file()
+            reason = None
+            if not exists:
+                stored = refused_info.get(item.drop_path)
+                if stored:
+                    reason = f"REFUSED — {stored['reason']}"
+                    if stored.get("diagnosis"):
+                        reason += (
+                            "\n\nWHY (site's own answer):\n"
+                            f"{stored['diagnosis']}"
+                        )
+                else:
+                    reason = (
+                        "No saved file — refused, skipped, or not"
+                        " generated yet."
+                    )
             entries.append({
                 "title": item.title,
                 "drop_path": item.drop_path,
                 "rel": rel if exists else None,
                 "dest": dest if exists else None,
                 "prompt": item.prompt,
-                "refused_reason": (
-                    None if exists else
-                    "No saved file — refused, skipped, or not generated"
-                    " yet."
-                ),
+                "refused_reason": reason,
             })
             if item.drop_path == clicked_drop:
                 start = i

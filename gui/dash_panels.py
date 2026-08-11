@@ -649,6 +649,13 @@ class DashPanel(JobPanel):
         # refused drop paths — each counts ONCE per panel lifetime
         # (owner 2026-07-29, the 176/161 over-count)
         self._refused_drops: set[str] = set()
+        # drop path -> {"reason", "diagnosis"} from the item_refused
+        # event (owner 2026-08-11): the ACTUAL refusal message + the
+        # site's own diagnostic answer, shown by the double-click
+        # viewer where the image would be. Scoped like _refused_drops
+        # (panel lifetime) — a later restart's rerun may overwrite with
+        # its fresher reason.
+        self._refused_info: dict[str, dict] = {}
         self.task_prog_var.set(f"0 / {task_total}")
         self.task_bar.configure(maximum=max(task_total, 1), value=0)
         self.theme_name_var.set("—")
@@ -763,6 +770,14 @@ class DashPanel(JobPanel):
                 self._update_folder(folder)
         elif kind == "item_refused":
             drop = event.get("drop_path", "")
+            # keep the refusal's WHY (owner 2026-08-11) — stored even
+            # on the duplicate-refusal early-out below, so a rerun's
+            # fresher reason/diagnosis replaces the stale one
+            if drop and (event.get("reason") or event.get("diagnosis")):
+                self._refused_info[drop] = {
+                    "reason": event.get("reason", ""),
+                    "diagnosis": event.get("diagnosis", ""),
+                }
             # owner 2026-07-29 ("176/161"): the SAME item refused again
             # on a later restart used to count (and add a row) EVERY
             # time, pushing done+refused past the task total — one
