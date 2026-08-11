@@ -276,6 +276,25 @@ RETRY_PREAMBLES = {
 CONTINUE_NUDGE = "Continue - please finish generating the image."
 
 
+# --- Refusal diagnostic question (owner 2026-08-11) ------------------
+# When the safer retry is ALSO refused (every retry the run allows is
+# spent), the runner asks the site ONE text-only question instead of a
+# third blind generation attempt: WHY was this blocked. The answer goes
+# to the transcript log + report txt + the dashboard's refusal view, so
+# the owner sees exactly which element (a character name, a prompt
+# word, the attached reference) trips the policy while reworking the
+# sheet — especially for the "sometimes passes, sometimes never"
+# copyright blocks with an attached reference image. Cheap: one text
+# reply, no image generation burned. Data only — reword freely.
+REFUSAL_DIAGNOSTIC_QUESTION = (
+    "You declined to generate the previous image. Without generating"
+    " anything, briefly tell me which SPECIFIC element of the prompt"
+    " or of the attached reference image conflicts with your policy"
+    " (a name, a phrase, the likeness in the reference...), so I can"
+    " rework the request."
+)
+
+
 # ═══════════ IMAGE-GENERATION-FAILED RETRY LADDER ═══════════════════════
 # --- Image-generation-failed retry (ChatGPT, owner 2026-07-21) --------
 
@@ -539,6 +558,9 @@ AI_REPAIR_PROMPT = (
 # ═══════════════════ IMAGE CHECKER — COPY ═══════════════════════════════
 # --- the AI image checker (owner's #3: banal defects only) ------------
 AI_FLAGS_FILENAME = "ai_flags.json"  # under <out>/_state/
+# the per-site AI response transcript (owner 2026-08-11) — under
+# <out>/_state/<site>/, written by painter.transcript.Transcript
+TRANSCRIPT_FILENAME = "transcript.jsonl"
 # the vision instruction — BANAL defects only, in a strict short format
 # the parser (painter.ai.parse_check_response) can read
 AI_CHECK_INSTRUCTIONS = (

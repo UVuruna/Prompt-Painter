@@ -15,6 +15,8 @@ the driver touches a browser.
 | `driver.py` | Algorithmic | CDP driver — the F1 turn-based per-item protocol (submit, await, extract, recovery) — [about](__about/driver.md) · [flow](__flow/driver.md) |
 | `runner.py` | Algorithmic | the paced, resumable run loop over a sheet's pending items — [about](__about/runner.md) · [flow](__flow/runner.md) |
 | `run_report.py` | Standard | the per-sheet report txt writer (split out of runner.py, faza 2) — [about](__about/run_report.md) |
+| `recovery.py` | Algorithmic | the image-failure recovery ladder (split out of runner.py, 2026-08-11) — [about](__about/recovery.md) · [flow](__flow/recovery.md) |
+| `transcript.py` | Standard | the per-site AI response transcript (`_state/<site>/transcript.jsonl`) — [about](__about/transcript.md) |
 | `sheet_parser.py` | Algorithmic | parses one prompt-sheet `.md` into the run queue — [about](__about/sheet_parser.md) · [flow](__flow/sheet_parser.md) |
 | `bg_remove.py` | Algorithmic | the color-keyed background-removal engine — [about](__about/bg_remove.md) · [flow](__flow/bg_remove.md) |
 | `postprocess.py` | Algorithmic | composed post-save hook: background removal + transparent crop — [about](__about/postprocess.md) · [flow](__flow/postprocess.md) |
@@ -29,7 +31,7 @@ the driver touches a browser.
 ## Connections
 
 ### Uses
-- The prompt sheets of consumer projects (first: DOMY Watch
+- The prompt sheets of consumer projects (first: Watch Academy
   `research/prompts/`) — READ-ONLY input
 
 ### Used by
@@ -65,7 +67,7 @@ the driver touches a browser.
   (quota/refusal — stop, never blind-retry), `GenerationTimeout`
   (no done edge inside the hard cap). No state is ever guessed.
 - **The background remover is in-house** (`painter/bg_remove.py`,
-  moved from DOMY Watch on the owner's rule) and called directly;
+  moved from Watch Academy on the owner's rule) and called directly;
   its heavy imports (numpy/scipy) load lazily, only when a fix
   actually runs. Fix failures are loud but never kill a run (the
   raw image is already saved; the remover is rerun-safe).

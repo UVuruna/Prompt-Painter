@@ -67,6 +67,7 @@ FLOW_REQUIRED_FILES: set[str] = {
     "gui/tool_panels/geometry.py", "gui/tool_panels/image_checker.py",
     # painter/ — the engine's real algorithms/protocols
     "painter/chrome.py", "painter/driver.py", "painter/runner.py",
+    "painter/recovery.py",
     "painter/sheet_parser.py", "painter/bg_remove.py",
     "painter/postprocess.py", "painter/upscale.py", "painter/aspect.py",
     "painter/filters.py", "painter/jobtemp.py",

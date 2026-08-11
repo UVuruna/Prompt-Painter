@@ -236,3 +236,18 @@ browser).
 - `normalize_text(text) -> str` — whitespace-collapsed, lowercased
   text for the composer/user-turn DOM comparisons (ProseMirror/Quill
   editors reflow whitespace and newlines).
+
+## 2026-08-11 — transcript support
+
+- `last_response_text` — the FULL text of the LAST assistant answer
+  the driver read (set in `await_done`/`extract_image`/`ask_text`,
+  reset at `capture_baseline` so a previous item's text never poses as
+  the current one's). The exceptions truncate text for their messages;
+  the transcript log ([Transcript](transcript.md)) reads this instead.
+- `ask_text(question, log) -> str` — the refusal diagnostic: send a
+  TEXT-ONLY question and return the answer's full text. No image
+  expected and NO marker classification (the site's explanation of a
+  refusal legitimately contains the very words the markers match).
+  Done = newest assistant turn's text stable for `text_settle_s` with
+  the busy signal gone; returns whatever arrived by
+  `generation_timeout_s` ("" = nothing).

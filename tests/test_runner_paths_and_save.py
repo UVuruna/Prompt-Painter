@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from painter import recovery as recovery_module
 from painter import runner as runner_module
 from painter.config import (
     COPYRIGHT_PREAMBLE,
@@ -52,10 +53,10 @@ def _fast_recovery(monkeypatch):
     escalation rounds are kept so their refresh/new-session path is
     exercised; a test needing a different shape re-patches these."""
     monkeypatch.setattr(
-        runner_module, "IMAGE_FAILED_RETRY_DELAY_RANGE_S", (0.0, 0.0)
+        recovery_module, "IMAGE_FAILED_RETRY_DELAY_RANGE_S", (0.0, 0.0)
     )
     monkeypatch.setattr(
-        runner_module,
+        recovery_module,
         "IMAGE_FAILED_ESCALATION_DELAYS_S",
         ((0.0, 0.0), (0.0, 0.0)),
     )

@@ -252,3 +252,28 @@ event) so the dashboard never stalls; the `item_done` event with
   public (not a `run_sheet`-only helper) so the GUI's tool / AI-check
   worker loops share the exact same poll-wait instead of a second copy
   of the logic.
+
+## 2026-08-11 — transcript, refusal diagnostic, recovery split
+
+- **The recovery ladder moved out** ([Recovery](recovery.md)): when the
+  transcript/diagnostic work pushed `runner.py` over the god-file line
+  guard, `_recover_image_failed` + the Stop-aware sleep split into
+  `painter/recovery.py` (moved whole; the runner's `ImageGenFailed`
+  handler now calls `recover_image_failed`, `_pause` shares
+  `interruptible_sleep`).
+- **The AI response transcript** ([Transcript](transcript.md)):
+  `run_sheet` builds one `Transcript` per run and its per-item `t_rec`
+  helper records every outcome (`refused` / `retry_failed` /
+  `no_image` / `skipped` / `diagnosis` / `saved`) with the FULL raw
+  response text from `driver.last_response_text`.
+- **The refusal diagnostic question** (owner 2026-08-11): when a
+  refusal survives the safer retry (every retry the run allows is
+  spent), the runner asks `REFUSAL_DIAGNOSTIC_QUESTION` once via
+  `driver.ask_text` — text only, no image burned — and the answer
+  lands in the transcript, the report txt (`WHY (site's answer)` line
+  via `RunReport.diagnosis`) and the `item_refused` event's
+  `diagnosis` field (shown by the dashboard's double-click viewer).
+  Best-effort: a failed question never fails the run; duck-typed
+  drivers without `ask_text` (the API job, tests) simply skip it.
+- **`item_refused` now carries `reason` (+ `diagnosis`)** — the GUI
+  stores them per drop path (`DashPanel._refused_info`).

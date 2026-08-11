@@ -42,7 +42,7 @@ behavior. Installed 2026-08-01 (MIGRATE-DOCS session) and wired into
   red guard). Exits 2 on failure.
 
 ### `test_sheet_parser.py` — Golden Parser Tests
-Runs the parser against the REAL archetype sheets in DOMY Watch
+Runs the parser against the REAL archetype sheets in Watch Academy
 `research/prompts/archetype/` (all eight files). Expected values
 were read from the sheets by hand, never copied from parser output:
 per-sheet item/skip counts, the full trinity (title, path) tuple
@@ -51,7 +51,7 @@ sheet, the unapproved tetramorph section, wrapped-heading
 normalization (calendar) and the two Life registers that share
 stems. The `fixtures/` sheets cover the loud failures: an unpaired
 heading, a missing H1 (`SheetError`), escaping and non-image drop
-paths. Skips (with a clear reason) if the DOMY Watch sheets are not
+paths. Skips (with a clear reason) if the Watch Academy sheets are not
 on disk.
 
 ### Run-Loop Tests — `test_runner_paths_and_save.py` / `test_runner_images.py` / `test_runner_recovery_ladder.py` / `test_runner_queue_and_control.py`
@@ -89,8 +89,18 @@ file's own docstring):
   choice on a `ModelDegraded` ("continue" loud-skips the item, anything
   else re-raises as `TerminalState` with the same `retry_after_s`),
   plus a pin on the F2-retimed ladder constants read straight from
-  `painter.config` (never `painter.runner`'s copies, which the autouse
-  fast-recovery fixture monkeypatches).
+  `painter.config` (never `painter.recovery`'s copies, which the autouse
+  fast-recovery fixture monkeypatches — the ladder and its knobs moved
+  to `painter/recovery.py` in the 2026-08-11 STRUCTURE-LAW split).
+
+### `test_transcript.py` — AI Response Transcript + Refusal Diagnostic
+`Transcript.record` JSONL rows (append, matched-null mining, the
+loud-but-nonfatal write failure), and `run_sheet` wiring (owner
+2026-08-11): a saved item's row, a double refusal asking exactly ONE
+`REFUSAL_DIAGNOSTIC_QUESTION` whose answer lands in the transcript,
+the report's `WHY (site's answer)` line and the `item_refused`
+event's `diagnosis`, and a `NoImage(had_text=True)` unknown answer
+recorded verbatim with `matched: null`.
 
 ### `test_driver.py` — CDP Driver, F1/F2 Protocol
 Duck-typed Locator/Page fakes over `SiteDriver` (no browser — see the
@@ -670,7 +680,7 @@ one violation each.
   [Run Loop](../painter/__about/runner.md), [Shared Filter
   Framework](../painter/__about/filters.md) and [GUI](../gui/___gui.md) — the units
   under test
-- DOMY Watch `research/prompts/archetype/` — the golden input
+- Watch Academy `research/prompts/archetype/` — the golden input
 
 ### Used by
 - Nobody at runtime; the offline safety net for every change.

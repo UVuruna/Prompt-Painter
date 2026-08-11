@@ -22,14 +22,12 @@ from typing import Callable
 
 from painter.config import (
     CONTINUE_NUDGE,
-    IMAGE_FAILED_ESCALATION_DELAYS_S,
-    IMAGE_FAILED_RETRY_DELAY_RANGE_S,
-    IMAGE_FAILED_RETRY_MAX,
-    IMAGE_RETRY_NUDGE,
     PAUSE_POLL_INTERVAL_S,
+    REFUSAL_DIAGNOSTIC_QUESTION,
     REPORT_SUFFIX,
     RETRY_PREAMBLES,
     STATE_DIRNAME,
+    TRANSCRIPT_FILENAME,
     Timing,
     dest_for,
     fmt_duration,
@@ -47,8 +45,10 @@ from painter.driver import (
     TerminalState,
     sniff_format,
 )
+from painter.recovery import interruptible_sleep, recover_image_failed
 from painter.run_report import RunReport
 from painter.sheet_parser import Sheet, SkippedItem
+from painter.transcript import Transcript
 
 Log = Callable[[str], None]
 # GUI stop button etc.; checked between items and during the pause
@@ -78,25 +78,7 @@ def _pause(timing: Timing, should_stop: ShouldStop | None, log: Log) -> None:
     """A random polite pause between prompts, interruptible by Stop."""
     wait = random.uniform(timing.pause_min_s, timing.pause_max_s)
     log(f"    pause {wait:.2f}s (paced run)")
-    _sleep(wait, should_stop, log)
-
-
-def _sleep(
-    seconds: float, should_stop: ShouldStop | None, log: Log
-) -> bool:
-    """Sleep ``seconds``, waking every half-second to honour Stop.
-
-    Shared by ``_pause`` (short paced waits) and the image-failure
-    recovery ladder (its retries and escalation rounds wait MINUTES —
-    up to ~36 — so a Stop must never hang behind them). Returns True
-    when Stop cut the wait short, False when it ran to completion; the
-    ladder uses that to abandon the recovery immediately."""
-    end = time.monotonic() + seconds
-    while time.monotonic() < end:
-        if should_stop is not None and should_stop():
-            return True
-        time.sleep(0.5)
-    return False
+    interruptible_sleep(wait, should_stop, log)
 
 
 def wait_while_paused(
@@ -170,109 +152,6 @@ def resolve_input_images(
         else:
             resolved.append(str(hit))
     return resolved, missing
-
-
-def _recover_image_failed(
-    exc: ImageGenFailed,
-    driver: SiteDriver,
-    generate_one: Callable[..., tuple[bytes, float]],
-    base: str,
-    should_stop: ShouldStop | None,
-    log: Log,
-    emit: OnEvent,
-    input_image_paths: list[str] | None = None,
-) -> tuple[bytes, float]:
-    """Walk the image-failure recovery ladder (owner 2026-07-23).
-
-    ChatGPT's image tool fails in two faces, both matched by
-    ``image_failed_text_markers`` and both arriving here as
-    ``ImageGenFailed``: its own "reply with 'retry'" text, and the
-    generic "Hmm...something seems to have gone wrong." error turn
-    (which also renders a native Retry BUTTON). One ladder serves
-    both, cheapest rung first:
-
-      1. click the site's native Retry button, if it has one for this
-         state and it is present — regenerates in place, no re-typing;
-      2. resend ``IMAGE_RETRY_NUDGE`` up to ``IMAGE_FAILED_RETRY_MAX``
-         times, each after a random ``IMAGE_FAILED_RETRY_DELAY_RANGE_S``
-         wait (server hiccups and soft rate-limits clear on their own —
-         hammering just re-fails);
-      3. one escalation ROUND per ``IMAGE_FAILED_ESCALATION_DELAYS_S``
-         entry: wait a random duration in that entry's range, then
-         REFRESH the page, open a NEW SESSION, and resend the WHOLE
-         original prompt (a fresh chat has no context, so "retry" alone
-         would mean nothing) — RE-ATTACHING ``input_image_paths`` when
-         the item carried "← `ref`" input image(s) (owner 2026-07-23;
-         the earlier rungs stay in the same chat where the image(s)
-         already sit, so only this new-session rung re-attaches).
-
-    Returns ``(image bytes, send timestamp)`` from the first rung that
-    yields an image. When every rung is spent the ladder re-raises
-    ``ImageGenFailed`` — the worker STOPS (owner's "GASI"): finished
-    items are safe on disk, so a restart resumes past them. A Stop
-    request during any wait abandons the ladder the same way. Only
-    ``ImageGenFailed`` is caught per rung; a quota/refusal that surfaces
-    mid-recovery propagates loudly, exactly as on a first attempt."""
-    reason = str(exc)
-
-    # rung 1 — the site's own Retry button (same chat, no re-typing)
-    try:
-        if driver.click_error_retry(log):
-            emit({"type": "item_retry"})
-            t_send = time.monotonic()
-            driver.await_done(log)
-            data = driver.extract_image()
-            log("    site Retry button RECOVERED")
-            return data, t_send
-    except ImageGenFailed as again:
-        reason = str(again)
-
-    # rung 2 — resend the site's own "retry" word, paced
-    for attempt in range(1, IMAGE_FAILED_RETRY_MAX + 1):
-        wait = random.uniform(*IMAGE_FAILED_RETRY_DELAY_RANGE_S)
-        log(
-            "    IMAGE GENERATION FAILED — waiting"
-            f" {wait:.0f}s then sending '{IMAGE_RETRY_NUDGE}'"
-            f" ({attempt}/{IMAGE_FAILED_RETRY_MAX}) ..."
-        )
-        if _sleep(wait, should_stop, log):
-            log("    STOPPED on request during recovery")
-            raise ImageGenFailed(reason)
-        emit({"type": "item_retry"})
-        try:
-            data, t_send = generate_one(IMAGE_RETRY_NUDGE)
-            log("    retry RECOVERED")
-            return data, t_send
-        except ImageGenFailed as again:
-            reason = str(again)
-
-    # rung 3 — escalation rounds: wait -> refresh -> new session ->
-    # resend the whole original prompt. The new session has NO history,
-    # so an input-image item must RE-ATTACH its reference here (the
-    # earlier rungs stayed in the same chat where the image already sat).
-    rounds = len(IMAGE_FAILED_ESCALATION_DELAYS_S)
-    for rnd, (lo, hi) in enumerate(IMAGE_FAILED_ESCALATION_DELAYS_S, start=1):
-        wait = random.uniform(lo, hi)
-        log(
-            f"    escalation round {rnd}/{rounds} — waiting"
-            f" {wait / 60:.0f} min, then refresh + new session ..."
-        )
-        if _sleep(wait, should_stop, log):
-            log("    STOPPED on request during recovery")
-            raise ImageGenFailed(reason)
-        emit({"type": "item_retry"})
-        driver.refresh(log)
-        driver.new_chat(log)
-        try:
-            data, t_send = generate_one(base, attach=input_image_paths)
-            log(f"    escalation round {rnd} RECOVERED (fresh session)")
-            return data, t_send
-        except ImageGenFailed as again:
-            reason = str(again)
-
-    # every rung spent — stop the worker (finished work is safe on disk)
-    log(f"    RECOVERY EXHAUSTED — stopping the site: {reason}")
-    raise ImageGenFailed(reason)
 
 
 def run_sheet(
@@ -369,6 +248,10 @@ def run_sheet(
         if report
         else None
     )
+    # the AI response TRANSCRIPT (owner 2026-08-11): every text the
+    # site answered, verbatim, beside the report — new/unknown site
+    # states are mined from this record instead of re-provoked live
+    transcript = Transcript(state_dir / TRANSCRIPT_FILENAME)
 
     for sk in sheet.skipped:
         log(f"  SKIP {sk.title} — {sk.reason}")
@@ -599,6 +482,7 @@ def run_sheet(
                         {
                             "type": "item_refused",
                             "drop_path": item.drop_path,
+                            "reason": reason,
                         }
                     )
                     if idx < total:
@@ -612,8 +496,25 @@ def run_sheet(
 
             retried = False  # True when a RETRY path produced the image
             skip_reason: str | None = None
+            # the ItemRefused that ENDED in a skip — the trigger for the
+            # one text-only diagnostic question (owner 2026-08-11)
+            refused_exc: ItemRefused | None = None
             data = None
             t_send = 0.0
+
+            def t_rec(
+                event: str, matched: str | None = None, action: str = ""
+            ) -> None:
+                """One transcript row for THIS item, carrying the FULL
+                raw response text the driver last read (the exceptions
+                truncate it; the transcript never does)."""
+                transcript.record(
+                    event, sheet=sheet.source.name, item=item.drop_path,
+                    # getattr: duck-typed drivers (tests, the API job)
+                    # may not track a last response text
+                    raw_text=getattr(driver, "last_response_text", ""),
+                    matched=matched, action=action, log=log,
+                )
 
             def try_safer(exc: ItemRefused):
                 """One safer retry with the category's preamble (owner
@@ -633,6 +534,14 @@ def run_sheet(
                 is correct."""
                 reason = str(exc)
                 preamble = RETRY_PREAMBLES.get(exc.category)
+                t_rec(
+                    "refused", matched=exc.category,
+                    action=(
+                        "safer retry"
+                        if safer_retry and preamble is not None
+                        else "skip (no retry)"
+                    ),
+                )
                 if safer_retry and preamble is not None:
                     log(
                         f"    REFUSED [{exc.category}] — one safer retry"
@@ -652,6 +561,15 @@ def run_sheet(
                         SendVanished,
                     ) as exc2:
                         reason = str(exc2)
+                        t_rec(
+                            "retry_failed",
+                            matched=(
+                                exc2.category
+                                if isinstance(exc2, ItemRefused)
+                                else None
+                            ),
+                            action="skip",
+                        )
                 return None, reason
 
             try:
@@ -660,10 +578,19 @@ def run_sheet(
                 result, reason = try_safer(exc)
                 if result is None:
                     skip_reason = reason
+                    refused_exc = exc
                 else:
                     data, t_send = result
                     retried = True
             except NoImage as exc:
+                t_rec(
+                    "no_image",
+                    action=(
+                        "skip"
+                        if exc.had_text or not continue_nudge
+                        else "continue nudge"
+                    ),
+                )
                 # F1 nudge policy (owner 2026-07-29, root cause 2): the
                 # continue nudge is allowed ONLY for a truly empty /
                 # interrupted answer. A TEXT answer matching no marker
@@ -748,7 +675,7 @@ def run_sheet(
                 if not image_failed_retry:
                     raise
                 try:
-                    data, t_send = _recover_image_failed(
+                    data, t_send = recover_image_failed(
                         exc, driver, generate_one, base, should_stop, log,
                         emit, input_paths,
                     )
@@ -757,6 +684,7 @@ def run_sheet(
                     result, reason = try_safer(exc2)
                     if result is None:
                         skip_reason = reason
+                        refused_exc = exc2
                     else:
                         data, t_send = result
                         retried = True
@@ -799,12 +727,47 @@ def run_sheet(
                     "    continuing with the next item; rework the"
                     " prompt (or intervene manually) and rerun later"
                 )
+                t_rec("skipped", action=skip_reason)
+                # THE REFUSAL DIAGNOSTIC (owner 2026-08-11): every
+                # retry this run allows is spent — instead of a third
+                # blind attempt, ask the site ONCE, text-only, WHY it
+                # blocked this item. Best-effort by design: a failed
+                # question never fails the run.
+                diagnosis = ""
+                # getattr: duck-typed drivers without ask_text (tests,
+                # the API job) simply skip the question
+                ask = getattr(driver, "ask_text", None)
+                if refused_exc is not None and ask is not None:
+                    log(
+                        "    asking the refusal diagnostic question"
+                        " (text only, no image burned) ..."
+                    )
+                    try:
+                        diagnosis = ask(REFUSAL_DIAGNOSTIC_QUESTION, log)
+                    except Exception as dexc:
+                        log(
+                            "    diagnostic question FAILED (run"
+                            f" continues): {dexc}"
+                        )
+                    if diagnosis:
+                        log(f"    WHY (site's answer): {diagnosis[:200]}")
+                        t_rec(
+                            "diagnosis",
+                            matched=refused_exc.category,
+                            action="logged",
+                        )
+                    else:
+                        log("    no diagnostic answer arrived")
                 if run_report is not None:
                     run_report.refused(item.drop_path, skip_reason)
+                    if diagnosis:
+                        run_report.diagnosis(item.drop_path, diagnosis)
                 emit(
                     {
                         "type": "item_refused",
                         "drop_path": item.drop_path,
+                        "reason": skip_reason,
+                        "diagnosis": diagnosis,
                     }
                 )
                 if idx < total:
@@ -857,6 +820,7 @@ def run_sheet(
             final_res = _png_size(saved_bytes)
             generated += 1
             log(f"    saved {dest} ({size:,} bytes)")
+            t_rec("saved", action=rel)
             # count it live right away (dashboard progress + generate
             # avg) — carries everything the dashboard needs to add the
             # image to its table now, except our-time (needs the pause).

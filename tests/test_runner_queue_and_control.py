@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from painter import recovery as recovery_module
 from painter import runner as runner_module
 from painter.config import (
     IMAGE_FAILED_ESCALATION_DELAYS_S,
@@ -44,10 +45,10 @@ def _fast_recovery(monkeypatch):
     """Zero out the image-failure ladder's real-clock waits — see
     test_runner_paths_and_save.py's own copy for the full rationale."""
     monkeypatch.setattr(
-        runner_module, "IMAGE_FAILED_RETRY_DELAY_RANGE_S", (0.0, 0.0)
+        recovery_module, "IMAGE_FAILED_RETRY_DELAY_RANGE_S", (0.0, 0.0)
     )
     monkeypatch.setattr(
-        runner_module,
+        recovery_module,
         "IMAGE_FAILED_ESCALATION_DELAYS_S",
         ((0.0, 0.0), (0.0, 0.0)),
     )

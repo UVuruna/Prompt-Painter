@@ -39,3 +39,10 @@ footer. `_now()` (module-private) stamps every line.
 - **Moved whole, byte-identical behavior.** The split changed the
   class's HOME, not its output — every report written after the split
   is line-for-line what the pre-split runner wrote.
+
+## 2026-08-11 — the diagnosis line
+
+`diagnosis(drop_path, text)` appends the site's OWN answer to the
+refusal diagnostic question (`WHY (site's answer) — ...`, capped at
+400 chars) right under the matching REFUSED line, so the sheet rework
+sees WHY without opening the transcript.

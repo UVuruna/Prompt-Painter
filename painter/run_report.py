@@ -81,6 +81,15 @@ class RunReport:
         self._refused += 1
         self._append(f"{_now()}  {drop_path:<44} REFUSED — {reason[:120]}")
 
+    def diagnosis(self, drop_path: str, text: str) -> None:
+        """The site's OWN answer to the refusal diagnostic question
+        (owner 2026-08-11) — appended right under the REFUSED line, so
+        the sheet rework sees WHY without opening the transcript."""
+        self._append(
+            f"{_now()}  {drop_path:<44} WHY (site's answer) —"
+            f" {text[:400]}"
+        )
+
     def finish(self, generated: int, wall_s: float, stopped_why: str) -> None:
         self._append("-" * 68)
         if self._refused:

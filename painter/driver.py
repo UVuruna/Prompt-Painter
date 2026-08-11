@@ -252,6 +252,10 @@ class SiteDriver:
         # instead of honestly waiting the signal out (that wait cost a
         # real run 7 minutes between two items).
         self._busy_known_stuck: bool = False
+        # TRANSCRIPT (owner 2026-08-11): the FULL text of the LAST
+        # assistant answer this driver read — the exceptions truncate
+        # it for their messages, the transcript log wants all of it
+        self.last_response_text: str = ""
 
     # --- lifecycle ----------------------------------------------------
 
@@ -415,6 +419,9 @@ class SiteDriver:
 
     def capture_baseline(self) -> Baseline:
         """Snapshot the page BEFORE a submit (F1 protocol)."""
+        # a fresh submit starts a fresh answer — never let the PREVIOUS
+        # item's text pose as this one's in the transcript log
+        self.last_response_text = ""
         self._baseline = Baseline(
             turn_count=self._turns_count(),
             last_img_src=self._last_image_src(),
@@ -872,6 +879,7 @@ class SiteDriver:
                     return
                 text = self._safe_text(turn)
                 if text:
+                    self.last_response_text = text
                     self._check_degrade_banner()
                     self._check_image_failed(text)
                     self._check_markers(text)
@@ -924,6 +932,7 @@ class SiteDriver:
                 break
             text = "" if turn is None else self._safe_text(turn)
             if text:
+                self.last_response_text = text
                 self._check_degrade_banner()
                 self._check_markers(text)
             if time.monotonic() > deadline:
@@ -936,6 +945,45 @@ class SiteDriver:
             time.sleep(t.poll_interval_s)
         b64 = img.evaluate(_FETCH_IMAGE_JS)
         return base64.b64decode(b64)
+
+    def ask_text(self, question: str, log: Log = print) -> str:
+        """Send a TEXT-ONLY question and return the answer's full text
+        — the refusal diagnostic (owner 2026-08-11). No image is
+        expected and NO marker classification runs: the whole point is
+        to read the site's own explanation of a refusal, and that
+        explanation legitimately contains the very words the refusal
+        markers match (classifying it would raise ``ItemRefused`` on
+        the diagnosis itself). Done = the newest assistant turn's text
+        STABLE for ``text_settle_s`` with the busy signal gone (the
+        same settle idiom as ``await_done``'s text-only branch).
+        Returns whatever arrived by ``generation_timeout_s`` — "" when
+        nothing did; the SUBMIT itself still fails loudly (the caller
+        decides that a failed diagnostic never fails the run)."""
+        self.submit_prompt(question, log)
+        t = self._timing
+        deadline = time.monotonic() + t.generation_timeout_s
+        stable_since: float | None = None
+        last = ""
+        while time.monotonic() < deadline:
+            turn = self._new_turn()
+            busy = self._busy()
+            text = "" if turn is None else self._safe_text(turn)
+            if text and not busy:
+                if text != last:
+                    last = text
+                    stable_since = time.monotonic()
+                elif (
+                    stable_since is not None
+                    and time.monotonic() - stable_since >= t.text_settle_s
+                ):
+                    self.last_response_text = text
+                    return text
+            else:
+                stable_since = None
+            time.sleep(t.poll_interval_s)
+        if last:
+            self.last_response_text = last
+        return last  # "" = the site answered nothing in time
 
     # --- F1 turn-scoping helpers ----------------------------------------
 

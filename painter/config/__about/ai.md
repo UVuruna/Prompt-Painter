@@ -137,3 +137,11 @@ the Fixer AI (owner 2026-07-17 through 2026-07-29 F7).
   underscore on the function, and `QUOTA_RESET_AT_PATTERN`/`_MONTHS`
   are not re-exported by [Config Package Index](__init__.md) even
   though they carry no underscore prefix themselves)
+
+## 2026-08-11 additions
+
+- `REFUSAL_DIAGNOSTIC_QUESTION` — the one text-only "why was this
+  blocked" question the runner sends after a refusal survives the
+  safer retry (answer -> transcript + report + dashboard).
+- `TRANSCRIPT_FILENAME` — `transcript.jsonl` under `_state/<site>/`
+  ([Transcript](../../__about/transcript.md)).
