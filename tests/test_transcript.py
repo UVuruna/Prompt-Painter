@@ -161,8 +161,17 @@ def test_double_refusal_asks_the_diagnostic_question(tmp_path):
         safer_retry=True, on_event=events.append,
     )
     assert generated == 0
-    # exactly ONE diagnostic question, the configured one
-    assert driver.asked == [REFUSAL_DIAGNOSTIC_QUESTION]
+    # exactly ONE diagnostic question — the configured template with
+    # the item's FULL sent prompt EMBEDDED (live run 2026-08-11: the
+    # context-relying wording got Gemini's "I do not have access to
+    # your previous prompt"; embedding makes the answer deterministic)
+    assert len(driver.asked) == 1
+    question = driver.asked[0]
+    assert "{prompt}" not in question
+    assert "prompt 0" in question  # the item's own sent prompt, quoted
+    assert question.startswith(
+        REFUSAL_DIAGNOSTIC_QUESTION.split("{prompt}")[0]
+    )
 
     rows = read_transcript(out, "chatgpt")
     assert [r["event"] for r in rows] == [

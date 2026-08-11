@@ -743,7 +743,16 @@ def run_sheet(
                         " (text only, no image burned) ..."
                     )
                     try:
-                        diagnosis = ask(REFUSAL_DIAGNOSTIC_QUESTION, log)
+                        # .replace, never .format — prompts contain
+                        # braces; and the prompt is EMBEDDED because
+                        # the site may not see prior context (the
+                        # Obi-Wan "no access" answer, 2026-08-11)
+                        diagnosis = ask(
+                            REFUSAL_DIAGNOSTIC_QUESTION.replace(
+                                "{prompt}", base
+                            ),
+                            log,
+                        )
                     except Exception as dexc:
                         log(
                             "    diagnostic question FAILED (run"

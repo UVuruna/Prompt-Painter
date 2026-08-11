@@ -145,3 +145,11 @@ the Fixer AI (owner 2026-07-17 through 2026-07-29 F7).
   safer retry (answer -> transcript + report + dashboard).
 - `TRANSCRIPT_FILENAME` — `transcript.jsonl` under `_state/<site>/`
   ([Transcript](../../__about/transcript.md)).
+
+### 2026-08-11b — the question became a template
+`REFUSAL_DIAGNOSTIC_QUESTION` now carries a `{prompt}` placeholder the
+runner fills with the item's FULL sent prompt via `str.replace` (never
+`.format` — prompts contain braces). Embedded because the site cannot
+be trusted to see prior context: the live run's Obi-Wan diagnostic got
+"I do not have access to your previous prompt" while Han's same-chat
+one worked minutes later.

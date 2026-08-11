@@ -287,12 +287,20 @@ CONTINUE_NUDGE = "Continue - please finish generating the image."
 # copyright blocks with an attached reference image. Cheap: one text
 # reply, no image generation burned. Data only — reword freely.
 REFUSAL_DIAGNOSTIC_QUESTION = (
-    "You declined to generate the previous image. Without generating"
-    " anything, briefly tell me which SPECIFIC element of the prompt"
-    " or of the attached reference image conflicts with your policy"
-    " (a name, a phrase, the likeness in the reference...), so I can"
-    " rework the request."
+    "You declined to generate an image for the request quoted below"
+    " (it may also have carried attached reference image(s)). Without"
+    " generating anything, briefly tell me which SPECIFIC element of"
+    " that request conflicts with your policy (a name, a phrase, the"
+    " likeness in the attached reference...), so I can rework it.\n\n"
+    "The declined request was:\n\n{prompt}"
 )
+# The runner substitutes the item's FULL sent prompt via str.replace
+# ("{prompt}"), NEVER str.format — a sheet prompt legitimately contains
+# braces and format would crash on them. The prompt is EMBEDDED because
+# the site cannot be trusted to see the prior context (live run
+# 2026-08-11: Gemini answered "I do not have access to your previous
+# prompt" to the context-relying wording, while the same-chat variant
+# worked minutes later — embedding makes both cases deterministic).
 
 
 # ═══════════ IMAGE-GENERATION-FAILED RETRY LADDER ═══════════════════════
