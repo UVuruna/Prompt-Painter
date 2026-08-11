@@ -15,7 +15,7 @@ pairing and stays there).
 
 The section owns the run's REFERENCE FOLDER — rung ② of the binding
 resolution order (sheet folder → Reference folder → absolute,
-`painter.runner.resolve_input_images`, deliberately REUSED rather than
+`painter.sheet_parser.resolve_input_images`, deliberately REUSED rather than
 re-derived — one resolution truth) — and a live per-entry eligibility
 view over the queued collections (✔ complete / ✖ reference missing /
 — no `←` line, plus the summary count). The section only REPORTS; the
@@ -32,7 +32,7 @@ while ON (`_apply_prompt_image_state`), splitting the column's height
 ## Connections
 
 ### Uses
-- [Run Loop](../../painter/__about/runner.md) — `resolve_input_images`
+- [Sheet Parser](../../painter/__about/sheet_parser.md) — `resolve_input_images`
   (the ONE resolution order, reused verbatim)
 - [Sheet Parser](../../painter/__about/sheet_parser.md) —
   `parse_sheet`/`SheetError` (the live eligibility view re-parses the

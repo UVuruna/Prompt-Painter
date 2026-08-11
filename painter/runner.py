@@ -40,6 +40,7 @@ from painter.driver import (
     ItemRefused,
     ModelDegraded,
     NoImage,
+    SendNotConfirmed,
     SendVanished,
     SiteDriver,
     TerminalState,
@@ -47,7 +48,11 @@ from painter.driver import (
 )
 from painter.recovery import interruptible_sleep, recover_image_failed
 from painter.run_report import RunReport
-from painter.sheet_parser import Sheet, SkippedItem
+from painter.sheet_parser import (
+    Sheet,
+    SkippedItem,
+    resolve_input_images,
+)
 from painter.transcript import Transcript
 
 Log = Callable[[str], None]
@@ -120,38 +125,6 @@ def wait_while_paused(
     emit({"type": "sheet_resumed"})
     log("    RESUMED")
     return False
-
-
-def resolve_input_images(
-    refs: tuple[str, ...] | list[str],
-    sheet_dir: Path,
-    reference_dir: Path | None = None,
-) -> tuple[list[str], list[str]]:
-    """Resolve an entry's "← `ref`" references to real files (faza 2,
-    owner 2026-08-03 — the binding resolution order): each ref is tried
-    ① relative to the sheet's own folder, ② relative to the run's
-    ``reference_dir`` (the GUI Prompt+Image section's Reference
-    folder), ③ as an absolute path. Sources are READ ONLY everywhere.
-
-    Returns ``(resolved, missing)`` — resolved absolute path strings in
-    the SAME order as ``refs`` (attach order), and the raw refs that
-    were found nowhere. Never guesses (no basename search, no fuzzy
-    match): a miss is the author's or the folder-picker's to fix, and
-    it is reported loudly by every caller."""
-    resolved: list[str] = []
-    missing: list[str] = []
-    for ref in refs:
-        candidates = [sheet_dir / ref]
-        if reference_dir is not None:
-            candidates.append(reference_dir / ref)
-        if Path(ref).is_absolute():
-            candidates.append(Path(ref))
-        hit = next((c for c in candidates if c.is_file()), None)
-        if hit is None:
-            missing.append(ref)
-        else:
-            resolved.append(str(hit))
-    return resolved, missing
 
 
 def run_sheet(
@@ -553,8 +526,14 @@ def run_sheet(
                 past the outer per-item catches — Python never routes
                 an exception from one ``except`` block to its siblings
                 — and killed the WHOLE site over one item's retry.
-                Quota (``TerminalState``) still propagates: that stop
-                is correct."""
+                ``ImageGenFailed`` was left OUT of that 2026-08-04 fix
+                and kept the same hole open (owner 2026-08-11, the
+                18:55:54 stop: the vanished-prompt re-send's own answer
+                was the site's "Image generation failed" turn, which
+                flew past every sibling catch and ended the run at
+                38/69 collections) — every per-item verdict is listed
+                here now. Quota (``TerminalState``) still propagates:
+                that stop is correct."""
                 reason = str(exc)
                 preamble = RETRY_PREAMBLES.get(exc.category)
                 t_rec(
@@ -580,8 +559,10 @@ def run_sheet(
                     except (
                         ItemRefused,
                         NoImage,
+                        ImageGenFailed,
                         GenerationTimeout,
                         SendVanished,
+                        SendNotConfirmed,
                     ) as exc2:
                         reason = str(exc2)
                         t_rec(
@@ -605,6 +586,15 @@ def run_sheet(
                 else:
                     data, t_send = result
                     retried = True
+            except GenerationTimeout as exc:
+                # owner 2026-08-11: the hard timeout was catchable in
+                # every NESTED handler but not on the first attempt —
+                # one item whose result never arrives is a per-item
+                # skip like any other, never the end of the site. (It
+                # survived until now only because the timeouts always
+                # happened to be raised inside a nested retry.)
+                t_rec("timeout", action="skip")
+                skip_reason = f"generation timed out — {exc}"
             except NoImage as exc:
                 t_rec(
                     "no_image",
@@ -633,14 +623,21 @@ def run_sheet(
                         log("    continue nudge RECOVERED")
                     except (NoImage, SendVanished) as exc2:
                         skip_reason = f"no image after nudge — {exc2}"
-            except SendVanished as exc:
+            except (SendVanished, SendNotConfirmed) as exc:
                 # F1b (owner 2026-08-04, the Padmé/Qui-Gon incident):
                 # the site DROPPED our confirmed message. The recovery
                 # is the item's OWN prompt again — never the
                 # content-blind continue nudge, which regenerated the
                 # PREVIOUS request and saved a Qui-Gon badge as Padmé.
+                #
+                # SendNotConfirmed (owner 2026-08-11) rides the same
+                # handler: the send provably did NOT take, so nothing
+                # is half-generated and re-sending our own prompt is
+                # the same safe move. It used to stop the whole site.
                 log(
-                    f"    SENT PROMPT VANISHED from the chat — {exc}"
+                    "    SEND NOT CONFIRMED — {}".format(exc)
+                    if isinstance(exc, SendNotConfirmed)
+                    else f"    SENT PROMPT VANISHED from the chat — {exc}"
                 )
                 log(
                     "    re-sending the item's own prompt (1 try) ..."
@@ -653,8 +650,10 @@ def run_sheet(
                 except (
                     ItemRefused,
                     NoImage,
+                    ImageGenFailed,
                     GenerationTimeout,
                     SendVanished,
+                    SendNotConfirmed,
                 ) as exc2:
                     skip_reason = (
                         f"prompt vanished; re-send failed — {exc2}"
@@ -733,6 +732,7 @@ def run_sheet(
                         ImageGenFailed,
                         GenerationTimeout,
                         SendVanished,
+                        SendNotConfirmed,
                     ) as exc:
                         skip_reason = f"duplicate image, retry failed: {exc}"
                     if skip_reason is None and digest == last_saved_digest:

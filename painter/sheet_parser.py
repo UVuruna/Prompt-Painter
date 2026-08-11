@@ -405,3 +405,35 @@ def parse_sheet(path: Path) -> Sheet:
         skipped=tuple(skipped),
         problems=tuple(problems),
     )
+
+
+def resolve_input_images(
+    refs: tuple[str, ...] | list[str],
+    sheet_dir: Path,
+    reference_dir: Path | None = None,
+) -> tuple[list[str], list[str]]:
+    """Resolve an entry's "← `ref`" references to real files (faza 2,
+    owner 2026-08-03 — the binding resolution order): each ref is tried
+    ① relative to the sheet's own folder, ② relative to the run's
+    ``reference_dir`` (the GUI Prompt+Image section's Reference
+    folder), ③ as an absolute path. Sources are READ ONLY everywhere.
+
+    Returns ``(resolved, missing)`` — resolved absolute path strings in
+    the SAME order as ``refs`` (attach order), and the raw refs that
+    were found nowhere. Never guesses (no basename search, no fuzzy
+    match): a miss is the author's or the folder-picker's to fix, and
+    it is reported loudly by every caller."""
+    resolved: list[str] = []
+    missing: list[str] = []
+    for ref in refs:
+        candidates = [sheet_dir / ref]
+        if reference_dir is not None:
+            candidates.append(reference_dir / ref)
+        if Path(ref).is_absolute():
+            candidates.append(Path(ref))
+        hit = next((c for c in candidates if c.is_file()), None)
+        if hit is None:
+            missing.append(ref)
+        else:
+            resolved.append(str(hit))
+    return resolved, missing

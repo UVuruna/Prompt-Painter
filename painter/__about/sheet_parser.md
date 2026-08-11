@@ -28,7 +28,8 @@ leniency.
    `PromptItem.input_images` (a tuple of the RAW strings) — read-only
    source photos the runner attaches into the chat before the prompt,
    resolved on disk at run time (sheet folder → the run's Reference
-   folder → absolute — `runner.resolve_input_images`; never touched
+   folder → absolute — `resolve_input_images`, which lives HERE (a
+   sheet entry's references are a sheet concern); never touched
    here, the parser stays pure and offline). Any of
    `TOOL_IMAGE_EXTENSIONS` (png/jpg/jpeg/webp — a reference photo may
    be a jpg). A `←` on a real entry naming a non-image file is

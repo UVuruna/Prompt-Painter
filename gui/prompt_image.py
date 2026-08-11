@@ -11,7 +11,7 @@ never guessed here by filename matching.
 
 This section owns the run's REFERENCE FOLDER — the second rung of the
 binding resolution order (sheet folder → Reference folder → absolute,
-``painter.runner.resolve_input_images`` — the ONE resolution truth
+``painter.sheet_parser.resolve_input_images`` — the ONE resolution truth
 this widget deliberately reuses instead of re-deriving) — and a live
 eligibility view over the queued collections: per entry ✔ complete /
 ✖ reference missing / — no ``←`` line, plus the summary count the
@@ -31,7 +31,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Callable
 
-from painter.runner import resolve_input_images
+from painter.sheet_parser import resolve_input_images
 from painter.sheet_parser import SheetError, parse_sheet
 from .theme import skin_listbox
 from .widgets import rounded_button, rounded_entry, tk_font

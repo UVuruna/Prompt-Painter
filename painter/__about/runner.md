@@ -19,7 +19,7 @@ report keeps every finished line. The loop writes ONLY under
 An item that carries INPUT IMAGE(S) (`PromptItem.input_images` — the
 sheet's `← \`ref\`` line(s), owner 2026-07-23; MULTI + faza 2
 2026-08-03, LINE ORDER = ATTACH ORDER) has each reference resolved by
-`resolve_input_images` — the BINDING order ① sheet folder →
+`sheet_parser.resolve_input_images` — the BINDING order ① sheet folder →
 ② `reference_dir` (the GUI Prompt+Image section's Reference folder) →
 ③ absolute; sources read only, no basename guessing — and attached
 into the composer BEFORE the prompt via `driver.submit_with_image`
@@ -224,7 +224,8 @@ event) so the dashboard never stalls; the `item_done` event with
   preamble that matches the refusal's `category` — `RETRY_PREAMBLES[exc.
   category]` — and only a second refusal counts as REFUSED. The safer
   retry catches EVERY per-item verdict of its own attempt
-  (`ItemRefused`, `NoImage`, `GenerationTimeout`, `SendVanished`), not
+  (`ItemRefused`, `NoImage`, `ImageGenFailed`, `GenerationTimeout`,
+  `SendVanished`, `SendNotConfirmed`), not
   just a second refusal (owner 2026-08-04, the 18:43:46 stop: a
   `NoImage` raised inside the retry flew past the outer per-item
   catches — Python never routes an exception from one `except` block
@@ -238,7 +239,15 @@ event) so the dashboard never stalls; the `item_done` event with
   incident): the site DROPPED our confirmed message — the recovery
   re-sends the item's OWN prompt ONCE (never the content-blind nudge,
   which regenerated the PREVIOUS request and saved a Qui-Gon badge as
-  `Padme_v3_gem.png`); a second vanish is a loud per-item skip. **Duplicate guard:** a result whose bytes hash identical to the
+  `Padme_v3_gem.png`); a second vanish is a loud per-item skip.
+  **`SendNotConfirmed`** (owner 2026-08-11) rides the same handler:
+  the send provably did not take, so the same safe re-send applies.
+  **`GenerationTimeout`** is a per-item skip on the FIRST attempt too
+  (owner 2026-08-11) — it was catchable in every nested handler but
+  not there, so one item whose result never arrived could end the site.
+  `ImageGenFailed` is likewise listed in every nested handler now: it
+  was left out of the 2026-08-04 fix and kept the same hole open (the
+  18:55:54 stop, a run ended at 38/69 collections). **Duplicate guard:** a result whose bytes hash identical to the
   PREVIOUS save this run means the site re-served the old image — one
   fresh re-submit, then a loud skip; a duplicate file is never silently
   saved. **Model degradation:** see the section above.
