@@ -569,6 +569,16 @@ AI_FLAGS_FILENAME = "ai_flags.json"  # under <out>/_state/
 # the per-site AI response transcript (owner 2026-08-11) — under
 # <out>/_state/<site>/, written by painter.transcript.Transcript
 TRANSCRIPT_FILENAME = "transcript.jsonl"
+# How many CONSECUTIVE failed checks make the GUI give up checking for
+# the rest of a run (owner 2026-08-11). The checker never could stop a
+# run — it lives on its own daemon thread — but when the cause is
+# standing rather than per-image (an exhausted API quota, a missing
+# key), every later image still spends a call to fail identically: the
+# 2026-08-11 log carries ~80 identical "free tier has zero quota" lines,
+# one per saved image. Any non-error result resets the streak, so a run
+# that recovers keeps checking. GENERATION IS NEVER AFFECTED.
+CHECKER_ERROR_GIVE_UP = 5
+
 # the vision instruction — BANAL defects only, in a strict short format
 # the parser (painter.ai.parse_check_response) can read
 AI_CHECK_INSTRUCTIONS = (

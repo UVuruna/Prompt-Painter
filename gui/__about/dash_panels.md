@@ -18,6 +18,32 @@ Average breakdown, the collections history tree (collection > folder
 > image), the per-step restore viewer ("Steps…") and the parallel
 Checker AI's per-row report ("Check…").
 
+## The tree's five columns (owner 2026-08-11)
+
+`Name | Done | Time | Res | Size | Check` — down from seven.
+
+- **Time is the ONE time column at every level.** An image row carries
+  the SUM of the AI's generation and our own processing (the former
+  separate `AI` + `Ours` columns), so the column reads top to bottom as
+  one quantity instead of three columns saying the same thing at three
+  levels. It shows `107s…` from `item_progress` and becomes the sum on
+  `item_done`.
+- **Res is the DELIVERED resolution only.** The old
+  `1254x1254→1254x1246` pair is gone from the tree; the full processing
+  history lives on in the report txt, where it belongs.
+- **Widths follow content; Name takes the rest.** `_autosize_columns`
+  measures every value column's widest real content in the tree's own
+  font (never below its configured floor) and `#0` alone has
+  `stretch=True` — THE SPACE & LEGIBILITY LAW: before this the widths
+  were fixed guesses and Name was capped at 230px, so long collection
+  and folder paths were cut while the panel held empty space beside
+  them.
+- **The sixth badge dot.** `item_checked` adds a teal `check` dot via
+  `_add_badge`, which rebuilds the row's dot strip from the keys kept
+  in `_badge_keys` (the strip is a rendered image, not a list). The dot
+  asserts only that the check RAN — the verdict stays in the Check
+  column, so an errored check still earns it.
+
 Every image row remembers `rel` — the ACTUAL saved out-relative path
 off its `item_progress` event (owner 2026-07-27: a ticked redo lands
 as a `_vN` version file) — in `_node_info`; "Steps…" and

@@ -108,6 +108,7 @@ into [Viewer Shared Rules](__about/viewer_shared.md),
 | `logic.py` | Algorithmic | Tk-free module-level functions — filter engine glue, pipeline runner, fixer decision table — [about](__about/logic.md) · [flow](__flow/logic.md) |
 | `dash_helpers.py` | Standard | shared dashboard helpers — badge dots, AI-check report/tag helpers, checkerboard — [about](__about/dash_helpers.md) |
 | `dash_panels.py` | Algorithmic | `JobPanel` base + `DashPanel` — one generation site's live dashboard view — [about](__about/dash_panels.md) · [flow](__flow/dash_panels.md) |
+| `dash_row_actions.py` | Standard | `RowActionsMixin` — what a selected dashboard ROW can open (viewer, Steps…, Check…) — [about](__about/dash_row_actions.md) |
 | `tool_dash.py` | Algorithmic | `ToolPanel` + `AiCheckPanel` + `DashGrid` — the tool/checker dashboard panels and grid — [about](__about/tool_dash.md) · [flow](__flow/tool_dash.md) |
 | `menu.py` | Algorithmic | `MainMenu` + `IconBar` — the startup's fixed 4×2 tile grid and the HOME-led nav strip (setup + running views) — [about](__about/menu.md) · [flow](__flow/menu.md) |
 | `prompt_image.py` | Algorithmic | `PromptImageSection` — the PROMPT+IMAGE mode's Reference folder + live eligibility view (faza 2) — [about](__about/prompt_image.md) |

@@ -777,3 +777,85 @@ def test_dash_panel_refresh_image_row_unknown_drop_is_a_noop(root, tmp_path):
     panel = gui.DashPanel(root, "gemini")
     panel.out_base = tmp_path
     panel.refresh_image_row("never-inserted.png")  # must not raise
+
+
+# ---------------------------------------------------------------------
+# DashPanel — the five-column tree (owner 2026-08-11)
+# Seven columns became five: AI + Ours merged into ONE Time column at
+# every level, Res carries only the DELIVERED resolution.
+# ---------------------------------------------------------------------
+
+
+def test_image_row_time_is_the_sum_of_ai_and_our_time(root):
+    """One Time column per row, at every level: an image row shows the
+    AI's generation PLUS our own processing, not two columns."""
+    panel = gui.DashPanel(root, "gemini")
+    drop = "assets/emblem/Glory.png"
+    ev = make_progress_event(drop, 1234)
+    ev["gen_s"] = 107.0
+    panel.handle(ev)
+    child = panel._child_ids[drop]
+
+    # partial until our time is known — never blank, never wrong
+    assert panel.tree.set(child, "time") == "107s…"
+
+    panel.handle({
+        "type": "item_done", "drop_path": drop, "gen_s": 107.0, "over_s": 29.0,
+    })
+    assert panel.tree.set(child, "time") == "136s"
+
+
+def test_res_column_holds_only_the_delivered_resolution(root):
+    """The "1254x1254→1254x1246" pair is gone from the tree — the full
+    processing history lives on in the report txt."""
+    panel = gui.DashPanel(root, "gemini")
+    drop = "assets/emblem/Glory.png"
+    ev = make_progress_event(drop, 1234)
+    ev["orig_res"], ev["final_res"] = "1254x1254", "1254x1246"
+    panel.handle(ev)
+
+    assert panel.tree.set(panel._child_ids[drop], "res") == "1254x1246"
+
+
+def test_the_tree_has_exactly_the_five_columns(root):
+    panel = gui.DashPanel(root, "gemini")
+    assert tuple(panel.tree["columns"]) == (
+        "done", "time", "res", "size", "check",
+    )
+
+
+def test_name_stretches_and_value_columns_do_not(root):
+    """SPACE & LEGIBILITY: value columns take what their content needs,
+    Name absorbs the rest — never a cut name beside empty space."""
+    panel = gui.DashPanel(root, "gemini")
+    assert panel.tree.column("#0", "stretch") in (1, True, "1")
+    for cid in ("done", "time", "res", "size", "check"):
+        assert panel.tree.column(cid, "stretch") in (0, False, "0")
+
+
+def test_a_wide_value_widens_its_own_column(root):
+    """_autosize_columns measures real content: a long resolution makes
+    the Res column grow past its configured floor."""
+    panel = gui.DashPanel(root, "gemini")
+    before = panel.tree.column("res", "width")
+    ev = make_progress_event("assets/emblem/Glory.png", 1234)
+    ev["orig_res"] = ev["final_res"] = "12345x12345"
+    panel.handle(ev)
+
+    assert panel.tree.column("res", "width") > before
+
+
+def test_a_checked_image_earns_the_check_dot(root):
+    """The sixth badge asserts only that the check RAN — an errored
+    check is still a check that ran; the VERDICT stays in the column."""
+    panel = gui.DashPanel(root, "gemini")
+    drop = "assets/emblem/Glory.png"
+    panel.handle(make_progress_event(drop, 1234))
+    child = panel._child_ids[drop]
+    assert "check" not in panel._badge_keys[child]
+
+    panel.handle({
+        "type": "item_checked", "drop_path": drop, "kind": "error",
+        "defects": [], "raw": "quota", "rel": "x", "time": 1.0,
+    })
+    assert "check" in panel._badge_keys[child]

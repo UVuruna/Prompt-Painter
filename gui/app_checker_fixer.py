@@ -37,10 +37,25 @@ from typing import Callable
 from painter.config import (
     AI_CHECK_INSTRUCTIONS,
     CDP_URL,
+    CHECKER_ERROR_GIVE_UP,
     SITES,
     TIMING,
 )
 from .logic import _fixer_decision
+
+
+def _note_streak(gui_self, key: str, kind: str, raw: str, log) -> None:
+    """``_note_checker_result`` guarded for duck-typed callers.
+
+    The same getattr idiom the runner uses for ``driver.ask_text``, and
+    a free function rather than a method for the same reason: this runs
+    INSIDE ``_run_checker_one``'s outer safety net, whose whole promise
+    is that a checker thread can never die. A minimal test double —
+    ``SimpleNamespace(_q=...)`` calling the UNBOUND method — carries no
+    methods at all, and must not be able to break that promise."""
+    note = getattr(gui_self, "_note_checker_result", None)
+    if note is not None:
+        note(key, kind, raw, log)
 
 
 class CheckerFixerMixin:
@@ -90,6 +105,8 @@ class CheckerFixerMixin:
         agent = self.agents.get(key)
         if agent is None or not agent.checker_var.get():
             return  # not a site, or this site's checker is off
+        if key in getattr(self, "_checker_stopped", ()):
+            return  # gave up for this run (see _note_checker_result)
         dash = self.panels.get(key)
         if dash is None or dash.out_base is None:
             return  # panel closed, or somehow not started yet
@@ -107,6 +124,46 @@ class CheckerFixerMixin:
             args=(key, drop_path, src, dash.out_base, want_prompt),
             daemon=True,
         ).start()
+
+    def _note_checker_result(self, key: str, kind: str, raw: str, log) -> None:
+        """Give up checking for the REST OF THIS RUN after
+        ``CHECKER_ERROR_GIVE_UP`` consecutive errors (owner 2026-08-11).
+
+        The checker never could stop a run — it lives on its own daemon
+        thread behind a blanket except (see ``_run_checker_one``) — but
+        when the cause is standing rather than per-image (an exhausted
+        API quota, a missing key), every later image still spends a call
+        to fail the same way: the 2026-08-11 log carries ~80 identical
+        "free tier has zero quota" lines, one per saved image, none of
+        them telling the owner anything the first one had not.
+
+        So: any NON-error result resets the streak (a run that recovers
+        keeps checking), and crossing the threshold posts ONE loud line
+        plus an ``item_checked_stopped`` event for the panel's state
+        line. GENERATION IS NEVER TOUCHED — the images keep coming, only
+        their checking stops."""
+        if not hasattr(self, "_checker_errors"):
+            self._checker_errors = {}
+            self._checker_stopped = set()
+        if kind != "error":
+            self._checker_errors[key] = 0
+            return
+        streak = self._checker_errors.get(key, 0) + 1
+        self._checker_errors[key] = streak
+        if streak < CHECKER_ERROR_GIVE_UP or key in self._checker_stopped:
+            return
+        self._checker_stopped.add(key)
+        reason = (
+            f"image check STOPPED for this run — {streak} checks in a"
+            f" row failed the same way ({raw[:120]}). The run itself is"
+            " untouched: images keep generating and saving, they are"
+            " simply not checked from here on. Fix the cause (API quota"
+            " / key) and start again to resume checking."
+        )
+        log(reason)
+        self._q.put(("__event__", key, {
+            "type": "item_checked_stopped", "reason": reason,
+        }))
 
     def _prompt_for_drop(self, drop_path: str, log) -> str | None:
         """F6 (REWORK.md): this item's own sheet PROMPT, resolved by
@@ -192,8 +249,10 @@ class CheckerFixerMixin:
                 "raw": result["raw"], "rel": result["rel"],
                 "time": result["time"],
             })
+            _note_streak(self, key, result["kind"], result["raw"] or "", log)
         except Exception as exc:
             log(f"FAIL {src.name}: {exc}")
+            _note_streak(self, key, "error", str(exc), log)
             emit({
                 "type": "item_checked", "drop_path": drop_path,
                 "kind": "error", "defects": [], "raw": str(exc),

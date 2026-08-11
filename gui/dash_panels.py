@@ -44,7 +44,8 @@ from painter.config import (
     job_color_pair,
     theme_pair,
 )
-from .dash_helpers import ai_check_doc_md, ai_check_image_file, ai_check_tag, badge_dots
+from .dash_helpers import ai_check_tag, badge_dots
+from .dash_row_actions import RowActionsMixin
 from .icons import icon
 from .logic import _STAT_KEYS, _scope_stats
 from .widgets import ctk_font, folder_of, rounded_button, tk_font
@@ -59,6 +60,11 @@ JOB_PANEL_BANNER_WRAP_PX = 480
 # parallel per-item Checker AI's "checking…"/"OK"/"flagged N"/"error"
 # indicator, appended after Size in the site dashboard's image rows.
 DASH_CHECK_COL_PX = 92
+
+# breathing room added to a column's widest MEASURED text before it
+# becomes that column's width (_autosize_columns) — without it the
+# last glyph sits flush against the next column's edge.
+DASH_COL_TEXT_PAD_PX = 14
 
 
 class JobPanel(ttk.Frame):
@@ -248,7 +254,7 @@ class JobPanel(ttk.Frame):
         return node
 
 
-class DashPanel(JobPanel):
+class DashPanel(RowActionsMixin, JobPanel):
     """One generation site's live view: current collection, whole-task
     totals, timings and the collections history table.
 
@@ -424,22 +430,33 @@ class DashPanel(JobPanel):
         # column headers + both scrollbars
         wrap = ttk.Frame(self)
         wrap.pack(fill="both", expand=True, pady=(2, 0))
-        # three levels: collection > folder > image. Aggregate rows
+        # three levels: collection > folder > image. FIVE columns
+        # (owner 2026-08-11, down from seven): aggregate rows
         # (collection, folder) fill Done/Time/Size; image rows fill
-        # AI/Ours/Res/Size. Everything stays column-aligned.
-        cols = ("done", "ai", "our", "res", "time", "size", "check")
+        # Time/Res/Size/Check. Everything stays column-aligned.
+        #
+        # Time is now the ONE time column at every level — an image row
+        # carries the SUM of the AI's generation and our own processing
+        # (the former separate AI + Ours columns), so the whole column
+        # reads top to bottom as one quantity instead of three columns
+        # saying the same thing at three levels. Res carries only the
+        # DELIVERED resolution — the "1254x1254→1254x1246" pair lives on
+        # in the report txt, where the full processing history belongs.
+        cols = ("done", "time", "res", "size", "check")
         self.tree = ttk.Treeview(wrap, columns=cols, height=8)
         self.tree.heading("#0", text="Name")
-        # stretch=False EVERYWHERE: widening Name grows the tree's
-        # total content width and the horizontal scrollbar takes over,
-        # instead of squeezing the other columns
-        self.tree.column("#0", width=230, minwidth=140, stretch=False)
+        # SPACE & LEGIBILITY (owner 2026-08-11): every value column takes
+        # exactly the width its widest content needs (_autosize_columns,
+        # remeasured as rows land) and NAME absorbs all the space left
+        # over — stretch=True here, stretch=False on the value columns.
+        # Before this the widths were fixed guesses and Name was capped
+        # at 230px, so long collection/folder paths were cut while the
+        # panel held empty space to their right.
+        self.tree.column("#0", width=230, minwidth=140, stretch=True)
         for cid, txt, w, anc in (
             ("done", "Done", 56, "center"),
-            ("ai", "AI", 52, "e"),
-            ("our", "Ours", 52, "e"),
-            ("res", "Res", 100, "center"),
             ("time", "Time", 64, "e"),
+            ("res", "Res", 100, "center"),
             ("size", "Size", 72, "e"),
             # the parallel Checker AI's per-image status (GUI rework
             # Phase 16) — "checking…" / "OK" / "flagged N" / "error",
@@ -449,6 +466,12 @@ class DashPanel(JobPanel):
             self.tree.heading(cid, text=txt)
             self.tree.column(cid, width=w, minwidth=w, anchor=anc,
                              stretch=False)
+        self._col_min = {
+            cid: w for cid, w in (
+                ("done", 56), ("time", 64), ("res", 100), ("size", 72),
+                ("check", DASH_CHECK_COL_PX),
+            )
+        }
         vsb = ttk.Scrollbar(
             wrap, orient="vertical", command=self.tree.yview,
             bootstyle="round",
@@ -467,109 +490,46 @@ class DashPanel(JobPanel):
 
         self.clear(active=False)
 
-    def _show_selected(self) -> None:
-        info = self._node_info.get(self.tree.focus())
-        if info and self._on_show is not None:
-            self._on_show(info)
+    def _add_badge(self, child: str, key: str) -> None:
+        """Add one badge dot to a row that already has its strip.
 
-    # --- per-step restore viewer (GUI rework Phase 9) -------------------
+        The dots are a single rendered PIL strip, so "adding" one means
+        rebuilding it from the row's remembered keys; BADGES order is
+        the render order, exactly as at insert time."""
+        keys = self._badge_keys.get(child, ())
+        if key in keys:
+            return
+        keys = tuple(k for k in BADGES if k in set(keys) | {key})
+        self._badge_keys[child] = keys
+        dots = badge_dots(keys)
+        if dots is not None:
+            self.tree.item(child, image=dots)
 
-    def _show_steps(self) -> None:
-        """The 'Steps…' button: open the per-step restore filmstrip for
-        the SAME focused/selected row 'Show' above would use. Fully
-        self-contained (mirrors ToolPanel's own before/after viewer,
-        which likewise never routes through an on_show-style callback)
-        — resolves the site-specific rel via dest_for and opens
-        StepRestoreWindow directly."""
-        info = self._node_info.get(self.tree.focus())
-        if not info or info["level"] != "image":
-            messagebox.showinfo(
-                "PromptPainter",
-                "Select one image row first — Steps shows the pipeline"
-                " history of a single saved image.",
-            )
-            return
-        if self.jobtemp is None or self.out_base is None:
-            messagebox.showinfo(
-                "PromptPainter", "No per-step history for this run yet.",
-            )
-            return
-        # the stored rel is the file that really got saved (a _vN
-        # version for a ticked redo — owner 2026-07-27); dest_for is
-        # only the fallback for rows without one (a REFUSED row)
-        rel = info.get("rel") or dest_for(info["drop"], self.slot_key)
-        if not self.jobtemp.steps_for(rel):
-            messagebox.showinfo(
-                "PromptPainter",
-                "No kept pipeline stages for this image — either no"
-                " post-save step ran, or 'Keep every pipeline step' was"
-                " off for this run.",
-            )
-            return
-        # deferred import (see module docstring) — reaches the class
-        # tests monkeypatch through the gui package object
-        import gui
-        gui.StepRestoreWindow(
-            self.winfo_toplevel(), f"Steps — {PurePosixPath(rel).name}",
-            self.jobtemp, rel, self.out_base / rel,
-            on_restored=partial(self.refresh_image_row, info["drop"]),
-        )
+    def _autosize_columns(self) -> None:
+        """Every value column takes the width its widest content needs;
+        NAME (stretch=True) absorbs everything left over.
 
-    # --- the parallel Checker AI's per-row report (GUI rework Phase 16) -
-
-    def _show_check(self) -> None:
-        """The 'Check…' button: the SAME report a checker batch row's
-        double-click shows (``ai_check_doc_md`` + ``ai_check_image_file``
-        — the shared module-level helpers, Rule #5), for the focused
-        row's PARALLEL check result. A separate surface from 'Show'
-        (prompt+image) and 'Steps…' (pipeline restore) — never
-        overloaded onto either, same reasoning as ``_show_steps``.
-        ``_check_results`` outlives a single collection (cleared only by
-        ``reset()``, unlike ``_child_ids`` — see its own assignment in
-        ``reset()``), so this works for any past row in the current run,
-        not only the one just checked."""
-        info = self._node_info.get(self.tree.focus())
-        if not info or info["level"] != "image":
-            messagebox.showinfo(
-                "PromptPainter",
-                "Select one image row first — Check shows the AI"
-                " checker's report for a single saved image.",
+        SPACE & LEGIBILITY (owner 2026-08-11): the widths used to be
+        fixed guesses, so a long collection or folder path was cut while
+        the panel held empty space beside it. Measured in the tree's own
+        font over the rows that actually exist, never below the column's
+        configured minimum, and re-run as rows land."""
+        font = tk_font("root")
+        pad = DASH_COL_TEXT_PAD_PX
+        widest = {cid: 0 for cid in self._col_min}
+        stack = list(self.tree.get_children(""))
+        while stack:
+            node = stack.pop()
+            stack.extend(self.tree.get_children(node))
+            for cid in self._col_min:
+                text = self.tree.set(node, cid)
+                if text:
+                    widest[cid] = max(widest[cid], font.measure(text))
+        for cid, floor in self._col_min.items():
+            head = font.measure(self.tree.heading(cid)["text"])
+            self.tree.column(
+                cid, width=max(floor, widest[cid] + pad, head + pad)
             )
-            return
-        result = self._check_results.get(info["drop"])
-        if result is None:
-            messagebox.showinfo(
-                "PromptPainter",
-                "No AI check for this image — turn on this site's 'AI"
-                " checker' switch before Start, or it has not finished"
-                " checking this one yet.",
-            )
-            return
-        rel = result["rel"]
-        defects = result.get("defects")
-        raw = result.get("raw")
-        md = ai_check_doc_md(rel, defects, raw)
-        image = ai_check_image_file(rel, self.out_base or Path("."))
-        # the Fixer AI's manual buttons (GUI rework Phase 20) — shown
-        # only when THIS report actually carries defects; this site's
-        # own slot_key (chatgpt/gemini/api_image) is already known, so
-        # _build_fix_workers needs no ai.drop_and_site_for guesswork
-        # the way AiCheckPanel's own standalone flow does.
-        image_worker = website_worker = None
-        if defects and self._on_fix_actions is not None and self.out_base:
-            image_worker, website_worker = self._on_fix_actions(
-                rel, self.out_base, defects, raw or "", self.slot_key,
-            )
-        # deferred import (see module docstring) — reaches the class
-        # tests monkeypatch through the gui package object
-        import gui
-        gui.DocWindow(
-            self.winfo_toplevel(), rel, md,
-            copy_text=raw if raw is not None else "\n".join(defects or []),
-            hint="Exactly what the vision model reported for this image.",
-            image_path=image if image.is_file() else None,
-            on_image_fix=image_worker, on_website_fix=website_worker,
-        )
 
     def refresh_image_row(self, drop: str) -> None:
         """Re-read ONE row's resolution/size straight off disk — the
@@ -724,6 +684,9 @@ class DashPanel(JobPanel):
         self._folder_nodes: dict[str, str] = {}  # folder -> tree row id
         self._folder_stats: dict[str, dict] = {}  # folder -> agg dict
         self._child_ids: dict[str, str] = {}  # drop_path -> tree row id
+        # tree row id -> the badge keys it already renders, so a
+        # later dot (the checker's) can be ADDED to the strip
+        self._badge_keys: dict[str, tuple] = {}
 
     # --- events (main thread, via the queue pump) ----------------------
 
@@ -754,24 +717,30 @@ class DashPanel(JobPanel):
             st = self._folder_stats[folder]
             st["done"] += 1
             st["size"] += event["size"]
-            res = event["orig_res"]
-            if event["final_res"] not in ("", event["orig_res"]):
-                res = f"{event['orig_res']}→{event['final_res']}"
+            # only the DELIVERED resolution (owner 2026-08-11) — the
+            # original is not lost, it stays in the report txt where the
+            # whole processing history lives
+            res = event["final_res"] or event["orig_res"]
             # the status badges this image EARNED (post-save steps that
             # really changed it + the safer retry) as a PIL dot strip on
             # the row — badge_keys_for maps the runner's action string
-            dots = badge_dots(
-                badge_keys_for(event["actions"], event["retried"])
-            )
+            keys = badge_keys_for(event["actions"], event["retried"])
+            dots = badge_dots(keys)
             child = self.tree.insert(
                 fnode, "end", text=PurePosixPath(drop).name,
                 values=(
-                    "", f"{event['gen_s']:.0f}s", "…", res, "",
+                    # Time is partial until item_done brings our own
+                    # processing time — then it becomes the SUM
+                    "", f"{event['gen_s']:.0f}s…", res,
                     fmt_size(event["size"]), "",
                 ),
                 **({"image": dots} if dots is not None else {}),
             )
             self._child_ids[drop] = child
+            # kept so the checker can ADD its own dot later without
+            # losing the post-save ones (the strip is a rendered image,
+            # not a list — it has to be rebuilt from the keys)
+            self._badge_keys[child] = keys
             self._node_info[child] = {
                 "level": "image", "sheet": self._theme_name, "drop": drop,
                 # the ACTUAL saved rel — a ticked redo lands as a _vN
@@ -792,7 +761,8 @@ class DashPanel(JobPanel):
             drop = event["drop_path"]
             child = self._child_ids.get(drop)
             if child is not None:
-                self.tree.set(child, "our", f"{over:.0f}s")
+                # ONE time per image: the AI's generation + ours
+                self.tree.set(child, "time", f"{total:.0f}s")
             folder = folder_of(drop)
             st = self._folder_stats.get(folder)
             if st is not None:
@@ -824,7 +794,7 @@ class DashPanel(JobPanel):
             fnode = self._ensure_folder(folder_of(drop))
             rnode = self.tree.insert(
                 fnode, "end", text=PurePosixPath(drop).name or "refused",
-                values=("", "", "", "REFUSED", "", "", ""),
+                values=("", "", "REFUSED", "", ""),
             )
             if drop:
                 self._node_info[rnode] = {
@@ -868,6 +838,16 @@ class DashPanel(JobPanel):
                     text = "OK"
                 self.tree.set(child, "check", text)
                 self.tree.item(child, tags=(ai_check_tag(check_kind),))
+                # the "checked" dot asserts only that the check RAN on
+                # this image (owner 2026-08-11) — the verdict above is
+                # what the Check column says, and an errored check is
+                # still a check that ran
+                self._add_badge(child, "check")
+        elif kind == "item_checked_stopped":
+            # the checker gave up for the rest of this run (owner
+            # 2026-08-11) — generation is untouched, so this is a log
+            # line and a state note, never a panel error
+            self.state_var.set(event.get("reason", "image check stopped"))
         elif kind == "sheet_done":
             self._finalize_theme()
             self.image_var.set("—")
@@ -919,7 +899,7 @@ class DashPanel(JobPanel):
             self._folder_stats[folder] = {"done": 0, "size": 0, "time": 0.0}
             node = self.tree.insert(
                 parent, "end", text=folder, open=True,
-                values=("0", "", "", "", "", fmt_size(0), ""),
+                values=("0", "", "", fmt_size(0), ""),
             )
             self._folder_nodes[folder] = node
             self._node_info[node] = {
@@ -931,8 +911,8 @@ class DashPanel(JobPanel):
     def _parent_values(self) -> tuple:
         wall = time.monotonic() - self._t_theme
         return (
-            f"{self._theme_done}/{self._theme_pending}", "", "", "",
-            fmt_duration(wall), fmt_size(self._theme_bytes), "",
+            f"{self._theme_done}/{self._theme_pending}",
+            fmt_duration(wall), "", fmt_size(self._theme_bytes), "",
         )
 
     def _update_parent(self) -> None:
@@ -946,8 +926,8 @@ class DashPanel(JobPanel):
             self.tree.item(
                 node,
                 values=(
-                    str(st["done"]), "", "", "",
-                    fmt_duration(st["time"]), fmt_size(st["size"]), "",
+                    str(st["done"]), fmt_duration(st["time"]), "",
+                    fmt_size(st["size"]), "",
                 ),
             )
 
@@ -962,6 +942,7 @@ class DashPanel(JobPanel):
         )
 
     def _refresh(self) -> None:
+        self._autosize_columns()
         now = time.monotonic()
         # bars
         self.theme_bar.configure(

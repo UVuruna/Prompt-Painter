@@ -141,6 +141,12 @@ BADGES = {
     "aspect": ("#d946ef", "aspect forced"),  # magenta/fuchsia
     "upscale": ("#3b82f6", "upscaled"),   # blue
     "retry": ("#a855f7", "safer retry"),  # purple
+    # owner 2026-08-11: the parallel Checker AI RAN on this image —
+    # the dot asserts only that, never the verdict; WHAT the check
+    # said stays in the tree's own Check column ("OK" / "flagged N" /
+    # "error"). Teal-500, the one hue of the Tailwind-500 family the
+    # five badges above had not taken.
+    "check": ("#14b8a6", "checked"),      # teal
 }
 # how the runner's post_save action string spells each step
 # ("REMOVE BG: done, CROP: done, ASPECT: done, UPSCALE: nothing") ->

@@ -254,10 +254,13 @@ def test_badge_keys_ignore_failures_unclear_and_free_text():
 
 
 def test_badge_tables_are_consistent():
-    """Every action step maps to a real badge; 'retry' is the one badge
-    with no action step (it comes from the runner's retried flag); every
-    badge is a (#rrggbb colour, label) pair."""
-    assert set(BADGE_ACTION_STEPS.values()) == set(BADGES) - {"retry"}
+    """Every action step maps to a real badge; TWO badges have no action
+    step — 'retry' (from the runner's retried flag) and 'check' (from the
+    parallel Checker AI, owner 2026-08-11, added on item_checked rather
+    than at insert); every badge is a (#rrggbb colour, label) pair."""
+    assert set(BADGE_ACTION_STEPS.values()) == set(BADGES) - {
+        "retry", "check",
+    }
     for color, label in BADGES.values():
         assert color.startswith("#") and len(color) == 7
         assert label

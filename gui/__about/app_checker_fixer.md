@@ -125,3 +125,26 @@ FIX buttons shared by both report viewers).
   the same one-tab collision `_queue_website_fix` avoids on the
   auto-dispatch side, just surfaced as a retry-able message since a
   manual click is the owner's own choice of timing.
+
+## Giving up on checking (owner 2026-08-11)
+
+The checker never could stop a RUN — it lives on its own daemon thread
+behind a blanket except. But when the cause is STANDING rather than
+per-image (an exhausted API quota, a missing key), every later image
+still spent a call to fail identically: the 2026-08-11 live log carries
+~80 identical "free tier has zero quota" lines, one per saved image,
+none saying anything the first had not.
+
+So `_note_checker_result` counts CONSECUTIVE failures per site. Any
+non-error result resets the streak (a run that recovers keeps
+checking); crossing `config.CHECKER_ERROR_GIVE_UP` posts ONE loud line
+plus an `item_checked_stopped` event for the panel's state line, and
+`_maybe_spawn_checker` then declines to start any further check for
+that site. A fresh Start clears it (`_start_site`), so the owner gets
+another attempt once the cause is fixed. **Generation is never
+touched** — the images keep coming, only their checking stops.
+
+`_note_streak` is the guarded free function both call sites use: it
+runs inside `_run_checker_one`'s outer safety net, whose whole promise
+is that a checker thread can never die, and a minimal duck-typed
+caller carrying no methods must not be able to break that promise.

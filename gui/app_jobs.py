@@ -273,6 +273,11 @@ class SiteJobsMixin:
         """
         if key in self._running:
             return
+        # a fresh Start gets a fresh checker (owner 2026-08-11): a run
+        # that gave up checking after a standing failure must try again
+        # once the owner has had a chance to fix the cause
+        getattr(self, "_checker_stopped", set()).discard(key)
+        getattr(self, "_checker_errors", {}).pop(key, None)
         self._cancel_restart(key)  # a manual Start beats the timer
         if not self._sheets:
             messagebox.showerror("PromptPainter", "Add sheet .md files first.")
