@@ -17,7 +17,7 @@ theme's folder. This document is the design proposal.
 ## Verdict on WHERE: a NEW standalone project
 
 **Recommendation: a separate project** (e.g. `Gadgets/PromptPainter`),
-not inside DOMY Watch:
+not inside Watch Academy:
 
 - It is a GENERAL tool — it serves every project's sheets, not just
   this dial's; DOMY stays the data (the sheets), the tool is the

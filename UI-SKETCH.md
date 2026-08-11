@@ -38,7 +38,7 @@ odobriš. Odgovori: "da", "da ali izmeni X", ili nacrtaj preko.)*
 │     │ filter: aspect 0.9 – 1.1    │      │  [Remove] [Clear]               │
 │     └─────────────────────────────┘      │                                 │
 │                                          │  Output:                        │
-│  ── Run behavior ──────────────────      │  [U:/…/DOMY Watch/assets  ]     │
+│  ── Run behavior ──────────────────      │  [U:/…/Watch Academy/assets  ]     │
 │  [ON] Report txt                         │  [Browse…]                      │
 │  [ON] Safer retry                        │                                 │
 │  [ON] Continue nudge                     │  [Select images…]               │

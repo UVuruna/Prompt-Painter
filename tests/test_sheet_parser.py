@@ -1,11 +1,11 @@
 """Golden tests for the sheet parser.
 
 The goldens run against the REAL archetype sheets in
-DOMY Watch research/prompts/archetype/ — the tool's first consumer.
+Watch Academy research/prompts/archetype/ — the tool's first consumer.
 Expected values were read from the sheets by hand, never from the
 parser's own output.
 
-Expected paths follow the DOMY ONE-HIERARCHY structure (DOMY Watch
+Expected paths follow the DOMY ONE-HIERARCHY structure (Watch Academy
 RESTRUCTURE.md, owner-sealed 2026-07-22; goldens re-read from the
 rewritten sheets 2026-07-27): `assets/<category>/<family>/<register
 subfolders>/<Figure>.png` — e.g. `archetypes/trinity/primary/colored/`
@@ -23,7 +23,7 @@ from painter.sheet_parser import SheetError, parse_sheet
 
 ARCHETYPE_DIR = (
     Path(__file__).resolve().parents[2]
-    / "DOMY Watch"
+    / "Watch Academy"
     / "research"
     / "prompts"
     / "archetype"

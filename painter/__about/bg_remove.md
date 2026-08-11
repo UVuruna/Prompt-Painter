@@ -6,7 +6,7 @@
 ## Purpose
 
 Makes a generated image's background transparent. Originally built
-inside DOMY Watch (`tools/bg_remove.py`); moved here 2026-07-17 on
+inside Watch Academy (`tools/bg_remove.py`); moved here 2026-07-17 on
 the owner's rule that no part of this program lives in another
 project. Also runnable standalone
 (`python painter/bg_remove.py <file-or-folder> --in-place --crop`).

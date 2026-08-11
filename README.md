@@ -19,7 +19,7 @@ decisions, workflow, DOM states, build order) **+
 2026-07-29 — wins over older CLAUDE.md sections until folded in) **+
 [UI-SKETCH.md](UI-SKETCH.md)** (the setup-screen layout reference,
 implemented and verified 2026-07-30).
-First consumer: DOMY Watch prompt sheets.
+First consumer: Watch Academy prompt sheets.
 
 ## Structure
 
@@ -124,5 +124,5 @@ CLI alternative (one site per run):
 
 ```bash
 python main.py sheet1.md sheet2.md --site gemini
-python main.py "..\DOMY Watch\research\prompts\archetype\trinity_prompts.md" --dry-run
+python main.py "..\Watch Academy\research\prompts\archetype\trinity_prompts.md" --dry-run
 ```

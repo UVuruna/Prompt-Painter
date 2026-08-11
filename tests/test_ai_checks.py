@@ -203,7 +203,7 @@ def test_check_pairing_maps_each_response_to_the_right_image(tmp_path):
     """FIX 5: over a batch, each image's flag / raw / viewer-file maps to
     THAT exact image — no off-by-one — including an image OUTSIDE the out
     base (an absolute key that ``flag_file`` still round-trips, the run
-    that checked DOMY Watch while the out base was Downloads)."""
+    that checked Watch Academy while the out base was Downloads)."""
     out = tmp_path / "out"
     serpent = _make_image(out, "emblem/gemini/mood/Serpent.png")
     glory = _make_image(out, "emblem/gemini/mood/Glory.png")
