@@ -80,3 +80,11 @@ a rate problem.
   dates noted per selector)
 - `NEW_CHAT_CHOICES` — `("off", "collection", "folder")`, when to open
   a fresh chat during a run
+
+## 2026-08-11 — Serbian refusal markers for ChatGPT
+
+ChatGPT also answers in the account's language (live capture, the Han
+reference run): the same Serbian refusal stems Gemini already carried
+("ne mogu da generi…", "ne mogu da kreiram", plus "ne mogu da
+napravim") joined ChatGPT's `REFUSAL_SAFETY` group, so a Serbian
+refusal gets the safer retry + the diagnostic question again.

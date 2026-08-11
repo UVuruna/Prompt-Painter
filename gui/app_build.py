@@ -942,10 +942,15 @@ class BuildMixin:
         self._dashgrid = DashGrid(dash_tab)
         self.panels: dict[str, JobPanel] = {}
         for key in ("chatgpt", "gemini", "api_image"):
+            # Stop + Pause in the dashboard header too (owner
+            # 2026-08-11) — the same _stop_site/_toggle_pause_job the
+            # AgentPanel/ApiPanel buttons call, so either surface works
             self.panels[key] = DashPanel(
                 self._dashgrid, key,
                 on_show=partial(self._show_node, key),
                 on_close=self._close_panel,
+                on_pause=self._toggle_pause_job,
+                on_stop=self._stop_site,
                 on_fix_actions=self._build_fix_workers,
             )
         for kind in JOB_TOOL_KINDS:

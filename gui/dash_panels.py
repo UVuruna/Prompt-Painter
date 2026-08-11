@@ -81,12 +81,14 @@ class JobPanel(ttk.Frame):
 
     def __init__(
         self, master, kind: str, on_show=None, on_close=None, on_pause=None,
+        on_stop=None,
     ):
         super().__init__(master, padding=6)
         self.slot_key = kind
         self._on_show = on_show   # called with a node-info dict on 'Show'
         self._on_close = on_close  # called with the slot key on CLOSE
         self._on_pause = on_pause  # called with the slot key on Pause/Resume
+        self._on_stop = on_stop    # called with the slot key on Stop
         self._finished = False
         self._node_info: dict[str, dict] = {}  # tree item id -> info
         # every job kind CAN carry a per-step backup store (the four
@@ -119,10 +121,24 @@ class JobPanel(ttk.Frame):
             header, "✕ Close", icon_name="close", command=self._do_close,
             kind="danger-outline", width=76,
         )
-        # a folder-based job (ToolPanel / AiCheckPanel) owns its OWN
-        # pause toggle here, beside Close (owner 2026-07-21) — the two
-        # gen sites' button lives on AgentPanel instead, so on_pause
-        # stays None for DashPanel and this button is never built there.
+        # STOP lives in the header too (owner 2026-08-11): the run must
+        # be stoppable FROM THE DASHBOARD, in the same spot the CLOSE
+        # button appears once the job ends — no trip back to the setup
+        # view. Built only where a stop callback is wired (the three
+        # DashPanel gen/API slots); finish() swaps Stop/Pause for
+        # Close, reset_finished() swaps them back.
+        self.btn_stop: ctk.CTkButton | None = None
+        if self._on_stop is not None:
+            self.btn_stop = rounded_button(
+                header, "Stop", icon_name="stop",
+                command=partial(self._on_stop, kind),
+                kind="danger-outline", width=70,
+            )
+            self.btn_stop.pack(side="right")
+        # the pause toggle beside it (owner 2026-07-21; extended to the
+        # DashPanel gen/API slots 2026-08-11 — before that the two gen
+        # sites' ONLY button lived on AgentPanel; both stay in sync via
+        # _toggle_pause_job -> set_paused).
         self.btn_pause: ctk.CTkButton | None = None
         if self._on_pause is not None:
             self.btn_pause = rounded_button(
@@ -170,16 +186,27 @@ class JobPanel(ttk.Frame):
         self._cap_banner_var.set("")
 
     def finish(self) -> None:
-        """The job ended — reveal the CLOSE button."""
+        """The job ended — swap the run controls (Stop/Pause) for the
+        CLOSE button (owner 2026-08-11: one spot, the right control
+        for the job's state)."""
         if self._finished:
             return
         self._finished = True
+        if self.btn_stop is not None:
+            self.btn_stop.pack_forget()
+        if self.btn_pause is not None:
+            self.btn_pause.pack_forget()
         self._close_btn.pack(side="right")
 
     def reset_finished(self) -> None:
-        """Hide the CLOSE button again (a slot reused for a new run)."""
+        """Hide the CLOSE button again and restore the run controls (a
+        slot reused for a new run)."""
         self._finished = False
         self._close_btn.pack_forget()
+        if self.btn_stop is not None:
+            self.btn_stop.pack(side="right")
+        if self.btn_pause is not None:
+            self.btn_pause.pack(side="right", padx=(0, 6))
 
     def set_paused(self, is_paused: bool) -> None:
         """Reflect a pause toggle (owner 2026-07-21): the muted state
@@ -236,9 +263,12 @@ class DashPanel(JobPanel):
 
     def __init__(
         self, master, kind: str, on_show=None, on_close=None,
-        on_fix_actions=None,
+        on_fix_actions=None, on_pause=None, on_stop=None,
     ):
-        super().__init__(master, kind, on_show=on_show, on_close=on_close)
+        super().__init__(
+            master, kind, on_show=on_show, on_close=on_close,
+            on_pause=on_pause, on_stop=on_stop,
+        )
         self._name = JOB_LABEL[kind]
         # the Fixer AI's manual-button builder (GUI rework Phase 20) —
         # PainterGui._build_fix_workers, called with THIS site's own

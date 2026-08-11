@@ -123,3 +123,12 @@ stored even on the duplicate-refusal early-out so a rerun's fresher
 reason replaces the stale one. Consumed by `app_settings.py`'s
 `_image_viewer_entries` (the double-click viewer shows it where the
 image would be).
+
+## 2026-08-11b — Stop + Pause in the dashboard header
+
+`JobPanel` accepts `on_stop` (and DashPanel forwards `on_pause`/
+`on_stop`): the three gen/API DashPanel slots now carry Stop
+(danger-outline) + Pause buttons in the header — the SAME
+`_stop_site`/`_toggle_pause_job` the AgentPanel/ApiPanel buttons call,
+so either surface works and labels stay in sync via `set_paused`.
+`finish()` swaps Stop/Pause for Close; `reset_finished()` swaps back.

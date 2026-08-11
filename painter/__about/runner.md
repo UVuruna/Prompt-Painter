@@ -277,3 +277,10 @@ event) so the dashboard never stalls; the `item_done` event with
   drivers without `ask_text` (the API job, tests) simply skip it.
 - **`item_refused` now carries `reason` (+ `diagnosis`)** — the GUI
   stores them per drop path (`DashPanel._refused_info`).
+
+## 2026-08-11b — condensed NOT ELIGIBLE log
+
+Prompt+Image mode's exclusions log ONE summary line per reason
+("N item(s) — first four names … +M more") instead of a line per item
+(the 69-collection run drowned the log); the FULL per-item list still
+lands in the report txt via `report_skips` — nothing silently dropped.

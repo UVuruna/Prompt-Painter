@@ -336,6 +336,17 @@ SITES = {
                 "retry or edit your prompt",
                 "unable to create",
                 "not able to create",
+                # ChatGPT ALSO answers in the account's language — live
+                # capture 2026-08-11 12:58 (the Han reference run):
+                # lang-ok: quotation of the site's own Serbian refusal
+                # "Ne mogu da generišem ovu verziju jer tražiš …"
+                # matched NO marker, so the item skipped with no safer
+                # retry and no diagnosis. Same Serbian stems Gemini
+                # already carries (markers must match the site's words).
+                # lang-ok: Serbian refusal markers — must match the site's own answer text
+                "ne mogu da generi",
+                "ne mogu da kreiram",
+                "ne mogu da napravim",
             ),
         },
         quota_text_markers=(

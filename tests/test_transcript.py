@@ -255,3 +255,14 @@ def test_ask_text_falls_back_to_the_last_turn(monkeypatch):
     answer = driver.ask_text("why?", log=lambda _l: None)
     assert answer == "The likeness is blocked."
     assert driver.ask_used_fallback is True
+
+
+def test_serbian_refusal_matches_chatgpt_markers():
+    """Live capture 2026-08-11 12:58: ChatGPT refused IN SERBIAN and no
+    marker matched — the item skipped with no safer retry and no
+    diagnosis. Pin that the Serbian stems now match (both sites)."""
+    # lang-ok: quotation of the site's own Serbian refusal answer
+    live = "Ne mogu da generišem ovu verziju jer tražiš ...".lower()
+    for site_key in ("chatgpt", "gemini"):
+        markers = SITES[site_key].refusal_markers["safety"]
+        assert any(m in live for m in markers), site_key

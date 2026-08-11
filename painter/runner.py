@@ -318,9 +318,16 @@ def run_sheet(
         # every declared "←" reference are both present run — the
         # owner's rule, checked against the CURRENT disk state
         eligible = []
+        # CONDENSED log (owner 2026-08-11, the 69-collection run: a
+        # per-item NOT ELIGIBLE line per excluded entry drowned the
+        # whole log) — ONE summary line per reason; the FULL per-item
+        # list still lands in the report txt via report_skips, so
+        # nothing is silently dropped (Loud Incompleteness holds).
+        no_ref: list[str] = []
+        ref_missing: list[str] = []
         for it in queue:
             if not it.input_images:
-                log(f"  NOT ELIGIBLE (no ← reference): {it.title}")
+                no_ref.append(it.title)
                 report_skips.append(SkippedItem(
                     it.title, "Prompt+Image mode: no ← reference", it.line
                 ))
@@ -329,10 +336,7 @@ def run_sheet(
                 it.input_images, sheet.source.parent, reference_dir
             )
             if missing:
-                log(
-                    f"  NOT ELIGIBLE (reference missing): {it.title} —"
-                    f" {', '.join(missing)}"
-                )
+                ref_missing.append(f"{it.title} ({', '.join(missing)})")
                 report_skips.append(SkippedItem(
                     it.title,
                     "Prompt+Image mode: reference missing:"
@@ -341,6 +345,25 @@ def run_sheet(
                 ))
                 continue
             eligible.append(it)
+        _PREVIEW = 4  # first few names inline; the rest by count
+        if no_ref:
+            head = ", ".join(no_ref[:_PREVIEW])
+            more = len(no_ref) - _PREVIEW
+            log(
+                f"  NOT ELIGIBLE (no ← reference): {len(no_ref)}"
+                f" item(s) — {head}"
+                + (f" … +{more} more (full list in the report)"
+                   if more > 0 else "")
+            )
+        if ref_missing:
+            head = ", ".join(ref_missing[:_PREVIEW])
+            more = len(ref_missing) - _PREVIEW
+            log(
+                f"  NOT ELIGIBLE (reference missing): {len(ref_missing)}"
+                f" item(s) — {head}"
+                + (f" … +{more} more (full list in the report)"
+                   if more > 0 else "")
+            )
         if len(eligible) != len(queue):
             log(
                 f"  PROMPT+IMAGE: {len(eligible)}/{len(queue)} item(s)"
