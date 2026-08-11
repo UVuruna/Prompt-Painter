@@ -136,6 +136,18 @@ class SendVanished(DriverError):
     nudge."""
 
 
+class SendNotConfirmed(DriverError):
+    """The prompt never became a user turn — the composer still holds
+    the text and nothing was submitted (owner 2026-08-11, the 17:10:16
+    Gemini stop, which ended a run at 39/69 collections).
+
+    A PER-ITEM verdict, not a site verdict: the send provably did NOT
+    take, so nothing is half-generated and re-sending the item's own
+    prompt is safe — the same recovery as ``SendVanished``, whose
+    handler this rides. It stayed a plain ``DriverError`` (= stop the
+    site) only because it was never given a class of its own."""
+
+
 class AttachNotConfigured(DriverError):
     """Image attach (``submit_with_image``) is disabled for this site —
     its ``attach_menu_path`` is empty in ``SITES``. Used by BOTH the
@@ -211,11 +223,20 @@ class Baseline:
     ``user_turn_count`` (F1b, owner 2026-08-04) is the number of USER
     turns before the submit — our sent prompt must ADD one; when the
     count falls back to (or below) this value the site DROPPED our
-    message (``SendVanished``)."""
+    message (``SendVanished``).
+
+    ``error_turn_count`` (owner 2026-08-11) is the number of the
+    site's native thread-error turns before the submit — ChatGPT's
+    "Something went wrong. Please try again." + Retry face renders
+    INSIDE the user turn and creates NO assistant turn at all, so it
+    is invisible to every other signal here; only a RISE above this
+    count proves the error belongs to OUR send rather than to an
+    earlier item still sitting in the chat."""
 
     turn_count: int
     last_img_src: str | None
     user_turn_count: int = 0
+    error_turn_count: int = 0
 
 
 def sniff_format(data: bytes) -> str | None:
@@ -420,6 +441,18 @@ class SiteDriver:
                 return loc.nth(n - 1).get_attribute("src")
         return None
 
+    def _error_turns_count(self) -> int:
+        """How many of the site's native thread-error turns the chat
+        currently holds — counted by their Retry button, the one
+        element the error face always carries (owner 2026-08-11). Zero
+        wherever the site names no such button (Gemini today)."""
+        if not self.site.image_error_retry_button:
+            return 0
+        total = 0
+        for sel in self.site.image_error_retry_button:
+            total += self.page.locator(sel).count()
+        return total
+
     def capture_baseline(self) -> Baseline:
         """Snapshot the page BEFORE a submit (F1 protocol)."""
         # a fresh submit starts a fresh answer — never let the PREVIOUS
@@ -429,6 +462,7 @@ class SiteDriver:
             turn_count=self._turns_count(),
             last_img_src=self._last_image_src(),
             user_turn_count=self._user_turns_count(),
+            error_turn_count=self._error_turns_count(),
         )
         return self._baseline
 
@@ -657,7 +691,7 @@ class SiteDriver:
                 self._retry_send()
                 retried = True
             time.sleep(t.poll_interval_s)
-        raise DriverError(
+        raise SendNotConfirmed(
             f"{self.site.name}: send NOT confirmed within"
             f" {t.send_confirm_timeout_s:.0f}s — composer:"
             f" {str(self._composer_text())[:80]!r}, newest user turn"
@@ -854,6 +888,7 @@ class SiteDriver:
                     f"{self.site.name}: no result for OUR turn after"
                     f" {t.generation_timeout_s:.0f}s (hard timeout)"
                 )
+            self._check_thread_error()
             turn = self._new_turn()
             busy = self._busy()
             vanished = self._anchor_state() == "vanished"
@@ -946,8 +981,60 @@ class SiteDriver:
                     had_text=bool(text),
                 )
             time.sleep(t.poll_interval_s)
-        b64 = img.evaluate(_FETCH_IMAGE_JS)
+        try:
+            b64 = img.evaluate(_FETCH_IMAGE_JS)
+        except Exception as exc:
+            return self._fetch_via_context(img, exc)
         return base64.b64decode(b64)
+
+    def _fetch_via_context(self, img: Locator, exc: Exception) -> bytes:
+        """Third extraction path: pull the image over the BROWSER
+        CONTEXT's own request API (owner 2026-08-11, the 16:32:13
+        Gemini crash).
+
+        Both in-page paths are same-origin bound: Gemini began serving
+        results from ``lh3.googleusercontent.com`` instead of a
+        ``blob:`` src, which TAINTS the canvas (``toDataURL`` throws
+        SecurityError) while the ``fetch()`` fallback dies on CORS —
+        and the resulting raw Playwright error escaped every handler
+        and killed the whole site mid-collection. ``context.request``
+        issues the GET OUTSIDE the page, so no CORS policy applies to
+        it, and it carries the context's cookies, so a signed/auth'd
+        CDN URL still resolves.
+
+        Loud on failure, exactly like before — this widens what can be
+        read, it never invents bytes — but the failure now arrives as a
+        classified ``NoImage`` the runner skips the item on, instead of
+        an unhandled crash that ends the run."""
+        src = img.get_attribute("src") or ""
+        if not src.startswith(("http://", "https://")):
+            # blob:/data: srcs are page-local — the context request
+            # cannot resolve them, so there is nothing further to try
+            raise NoImage(
+                f"{self.site.name}: could not read the image bytes"
+                f" from the DOM ({exc})",
+                had_text=False,
+            )
+        try:
+            resp = self.page.context.request.get(src)
+            if not resp.ok:
+                raise DriverError(f"HTTP {resp.status}")
+            data = resp.body()
+        except Exception as exc2:
+            raise NoImage(
+                f"{self.site.name}: could not read the image bytes —"
+                f" in-page ({exc}); browser-context GET of {src[:120]}"
+                f" ({exc2})",
+                had_text=False,
+            ) from exc2
+        if sniff_format(data) is None:
+            raise NoImage(
+                f"{self.site.name}: the browser-context GET of"
+                f" {src[:120]} returned {len(data)} bytes that are not"
+                " an image (an error page, most likely)",
+                had_text=False,
+            )
+        return data
 
     def ask_text(self, question: str, log: Log = print) -> str:
         """Send a TEXT-ONLY question and return the answer's full text
@@ -1202,6 +1289,11 @@ class SiteDriver:
                 prev.user_turn_count if prev is not None
                 else max(0, self._user_turns_count() - 1)
             ),
+            # the clicked error turn is being replaced by the
+            # regeneration; re-read the count NOW so the thread-error
+            # check judges the regeneration on its own merits and
+            # never re-fires on the error we just handled
+            error_turn_count=self._error_turns_count(),
         )
         log("    clicked the site's Retry button")
         return True
@@ -1213,9 +1305,28 @@ class SiteDriver:
         2026-07-23): the session cookies live in the profile on disk,
         so the reload keeps the login; only the (possibly wedged) page
         state is thrown away. The fresh composer must be present before
-        the caller pastes the next prompt — loud if it never returns."""
+        the caller pastes the next prompt — loud if it never returns.
+
+        SECOND CHANCE (owner 2026-08-11, the 14:52:32 stop): a single
+        slow reload — the composer simply not painted within
+        ``selector_timeout_s`` — ended a ChatGPT run at 38/69
+        collections. A reload that lands slowly is ordinary web
+        behaviour, not selector rot, so it earns ONE more reload with a
+        doubled budget before the loud raise. If the composer is gone
+        after that, it is gone for real and the raise stands."""
         self.page.reload()
-        self._require(self.site.prompt_box, "the prompt box (after refresh)")
+        try:
+            self._require(
+                self.site.prompt_box, "the prompt box (after refresh)"
+            )
+        except DriverError:
+            log("    composer did not come back — one more reload ...")
+            self.page.reload()
+            self._require(
+                self.site.prompt_box,
+                "the prompt box (after refresh)",
+                timeout_s=self._timing.selector_timeout_s * 2,
+            )
         log("    page refreshed")
 
     def _retry_send(self) -> None:
@@ -1361,6 +1472,39 @@ class SiteDriver:
                         f" (matched '{marker}'): {text[:200]}",
                         category=category,
                     )
+
+    def _check_thread_error(self) -> None:
+        """Raise ``ImageGenFailed`` when the site put a NATIVE thread
+        error on OUR send (owner 2026-08-11, the 420s dead waits).
+
+        ChatGPT's second error face — orange "Something went wrong.
+        Please try again." beside a Retry button — is rendered INSIDE
+        the ``[data-message-author-role="user"]`` block and creates NO
+        assistant turn, so ``_new_turn`` never sees it and
+        ``_check_image_failed`` (which reads assistant text only) never
+        gets the string to match. Meanwhile the busy signal stays set,
+        so the item burned the FULL ``generation_timeout_s`` — 420s per
+        occurrence, live run 2026-08-11 18:47:21-18:52:06 — before
+        dying as an unattributed timeout.
+
+        The verdict is a COUNT RISE, never mere presence: an error turn
+        from an earlier item stays in the chat, and treating that as
+        ours would fail every later item in the conversation. The raise
+        feeds the ordinary image-failure ladder, whose FIRST rung is a
+        click on exactly this button.
+
+        Silent no-op wherever the site names no such button (Gemini)."""
+        if not self.site.image_error_retry_button:
+            return
+        base = self._baseline
+        if base is None:
+            return
+        if self._error_turns_count() > base.error_turn_count:
+            raise ImageGenFailed(
+                f"{self.site.name}: the site put a native thread error"
+                " on our send (its Retry button appeared) — no"
+                " assistant turn was ever created"
+            )
 
     def _check_image_failed(self, text: str) -> None:
         """Raise ``ImageGenFailed`` when ``text`` names a known

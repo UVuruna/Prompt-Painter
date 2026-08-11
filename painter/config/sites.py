@@ -402,6 +402,18 @@ SITES = {
             # false REFUSED while the plan limit was approaching.
             "unable to invoke the image-generation tool",
             "unable to invoke the image generation tool",
+            # live capture 2026-08-11 (owner's DevTools screenshot):
+            # the THIRD wording of the same error face — orange
+            # "Something went wrong. Please try again." beside the
+            # Retry button. It is NOT the 2026-07-23 "Hmm...something
+            # SEEMS TO HAVE gone wrong" string above, so nothing here
+            # matched it. Its real detection is structural (the Retry
+            # button count, SiteDriver._check_thread_error) because
+            # this face renders inside the USER turn where no text
+            # scan of assistant turns can reach it; the marker stays
+            # as the belt-and-braces path for a render variant that
+            # does land in an assistant turn.
+            "something went wrong. please try again",
         ),
         # the Retry button of the "something went wrong" turn (verified
         # against the live DOM by the owner 2026-07-23, UV/RETRY

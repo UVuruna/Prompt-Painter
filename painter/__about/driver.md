@@ -132,7 +132,11 @@ confirmed) → the old count comparison stays as the fallback.
    (`image_error_retry_button`) if present; True when clicked. Never
    loud — a missing button is a normal branch.
 4. `refresh(log)` — reload the page and wait for the composer back (a
-   last-resort ladder rung); the login lives in the profile on disk.
+   last-resort ladder rung); the login lives in the profile on disk. A
+   composer that does not come back in time earns ONE more reload with
+   a doubled budget (owner 2026-08-11, the 14:52:32 stop: a single slow
+   reload ended a ChatGPT run at 38/69 collections) — a composer that
+   is gone after that is still loud.
 2b. `new_chat(log)` — clicks the sidebar's New-chat control and waits
    for the fresh composer; re-anchors the baseline to nothing (a fresh
    conversation restarts turn numbering).
@@ -140,7 +144,15 @@ confirmed) → the old count comparison stays as the fallback.
    OUR new turn ONLY (src must differ from the baseline's last image),
    read in-page CANVAS-FIRST (`drawImage` + `toDataURL`: site CSP
    blocks `fetch()` of `blob:` srcs on Gemini, while a canvas needs no
-   request); `fetch()` stays as the fallback.
+   request); `fetch()` stays as the fallback. When BOTH in-page paths
+   fail, `_fetch_via_context` pulls the bytes over the browser
+   CONTEXT's request API — outside the page, so no CORS applies, and
+   carrying the context's cookies (owner 2026-08-11, the 16:32:13 stop:
+   Gemini began serving results from `lh3.googleusercontent.com`
+   instead of a `blob:` src, which taints the canvas AND fails the
+   fetch; the raw error killed the whole site). Its own failure is a
+   classified `NoImage` — a per-item skip, never an unhandled crash —
+   and bytes that are not an image are refused, never saved.
 
 All required-element lookups poll up to the selector timeout before
 failing loudly — SPAs morph elements a beat after input events.
@@ -181,13 +193,30 @@ failing loudly — SPAs morph elements a beat after input events.
   busy/stop signal never clears, in one of two forms — its own
   "reply with 'retry'" text, or the generic "Hmm...something seems to
   have gone wrong." error turn (which renders a native Retry button).
-  Both match `image_failed_text_markers`. Raised by
-  `_check_image_failed()`, called from `await_done`'s polling loop on
-  every poll — a silent no-op wherever the site's
-  `image_failed_text_markers` is empty (Gemini today). The runner
+  Both match `image_failed_text_markers`. A THIRD face (owner
+  2026-08-11) carries the wording "Something went wrong. Please try
+  again." and renders INSIDE the user turn, creating no assistant turn
+  at all — no text scan can reach it, so the item burned the full
+  `generation_timeout_s` (420s per occurrence in the live run). It is
+  detected STRUCTURALLY by `_check_thread_error()`: the count of the
+  site's Retry buttons RISING above `Baseline.error_turn_count`. The
+  verdict is a count rise and never mere presence — an error turn from
+  an earlier item stays in the chat, and treating that as ours would
+  fail every later item. Raised by `_check_image_failed()` /
+  `_check_thread_error()`, both called from `await_done`'s polling loop
+  on every poll — silent no-ops wherever the site's
+  `image_failed_text_markers` / `image_error_retry_button` is empty
+  (Gemini today). The runner
   catches it and walks a recovery LADDER (Retry button → paced "retry"
   text → escalation rounds of refresh + new session); the ladder
   re-raises only when every rung is spent, which stops the site.
+- `SendNotConfirmed` (owner 2026-08-11, the 17:10:16 stop) — the
+  prompt never became a user turn: the composer still holds the text
+  and nothing was submitted. A PER-ITEM verdict — the send provably
+  did NOT take, so nothing is half-generated and re-sending our own
+  prompt is safe (it rides `SendVanished`'s handler). It was a bare
+  `DriverError` until now, so one unaccepted send ended a Gemini run
+  at 39/69 collections.
 - `ModelDegraded` — the site's degradation banner is up (Gemini's
   "Limit reached. Continuing with Flash-Lite.", `SiteConfig.
   degrade_banner`) and OUR turn produced no image. Checked BEFORE the
