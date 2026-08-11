@@ -26,9 +26,11 @@ from painter.config import (
     TIMING,
 )
 from painter.driver import (
+    GenerationTimeout,
     ImageGenFailed,
     ItemRefused,
     NoImage,
+    SendNotConfirmed,
     SendVanished,
 )
 from painter.runner import run_sheet
@@ -454,3 +456,93 @@ def test_send_vanished_twice_skips_the_item_not_the_site(tmp_path):
     assert sum(
         1 for line in logs if "REFUSED/SKIPPED" in line
     ) == 2
+
+
+# ---------------------------------------------------------------
+# owner 2026-08-11 — the four site-stops of the 2026-08-11 live run
+# (UV/prompt.txt): every one of them was a PER-ITEM failure that
+# escaped its handler and ended the whole run. These fix that.
+# ---------------------------------------------------------------
+
+
+def test_image_gen_failed_inside_vanished_resend_skips_the_item(tmp_path):
+    """The 18:55:54 ChatGPT stop (UV/prompt.txt:5241): the vanished-
+    prompt re-send's own answer was the site's "Image generation
+    failed" turn. ``ImageGenFailed`` was missing from that handler's
+    except tuple — Python never routes an exception from one ``except``
+    block to its siblings — so it flew past every per-item catch and
+    ended the run at 38/69 collections. It must skip THIS item and let
+    the next one run."""
+    class VanishesThenImageFails(FakeDriver):
+        def extract_image(self):
+            # only item 0 misbehaves: first its send vanishes, then the
+            # re-send's own answer is the image-failure turn
+            if self.submitted[-1] != "prompt 0":
+                return super().extract_image()
+            if self.submitted.count("prompt 0") == 1:
+                raise SendVanished("ChatGPT: our sent prompt is NO LONGER")
+            raise ImageGenFailed("ChatGPT: image generation failed")
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = VanishesThenImageFails(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, log=logs.append,
+    )
+
+    # item 0 skipped, item 1 still generated — the site did NOT stop
+    assert generated == 1
+    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert any("REFUSED/SKIPPED" in line for line in logs)
+
+
+def test_generation_timeout_on_the_first_attempt_skips_the_item(tmp_path):
+    """The hard timeout was catchable in every NESTED handler but not
+    on the first attempt (owner 2026-08-11) — one item whose result
+    never arrives must be a per-item skip, never the end of the site."""
+    class TimesOutOnce(FakeDriver):
+        def await_done(self, log=print):
+            if self.submitted == ["prompt 0"]:
+                raise GenerationTimeout(
+                    "ChatGPT: no result for OUR turn after 420s"
+                )
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = TimesOutOnce(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, log=logs.append,
+    )
+
+    assert generated == 1
+    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert any("timed out" in line for line in logs)
+
+
+def test_send_not_confirmed_resends_then_continues(tmp_path):
+    """The 17:10:16 Gemini stop (UV/prompt.txt:4590): "send NOT
+    confirmed within 20s" was a bare ``DriverError``, so one unaccepted
+    send ended the run at 39/69 collections. The send provably did NOT
+    take, so it rides the SendVanished recovery — re-send our own
+    prompt once — and the run goes on either way."""
+    class SendDoesNotTakeOnce(FakeDriver):
+        def await_done(self, log=print):
+            if self.submitted == ["prompt 0"]:
+                raise SendNotConfirmed("Gemini: send NOT confirmed within 20s")
+
+    sheet = make_sheet(tmp_path, n=2)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = SendDoesNotTakeOnce(SITES["gemini"])
+    generated = run_sheet(
+        sheet, driver, out, "gemini", FAST, log=logs.append,
+    )
+
+    # the re-send recovered item 0, and item 1 ran normally
+    assert generated == 2
+    assert driver.submitted == ["prompt 0", "prompt 0", "prompt 1"]
+    assert any("SEND NOT CONFIRMED" in line for line in logs)

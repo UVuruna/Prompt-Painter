@@ -1516,3 +1516,183 @@ def test_await_done_never_accepts_a_turn_before_our_user_turn():
     with pytest.raises(NoImage) as exc:
         driver.await_done(log=lambda s: None)
     assert exc.value.had_text is False  # honest "nothing arrived"
+
+
+# --- (j) the 2026-08-11 live-run stops (owner) -------------------------
+# Two of that day's four site-stops were driver-side: a thread error the
+# driver could not see at all, and an image src it could not read.
+
+
+class CountLocator:
+    """Duck-typed Locator standing for N matches of one selector — the
+    thread-error check counts Retry buttons, it never touches them."""
+
+    def __init__(self, n: int):
+        self._n = n
+
+    def count(self):
+        return self._n
+
+
+def test_thread_error_on_our_send_raises_image_gen_failed():
+    """ChatGPT's "Something went wrong. Please try again." + Retry face
+    (owner's DevTools capture 2026-08-11) renders INSIDE the user turn
+    and creates NO assistant turn, so no text scan can reach it while
+    the busy signal stays set — the item burned the full 420s hard
+    timeout (live run 18:47:21-18:52:06). Detected structurally, by the
+    Retry button count RISING above the pre-submit baseline, and raised
+    as ImageGenFailed so the ordinary ladder (whose first rung clicks
+    exactly that button) takes over."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.image_error_retry_button[0]] = CountLocator(1)
+    driver = SiteDriver(site, FAST, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0, last_img_src=None, error_turn_count=0
+    )
+
+    with pytest.raises(ImageGenFailed):
+        driver.await_done(log=lambda s: None)
+
+
+def test_an_older_thread_error_is_not_attributed_to_our_send():
+    """The other half, and the reason the verdict is a COUNT RISE and
+    never mere presence: an error turn from an EARLIER item stays in
+    the chat. Treating it as ours would fail every later item in the
+    conversation — so with the count unchanged the wait proceeds
+    normally (here: to its ordinary no-image verdict)."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    page.locators[site.image_error_retry_button[0]] = CountLocator(1)
+    driver = SiteDriver(site, FAST, "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0, last_img_src=None, error_turn_count=1
+    )
+
+    with pytest.raises(NoImage):
+        driver.await_done(log=lambda s: None)
+
+
+class _RaisingImageLocator(ImageLocator):
+    """An <img> whose IN-PAGE byte read fails the way Gemini's
+    googleusercontent results do: tainted canvas + CORS-blocked fetch."""
+
+    def evaluate(self, js, *args):
+        if args:  # the loaded-check still answers normally
+            return self._loaded
+        raise RuntimeError(
+            "canvas: SecurityError: Tainted canvases may not be exported"
+            " | fetch https://lh3.googleusercontent.com/gg-dl/x:"
+            " TypeError: Failed to fetch"
+        )
+
+
+class _FakeRequest:
+    def __init__(self, body: bytes, ok: bool = True, status: int = 200):
+        self._body, self.ok, self.status = body, ok, status
+        self.urls: list[str] = []
+
+    def get(self, url):
+        self.urls.append(url)
+        return self
+
+    def body(self):
+        return self._body
+
+
+class _FakeContext:
+    def __init__(self, request):
+        self.request = request
+
+
+def _page_with_image(site, src, request, img_cls=_RaisingImageLocator):
+    page = FakePage()
+    img = img_cls(src)
+    page.locators[site.response_container[0]] = ContainerLocator(
+        [TurnLocator(images={site.result_image[0]: img})]
+    )
+    page.context = _FakeContext(request)
+    return page
+
+
+def test_extract_image_falls_back_to_the_browser_context_request():
+    """The 16:32:13 Gemini stop (UV/prompt.txt:3339): Gemini began
+    serving results from lh3.googleusercontent.com instead of a blob:
+    src, which taints the canvas AND fails the CORS fetch — the raw
+    Playwright error escaped every handler and killed the site
+    mid-collection. The context request runs OUTSIDE the page, so no
+    CORS applies and the context's cookies still authorize it."""
+    site = SITES["gemini"]
+    png = bytes.fromhex("89504e470d0a1a0a") + b"rest-of-the-file"
+    request = _FakeRequest(png)
+    src = "https://lh3.googleusercontent.com/gg-dl/AAQ_wb=s1024-rj"
+    page = _page_with_image(site, src, request)
+    driver = SiteDriver(site, replace(FAST, image_ready_timeout_s=0.5),
+                        "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src="blob:old")
+
+    assert driver.extract_image() == png
+    assert request.urls == [src]
+
+
+def test_context_fallback_failure_is_a_classified_skip_not_a_crash():
+    """When the third path fails too the item is still LOST — but as a
+    classified NoImage the runner skips, never the unhandled exception
+    that ended the run. Here the GET returns an error page: bytes that
+    are not an image are refused rather than saved."""
+    site = SITES["gemini"]
+    request = _FakeRequest(b"<html>403 Forbidden</html>")
+    page = _page_with_image(
+        site, "https://lh3.googleusercontent.com/gg-dl/x", request
+    )
+    driver = SiteDriver(site, replace(FAST, image_ready_timeout_s=0.5),
+                        "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(turn_count=0, last_img_src="blob:old")
+
+    with pytest.raises(NoImage):
+        driver.extract_image()
+
+
+def test_refresh_gives_a_slow_reload_one_more_chance():
+    """The 14:52:32 ChatGPT stop (UV/prompt.txt:2107): a single slow
+    reload — the composer simply not painted within selector_timeout_s
+    — ended a run at 38/69 collections. A reload that lands slowly is
+    ordinary web behaviour, not selector rot, so it earns ONE more
+    reload before the loud raise."""
+    site = SITES["chatgpt"]
+
+    class SlowPage(FakePage):
+        def reload(self):
+            super().reload()
+            if len([c for c in self.calls if c == ("reload",)]) >= 2:
+                self.locators[site.prompt_box[0]] = FakeLocator(
+                    "prompt_box", self
+                )
+
+    page = SlowPage()
+    driver = SiteDriver(site, replace(FAST, selector_timeout_s=0.05),
+                        "http://unused")
+    driver.page = page
+
+    driver.refresh(log=lambda s: None)
+
+    assert [c for c in page.calls if c == ("reload",)] == [
+        ("reload",), ("reload",)
+    ]
+
+
+def test_refresh_still_fails_loudly_when_the_composer_is_really_gone():
+    """The second chance widens the timing tolerance, it never softens
+    the verdict: a composer that is gone for good is still loud."""
+    site = SITES["chatgpt"]
+    page = FakePage()
+    driver = SiteDriver(site, replace(FAST, selector_timeout_s=0.05),
+                        "http://unused")
+    driver.page = page
+
+    with pytest.raises(DriverError):
+        driver.refresh(log=lambda s: None)
