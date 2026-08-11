@@ -154,6 +154,15 @@ class ImageViewer(tk.Toplevel):
 
         self.bind("<Destroy>", self._on_destroy)
         self._render_entry()
+        # SPACE & LEGIBILITY (owner 2026-08-11, the annotated DJ_v3_gem
+        # screenshot): the window OPENS at the height its content
+        # actually needs — image + prompt + the Check/Steps sections —
+        # instead of a fixed guess that either cuts the sections off or
+        # leaves a dead band of empty space below them. Fitted once the
+        # window is mapped (real widget sizes exist only then), and
+        # again on every section toggle (the sections grow into free
+        # screen space BEFORE any scrollbar earns its place).
+        self.bind("<Map>", self._fit_height_once, add="+")
 
     # --- construction ----------------------------------------------------
 
@@ -172,8 +181,21 @@ class ImageViewer(tk.Toplevel):
     def _build_image_block(self, body) -> None:
         self._image_block = ttk.Frame(body)
         self._image_block.pack(fill="x")
-        self._image_label = ttk.Label(self._image_block)
-        self._image_label.pack(pady=(4, 2))
+        self._image_label = ttk.Label(self._image_block, justify="left")
+        self._image_label.pack(fill="x", padx=4, pady=(4, 2))
+        # SPACE & LEGIBILITY (owner 2026-08-11, the BobaFett_v2 REFUSED
+        # shots): when this label carries TEXT (a refusal message), it
+        # must WRAP at the window's live width — an unwrapped line just
+        # renders past the right edge (clipped = LAW violation). Bound
+        # to the label's own <Configure> so a resize re-wraps; harmless
+        # while an image is shown (wraplength affects only text).
+        self._image_label.bind(
+            "<Configure>",
+            lambda e: self._image_label.configure(
+                wraplength=max(e.width - 12, 200)
+            ),
+            add="+",
+        )
         # only packed while a Steps thumbnail overrides the main view —
         # unpacked (never destroyed) the rest of the time
         self._step_note_var = tk.StringVar(value="")
@@ -250,6 +272,7 @@ class ImageViewer(tk.Toplevel):
         self._refresh_check_section()
         self._refresh_steps_section()
         self._scroll.refresh()
+        self._fit_height()
 
     def _current(self) -> dict:
         return self._entries[self._index]
@@ -317,6 +340,24 @@ class ImageViewer(tk.Toplevel):
         self._prompt_txt.delete("1.0", "end")
         self._prompt_txt.insert("1.0", self._current().get("prompt", ""))
         self._prompt_txt.configure(state="disabled")
+        self._size_text_to_content(self._prompt_txt)
+
+    def _size_text_to_content(self, txt: tk.Text) -> None:
+        """Space & Legibility (owner 2026-08-11): a Text box holds the
+        rows its CONTENT needs — a fixed 8-row box renders 6 rows of
+        emptiness under a 2-line prompt, and that dead band is exactly
+        BUG A. Measured in DISPLAY lines (wrapping counted, needs a
+        laid-out width — hence after idle), clamped 2..14; past 14 the
+        window is honestly full and the outer scroll takes over."""
+        def _apply() -> None:
+            try:
+                lines = txt.count("1.0", "end", "displaylines")[0]
+            except Exception:
+                return  # not laid out yet — the next render re-runs
+            txt.configure(height=max(2, min(int(lines), 14)))
+            self._scroll.refresh()
+            self._fit_height()
+        txt.after_idle(_apply)
 
     def _copy_prompt(self) -> None:
         _copy_to_clipboard(self, self._current().get("prompt", ""))
@@ -339,6 +380,7 @@ class ImageViewer(tk.Toplevel):
         self._check_txt.delete("1.0", "end")
         self._check_txt.insert("1.0", md)
         self._check_txt.configure(state="disabled")
+        self._size_text_to_content(self._check_txt)
         self._render_check_btn()
         self._check_btn.pack(fill="x")
         if self._check_open:
@@ -359,6 +401,31 @@ class ImageViewer(tk.Toplevel):
         else:
             self._check_body.pack_forget()
         self._scroll.refresh()
+        self._fit_height()
+
+    # --- content-fit window height (owner 2026-08-11) -------------------
+
+    def _fit_height_once(self, _event=None) -> None:
+        self.unbind("<Map>")
+        self._fit_height()
+
+    def _fit_height(self) -> None:
+        """Size the WINDOW height to the content's real need — the
+        Space & Legibility fix order applied to this window: give the
+        sections the free screen space FIRST; the scrollbar earns its
+        place only once the screen cap is truly hit. Chrome (nav row,
+        title, paddings) is measured as the live delta between the
+        window and the scroll viewport, so the math never hardcodes
+        widget heights."""
+        self.update_idletasks()
+        canvas_h = self._scroll.canvas.winfo_height()
+        if canvas_h <= 1:
+            return  # not laid out yet — the <Map> fit will re-run
+        chrome = max(self.winfo_height() - canvas_h, 0)
+        need = self._scroll.body.winfo_reqheight() + chrome + 12
+        cap = int(self.winfo_screenheight() * DOC_MAX_FRAC)
+        height = max(IMAGE_VIEWER_MIN_H, min(need, cap))
+        self.geometry(f"{self.winfo_width()}x{height}")
 
     # --- Steps sub-section ---------------------------------------------
 
@@ -395,6 +462,7 @@ class ImageViewer(tk.Toplevel):
         else:
             self._steps_body.pack_forget()
         self._scroll.refresh()
+        self._fit_height()
 
     def _build_steps_strip(self) -> None:
         for child in self._steps_scroll.body.winfo_children():
