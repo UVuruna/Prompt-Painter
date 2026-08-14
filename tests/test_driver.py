@@ -1695,6 +1695,41 @@ def test_collapsed_show_more_prefix_still_anchors():
     assert driver._anchor_state() == "vanished"
 
 
+def test_attachment_chip_before_prompt_still_anchors():
+    """A Prompt+Image user turn renders the attached reference chip
+    (the filename) BEFORE the prompt text — Gemini's user-query does
+    (the 2026-08-14 continents run: every healthy send read as
+    vanished and was re-sent, burning quota on duplicate globes). The
+    anchor window must start where the head sits, not at position 0;
+    a turn holding someone ELSE's prompt must still read vanished."""
+    site = SITES["gemini"]
+    full = (
+        "Photorealistic Earth globe from orbit distance, the single"
+        " supercontinent PANGEA centered on the sunlit hemisphere,"
+        " wrapped by the single Panthalassa ocean in deep sapphire."
+        " Geography copied exactly from the reference image."
+    )
+    page = FakePage()
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl("Pangea_reference.png\n" + full, 10)]
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0, last_img_src=None, user_turn_count=1
+    )
+    driver._sent_norm = normalize_text(full)
+    driver._sent_head = driver._sent_norm[:60]
+
+    assert driver._anchor_state() == "ok"
+
+    # a genuinely dropped message: the newest turn is another prompt
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl("Zealandia_reference.png\nA wholly different prompt", 10)]
+    )
+    assert driver._anchor_state() == "vanished"
+
+
 class _RaisingImageLocator(ImageLocator):
     """An <img> whose IN-PAGE byte read fails the way Gemini's
     googleusercontent results do: tainted canvas + CORS-blocked fetch."""

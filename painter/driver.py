@@ -1197,10 +1197,20 @@ class SiteDriver:
                 # variants diverge inside that window, so a DROPPED
                 # message still reads vanished — the case the old
                 # count check existed for.
-                if self._sent_head not in norm:
+                # 2026-08-14 (the continents Prompt+Image run): the
+                # turn's visible text may PRECEDE our prompt with UI
+                # text — Gemini's user-query renders the attached
+                # reference chip (the filename) before the prompt — so
+                # the window is anchored WHERE THE HEAD SITS, never at
+                # position 0 (a position-0 compare read every healthy
+                # attachment send as vanished and re-sent it, burning
+                # quota on duplicates the whole run long).
+                i = norm.find(self._sent_head)
+                if i < 0:
                     return "vanished"
-                k = min(len(norm), len(self._sent_norm), ANCHOR_VERIFY_CHARS)
-                if norm[:k] != self._sent_norm[:k]:
+                tail = norm[i:]
+                k = min(len(tail), len(self._sent_norm), ANCHOR_VERIFY_CHARS)
+                if tail[:k] != self._sent_norm[:k]:
                     return "vanished"
                 return "ok"
             # legacy path (no full prompt recorded — ask_text and other

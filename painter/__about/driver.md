@@ -38,7 +38,13 @@ OUR prompt: the head must be present, then the visible text must
 agree with the full prompt for as far as both go, capped at
 `ANCHOR_VERIFY_CHARS` (300) — the collapsed "Show more" view is a
 prefix, and identical-head colored variants diverge inside that
-window, so a DROPPED message still reads vanished. The USER-TURN
+window, so a DROPPED message still reads vanished. The window is
+anchored WHERE THE HEAD SITS in the turn's text, never at position 0
+(2026-08-14, the continents Prompt+Image run: Gemini's `user-query`
+renders the attached reference chip — the filename — BEFORE the
+prompt, so a position-0 compare read every healthy attachment send as
+vanished and re-sent it, burning quota on duplicate globes while the
+Dashboard logged the whole sheet REFUSED). The USER-TURN
 COUNT no longer votes: ChatGPT's new UI VIRTUALIZES turns out of the
 DOM (`data-is-intersecting`, live CDP probe 2026-08-14), so the count
 falls below the baseline on perfectly healthy sends — one such false
