@@ -292,16 +292,16 @@ def test_drop_and_site_for_strips_the_version_sibling():
     2026-07-27) reverses to the SAME canonical drop as its master, so
     a flagged version still matches its sheet entry for a re-send —
     the owner's irregular bare ``_v`` form included."""
-    assert ai.drop_and_site_for("emblem/mood/Glory_v3_gem.png") == (
+    assert ai.drop_and_site_for("assets/emblem/mood/Glory_v3_gem.png") == (
         "assets/emblem/mood/Glory.png", "gemini",
     )
-    assert ai.drop_and_site_for("emblem/mood/Glory_v_gpt.png") == (
-        "assets/emblem/mood/Glory.png", "chatgpt",
+    assert ai.drop_and_site_for("masters/mood/Glory_v_gpt.png") == (
+        "masters/mood/Glory.png", "chatgpt",
     )
     # a name whose stem legitimately ends in letters+digits without
     # the _v marker is untouched
     assert ai.drop_and_site_for("emblem/mood/Glory2_gem.png") == (
-        "assets/emblem/mood/Glory2.png", "gemini",
+        "emblem/mood/Glory2.png", "gemini",
     )
 
 
@@ -314,9 +314,9 @@ def test_drop_and_site_for_none_when_no_site_segment():
 
 def test_plan_resend_groups_by_site_and_sheet():
     flagged = {
-        "emblem/gemini/mood/Glory.png": ["subject cut"],
-        "emblem/gemini/mood/Anger.png": ["stray line", "halo"],
-        "chatgpt/fake/img_0.png": ["watermark"],  # the legacy layout
+        "assets/emblem/mood/Glory_gem.png": ["subject cut"],
+        "assets/emblem/mood/Anger_gem.png": ["stray line", "halo"],
+        "fake/img_0_gpt.png": ["watermark"],
     }
     drop_to_source = {
         "assets/emblem/mood/Glory.png": "C:/sheets/mood.md",

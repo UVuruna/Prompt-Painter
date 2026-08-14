@@ -147,15 +147,27 @@ in here.**
    dimension under 800 px, upscaled native-4x then LANCZOS so no
    dimension stays below 800. Failures are loud but never kill the
    run.
-7. Images save **DIRECTLY** into a tree that MIRRORS DOMY's
-   `assets/` (owner 2026-07-18): sheets carry FULL site-agnostic
-   paths (`assets/emblem/mood/Glory.png`) and the generator lands
-   as the TERMINAL FILENAME SUFFIX (DOMY RESTRUCTURE, owner
-   2026-07-22 — no per-site folders; `SITE_FILE_SUFFIX`: chatgpt
-   `_gpt`, gemini `_gem`, api_image `_api`) —
-   `assets/<rest>/<File>.png` → `<out>/<rest>/<File>_<sfx>.png`
-   (e.g. `output/images/emblem/mood/Glory_gem.png`) — so a finished
-   collection COPIES STRAIGHT into `Watch Academy/assets/`. No
+7. **THE PATH IN THE SHEET IS THE PATH** (owner decree 2026-08-14 —
+   binding, supersedes the "assets mirror" wording of 2026-07-18/22).
+   The sheet is written BY the project that wants the image and
+   states exactly where that image belongs. PromptPainter does not
+   read a root out of it, does not strip a segment, does not add a
+   folder of its own, and NEVER decides another project's structure.
+   It appends exactly ONE thing: the generator's registered suffix,
+   before the extension (`SITE_FILE_SUFFIX`: chatgpt `_gpt`, gemini
+   `_gem`, api_image `_api`) —
+   `<drop path>/<File>.png` → `<out>/<drop path>/<File>_<sfx>.png`
+   (e.g. `masters/weeks/inner_wheel/mood/primary/colored/Glory.png`
+   → `<out>/masters/weeks/inner_wheel/mood/primary/colored/Glory_gem.png`)
+   — so a finished collection COPIES STRAIGHT into the consuming
+   project's root, whatever that root is called. **Why this is a law:**
+   until 2026-08-14 `dest_for` stripped a literal leading `assets`
+   (true of every sheet the day it was written) and dumped anything
+   else into a `<site>/` folder; the day Watch Academy renamed its
+   tree to `masters/`, all 1145 already-generated images read as
+   missing and the app offered to make them again. The guard is
+   `tests/test_runner_paths_and_save.py::test_dest_for_keeps_the_sheets_path_exactly`.
+   No
    approval step (owner 2026-07-17: saving IS the end of the
    tool's job). Run state + reports live under `<out>/_state/<site>/`
    and backup variants under `<out>/EXTRA/` — neither pollutes the

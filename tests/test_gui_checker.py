@@ -241,7 +241,7 @@ def test_shared_report_helper_identical_output_from_both_panels(
     comparing what each panel hands it for the IDENTICAL
     (rel, defects, raw) triple."""
     out_base = tmp_path / "out"
-    rel = "emblem/mood/Glory_gem.png"
+    rel = "assets/emblem/mood/Glory_gem.png"
     live = out_base / rel
     make_png(live)
     defects = ["subject cropped at the shoulder"]

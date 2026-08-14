@@ -70,15 +70,30 @@ SITE_FILE_SUFFIX = {"chatgpt": "_gpt", "gemini": "_gem", "api_image": "_api"}
 
 
 def dest_for(drop_path: str, site_key: str) -> str:
-    """The save path (relative to the out base) for one drop path."""
+    """The save path (relative to the out base) for one drop path.
+
+    THE PATH IN THE SHEET IS THE PATH (owner decree 2026-08-14). The
+    sheet is written by the project that WANTS the image and states
+    exactly where that image belongs; PromptPainter does not read a
+    root out of it, does not strip a segment, does not add a folder of
+    its own. It appends ONE thing: the generator's registered suffix,
+    before the extension.
+
+        masters/weeks/.../Glory.png  ->  masters/weeks/.../Glory_gem.png
+
+    (Until 2026-08-14 this stripped a literal leading "assets" and fell
+    back to a "<site>/<drop>" folder for anything else — a rule born
+    when every sheet happened to start with `assets/`. The day Watch
+    Academy renamed its tree to `masters/`, every one of 1145 existing
+    images read as missing. Never infer structure from someone else's
+    filenames again.)
+    """
     parts = drop_path.split("/")
     suffix = SITE_FILE_SUFFIX[site_key]
-    if parts[0] == "assets" and len(parts) >= 3:
-        name = parts[-1]
-        stem, dot, ext = name.rpartition(".")
-        name = f"{stem}{suffix}.{ext}" if dot else f"{name}{suffix}"
-        return "/".join([*parts[1:-1], name])
-    return "/".join([site_key, drop_path])
+    name = parts[-1]
+    stem, dot, ext = name.rpartition(".")
+    name = f"{stem}{suffix}.{ext}" if dot else f"{name}{suffix}"
+    return "/".join([*parts[:-1], name])
 
 
 def versioned_dest_for(

@@ -40,12 +40,18 @@ rejected outright.
 ```
 - The `→` arrow line carries the OUTPUT PATH — the tool names and
   files images itself, no renaming ever happens afterwards.
-- Write the FULL, SITE-AGNOSTIC assets path:
-  `assets/<folders...>/<File>.png`. The tool adds the generator as a
-  FILENAME SUFFIX (`_gpt` / `_gem` / `_api`), so the output tree
-  mirrors the DOMY assets tree exactly:
-  `assets/emblem/mood/Glory.png` → `out/emblem/mood/Glory_gem.png`
-  — and a finished collection copies straight into `assets/`.
+- Write the FULL, SITE-AGNOSTIC path **exactly as it is in YOUR
+  project** — from your project's root, whatever that root is called
+  (`assets/…`, `masters/…`, anything). **THE PATH IN THE SHEET IS THE
+  PATH** (owner decree 2026-08-14): PromptPainter does not read a root
+  out of it, does not strip a segment and does not invent a folder —
+  it is your project's structure, not the tool's business. The ONLY
+  thing the tool adds is the generator as a FILENAME SUFFIX (`_gpt` /
+  `_gem` / `_api`):
+  `masters/emblem/mood/Glory.png` →
+  `<out>/masters/emblem/mood/Glory_gem.png`
+  — so the output tree is your tree, and a finished collection copies
+  straight into your project root.
 - The path must end in `.png` and be UNIQUE within the sheet.
 - Long titles and paths may wrap across lines; plain text may sit
   between the bold title and the arrow; the title may contain
@@ -189,7 +195,8 @@ arrow form — it is the only one with loud error checking.
 - [ ] `# H1` theme name at the top
 - [ ] every image: `**Title** → \`assets/<folders>/.../File.png\``
       + one fenced prompt block
-- [ ] every path unique, `.png`, full `assets/` form (site-agnostic)
+- [ ] every path unique, `.png`, FULL path from the consuming
+      project's root (site-agnostic) — the tool never alters it
 - [ ] every prompt states its ASPECT RATIO and SHAPE explicitly
       (rule 3b — the tool never infers them)
 - [ ] any input-image entries use `← \`refs/...\`` right under the

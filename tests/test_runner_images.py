@@ -121,7 +121,7 @@ def test_input_image_item_attaches_via_submit_with_image(tmp_path):
     generated = run_sheet(sheet, driver, out, "chatgpt", FAST)
 
     assert generated == 1
-    assert (out / "chatgpt" / "fake" / "hero.png").exists()
+    assert (out / "fake" / "hero_gpt.png").exists()
     # attached (not plain-submitted), resolved RELATIVE TO THE SHEET
     # FOLDER; the driver receives the resolved path LIST (multi-attach
     # contract, faza 2 2026-08-03)
@@ -150,8 +150,8 @@ def test_input_image_missing_is_skipped_loudly(tmp_path):
 
     # the missing-input item is skipped; the plain one still runs
     assert generated == 1
-    assert not (out / "chatgpt" / "fake" / "hero.png").exists()
-    assert (out / "chatgpt" / "fake" / "plain.png").exists()
+    assert not (out / "fake" / "hero_gpt.png").exists()
+    assert (out / "fake" / "plain_gpt.png").exists()
     assert any("INPUT IMAGE MISSING" in line for line in logs)
     # the missing item never reached the driver — nothing attached
     assert driver.attached == []
@@ -280,8 +280,8 @@ def test_require_input_image_runs_only_complete_pairs(tmp_path):
     )
 
     assert generated == 1
-    assert (tmp_path / "out" / "chatgpt" / "fake" / "hero.png").exists()
-    assert not (tmp_path / "out" / "chatgpt" / "fake" / "noref.png").exists()
+    assert (tmp_path / "out" / "fake" / "hero_gpt.png").exists()
+    assert not (tmp_path / "out" / "fake" / "noref_gpt.png").exists()
     assert any("NOT ELIGIBLE (no ← reference)" in ln for ln in logs)
     assert any("NOT ELIGIBLE (reference missing)" in ln for ln in logs)
     assert any("PROMPT+IMAGE: 1/3" in ln for ln in logs)
@@ -314,7 +314,7 @@ def test_continue_nudge_recovers_a_stuck_response(tmp_path):
     )
     # the stuck item recovered on the nudge and counts as generated
     assert generated == 1
-    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "fake" / "img_0_gpt.png").exists()
     assert any("continue nudge RECOVERED" in line for line in logs)
     # the original prompt, then the nudge sent VERBATIM into the same chat
     # (CONTINUE_NUDGE, no prompt suffix) — one nudge attempt per item
@@ -346,8 +346,8 @@ def test_noimage_with_text_is_skipped_never_nudged(tmp_path):
 
     assert generated == 1
     assert CONTINUE_NUDGE not in driver.submitted
-    assert not (out / "gemini" / "fake" / "img_0.png").exists()
-    assert (out / "gemini" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gem.png").exists()
+    assert (out / "fake" / "img_1_gem.png").exists()
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
@@ -374,8 +374,8 @@ def test_continue_nudge_still_stuck_is_skipped_loudly(tmp_path):
     assert driver.submitted == [
         "prompt 0", CONTINUE_NUDGE, "prompt 1", CONTINUE_NUDGE,
     ]
-    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert not (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gpt.png").exists()
+    assert not (out / "fake" / "img_1_gpt.png").exists()
     report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )

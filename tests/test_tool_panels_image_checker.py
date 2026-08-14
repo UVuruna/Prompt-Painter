@@ -627,11 +627,12 @@ def test_run_ai_check_job_with_sheets_checks_only_matched_images(
 ):
     import painter.ai as ai_module
 
-    # the DOMY assets-mirror layout ai.drop_and_site_for reverses:
-    # <out>/<rest>/<File>_<sfx>.png -> ('assets/<rest>/<File>.png', site)
+    # the layout ai.drop_and_site_for reverses: <out>/<drop>/<File>_<sfx>
+    # .png -> ('<drop>/<File>.png', site) — the sheet's path, verbatim
     out_base = tmp_path / "out"
-    (out_base / "emblem").mkdir(parents=True)
-    matched = out_base / "emblem" / "Glory_gem.png"
+    (out_base / "assets" / "emblem").mkdir(parents=True)
+    (out_base / "emblem").mkdir(parents=True, exist_ok=True)
+    matched = out_base / "assets" / "emblem" / "Glory_gem.png"
     unmatched = out_base / "emblem" / "Mystery_gem.png"
     Image.new("RGBA", (10, 10)).save(matched)
     Image.new("RGBA", (10, 10)).save(unmatched)
@@ -680,8 +681,9 @@ def test_run_ai_check_job_with_sheet_file_input_matches_too(
     import painter.ai as ai_module
 
     out_base = tmp_path / "out"
-    (out_base / "emblem").mkdir(parents=True)
-    matched = out_base / "emblem" / "Glory_gem.png"
+    (out_base / "assets" / "emblem").mkdir(parents=True)
+    (out_base / "emblem").mkdir(parents=True, exist_ok=True)
+    matched = out_base / "assets" / "emblem" / "Glory_gem.png"
     Image.new("RGBA", (10, 10)).save(matched)
 
     sheet = tmp_path / "theme.md"

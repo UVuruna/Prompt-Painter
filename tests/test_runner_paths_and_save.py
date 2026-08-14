@@ -125,20 +125,36 @@ def state(out_base: Path, site: str, name: str) -> Path:
     return out_base / "_state" / site / name
 
 
-def test_dest_for_mirrors_the_assets_tree():
-    # full assets paths: the site lands as the terminal filename
-    # suffix (DOMY RESTRUCTURE 2026-07-22) — out/ mirrors assets/
-    # byte-for-byte, ready to copy straight in
+def test_dest_for_keeps_the_sheets_path_exactly():
+    """THE PATH IN THE SHEET IS THE PATH (owner decree 2026-08-14).
+
+    GUARD against the regression that cost the owner a whole run: the
+    old dest_for stripped a literal leading ``assets`` and shoved
+    everything else into a ``<site>/`` folder. The day Watch Academy
+    renamed its tree ``assets/`` -> ``masters/``, all 1145 existing
+    images read as missing — the app was looking for a folder it had
+    invented. PromptPainter appends the generator suffix and NOTHING
+    else; the root of the path is the consuming project's business.
+    """
+    # the tree that broke it — any root, preserved verbatim
     assert (
-        dest_for("assets/weeks/inner_wheel/mood/Glory.png", "gemini")
-        == "weeks/inner_wheel/mood/Glory_gem.png"
+        dest_for("masters/weeks/inner_wheel/mood/primary/colored/Glory.png",
+                 "gemini")
+        == "masters/weeks/inner_wheel/mood/primary/colored/Glory_gem.png"
     )
+    # a root named "assets" is not special — it is just a folder
     assert (
         dest_for("assets/weeks/faith/bible/primary/dual/x.png", "chatgpt")
-        == "weeks/faith/bible/primary/dual/x_gpt.png"
+        == "assets/weeks/faith/bible/primary/dual/x_gpt.png"
     )
-    # legacy relative drops keep the old <site>/<drop> layout
-    assert dest_for("fake/img_0.png", "gemini") == "gemini/fake/img_0.png"
+    # a brand-new root nobody has seen yet works without a code change
+    assert (
+        dest_for("whatever/they/call/it/Sun.png", "gemini")
+        == "whatever/they/call/it/Sun_gem.png"
+    )
+    # short paths too — no site folder is ever prepended
+    assert dest_for("fake/img_0.png", "gemini") == "fake/img_0_gem.png"
+    assert dest_for("img_0.png", "gemini") == "img_0_gem.png"
 
 
 def test_dest_for_api_image_suffixes_the_same_way_a_real_site_does():
@@ -149,10 +165,10 @@ def test_dest_for_api_image_suffixes_the_same_way_a_real_site_does():
     website-generated one."""
     assert (
         dest_for("assets/emblem/mood/Glory.png", "api_image")
-        == "emblem/mood/Glory_api.png"
+        == "assets/emblem/mood/Glory_api.png"
     )
     assert (
-        dest_for("fake/img_0.png", "api_image") == "api_image/fake/img_0.png"
+        dest_for("fake/img_0.png", "api_image") == "fake/img_0_api.png"
     )
 
 
@@ -161,40 +177,40 @@ def test_versioned_dest_for_counts_from_the_last_existing(tmp_path):
     the LAST version on disk — canonical alone -> _v2; last _v4 -> _v5
     (gaps never matter); the owner's irregular ``_v`` reads as v1."""
     drop = "assets/emblem/mood/Glory.png"
-    folder = tmp_path / "emblem" / "mood"
+    folder = tmp_path / "assets" / "emblem" / "mood"
     folder.mkdir(parents=True)
     (folder / "Glory_gem.png").write_bytes(b"x")
 
     # only the canonical file -> the first redo is _v2
     assert (
         versioned_dest_for(drop, "gemini", tmp_path)
-        == "emblem/mood/Glory_v2_gem.png"
+        == "assets/emblem/mood/Glory_v2_gem.png"
     )
     # last existing version wins, gaps ignored: v2 + v4 -> v5
     (folder / "Glory_v2_gem.png").write_bytes(b"x")
     (folder / "Glory_v4_gem.png").write_bytes(b"x")
     assert (
         versioned_dest_for(drop, "gemini", tmp_path)
-        == "emblem/mood/Glory_v5_gem.png"
+        == "assets/emblem/mood/Glory_v5_gem.png"
     )
     # the irregular bare "_v" form reads as version 1 — never a crash,
     # never lifting the max above a real _vN
     (folder / "Glory_v_gem.png").write_bytes(b"x")
     assert (
         versioned_dest_for(drop, "gemini", tmp_path)
-        == "emblem/mood/Glory_v5_gem.png"
+        == "assets/emblem/mood/Glory_v5_gem.png"
     )
     # another figure's versions in the same folder never leak in
     (folder / "Glory_Shield_v9_gem.png").write_bytes(b"x")
     assert (
         versioned_dest_for(drop, "gemini", tmp_path)
-        == "emblem/mood/Glory_v5_gem.png"
+        == "assets/emblem/mood/Glory_v5_gem.png"
     )
     # per-site independence: the same drop under chatgpt has no
     # versions yet -> _v2
     assert (
         versioned_dest_for(drop, "chatgpt", tmp_path)
-        == "emblem/mood/Glory_v2_gpt.png"
+        == "assets/emblem/mood/Glory_v2_gpt.png"
     )
 
 
@@ -270,7 +286,7 @@ def test_suffix_layout_report_and_resume(tmp_path):
     assert generated == 2
     assert driver.submitted[0] == "prompt 0" + suffix
     # legacy drops keep the <site>/<drop> layout
-    assert (out / "gemini" / "fake" / "img_0.png").read_bytes().startswith(
+    assert (out / "fake" / "img_0_gem.png").read_bytes().startswith(
         PNG_1PX
     )
     # NO progress sidecar any more — "done" is the saved file itself;
@@ -310,7 +326,7 @@ def test_assets_paths_save_into_the_mirrored_tree(tmp_path):
     run_sheet(sheet, FakeDriver(SITES["chatgpt"]), out, "chatgpt", FAST)
     # assets/emblem/mood/Glory.png -> out/emblem/mood/Glory_gpt.png
     # (the site is the terminal filename suffix, RESTRUCTURE 2026-07-22)
-    assert (out / "emblem" / "mood" / "Glory_gpt.png").exists()
+    assert (out / "assets" / "emblem" / "mood" / "Glory_gpt.png").exists()
     # no progress sidecar — resume is by the saved file's existence
     assert not state(out, "chatgpt", "mood_prompts.progress.json").exists()
 
@@ -360,8 +376,8 @@ def test_safer_retry_recovers_then_gives_up(tmp_path):
     )
     # item 0 recovered on the safer retry; item 1 refused twice -> skipped
     assert generated == 1
-    assert (out / "gemini" / "fake" / "img_0.png").exists()
-    assert not (out / "gemini" / "fake" / "img_1.png").exists()
+    assert (out / "fake" / "img_0_gem.png").exists()
+    assert not (out / "fake" / "img_1_gem.png").exists()
     assert any("safer retry SUCCEEDED" in line for line in logs)
     # item 0: original + safer; item 1: original + safer = 4 submits
     assert len(driver.submitted) == 4

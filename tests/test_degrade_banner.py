@@ -70,8 +70,8 @@ def test_banner_with_wait_choice_stops_after_the_saved_image(tmp_path):
     assert exc.value.retry_after_s is not None
     # the image that already ARRIVED was saved first — never wasted
     # (a bare non-assets drop path lands in the legacy per-site layout)
-    assert (tmp_path / "gemini" / "fake" / "img_0.png").exists()
-    assert not (tmp_path / "gemini" / "fake" / "img_1.png").exists()
+    assert (tmp_path / "fake" / "img_0_gem.png").exists()
+    assert not (tmp_path / "fake" / "img_1_gem.png").exists()
 
 
 def test_no_banner_never_asks(tmp_path):

@@ -8,7 +8,7 @@
 The paced, resumable loop over a clean sheet's pending items:
 paste (prompt + the site's rule suffix) → submit → await the done
 edge → extract bytes → save at `out_base / dest_for(drop, site_key)`
-(the assets-mirroring layout) → the `post_save` hook (the caller's
+(the sheet's own path + the generator suffix — owner decree 2026-08-14) → the `post_save` hook (the caller's
 composed postprocess: bg removal / crop / upscale) → report line →
 pause → next. A crash or a quota stop costs nothing — **"done" is
 the SAVED FILE itself** (owner 2026-07-19: no progress sidecar), so

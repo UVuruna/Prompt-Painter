@@ -140,7 +140,7 @@ def test_image_gen_failed_recovers_on_a_later_retry(tmp_path):
         log=logs.append, on_event=events.append,
     )
     assert generated == 1
-    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "fake" / "img_0_gpt.png").exists()
     assert any("retry RECOVERED" in line for line in logs)
     # original submit + 2 "retry" resends
     assert driver.submitted == [
@@ -168,8 +168,8 @@ def test_image_gen_failed_exhausts_ladder_then_stops(tmp_path):
         run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append)
 
     # neither item produced a file; the second item was never reached
-    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert not (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gpt.png").exists()
+    assert not (out / "fake" / "img_1_gpt.png").exists()
     assert any("RECOVERY EXHAUSTED" in line for line in logs)
     # item 0: original submit + 2 text retries, then 2 escalation rounds
     # each resend the WHOLE original prompt in a fresh session
@@ -211,7 +211,7 @@ def test_image_gen_failed_recovers_via_the_retry_button(tmp_path):
     logs: list[str] = []
     driver = ButtonRecovers(SITES["chatgpt"])
     assert run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append) == 1
-    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "fake" / "img_0_gpt.png").exists()
     assert driver.retry_clicks == 1
     # recovered on the button alone — no "retry" text, no new session
     assert driver.submitted == ["prompt 0"]
@@ -234,7 +234,7 @@ def test_image_gen_failed_recovers_in_a_fresh_session(tmp_path):
     logs: list[str] = []
     driver = FreshSessionRecovers(SITES["chatgpt"])
     assert run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append) == 1
-    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "fake" / "img_0_gpt.png").exists()
     # button skipped, both text retries spent, then ONE escalation round
     assert driver.refreshes == 1 and driver.new_chats == 1
     # the escalation round resends the WHOLE original prompt (run_sheet
@@ -275,8 +275,8 @@ def test_refusal_inside_ladder_skips_item_not_site(tmp_path):
     )  # must not raise — the refusal skips item 0, never stops the site
 
     assert generated == 1  # item 0 refused mid-ladder, item 1 still ran
-    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gpt.png").exists()
+    assert (out / "fake" / "img_1_gpt.png").exists()
     report = state(out, "chatgpt", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
@@ -309,8 +309,8 @@ def test_duplicate_bytes_retries_once_then_skips(tmp_path):
     generated = run_sheet(sheet, driver, out, "chatgpt", FAST, log=logs.append)
 
     assert generated == 1  # only item 0 saved
-    assert (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert not (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert (out / "fake" / "img_0_gpt.png").exists()
+    assert not (out / "fake" / "img_1_gpt.png").exists()
     # item 1's duplicate triggered exactly ONE fresh re-submit
     assert driver.submitted.count("prompt 1") == 2
     assert any("DUPLICATE IMAGE" in line for line in logs)
@@ -391,8 +391,8 @@ def test_safer_retry_failing_with_no_image_skips_only_the_item(tmp_path):
     )  # must not raise — the site survives the failed retry
 
     assert generated == 1  # item 0 skipped, item 1 saved
-    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gpt.png").exists()
+    assert (out / "fake" / "img_1_gpt.png").exists()
     assert any("REFUSED/SKIPPED" in line for line in logs)
 
 
@@ -493,8 +493,8 @@ def test_image_gen_failed_inside_vanished_resend_skips_the_item(tmp_path):
 
     # item 0 skipped, item 1 still generated — the site did NOT stop
     assert generated == 1
-    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gpt.png").exists()
+    assert (out / "fake" / "img_1_gpt.png").exists()
     assert any("REFUSED/SKIPPED" in line for line in logs)
 
 
@@ -518,8 +518,8 @@ def test_generation_timeout_on_the_first_attempt_skips_the_item(tmp_path):
     )
 
     assert generated == 1
-    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
-    assert (out / "chatgpt" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gpt.png").exists()
+    assert (out / "fake" / "img_1_gpt.png").exists()
     assert any("timed out" in line for line in logs)
 
 

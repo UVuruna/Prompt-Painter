@@ -137,9 +137,9 @@ def test_refusal_skips_the_item_and_the_run_continues(tmp_path):
     assert len(driver.submitted) == 3  # the refusal did not stop the run
     # the refused item left NO file, so a rerun retries it by
     # file-existence; the two generated items ARE on disk
-    assert not (out / "gemini" / "fake" / "img_1.png").exists()
-    assert (out / "gemini" / "fake" / "img_0.png").exists()
-    assert (out / "gemini" / "fake" / "img_2.png").exists()
+    assert not (out / "fake" / "img_1_gem.png").exists()
+    assert (out / "fake" / "img_0_gem.png").exists()
+    assert (out / "fake" / "img_2_gem.png").exists()
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
@@ -174,7 +174,7 @@ def test_advised_items_sit_out_unless_ticked(tmp_path):
     driver = FakeDriver(SITES["gemini"])
     logs: list[str] = []
     assert run_sheet(sheet, driver, out, "gemini", FAST, log=logs.append) == 1
-    assert not (out / "gemini" / "adv" / "optional.png").exists()
+    assert not (out / "adv" / "optional_gem.png").exists()
     assert any("NOT RUN (sheet advice)" in line for line in logs)
     report = state(out, "gemini", "adv_prompts_report.txt").read_text(
         encoding="utf-8"
@@ -186,7 +186,7 @@ def test_advised_items_sit_out_unless_ticked(tmp_path):
     assert run_sheet(
         sheet, driver2, out, "gemini", FAST, only={"adv/optional.png"}
     ) == 1
-    assert (out / "gemini" / "adv" / "optional.png").exists()
+    assert (out / "adv" / "optional_gem.png").exists()
 
 
 def test_only_filter_drives_just_the_ticked_items(tmp_path):
@@ -197,8 +197,8 @@ def test_only_filter_drives_just_the_ticked_items(tmp_path):
         sheet, driver, out, "chatgpt", FAST, only={"fake/img_2.png"}
     )
     assert generated == 1
-    assert (out / "chatgpt" / "fake" / "img_2.png").exists()
-    assert not (out / "chatgpt" / "fake" / "img_0.png").exists()
+    assert (out / "fake" / "img_2_gpt.png").exists()
+    assert not (out / "fake" / "img_0_gpt.png").exists()
 
 
 def test_file_existence_resume_skips_saved_and_runs_missing(tmp_path):
@@ -259,16 +259,16 @@ def test_only_ticked_existing_redoes_as_a_new_version(tmp_path):
     assert (out / dest_for("fake/img_0.png", "gemini")).read_bytes() == b"STALE"
     assert (out / dest_for("fake/img_1.png", "gemini")).read_bytes() == b"STALE"
     assert (
-        out / "gemini" / "fake" / "img_0_v2.png"
+        out / "fake" / "img_0_v2_gem.png"
     ).read_bytes().startswith(PNG_1PX)
     assert (
-        out / "gemini" / "fake" / "img_1_v2.png"
+        out / "fake" / "img_1_v2_gem.png"
     ).read_bytes().startswith(PNG_1PX)
     assert any("NEW VERSION: 2/2" in line for line in logs)
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )
-    assert "NEW VERSION: img_0_v2.png" in report
+    assert "NEW VERSION: img_0_v2_gem.png" in report
 
 
 def test_ticked_redo_saves_domy_form_and_events_carry_the_rel(tmp_path):
@@ -289,7 +289,7 @@ def test_ticked_redo_saves_domy_form_and_events_carry_the_rel(tmp_path):
         (), (),
     )
     out = tmp_path / "out"
-    done = out / "emblem" / "mood" / "Glory_gem.png"
+    done = out / "assets" / "emblem" / "mood" / "Glory_gem.png"
     done.parent.mkdir(parents=True, exist_ok=True)
     done.write_bytes(b"STALE")
 
@@ -303,10 +303,10 @@ def test_ticked_redo_saves_domy_form_and_events_carry_the_rel(tmp_path):
     assert generated == 2
     assert done.read_bytes() == b"STALE"  # the master is never touched
     assert (
-        out / "emblem/mood/Glory_v2_gem.png"
+        out / "assets/emblem/mood/Glory_v2_gem.png"
     ).read_bytes().startswith(PNG_1PX)
     assert (
-        out / "emblem/mood/Hope_gem.png"
+        out / "assets/emblem/mood/Hope_gem.png"
     ).read_bytes().startswith(PNG_1PX)
 
     rels = {
@@ -314,8 +314,8 @@ def test_ticked_redo_saves_domy_form_and_events_carry_the_rel(tmp_path):
         for ev in events
         if ev["type"] == "item_progress"
     }
-    assert rels["assets/emblem/mood/Glory.png"] == "emblem/mood/Glory_v2_gem.png"
-    assert rels["assets/emblem/mood/Hope.png"] == "emblem/mood/Hope_gem.png"
+    assert rels["assets/emblem/mood/Glory.png"] == "assets/emblem/mood/Glory_v2_gem.png"
+    assert rels["assets/emblem/mood/Hope.png"] == "assets/emblem/mood/Hope_gem.png"
     done_rels = {
         ev["drop_path"]: ev["rel"]
         for ev in events
@@ -503,8 +503,8 @@ def test_model_degraded_continue_choice_skips_item_and_run_continues(tmp_path):
     )  # must not raise — "continue" keeps the run alive
 
     assert generated == 1  # item 0 skipped (degraded), item 1 still ran
-    assert not (out / "gemini" / "fake" / "img_0.png").exists()
-    assert (out / "gemini" / "fake" / "img_1.png").exists()
+    assert not (out / "fake" / "img_0_gem.png").exists()
+    assert (out / "fake" / "img_1_gem.png").exists()
     report = state(out, "gemini", "fake_prompts_report.txt").read_text(
         encoding="utf-8"
     )

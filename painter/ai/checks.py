@@ -172,16 +172,18 @@ def drop_and_site_for(rel: str) -> tuple[str, str] | None:
     """Reverse ``config.dest_for``: the (drop_path, site) one
     out-relative save path came from.
 
-    Assets mirror ``<rest>/<File>[_vN]_<sfx>.png`` ->
-    ``('assets/<rest>/<File>.png', site)`` (the DOMY RESTRUCTURE
-    filename-suffix convention, 2026-07-22; a ``_vN`` version sibling
-    — the ticked-redo output, owner 2026-07-27 — reverses to the SAME
-    canonical drop as its master, so a flagged version re-sends
-    through the sheet entry it came from); the pre-RESTRUCTURE
-    ``<category>/<site>/<rest>`` folder layout and legacy
-    ``<site>/<drop>`` still reverse for old out/ trees. ``None`` when
-    nothing names a site (an absolute flag key, or a folder that was
-    never a generator output).
+    ``<rest>/<File>[_vN]_<sfx>.png`` -> ``('<rest>/<File>.png', site)``
+    — the exact inverse of ``dest_for``: drop the generator suffix,
+    drop a ``_vN`` (the ticked-redo output, owner 2026-07-27, reverses
+    to the SAME canonical drop as its master, so a flagged version
+    re-sends through the sheet entry it came from), and KEEP the rest
+    of the path untouched. No root is re-attached: the sheet's path is
+    the path (owner decree 2026-08-14) — pasting ``assets/`` back on
+    was the same wrong assumption as stripping it. The
+    pre-RESTRUCTURE ``<category>/<site>/<rest>`` and legacy
+    ``<site>/<drop>`` layouts still reverse for old out/ trees.
+    ``None`` when nothing names a site (an absolute flag key, or a
+    folder that was never a generator output).
     """
     from painter.config import SITE_FILE_SUFFIX
 
@@ -197,9 +199,9 @@ def drop_and_site_for(rel: str) -> tuple[str, str] | None:
                 if version is not None:
                     bare = version.group(1)
                 bare += f".{ext}" if dot else ""
-                return "assets/" + "/".join((*parts[:-1], bare)), site
+                return "/".join((*parts[:-1], bare)), site
     if len(parts) >= 3 and parts[1] in SITES:
-        return "assets/" + "/".join((parts[0], *parts[2:])), parts[1]
+        return "/".join((parts[0], *parts[2:])), parts[1]
     if len(parts) >= 2 and parts[0] in SITES:
         return "/".join(parts[1:]), parts[0]
     return None
