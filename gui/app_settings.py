@@ -352,6 +352,19 @@ class SettingsMixin:
         self.log_box.insert("end", f"[{stamp}] {line}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
+        # the same line goes to output/log.txt (owner 2026-08-14) —
+        # the Log tab dies with the window, the file survives it.
+        # Best-effort like the transcript: a disk hiccup never breaks
+        # the GUI over a diagnostics line.
+        try:
+            day = datetime.now().strftime("%Y-%m-%d")
+            config.GENERATED_ROOT.mkdir(parents=True, exist_ok=True)
+            with (config.GENERATED_ROOT / "log.txt").open(
+                "a", encoding="utf-8"
+            ) as fh:
+                fh.write(f"[{day} {stamp}] {line}\n")
+        except OSError:
+            pass
 
     def _queue_sheets(self, paths) -> None:
         """Append PATHS to the collection queue, de-duplicated by path —
