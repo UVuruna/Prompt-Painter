@@ -105,6 +105,43 @@ image. So every prompt states, in its own text, unambiguously:
   symmetry...) — if it matters, write it; the tool adds nothing
   beyond the background/site rules above.
 
+**A CONTRADICTORY PROMPT GETS A RANDOM VIOLATION, NOT A COMPROMISE**
+(owner 2026-08-14, the astrology constellation plates). The canonical
+bad example — a scene whose SUBJECT fills the frame with darkness,
+run with the white-background site suffix:
+
+> *"Center: a deep midnight-blue to black night-sky field scattered
+> with faint background stars; the Taurus constellation traced as
+> bright white star points..."*
+> — plus the appended suffix: *"render on a PLAIN PURE WHITE
+> background ... the subject FILLS the canvas — no wide empty
+> margins on any side ... never a small letterboxed image inside
+> dead background bands."*
+
+The two demands cannot BOTH hold: if the night-sky field fills the
+canvas there is no pixel left for the white background. The model
+must break one rule, and each render breaks a DIFFERENT one — one
+image came back full-bleed dark (the model even apologized in text
+that it is not on white), one letterboxed the sky between dead white
+bands (violating the very suffix that asked for white), one squeezed
+a thin white margin around the sky. Three prompts, three different
+violations — that randomness IS the symptom of a self-contradictory
+prompt. The fixes, pick ONE per sheet:
+
+- **Bound the dark field in a shape** so both rules can hold: "a
+  circular medallion containing the night-sky field, crisp circular
+  edge, centered on a pure white background with a small margin" —
+  the sky fills the MEDALLION, the white fills the CANVAS.
+- **Or declare the full-bleed intent** and run those entries with
+  background "none" in the GUI (per rule BACKGROUND above): a plate
+  that IS a dark sky must not carry a white-background suffix at all
+  — BG removal cannot key out a dark field anyway.
+
+General law behind the example: before shipping a sheet, read each
+prompt WITH the site suffix appended and ask whether every rule can
+be satisfied at once. A rule the scene makes impossible does not get
+"mostly obeyed" — it gets ignored unpredictably, per image.
+
 ### 3c. Optional: attach an INPUT IMAGE (`← path`)
 
 An entry may ALSO carry a source photo the tool attaches into the chat
