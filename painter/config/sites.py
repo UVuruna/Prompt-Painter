@@ -408,7 +408,7 @@ SITES = {
             # Retry button. It is NOT the 2026-07-23 "Hmm...something
             # SEEMS TO HAVE gone wrong" string above, so nothing here
             # matched it. Its real detection is structural (the Retry
-            # button count, SiteDriver._check_thread_error) because
+            # button count, SiteDriver._thread_error_risen) because
             # this face renders inside the USER turn where no text
             # scan of assistant turns can reach it; the marker stays
             # as the belt-and-braces path for a render variant that

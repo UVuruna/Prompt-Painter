@@ -30,12 +30,22 @@ which makes "grab the last visible image" — the duplicate-save root
 cause — impossible. See the flow diagram for the full state machine.
 
 **F1b — user-turn ANCHORING (owner 2026-08-04, the Padmé/Qui-Gon
-incident):** the confirmed prompt's normalized head (`_sent_head`)
-becomes the result's ANCHOR. `_anchor_state()` answers, on every
-poll, whether the newest user turn still holds it (and whether the
-user-turn count grew past the baseline — two colored-variant prompts
-share an identical 60-char head, so the count is what catches a
-vanish between identical heads): `ok` → the accepted result must
+incident; TEXT-FIRST since 2026-08-14, the SendVanished storm):** the
+confirmed prompt's normalized head (`_sent_head`) AND full normalized
+text (`_sent_norm`) become the result's ANCHOR. `_anchor_state()`
+answers, on every poll, whether the newest user turn still reads as
+OUR prompt: the head must be present, then the visible text must
+agree with the full prompt for as far as both go, capped at
+`ANCHOR_VERIFY_CHARS` (300) — the collapsed "Show more" view is a
+prefix, and identical-head colored variants diverge inside that
+window, so a DROPPED message still reads vanished. The USER-TURN
+COUNT no longer votes: ChatGPT's new UI VIRTUALIZES turns out of the
+DOM (`data-is-intersecting`, live CDP probe 2026-08-14), so the count
+falls below the baseline on perfectly healthy sends — one such false
+`SendVanished` fired every ~4 minutes through the 2026-08-14 run (the
+Dashboard's "REFUSED" wall). The old count-then-head rule survives
+only for flows with no recorded full prompt. `ok` → the accepted
+result must
 FOLLOW our own user turn in the DOM (`_follows`,
 `compareDocumentPosition`) — the assistant-turn COUNT is ignored,
 because a long chat VIRTUALIZES old turns out of the DOM and the
@@ -198,13 +208,20 @@ failing loudly — SPAs morph elements a beat after input events.
   again." and renders INSIDE the user turn, creating no assistant turn
   at all — no text scan can reach it, so the item burned the full
   `generation_timeout_s` (420s per occurrence in the live run). It is
-  detected STRUCTURALLY by `_check_thread_error()`: the count of the
+  detected STRUCTURALLY by `_thread_error_risen()`: the count of the
   site's Retry buttons RISING above `Baseline.error_turn_count`. The
   verdict is a count rise and never mere presence — an error turn from
   an earlier item stays in the chat, and treating that as ours would
-  fail every later item. Raised by `_check_image_failed()` /
-  `_check_thread_error()`, both called from `await_done`'s polling loop
-  on every poll — silent no-ops wherever the site's
+  fail every later item. SOFTENED 2026-08-14 (the Zealandia incident):
+  the banner can now coexist with a DELIVERED image — ChatGPT showed
+  the error and still rendered the globe in the same turn, and the old
+  instant raise made the ladder send "retry" while the finished image
+  sat unread. Now the IMAGE wins (checked first on every poll of
+  `await_done`); the risen error becomes `ImageGenFailed` only after
+  it holds `image_ready_timeout_s` with no image, and while it is
+  pending the quiet no-turn wait never falls through to the
+  nudge-eligible `NoImage`. `_check_image_failed()` (text markers)
+  still raises directly — silent no-ops wherever the site's
   `image_failed_text_markers` / `image_error_retry_button` is empty
   (Gemini today). The runner
   catches it and walks a recovery LADDER (Retry button → paced "retry"

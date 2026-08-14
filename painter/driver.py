@@ -210,6 +210,13 @@ def normalize_text(text: str) -> str:
 # verifying the composer content / the sent user turn (F1 protocol)
 VERIFY_PREFIX_CHARS = 60
 
+# how far the ANCHOR compares the newest user turn's visible text
+# against the full sent prompt (owner 2026-08-14, the SendVanished
+# storm): far enough that identical-head colored variants diverge
+# inside the window, short enough to stay clear of the collapsed
+# "Show more" cut and any trailing UI text the turn may append
+ANCHOR_VERIFY_CHARS = 300
+
 
 @dataclass(frozen=True)
 class Baseline:
@@ -266,6 +273,10 @@ class SiteDriver:
         # CONFIRMED prompt — the anchor every result is paired to. The
         # newest user turn must still hold it, or the send VANISHED.
         self._sent_head: str | None = None
+        # 2026-08-14: the FULL normalized prompt beside the head — the
+        # anchor verdict is now TEXT-first (see _anchor_state), and the
+        # head alone cannot tell identical-head colored variants apart
+        self._sent_norm: str | None = None
         # LIVE-RUN FIX (owner 2026-08-04): True when the LAST await_done
         # returned on the image while the busy signal was STILL set —
         # i.e. the site's stop button is provably STUCK, not a running
@@ -640,7 +651,8 @@ class SiteDriver:
         self.capture_baseline()
         self._paste_and_send(prompt, log)
         self._confirm_sent(prompt, log)
-        self._sent_head = normalize_text(prompt)[:VERIFY_PREFIX_CHARS]
+        self._sent_norm = normalize_text(prompt)
+        self._sent_head = self._sent_norm[:VERIFY_PREFIX_CHARS]
 
     def _confirm_sent(self, prompt: str, log: Log) -> None:
         """Block until the send is CONFIRMED (owner 2026-07-29): the
@@ -752,7 +764,8 @@ class SiteDriver:
             prompt, log, reattach=lambda: self._attach_image(image_path)
         )
         self._confirm_sent(prompt, log)
-        self._sent_head = normalize_text(prompt)[:VERIFY_PREFIX_CHARS]
+        self._sent_norm = normalize_text(prompt)
+        self._sent_head = self._sent_norm[:VERIFY_PREFIX_CHARS]
 
     def _attach_image(self, image_path: str | list[str]) -> None:
         """Walk the "+" menu like a person and attach ``image_path`` (one
@@ -881,6 +894,17 @@ class SiteDriver:
         # HOLD for text_settle_s before it is terminal — a re-rendering
         # conversation can transiently mis-read the newest user turn.
         vanished_since: float | None = None
+        # 2026-08-14 (the Zealandia incident): the thread-error banner
+        # is no longer an instant verdict — ChatGPT now shows
+        # "Something went wrong" + Retry AND STILL DELIVERS the image
+        # in the same turn (owner's screenshot: banner up, globe 1/2
+        # rendered below it). The 2026-08-11 assumption ("error = no
+        # assistant turn will ever come") raised ImageGenFailed on
+        # sight, the ladder sent "retry", and the finished image was
+        # never extracted. Now: the IMAGE wins (checked first, every
+        # poll); the risen error becomes terminal only after it holds
+        # image_ready_timeout_s with no image arriving.
+        error_since: float | None = None
         while True:
             now = time.monotonic()
             if now > deadline:
@@ -888,9 +912,28 @@ class SiteDriver:
                     f"{self.site.name}: no result for OUR turn after"
                     f" {t.generation_timeout_s:.0f}s (hard timeout)"
                 )
-            self._check_thread_error()
             turn = self._new_turn()
             busy = self._busy()
+            if turn is not None and self._turn_image(turn) is not None:
+                # our image is loaded — done, banner and button
+                # ignored. When the busy signal is STILL set at this
+                # moment it is provably stuck (our result exists), so
+                # record it for the next _ensure_ready (owner
+                # 2026-08-04).
+                self._busy_known_stuck = busy
+                return
+            if self._thread_error_risen():
+                if error_since is None:
+                    error_since = now
+                elif now - error_since >= t.image_ready_timeout_s:
+                    raise ImageGenFailed(
+                        f"{self.site.name}: the site put a native"
+                        " thread error on our send (its Retry button"
+                        " appeared) and no image arrived within"
+                        f" {t.image_ready_timeout_s:.0f}s of it"
+                    )
+            else:
+                error_since = None
             vanished = self._anchor_state() == "vanished"
             if vanished:
                 if vanished_since is None:
@@ -908,13 +951,6 @@ class SiteDriver:
             else:
                 vanished_since = None
             if turn is not None:
-                if self._turn_image(turn) is not None:
-                    # our image is loaded — done, button ignored. When
-                    # the busy signal is STILL set at this moment it is
-                    # provably stuck (our result exists), so record it
-                    # for the next _ensure_ready (owner 2026-08-04).
-                    self._busy_known_stuck = busy
-                    return
                 text = self._safe_text(turn)
                 if text:
                     self.last_response_text = text
@@ -935,7 +971,14 @@ class SiteDriver:
                         )
                 else:
                     text_only_since = None  # busy again / image incoming
-            elif not vanished and not busy and now > quiet_deadline:
+            elif (
+                not vanished
+                and not busy
+                and error_since is None  # a pending thread error owns
+                # this wait — its verdict is ImageGenFailed (the
+                # ladder), never the nudge-eligible quiet NoImage
+                and now > quiet_deadline
+            ):
                 # the message used to hardcode busy_appear_timeout_s,
                 # which read as "gave up after 30s" even when a stale
                 # busy signal had honestly held this branch off for
@@ -1134,14 +1177,37 @@ class SiteDriver:
             n = loc.count()
             if not n:
                 continue
-            if n <= base.user_turn_count:
-                return "vanished"
             try:
                 text = loc.nth(n - 1).inner_text()
             except Exception:
                 return "unavailable"  # transiently detached — this
                 # poll falls back; the next one re-reads
-            if self._sent_head in normalize_text(text):
+            norm = normalize_text(text)
+            if self._sent_norm is not None:
+                # 2026-08-14 (the SendVanished storm, live CDP probe):
+                # ChatGPT's new UI VIRTUALIZES turns out of the DOM
+                # (data-is-intersecting) — the user-turn count falls
+                # BELOW the baseline on perfectly healthy sends, so the
+                # count is a liar and the TEXT is the verdict. The
+                # newest user turn must read as OUR prompt: the head,
+                # then the visible text agreeing with the full prompt
+                # for as far as both go (the collapsed "Show more" view
+                # is a prefix; ANCHOR_VERIFY_CHARS keeps the window
+                # clear of trailing UI text). Identical-head colored
+                # variants diverge inside that window, so a DROPPED
+                # message still reads vanished — the case the old
+                # count check existed for.
+                if self._sent_head not in norm:
+                    return "vanished"
+                k = min(len(norm), len(self._sent_norm), ANCHOR_VERIFY_CHARS)
+                if norm[:k] != self._sent_norm[:k]:
+                    return "vanished"
+                return "ok"
+            # legacy path (no full prompt recorded — ask_text and other
+            # non-submit flows): the pre-2026-08-14 count-then-head rule
+            if n <= base.user_turn_count:
+                return "vanished"
+            if self._sent_head in norm:
                 return "ok"
             return "vanished"
         return "unavailable"
@@ -1473,9 +1539,12 @@ class SiteDriver:
                         category=category,
                     )
 
-    def _check_thread_error(self) -> None:
-        """Raise ``ImageGenFailed`` when the site put a NATIVE thread
-        error on OUR send (owner 2026-08-11, the 420s dead waits).
+    def _thread_error_risen(self) -> bool:
+        """Did the site put a NATIVE thread error on OUR send? (owner
+        2026-08-11, the 420s dead waits; SOFTENED 2026-08-14, the
+        Zealandia incident — the banner can now coexist with a
+        delivered image, so this only REPORTS; ``await_done`` raises
+        ``ImageGenFailed`` after the error holds with no image.)
 
         ChatGPT's second error face — orange "Something went wrong.
         Please try again." beside a Retry button — is rendered INSIDE
@@ -1495,16 +1564,11 @@ class SiteDriver:
 
         Silent no-op wherever the site names no such button (Gemini)."""
         if not self.site.image_error_retry_button:
-            return
+            return False
         base = self._baseline
         if base is None:
-            return
-        if self._error_turns_count() > base.error_turn_count:
-            raise ImageGenFailed(
-                f"{self.site.name}: the site put a native thread error"
-                " on our send (its Retry button appeared) — no"
-                " assistant turn was ever created"
-            )
+            return False
+        return self._error_turns_count() > base.error_turn_count
 
     def _check_image_failed(self, text: str) -> None:
         """Raise ``ImageGenFailed`` when ``text`` names a known

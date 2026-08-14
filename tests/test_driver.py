@@ -1378,6 +1378,9 @@ def test_submit_prompt_records_the_sent_head_for_anchoring():
     assert driver._sent_head == normalize_text(
         "Hello   WORLD, anchored"
     )[:60]
+    # 2026-08-14: the FULL normalized prompt is recorded beside the
+    # head — the anchor verdict is text-first now
+    assert driver._sent_norm == normalize_text("Hello   WORLD, anchored")
 
 
 def test_await_done_raises_send_vanished_when_our_prompt_left_the_chat():
@@ -1398,18 +1401,23 @@ def test_await_done_raises_send_vanished_when_our_prompt_left_the_chat():
     driver._baseline = Baseline(
         turn_count=1, last_img_src=None, user_turn_count=1
     )
-    driver._sent_head = normalize_text(
+    driver._sent_norm = normalize_text(
         "ROUND medallion, aged bronze relief — Padmé"
-    )[:60]
+    )
+    driver._sent_head = driver._sent_norm[:60]
 
     with pytest.raises(SendVanished):
         driver.await_done(log=lambda s: None)
 
 
 def test_send_vanished_even_when_the_previous_prompt_shares_our_head():
-    """Two colored-variant prompts share the same 60-char head, so the
-    text check alone cannot see the vanish — the user-turn COUNT (no
-    growth past the baseline) must catch it."""
+    """Two colored-variant prompts share the same 60-char head — the
+    head alone cannot see the vanish. Since 2026-08-14 the verdict is
+    the FULL-TEXT window (ANCHOR_VERIFY_CHARS): the variants diverge
+    right after the shared head, so the newest user turn reading as
+    the PREVIOUS variant is a vanish. (The old user-turn COUNT rule is
+    gone — ChatGPT's virtualizing UI made the count lie on healthy
+    sends.)"""
     site = SITES["gemini"]
     shared = "Ornate circular badge, vivid full-color paint over polished"
     page = FakePage()
@@ -1424,7 +1432,10 @@ def test_send_vanished_even_when_the_previous_prompt_shares_our_head():
     driver._baseline = Baseline(
         turn_count=1, last_img_src=None, user_turn_count=1
     )
-    driver._sent_head = normalize_text(shared)[:60]
+    driver._sent_norm = normalize_text(
+        shared + " gold-and-crimson enamel, OUR item"
+    )
+    driver._sent_head = driver._sent_norm[:60]
 
     with pytest.raises(SendVanished):
         driver.await_done(log=lambda s: None)
@@ -1454,9 +1465,10 @@ def test_await_done_accepts_our_result_when_the_turn_count_is_stale():
     driver._baseline = Baseline(
         turn_count=2, last_img_src=None, user_turn_count=1
     )
-    driver._sent_head = normalize_text(
+    driver._sent_norm = normalize_text(
         "This is a TRANSFORMATIVE homage retry"
-    )[:60]
+    )
+    driver._sent_head = driver._sent_norm[:60]
 
     driver.await_done(log=lambda s: None)  # must return, never raise
 
@@ -1479,9 +1491,10 @@ def test_await_done_classifies_a_refusal_despite_a_stale_turn_count():
     driver._baseline = Baseline(
         turn_count=2, last_img_src=None, user_turn_count=0
     )
-    driver._sent_head = normalize_text(
+    driver._sent_norm = normalize_text(
         "This is a TRANSFORMATIVE homage retry"
-    )[:60]
+    )
+    driver._sent_head = driver._sent_norm[:60]
 
     with pytest.raises(ItemRefused) as exc:
         driver.await_done(log=lambda s: None)
@@ -1509,9 +1522,10 @@ def test_await_done_never_accepts_a_turn_before_our_user_turn():
     driver._baseline = Baseline(
         turn_count=0, last_img_src=None, user_turn_count=0
     )
-    driver._sent_head = normalize_text(
+    driver._sent_norm = normalize_text(
         "our Padmé prompt, still awaiting its answer"
-    )[:60]
+    )
+    driver._sent_head = driver._sent_norm[:60]
 
     with pytest.raises(NoImage) as exc:
         driver.await_done(log=lambda s: None)
@@ -1542,11 +1556,18 @@ def test_thread_error_on_our_send_raises_image_gen_failed():
     timeout (live run 18:47:21-18:52:06). Detected structurally, by the
     Retry button count RISING above the pre-submit baseline, and raised
     as ImageGenFailed so the ordinary ladder (whose first rung clicks
-    exactly that button) takes over."""
+    exactly that button) takes over. SOFTENED 2026-08-14 (Zealandia):
+    the banner can coexist with a delivered image, so the raise comes
+    only after the error HOLDS image_ready_timeout_s with no image —
+    still ImageGenFailed, still the ladder, just patient."""
     site = SITES["chatgpt"]
     page = FakePage()
     page.locators[site.image_error_retry_button[0]] = CountLocator(1)
-    driver = SiteDriver(site, FAST, "http://unused")
+    driver = SiteDriver(
+        site,
+        replace(FAST, image_ready_timeout_s=0.05, generation_timeout_s=5.0),
+        "http://unused",
+    )
     driver.page = page
     driver._baseline = Baseline(
         turn_count=0, last_img_src=None, error_turn_count=0
@@ -1565,7 +1586,9 @@ def test_an_older_thread_error_is_not_attributed_to_our_send():
     site = SITES["chatgpt"]
     page = FakePage()
     page.locators[site.image_error_retry_button[0]] = CountLocator(1)
-    driver = SiteDriver(site, FAST, "http://unused")
+    driver = SiteDriver(
+        site, replace(FAST, busy_appear_timeout_s=0.05), "http://unused"
+    )
     driver.page = page
     driver._baseline = Baseline(
         turn_count=0, last_img_src=None, error_turn_count=1
@@ -1573,6 +1596,103 @@ def test_an_older_thread_error_is_not_attributed_to_our_send():
 
     with pytest.raises(NoImage):
         driver.await_done(log=lambda s: None)
+
+
+# --- (k) the 2026-08-14 live-run faces (owner's Zealandia screenshots) --
+
+
+def test_image_wins_over_a_risen_thread_error_banner():
+    """The Zealandia incident (owner 2026-08-14): ChatGPT showed
+    "Something went wrong" + Retry AND still delivered the image in the
+    same turn. The old instant ImageGenFailed made the ladder send
+    "retry" while the finished globe sat unread — the IMAGE must win
+    over the banner."""
+    site = SITES["chatgpt"]
+    img = ImageLocator("https://chatgpt.example/estuary/zealandia")
+    ours = TurnLocator(images={site.result_image[0]: img}, order=20)
+    page = FakePage()
+    page.locators[site.image_error_retry_button[0]] = CountLocator(1)
+    page.locators[site.response_container[0]] = ContainerLocator([ours])
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl("Photorealistic satellite view of Earth, Zealandia", 10)]
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0,
+        last_img_src=None,
+        user_turn_count=0,
+        error_turn_count=0,  # the banner ROSE on our send…
+    )
+    driver._sent_norm = normalize_text(
+        "Photorealistic satellite view of Earth, Zealandia"
+    )
+    driver._sent_head = driver._sent_norm[:60]
+
+    driver.await_done(log=lambda s: None)  # …and the image still wins
+
+
+def test_virtualized_turn_count_drop_is_not_a_vanish():
+    """The SendVanished storm (owner 2026-08-14, live CDP probe):
+    ChatGPT's new UI virtualizes old turns OUT of the DOM
+    (data-is-intersecting), so the user-turn count falls BELOW the
+    pre-submit baseline on a perfectly healthy send. The newest user
+    turn still reads as OUR prompt — the anchor must stand and the
+    result must be accepted, never SendVanished."""
+    site = SITES["chatgpt"]
+    img = ImageLocator("blob:fresh-after-virtualization")
+    ours = TurnLocator(images={site.result_image[0]: img}, order=20)
+    page = FakePage()
+    page.locators[site.response_container[0]] = ContainerLocator([ours])
+    page.locators[site.user_turn[0]] = _ListLocator(
+        # ONE user turn left in the DOM — ours; the baseline saw THREE
+        [_AnchorEl("Ornate circular medallion, aged bronze relief", 10)]
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0, last_img_src=None, user_turn_count=3
+    )
+    driver._sent_norm = normalize_text(
+        "Ornate circular medallion, aged bronze relief"
+    )
+    driver._sent_head = driver._sent_norm[:60]
+
+    driver.await_done(log=lambda s: None)  # must return, never raise
+
+
+def test_collapsed_show_more_prefix_still_anchors():
+    """The visible text of a long prompt is a COLLAPSED prefix ("Show
+    more") — a prefix of the full prompt must read as ours, while an
+    identical-head sibling diverging inside ANCHOR_VERIFY_CHARS must
+    not (that pair is what the old count rule existed for)."""
+    site = SITES["chatgpt"]
+    full = (
+        "Photorealistic satellite view of Earth from orbit, ONE globe"
+        " centred and filling the frame, isolated on a plain"
+        " transparent background, no border, no frame, no ornament,"
+        " no lettering of any kind. The globe is turned to the"
+        " southwest Pacific with New Zealand at the centre of the"
+        " disc and the submerged continent shown as it actually is."
+    )
+    page = FakePage()
+    page.locators[site.user_turn[0]] = _ListLocator(
+        [_AnchorEl(full[:200], 10)]  # the collapsed visible prefix
+    )
+    driver = SiteDriver(site, _anchor_timing(), "http://unused")
+    driver.page = page
+    driver._baseline = Baseline(
+        turn_count=0, last_img_src=None, user_turn_count=1
+    )
+    driver._sent_norm = normalize_text(full)
+    driver._sent_head = driver._sent_norm[:60]
+
+    assert driver._anchor_state() == "ok"
+
+    # the sibling variant: same 60-char head, diverges within the window
+    sibling = full[:80] + " BUT a wholly different continent and framing"
+    page.locators[site.user_turn[0]] = _ListLocator([_AnchorEl(sibling, 10)])
+    assert driver._anchor_state() == "vanished"
 
 
 class _RaisingImageLocator(ImageLocator):
