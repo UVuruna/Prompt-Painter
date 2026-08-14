@@ -294,14 +294,14 @@ class SiteJobsMixin:
             )
             return
         out_base = self._out_base()
-        for sheet in sheets:
-            if sheet.source.resolve().is_relative_to(out_base):
-                messagebox.showerror(
-                    "PromptPainter",
-                    f"{sheet.source.name} lives inside the output folder"
-                    " — sources are READ ONLY; pick another output.",
-                )
-                return
+        # NO containment check (owner decree 2026-08-14): the Output IS
+        # the consuming project's root and its sheets live INSIDE it
+        # (Watch Academy: shared/research/prompts/), so "the sheet is
+        # under the output folder" is the NORMAL, correct setup — it
+        # refused every real run. READ ONLY is guaranteed by what the
+        # tool writes, not by where the sheet sits: image dests,
+        # _state/, EXTRA/ and <stem>_report.txt. A .md is never a write
+        # target.
         # the progress sidecar and report are keyed by filename stem, so
         # two queued themes with the same filename would collide
         stems = [s.source.stem for s in sheets]
@@ -550,14 +550,14 @@ class SiteJobsMixin:
             )
             return
         out_base = self._out_base()
-        for sheet in sheets:
-            if sheet.source.resolve().is_relative_to(out_base):
-                messagebox.showerror(
-                    "PromptPainter",
-                    f"{sheet.source.name} lives inside the output folder"
-                    " — sources are READ ONLY; pick another output.",
-                )
-                return
+        # NO containment check (owner decree 2026-08-14): the Output IS
+        # the consuming project's root and its sheets live INSIDE it
+        # (Watch Academy: shared/research/prompts/), so "the sheet is
+        # under the output folder" is the NORMAL, correct setup — it
+        # refused every real run. READ ONLY is guaranteed by what the
+        # tool writes, not by where the sheet sits: image dests,
+        # _state/, EXTRA/ and <stem>_report.txt. A .md is never a write
+        # target.
         stems = [s.source.stem for s in sheets]
         dupes = sorted({s for s in stems if stems.count(s) > 1})
         if dupes:

@@ -226,15 +226,12 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: --site is required (or use --dry-run)", file=sys.stderr)
         return 2
 
+    # NO containment check (owner decree 2026-08-14): the Output IS the
+    # consuming project's root and its sheets live INSIDE it, so that
+    # test refused every real run. READ ONLY is guaranteed by what the
+    # tool writes (image dests, _state/, EXTRA/, <stem>_report.txt) —
+    # a .md is never a write target.
     out_base = args.out.resolve()
-    for sheet in sheets:
-        if sheet.source.resolve().is_relative_to(out_base):
-            print(
-                f"ERROR: {sheet.source.name} lives inside the output"
-                " folder — sources are READ ONLY; pick another output.",
-                file=sys.stderr,
-            )
-            return 2
 
     post_save = _build_post_save(
         do_bg=not args.no_bgfix,

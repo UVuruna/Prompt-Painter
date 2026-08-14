@@ -423,3 +423,36 @@ def test_no_safer_retry_by_default(tmp_path):
     assert generated == 1
     # no retry: item 0 submitted once, item 1 once
     assert len(driver.submitted) == 2
+
+
+def test_sheet_inside_the_output_folder_runs_and_is_never_written(tmp_path):
+    """A sheet living INSIDE the output folder is the normal setup, not
+    an error (owner decree 2026-08-14).
+
+    The Output is the consuming project's ROOT and its prompt sheets
+    live inside it (Watch Academy: shared/research/prompts/). The GUI
+    and CLI used to refuse that outright — "sources are READ ONLY; pick
+    another output" — which rejected every real run. READ ONLY is a
+    promise about what the tool WRITES, so this proves the promise
+    directly: the run works, and the sheet file is byte-identical
+    afterwards.
+    """
+    out = tmp_path / "project"
+    sheet_dir = out / "shared" / "research" / "prompts"
+    sheet_dir.mkdir(parents=True)
+    source = sheet_dir / "mood_prompts.md"
+    source.write_text("# Mood\n", encoding="utf-8")
+    before = source.read_bytes()
+
+    sheet = Sheet(
+        "Mood", source,
+        (PromptItem("Glory", "masters/weeks/mood/Glory.png", "p1", 1),),
+        (), (),
+    )
+    driver = FakeDriver(SITES["gemini"])
+
+    generated = run_sheet(sheet, driver, out, "gemini", FAST, log=lambda _: None)
+
+    assert generated == 1
+    assert (out / "masters/weeks/mood/Glory_gem.png").exists()
+    assert source.read_bytes() == before  # the source was never touched
