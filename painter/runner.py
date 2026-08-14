@@ -149,6 +149,7 @@ def run_sheet(
     on_degrade: Callable[[float | None], str] | None = None,
     reference_dir: Path | None = None,
     require_input_image: bool = False,
+    report_stem: str | None = None,
 ) -> int:
     """Generate every pending item of a clean sheet; returns the count.
 
@@ -214,7 +215,10 @@ def run_sheet(
     state_dir.mkdir(parents=True, exist_ok=True)
     run_report = (
         RunReport(
-            state_dir / (sheet.source.stem + REPORT_SUFFIX),
+            # report_stem (2026-08-14): the queue-unique stem — two
+            # same-named sheets in different folders no longer share
+            # (or refuse over) one report file; see unique_report_stems
+            state_dir / ((report_stem or sheet.source.stem) + REPORT_SUFFIX),
             sheet.theme,
             driver.site.name,
         )

@@ -23,6 +23,43 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def unique_report_stems(sources: list[Path]) -> dict[str, str]:
+    """Per-sheet report stem, unique across the whole queue — keyed
+    by ``str(source)``.
+
+    The report file is keyed by the sheet's filename stem — but the
+    consuming project may legitimately hold SAME-NAMED sheets in
+    different folders (Watch Academy 2026-08-14:
+    ``continents/continents_prompts.md`` AND
+    ``weekday/continents_prompts.md``). The old behavior refused the
+    whole run with a rename demand — the tool dictating another
+    project's structure, the exact sin THE PATH IN THE SHEET IS THE
+    PATH outlawed. Instead, colliding stems absorb path segments from
+    the right (``weekday__continents_prompts``) until they differ; a
+    lone stem stays bare, so every existing report file keeps its
+    name."""
+    stems: dict[str, str] = {
+        str(p): Path(p).stem for p in sources
+    }
+    depth = 1
+    while True:
+        counts: dict[str, int] = {}
+        for v in stems.values():
+            counts[v] = counts.get(v, 0) + 1
+        clashing = [k for k, v in stems.items() if counts[v] > 1]
+        if not clashing:
+            return stems
+        if depth >= max(len(Path(k).parts) for k in clashing):
+            # identical full paths — the queue de-dups, so this is
+            # unreachable in practice; never loop forever on it
+            return stems
+        for key in clashing:
+            parts = Path(key).parts
+            take = parts[-(depth + 1) : -1] + (Path(key).stem,)
+            stems[key] = "__".join(take)
+        depth += 1
+
+
 class RunReport:
     """``<out_root>/<sheet-stem>_report.txt`` — appended per run.
 

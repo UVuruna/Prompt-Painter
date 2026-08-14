@@ -302,19 +302,10 @@ class SiteJobsMixin:
         # tool writes, not by where the sheet sits: image dests,
         # _state/, EXTRA/ and <stem>_report.txt. A .md is never a write
         # target.
-        # the progress sidecar and report are keyed by filename stem, so
-        # two queued themes with the same filename would collide
-        stems = [s.source.stem for s in sheets]
-        dupes = sorted({s for s in stems if stems.count(s) > 1})
-        if dupes:
-            messagebox.showerror(
-                "PromptPainter",
-                "Two queued collections share a filename: "
-                + ", ".join(dupes)
-                + ".\nTheir progress/report files would collide — rename"
-                " one before running.",
-            )
-            return
+        # NO rename demand (owner 2026-08-14, the two continents
+        # sheets): same-named sheets in different folders are the
+        # consuming project's legitimate structure — their reports are
+        # disambiguated per queue (unique_report_stems), never refused.
 
         panel = self.agents[key]
         # THE PACE is a switch, not four typed numbers (owner
@@ -558,17 +549,8 @@ class SiteJobsMixin:
         # tool writes, not by where the sheet sits: image dests,
         # _state/, EXTRA/ and <stem>_report.txt. A .md is never a write
         # target.
-        stems = [s.source.stem for s in sheets]
-        dupes = sorted({s for s in stems if stems.count(s) > 1})
-        if dupes:
-            messagebox.showerror(
-                "PromptPainter",
-                "Two queued collections share a filename: "
-                + ", ".join(dupes)
-                + ".\nTheir progress/report files would collide — rename"
-                " one before running.",
-            )
-            return
+        # NO rename demand (owner 2026-08-14) — same-named sheets are
+        # disambiguated per queue (unique_report_stems), never refused.
 
         panel = self._tool_panels["api_image_gen"]
         if panel.access_gated:
@@ -722,7 +704,12 @@ class SiteJobsMixin:
         # would stay disabled forever
         try:
             from painter.driver import DriverError, TerminalState
+            from painter.run_report import unique_report_stems
             from painter.runner import run_sheet
+
+            report_stems = unique_report_stems(
+                [s.source for s in sheets]
+            )
 
             t_site = time.monotonic()
             # F4g (owner 2026-07-29): no manual "Open Chrome" step —
@@ -770,6 +757,7 @@ class SiteJobsMixin:
                         on_degrade=on_degrade,
                         reference_dir=reference_dir,
                         require_input_image=require_input_image,
+                        report_stem=report_stems[str(sheet.source)],
                     )
                     done_sheets += 1
                     log(f"collection done: {generated} image(s) into {out_base}")

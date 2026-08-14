@@ -262,8 +262,10 @@ def main(argv: list[str] | None = None) -> int:
     # imported lazily so --dry-run works without playwright installed
     from painter.chrome import ChromeError, ensure_chrome
     from painter.driver import DriverError, SiteDriver, TerminalState
+    from painter.run_report import unique_report_stems
     from painter.runner import run_sheet
 
+    report_stems = unique_report_stems([s.source for s in sheets])
     try:
         state = ensure_chrome((site.url,), args.cdp)
     except ChromeError as exc:
@@ -296,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
                 safer_retry=args.safer_retry,
                 continue_nudge=not args.no_continue_nudge,
                 new_chat_per_folder=(args.new_chat == "folder"),
+                report_stem=report_stems[str(sheet.source)],
             )
             total += generated
             if (
