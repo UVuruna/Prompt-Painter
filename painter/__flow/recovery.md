@@ -32,9 +32,15 @@ flowchart TD
 
 Notes:
 
-- Only `ImageGenFailed` is caught per rung — a quota (`TerminalState`)
-  or refusal (`ItemRefused`) surfacing mid-recovery propagates loudly
-  to the runner's own handlers, exactly as on a first attempt.
+- Every per-item verdict in `RUNG_FAILURES` (`ImageGenFailed`,
+  `GenerationTimeout`, `NoImage`, `SendVanished`, `SendNotConfirmed`)
+  hands the ladder to the NEXT rung (owner 2026-08-14, the 15:56:37
+  stop: rung ①'s own wait timed out after the Retry click and only
+  `ImageGenFailed` was caught — the timeout flew past the runner's
+  `except ItemRefused` around the ladder and killed the site before
+  the refresh rung could run). A quota (`TerminalState`) or refusal
+  (`ItemRefused`) surfacing mid-recovery still propagates loudly to
+  the runner's own handlers, exactly as on a first attempt.
 - `interruptible_sleep` wakes every 0.5 s to honour Stop; True =
   Stop cut the wait — the ladder abandons recovery the same way as
   exhaustion (the raise), never half-continues.

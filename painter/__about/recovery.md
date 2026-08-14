@@ -38,8 +38,11 @@ button, ② paced `IMAGE_RETRY_NUDGE` resends, ③ escalation rounds
 (wait → refresh → new session → resend the WHOLE prompt, re-attaching
 input images). First rung that yields an image returns; every rung
 spent re-raises `ImageGenFailed` — the worker STOPS (owner's "GASI"),
-files on disk resume. Only `ImageGenFailed` is caught per rung; a
-quota/refusal mid-recovery propagates loudly.
+files on disk resume. Every verdict in `RUNG_FAILURES` (ImageGenFailed,
+GenerationTimeout, NoImage, SendVanished, SendNotConfirmed) hands the
+ladder to the next rung (owner 2026-08-14 — rung ①'s timeout used to
+kill the site before the refresh rung); a quota/refusal mid-recovery
+propagates loudly.
 
 ## Design Decisions
 - **No import back into the runner.** The runner imports THIS module,

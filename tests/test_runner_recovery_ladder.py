@@ -523,6 +523,52 @@ def test_generation_timeout_on_the_first_attempt_skips_the_item(tmp_path):
     assert any("timed out" in line for line in logs)
 
 
+def test_timeout_inside_rung1_hands_the_ladder_on(tmp_path):
+    """The 15:56:37 ChatGPT stop (owner 2026-08-14, UV/prompt.txt:967):
+    rung 1 clicked the site's Retry button and its OWN ``await_done``
+    then burned the whole 420s — the ``GenerationTimeout`` was caught
+    nowhere (the ladder caught only ``ImageGenFailed`` per rung, and
+    the runner wraps the ladder in ``except ItemRefused`` alone), so
+    one stuck Retry ended the site with zero transcript rows. Every
+    per-item verdict inside a rung now hands the ladder to the NEXT
+    rung — here escalation round 1's refresh + fresh session recovers,
+    exactly the refresh the owner had to click by hand."""
+    class RetryClickThenTimeout(FakeDriver):
+        def click_error_retry(self, log=print):
+            self.retry_clicks += 1
+            return True
+
+        def await_done(self, log=print):
+            # rung 1's wait after the Retry click times out
+            if self.retry_clicks == 1 and self.new_chats == 0 \
+                    and self.submitted == ["prompt 0"]:
+                raise GenerationTimeout(
+                    "ChatGPT: no result for OUR turn after 420s"
+                )
+
+        def extract_image(self):
+            # rung 2's "retry" resends keep failing too — only the
+            # fresh session (the refresh rung) clears the wedged page
+            if self.new_chats == 0:
+                raise ImageGenFailed("ChatGPT: image generation failed")
+            return super().extract_image()
+
+    sheet = make_sheet(tmp_path, n=1)
+    out = tmp_path / "out"
+    logs: list[str] = []
+    driver = RetryClickThenTimeout(SITES["chatgpt"])
+    generated = run_sheet(
+        sheet, driver, out, "chatgpt", FAST, log=logs.append,
+    )  # must not raise — the timeout stays inside the ladder
+
+    assert generated == 1
+    assert (out / "fake" / "img_0_gpt.png").exists()
+    assert driver.retry_clicks == 1
+    # the ladder reached the refresh + new-session rung on its own
+    assert driver.refreshes >= 1 and driver.new_chats >= 1
+    assert any("RECOVERED (fresh session)" in line for line in logs)
+
+
 def test_send_not_confirmed_resends_then_continues(tmp_path):
     """The 17:10:16 Gemini stop (UV/prompt.txt:4590): "send NOT
     confirmed within 20s" was a bare ``DriverError``, so one unaccepted

@@ -25,7 +25,31 @@ from painter.config import (
     IMAGE_FAILED_RETRY_MAX,
     IMAGE_RETRY_NUDGE,
 )
-from painter.driver import ImageGenFailed, SiteDriver
+from painter.driver import (
+    GenerationTimeout,
+    ImageGenFailed,
+    NoImage,
+    SendNotConfirmed,
+    SendVanished,
+    SiteDriver,
+)
+
+# The verdicts a RUNG may fail with and still hand the ladder to the
+# next rung (owner 2026-08-14, the 15:56:37 stop: rung 1's own
+# await_done timed out after the Retry click, and only ImageGenFailed
+# was caught — the GenerationTimeout flew past the runner's per-item
+# handlers, which wrap this ladder in `except ItemRefused` alone, and
+# killed the whole site. 0.0.271 fixed the runner's except sets but
+# left the ladder's inside untouched). Quota (TerminalState) and
+# refusals (ItemRefused) still propagate: the quota stop is correct,
+# and the runner routes a mid-ladder refusal into the safer retry.
+RUNG_FAILURES = (
+    ImageGenFailed,
+    GenerationTimeout,
+    NoImage,
+    SendVanished,
+    SendNotConfirmed,
+)
 
 # structural aliases matching painter.runner's own (kept local — the
 # runner imports THIS module, never the other way around)
@@ -86,9 +110,11 @@ def recover_image_failed(
     yields an image. When every rung is spent the ladder re-raises
     ``ImageGenFailed`` — the worker STOPS (owner's "GASI"): finished
     items are safe on disk, so a restart resumes past them. A Stop
-    request during any wait abandons the ladder the same way. Only
-    ``ImageGenFailed`` is caught per rung; a quota/refusal that surfaces
-    mid-recovery propagates loudly, exactly as on a first attempt."""
+    request during any wait abandons the ladder the same way. Every
+    per-item verdict in ``RUNG_FAILURES`` hands the ladder to the next
+    rung (owner 2026-08-14 — rung 1's timeout used to kill the site); a
+    quota/refusal that surfaces mid-recovery propagates loudly, exactly
+    as on a first attempt."""
     reason = str(exc)
 
     # rung 1 — the site's own Retry button (same chat, no re-typing)
@@ -100,7 +126,7 @@ def recover_image_failed(
             data = driver.extract_image()
             log("    site Retry button RECOVERED")
             return data, t_send
-    except ImageGenFailed as again:
+    except RUNG_FAILURES as again:
         reason = str(again)
 
     # rung 2 — resend the site's own "retry" word, paced
@@ -119,7 +145,7 @@ def recover_image_failed(
             data, t_send = generate_one(IMAGE_RETRY_NUDGE)
             log("    retry RECOVERED")
             return data, t_send
-        except ImageGenFailed as again:
+        except RUNG_FAILURES as again:
             reason = str(again)
 
     # rung 3 — escalation rounds: wait -> refresh -> new session ->
@@ -143,7 +169,7 @@ def recover_image_failed(
             data, t_send = generate_one(base, attach=input_image_paths)
             log(f"    escalation round {rnd} RECOVERED (fresh session)")
             return data, t_send
-        except ImageGenFailed as again:
+        except RUNG_FAILURES as again:
             reason = str(again)
 
     # every rung spent — stop the worker (finished work is safe on disk)
