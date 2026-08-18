@@ -12,11 +12,13 @@ sheet, resumable, paced, sources strictly read-only.
 
 **Status:** live — first supervised runs succeeded 2026-07-17.
 **GitHub:** [UVuruna/Prompt-Painter](https://github.com/UVuruna/Prompt-Painter)
-**The handover pack: [CLAUDE.md](CLAUDE.md)** (the BINDING spec —
-decisions, workflow, DOM states, build order) **+
-[PLAN.md](PLAN.md)** (the design discussion behind it) **+
-[REWORK.md](REWORK.md)** (the BIG REWORK plan, owner Q&A
-2026-07-29 — wins over older CLAUDE.md sections until folded in) **+
+**The handover pack: [CLAUDE.md](CLAUDE.md)** (the binding spec — stack,
+laws, pointers) **+ [docs/DECISIONS.md](docs/DECISIONS.md)** (every owner
+decree with its date) **+
+[docs/history/PLAN-2026-07-16.md](docs/history/PLAN-2026-07-16.md)** (the
+original design discussion) **+
+[docs/history/REWORK-2026-07-29.md](docs/history/REWORK-2026-07-29.md)**
+(the BIG REWORK plan, owner Q&A 2026-07-29 — all seven phases LANDED) **+
 [UI-SKETCH.md](UI-SKETCH.md)** (the setup-screen layout reference,
 implemented and verified 2026-07-30).
 First consumer: Watch Academy prompt sheets.
