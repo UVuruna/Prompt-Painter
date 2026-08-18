@@ -53,7 +53,8 @@ scrolls between PAIRS — each pair is itself horizontal).
 - [Dashboard Support Helpers](dash_helpers.md) — `_scaled_photo`
 - [Scroll](scroll.md) — `ScrollFrame` (vertical for before/after,
   horizontal for the filmstrip)
-- [Theme](theme.md) — `THEME_TOPLEVELS`, `skin_toplevel`
+- [Theme](theme.md) — `finish_toplevel` (the shared Toplevel setup
+  ritual), `THEME_TOPLEVELS` (unregister on `<Destroy>`)
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`
 
 ### Used by

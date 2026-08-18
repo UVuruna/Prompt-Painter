@@ -95,7 +95,10 @@ Treeview tag-name constants (`TOOL_CHANGED_TAG`, `TOOL_SKIP_TAG`). Key
 functions: `apply_theme`/`_apply_theme_now` (the coherent flip),
 `setup_style` (the ttk style patch), `skin_text`/`skin_listbox`/
 `skin_canvas`/`skin_toplevel`/`skin_tree` + `recolor_tk_registry` (the
-plain-tk skin registry), `smooth_transition`/`_snapshot_overlay`/
+plain-tk skin registry), `finish_toplevel` (the one Toplevel setup
+ritual — title, minsize, skin, THEME_TOPLEVELS enrolment — extracted
+from five identical constructor blocks, audit 2026-08-18 Violation 1),
+`smooth_transition`/`_snapshot_overlay`/
 `_fade_out_overlay` (the shared cover-and-fade transition),
 `register_painter_day` (the custom light ttkbootstrap theme,
 registered once, idempotent).

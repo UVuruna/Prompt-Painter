@@ -32,7 +32,7 @@ from PIL import Image
 
 from .dash_helpers import _scaled_photo
 from .logic import _fix_result_ui
-from .theme import THEME_TOPLEVELS, skin_text, skin_toplevel
+from .theme import THEME_TOPLEVELS, finish_toplevel, skin_text
 from .viewer_shared import (
     DOC_A4_RATIO,
     DOC_CHROME_PAD_PX,
@@ -62,10 +62,7 @@ class DocWindow(tk.Toplevel):
         on_website_fix: Callable[[], tuple[str, str]] | None = None,
     ):
         super().__init__(master)
-        self.title(title)
-        self.minsize(DOC_MIN_W, DOC_MIN_H)
-        skin_toplevel(self)  # bg registered so a flip re-tints the window
-        THEME_TOPLEVELS.append(self)  # flip coherently with the main window
+        finish_toplevel(self, title=title, minsize=(DOC_MIN_W, DOC_MIN_H))
         self._raw = raw_markdown
         self._copy_text = copy_text if copy_text is not None else raw_markdown
         self._image_path = image_path

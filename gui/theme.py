@@ -174,6 +174,34 @@ def recolor_tk_registry() -> None:
 THEME_TOPLEVELS: list = []
 
 
+def finish_toplevel(
+    win: tk.Toplevel,
+    *,
+    title: str | None = None,
+    minsize: tuple[int, int] | None = None,
+) -> None:
+    """The one setup ritual every theme-aware Toplevel ends its own
+    ``__init__`` head with: name it, floor it, register its background
+    with the tk skin registry and enrol it in THEME_TOPLEVELS so a
+    Day/Night flip re-tints it coherently with the main window.
+
+    Five constructors carried this block verbatim (DocWindow,
+    BeforeAfterWindow, StepRestoreWindow, SelectWindow, ImageViewer) —
+    audit 2026-08-18 Violation 1. ``title`` is optional because
+    ImageViewer names itself later from the image's stem.
+
+    The un-registration stays with each window's own ``<Destroy>``
+    binding: they differ (some check ``event.widget is self``, one does
+    not) and a window's teardown is its own business.
+    """
+    if title is not None:
+        win.title(title)
+    if minsize is not None:
+        win.minsize(*minsize)
+    skin_toplevel(win)  # bg registered so a flip re-tints the window
+    THEME_TOPLEVELS.append(win)  # flip coherently with the main window
+
+
 def _apply_theme_now(name: str) -> None:
     """The actual coherent flip (no animation): swap the ttkbootstrap
     theme + re-run setup_style (the ttk half), flip the customtkinter

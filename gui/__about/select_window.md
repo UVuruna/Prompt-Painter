@@ -31,7 +31,8 @@ the real performance engineering in this file.
 - [Painter (folder)](../../painter/___painter.md) — `config`
   (`RESIZE_SETTLE_MS`, `SITES`), `sheet_parser.Sheet`
 - [Scroll](scroll.md) — `ScrollFrame`
-- [Theme](theme.md) — `THEME_TOPLEVELS`, `skin_toplevel`
+- [Theme](theme.md) — `finish_toplevel` (the shared Toplevel setup
+  ritual), `THEME_TOPLEVELS` (unregister on `<Destroy>`)
 - [Viewer Shared Rules](viewer_shared.md) — `DOC_HEIGHT_FRAC`/
   `DOC_MAX_FRAC`, the "tall open" / "never bigger than screen" clamps
   this window shares with every viewer Toplevel — imported from the

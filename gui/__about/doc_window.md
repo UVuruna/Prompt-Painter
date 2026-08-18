@@ -39,7 +39,8 @@ the [flow diagram](../__flow/doc_window.md).
   transparency-checkerboard-composited thumbnail)
 - [Logic](logic.md) — `_fix_result_ui` (the pure Fixer result-to-UI
   mapping `_apply_fix_result` applies)
-- [Theme](theme.md) — `THEME_TOPLEVELS`, `skin_text`, `skin_toplevel`
+- [Theme](theme.md) — `finish_toplevel` (the shared Toplevel setup
+  ritual), `THEME_TOPLEVELS` (unregister on `<Destroy>`), `skin_text`
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`, `status`,
   `tk_font`
 - `gui.dialogs.AI_POLL_MS` — `_arm_fix_poll`'s OWN Fixer poll

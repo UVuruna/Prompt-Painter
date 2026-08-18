@@ -21,7 +21,7 @@ import ttkbootstrap as tb
 from painter.config import RESIZE_SETTLE_MS, SITES
 from painter.sheet_parser import Sheet
 from .scroll import ScrollFrame
-from .theme import THEME_TOPLEVELS, skin_toplevel
+from .theme import THEME_TOPLEVELS, finish_toplevel
 from .viewer_shared import DOC_HEIGHT_FRAC, DOC_MAX_FRAC
 from .widgets import folder_of, rounded_button, status, tk_font, wrap_bar_label
 
@@ -93,10 +93,10 @@ class SelectWindow(tk.Toplevel):
         site_keys: list[str] | None = None,
     ):
         super().__init__(gui.root)
-        self.title("Select images per site")
-        self.minsize(SELECT_MIN_W, SELECT_OPEN_H)
-        skin_toplevel(self)  # bg registered so a flip re-tints the window
-        THEME_TOPLEVELS.append(self)  # flip coherently with the main window
+        finish_toplevel(
+            self, title="Select images per site",
+            minsize=(SELECT_MIN_W, SELECT_OPEN_H),
+        )
         self._gui = gui
         # F4d (owner 2026-07-29): only the TICKED sites' columns show —
         # the caller passes them; None keeps every site (tests, tools)

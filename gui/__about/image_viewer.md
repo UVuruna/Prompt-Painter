@@ -46,7 +46,8 @@ explicitly.
   `ai_check_doc_md` (the Check section renders the SAME text
   `DashPanel._show_check` shows)
 - [Scroll](scroll.md) — `ScrollFrame`
-- [Theme](theme.md) — `THEME_TOPLEVELS`, `skin_text`, `skin_toplevel`
+- [Theme](theme.md) — `finish_toplevel` (the shared Toplevel setup
+  ritual), `THEME_TOPLEVELS` (unregister on `<Destroy>`), `skin_text`
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`, `tk_font`
 
 ### Used by

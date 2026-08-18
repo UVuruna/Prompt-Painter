@@ -22,7 +22,7 @@ from typing import Callable
 from painter.config import JOBTEMP_STEP_LABEL, STEP_RESTORE_CURRENT_LABEL
 from .dash_helpers import _scaled_photo
 from .scroll import ScrollFrame
-from .theme import THEME_TOPLEVELS, skin_toplevel
+from .theme import THEME_TOPLEVELS, finish_toplevel
 from .viewer_shared import (
     DOC_HEIGHT_FRAC,
     DOC_MAX_FRAC,
@@ -65,10 +65,7 @@ class BeforeAfterWindow(tk.Toplevel):
         subtitle=None,
     ):
         super().__init__(master)
-        self.title(title)
-        self.minsize(DOC_MIN_W, DOC_MIN_H)
-        skin_toplevel(self)  # bg registered so a flip re-tints the window
-        THEME_TOPLEVELS.append(self)
+        finish_toplevel(self, title=title, minsize=(DOC_MIN_W, DOC_MIN_H))
         self._restore_cb = restore_cb
         self._photos: list = []  # keep the PhotoImages alive
         self._pairs = list(pairs)
@@ -280,10 +277,7 @@ class StepRestoreWindow(tk.Toplevel):
         live_path: Path, *, on_restored: Callable[[], None] | None = None,
     ):
         super().__init__(master)
-        self.title(title)
-        self.minsize(DOC_MIN_W, DOC_MIN_H)
-        skin_toplevel(self)  # bg registered so a flip re-tints the window
-        THEME_TOPLEVELS.append(self)
+        finish_toplevel(self, title=title, minsize=(DOC_MIN_W, DOC_MIN_H))
         self._temp = temp
         self._rel = rel
         self._live_path = live_path

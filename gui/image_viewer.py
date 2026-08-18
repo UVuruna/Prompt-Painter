@@ -19,7 +19,7 @@ from typing import Callable
 
 from .dash_helpers import _scaled_photo, ai_check_doc_md
 from .scroll import ScrollFrame
-from .theme import THEME_TOPLEVELS, skin_text, skin_toplevel
+from .theme import THEME_TOPLEVELS, finish_toplevel, skin_text
 from .viewer_shared import (
     DOC_MAX_FRAC,
     _copy_to_clipboard,
@@ -123,9 +123,9 @@ class ImageViewer(tk.Toplevel):
         self._check_open = False
         self._steps_open = False
 
-        self.minsize(IMAGE_VIEWER_MIN_W, IMAGE_VIEWER_MIN_H)
-        skin_toplevel(self)  # bg registered so a flip re-tints the window
-        THEME_TOPLEVELS.append(self)
+        finish_toplevel(
+            self, minsize=(IMAGE_VIEWER_MIN_W, IMAGE_VIEWER_MIN_H),
+        )
 
         width = min(
             IMAGE_VIEWER_W, int(self.winfo_screenwidth() * DOC_MAX_FRAC)

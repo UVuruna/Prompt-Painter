@@ -217,6 +217,7 @@ from .theme import (
     _skin,
     _snapshot_overlay,
     apply_theme,
+    finish_toplevel,
     recolor_tk_registry,
     register_painter_day,
     setup_style,
