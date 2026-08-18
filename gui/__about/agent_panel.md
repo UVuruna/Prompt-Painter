@@ -117,7 +117,8 @@ disagree.
   degrade/fixer-mode/helper choice lists, the BG mode/reach labels,
   the upscale/aspect defaults, `TIMING`)
 - [Aspect Ratio Canvas](aspect_canvas.md) — `AspectRatioCanvas` (the
-  Force Aspect Ratio block)
+  Force Aspect Ratio block) + `apply_typed_wh` (the shared typed-W/H
+  reshape behind `_on_force_aspect_wh_typed`)
 - [Filter Editor](filter_editor.md) — `FilterEditor` (the upscale
   gate's embedded condition stack)
 - [Icons](icons.md) — `icon()` (the site-logo header images: this

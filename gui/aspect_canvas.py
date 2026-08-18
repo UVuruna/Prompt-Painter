@@ -33,6 +33,32 @@ ASPECT_CANVAS_LABEL_GAP_PX = 10    # gap between the arena and the dual label
 ASPECT_CANVAS_LABEL_RESERVE_PX = 24  # vertical space reserved for the label
 
 
+def apply_typed_wh(
+    w_var: tk.StringVar, h_var: tk.StringVar, canvas: "AspectRatioCanvas",
+) -> None:
+    """Live-reshape a canvas from its W/H entry pair as the owner types.
+
+    A bad or incomplete value is a normal MID-EDIT typing state, not an
+    error: it is silently skipped and the canvas keeps its last good
+    shape — final validation happens on Start (``force_aspect_ratio()``
+    / ``target_ratio()``), which is where a ValueError belongs.
+
+    The one owner of that read-parse-guard-apply step. Three panels bound
+    it to their two StringVars' ``trace_add("write", ...)`` with the same
+    seven statements each — AgentPanel, ApiImageGenPanel and
+    AspectSettingsPanel (audit 2026-08-18 Violation 3, a 3-way clone one
+    statement under the clone guard's own threshold).
+    """
+    try:
+        w = int(w_var.get().strip())
+        h = int(h_var.get().strip())
+    except ValueError:
+        return
+    if w <= 0 or h <= 0:
+        return
+    canvas.set_ratio(w, h)
+
+
 class AspectRatioCanvas(tk.Canvas):
     """A live, draggable preview of the TARGET output ratio (GUI rework
     Phase 5) — separate from Phase 4's ``FilterEditor`` (which picks

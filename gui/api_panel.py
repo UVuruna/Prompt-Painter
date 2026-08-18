@@ -54,7 +54,7 @@ from painter.config import (
     UPSCALE_MIN_SIDE_DEFAULT,
     theme_pair,
 )
-from .aspect_canvas import AspectRatioCanvas
+from .aspect_canvas import AspectRatioCanvas, apply_typed_wh
 from .filter_editor import FilterEditor
 from .icons import icon
 from .logic import _upscale_params_from_side_and_filter
@@ -469,14 +469,10 @@ class ApiImageGenPanel(ttk.Frame):
         self.force_aspect_h_var.set(str(h))
 
     def _on_force_aspect_wh_typed(self, *_args) -> None:
-        try:
-            w = int(self.force_aspect_w_var.get().strip())
-            h = int(self.force_aspect_h_var.get().strip())
-        except ValueError:
-            return
-        if w <= 0 or h <= 0:
-            return
-        self._force_aspect_canvas.set_ratio(w, h)
+        apply_typed_wh(
+            self.force_aspect_w_var, self.force_aspect_h_var,
+            self._force_aspect_canvas,
+        )
 
     def force_aspect_ratio(self) -> tuple[int, int]:
         """ValueError propagates to the caller's Start validation, same

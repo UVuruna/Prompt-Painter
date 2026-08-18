@@ -112,7 +112,8 @@ a plain prompt; the actual call still happens in `extract_image`.
   `_populate_model_dropdowns`, `_on_model_pick` — mirrors the
   original file's own lazy-import convention)
 - [Aspect Ratio Canvas](aspect_canvas.md) — `AspectRatioCanvas` (the
-  Force Aspect Ratio target editor)
+  Force Aspect Ratio target editor) + `apply_typed_wh` (the shared
+  typed-W/H reshape behind `_on_force_aspect_wh_typed`)
 - [Filter Editor](filter_editor.md) — `FilterEditor` (the upscale
   gate's embedded condition stack)
 - [Icons](icons.md) — `icon()` (the job-logo header image)

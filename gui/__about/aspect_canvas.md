@@ -30,7 +30,12 @@ fields; both current hosts (`AgentPanel`'s Force Aspect Ratio block,
 parsing both fields and calling `set_ratio` — with a bad/incomplete
 value silently skipped as a normal mid-typing state rather than an
 error dialog on every keystroke (final validation happens on
-Start/Run); that parsing itself lives in the host, not this widget.
+Start/Run); that parsing lives in this module's own free function
+`apply_typed_wh(w_var, h_var, canvas)`, NOT inside the widget — the
+canvas draws, the helper reads the host's two StringVars. The three
+hosts (`AgentPanel`, `ApiImageGenPanel`, `AspectSettingsPanel`) each
+carried the same seven statements before the 2026-08-18 audit named it
+Violation 3.
 
 **Drag math.** Each of the 4 edges (not just 2 axes) is tracked
 individually. Grabbing the RIGHT edge clamps its effective x to never
@@ -69,6 +74,16 @@ refactor, step 3/8).
   flip — both non-modal, LIVE parts of the main window (a fully-modal
   host, like the old `AspectRatioDialog`, never needed this since a
   flip cannot happen while a `grab_set` dialog is open)
+
+## Functions
+
+### apply_typed_wh(w_var, h_var, canvas)
+The one owner of the typed-W/H → `set_ratio` step: read both
+StringVars, parse, skip a bad or incomplete MID-EDIT value silently,
+skip a non-positive one, then reshape the canvas. A free function, not
+a method or a mixin — its three hosts have three different base classes
+(`AgentPanel`/`ApiImageGenPanel` frames and a `ToolSettingsPanel`
+subclass), and a helper that needs no shared base fits all three.
 
 ## Classes
 

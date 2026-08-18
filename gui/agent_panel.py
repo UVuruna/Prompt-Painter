@@ -61,7 +61,7 @@ from painter.config import (
     UPSCALE_MIN_SIDE_DEFAULT,
     theme_pair,
 )
-from .aspect_canvas import AspectRatioCanvas
+from .aspect_canvas import AspectRatioCanvas, apply_typed_wh
 from .filter_editor import FilterEditor
 from .icons import icon
 from .logic import _upscale_params_from_side_and_filter
@@ -721,19 +721,13 @@ class AgentPanel(ttk.Labelframe):
         self.force_aspect_h_var.set(str(h))
 
     def _on_force_aspect_wh_typed(self, *_args) -> None:
-        """Live-reshape the canvas as the owner types a new W/H. A bad
-        or incomplete value (mid-edit) is a normal typing state, not an
-        error — silently skipped, same as
-        ``AspectRatioDialog._on_wh_typed``; final validation happens in
-        ``force_aspect_ratio()`` on Start."""
-        try:
-            w = int(self.force_aspect_w_var.get().strip())
-            h = int(self.force_aspect_h_var.get().strip())
-        except ValueError:
-            return
-        if w <= 0 or h <= 0:
-            return
-        self._force_aspect_canvas.set_ratio(w, h)
+        """Live-reshape the canvas as the owner types a new W/H — the
+        shared ``apply_typed_wh`` does the read-parse-guard-apply; final
+        validation happens in ``force_aspect_ratio()`` on Start."""
+        apply_typed_wh(
+            self.force_aspect_w_var, self.force_aspect_h_var,
+            self._force_aspect_canvas,
+        )
 
     def force_aspect_ratio(self) -> tuple[int, int]:
         """The Force-Aspect target ratio — ValueError propagates to the

@@ -38,7 +38,7 @@ from painter.config import (
     UPSCALE_MINDIM_STEP,
     UPSCALE_MIN_SIDE_DEFAULT,
 )
-from ..aspect_canvas import AspectRatioCanvas
+from ..aspect_canvas import AspectRatioCanvas, apply_typed_wh
 from ..logic import _upscale_params_from_side_and_filter
 from ..widgets import (
     Spinner,
@@ -279,18 +279,11 @@ class AspectSettingsPanel(ToolSettingsPanel):
         self._ratio_h_var.set(str(h))
 
     def _on_wh_typed(self, *_args) -> None:
-        """Live-reshape the canvas as the owner types; a bad/mid-edit
-        value is silently skipped (final validation happens in
-        ``target_ratio()`` on Start) — mirrors ``AgentPanel._on_force_
-        aspect_wh_typed``/``AspectRatioDialog._on_wh_typed``."""
-        try:
-            w = int(self._ratio_w_var.get().strip())
-            h = int(self._ratio_h_var.get().strip())
-        except ValueError:
-            return
-        if w <= 0 or h <= 0:
-            return
-        self._ratio_canvas.set_ratio(w, h)
+        """Live-reshape the canvas as the owner types — the shared
+        ``apply_typed_wh`` does the read-parse-guard-apply; final
+        validation happens in ``target_ratio()`` on Start."""
+        apply_typed_wh(self._ratio_w_var, self._ratio_h_var,
+                       self._ratio_canvas)
 
     def target_ratio(self) -> tuple[int, int]:
         """The target W:H — ``ValueError`` propagates to Start's own

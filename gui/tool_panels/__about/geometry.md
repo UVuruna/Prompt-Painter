@@ -29,7 +29,8 @@ body is thin — the engine does the work.
   `UPSCALE_ASPECT_MAX`, `UPSCALE_ASPECT_MIN`, `UPSCALE_MINDIM_STEP`,
   `UPSCALE_MIN_SIDE_DEFAULT`
 - [AspectRatioCanvas](../../__about/aspect_canvas.md) — the live W:H editor
-  (`AspectSettingsPanel._build_extra`)
+  (`AspectSettingsPanel._build_extra`) + `apply_typed_wh` (the shared
+  typed-W/H reshape behind `_on_wh_typed`)
 - [Pure Logic Helpers](../../__about/logic.md) —
   `_upscale_params_from_side_and_filter`
   (`UpscaleSettingsPanel.build_func`)
