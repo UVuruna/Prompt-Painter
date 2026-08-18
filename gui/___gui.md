@@ -72,7 +72,8 @@ the Files table.)
 **Second god-file round (owner approved 2026-07-30) — and the guard
 that keeps it honest.** Feature work had pushed several modules back
 over the budget (`gui/tool_panels.py` 1283, `gui/viewers.py` 1185,
-`gui/app_jobs.py` 1122, `gui/agent_panel.py` 1023). The owner approved
+`gui/app_jobs.py` 1122, `gui/agent_panel.py` 1023 — the last of these
+healed 2026-08-18 by the R6 split below). The owner approved
 splitting the three worst files in the codebase and adding the
 mandatory STRUCTURE LAW guard (root Rule #20 point 3) —
 `tests/test_structure_law.py` (renamed from `test_structure.py` in the
@@ -97,6 +98,7 @@ into [Viewer Shared Rules](__about/viewer_shared.md),
 | `app_tools.py` | Algorithmic | Tool Jobs Mixin — the four standalone tools + the AI image checker job — [about](__about/app_tools.md) · [flow](__flow/app_tools.md) |
 | `app_settings.py` | Algorithmic | Settings Mixin — Collections queue, prerequisite actions, settings round-trip — [about](__about/app_settings.md) · [flow](__flow/app_settings.md) |
 | `agent_panel.py` | Algorithmic | `AgentPanel` — one site's own control panel (Pipeline/Run behavior/Prompt groups) — [about](__about/agent_panel.md) · [flow](__flow/agent_panel.md) |
+| `agent_subpanels.py` | Algorithmic | `AgentSubPanelsMixin` — the five fine-tune sub-panels an `AgentPanel` switch opens into (BG / aspect / upscale / checker / pacing) — [about](__about/agent_subpanels.md) |
 | `api_panel.py` | Algorithmic | `ApiImageGenPanel` + `ApiImageAdapter` — the paid Gemini image-API job's panel — [about](__about/api_panel.md) · [flow](__flow/api_panel.md) |
 | `widgets.py` | Algorithmic | themed widget toolkit — rounded CTk factories, font-zoom registry, `ACTIVE_THEME`/`FONT_BASE` — [about](__about/widgets.md) · [flow](__flow/widgets.md) |
 | `icons.py` | Algorithmic | SVG-first icon loading + the Day/Night switch's hand-rendered sun/moon art — [about](__about/icons.md) · [flow](__flow/icons.md) |

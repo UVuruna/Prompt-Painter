@@ -75,13 +75,6 @@ RATCHET: dict[str, str] = {
         " recovery ladder. Second-round split (owner approved the three"
         " worst first, 2026-07-30)."
     ),
-    "gui/agent_panel.py": (
-        "AgentPanel — ONE cohesive responsibility (one site's control"
-        " surface) whose sub-panel builders make it long. Second-round"
-        " candidate (owner approved the three worst first,"
-        " 2026-07-30): the UI-SKETCH sub-panel builders could move to"
-        " their own module, or this documents itself as irreducible."
-    ),
     "tests/test_driver.py": (
         "The CDP-driver suite. Splits WITH painter/driver.py in the"
         " second round."

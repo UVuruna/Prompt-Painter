@@ -4,7 +4,11 @@
 **Flow:** [diagram](../__flow/agent_panel.md)
 
 ## Purpose
-`AgentPanel` — one site's (ChatGPT / Gemini) OWN control panel.
+`AgentPanel` — one site's (ChatGPT / Gemini) OWN control panel. What
+each switch OPENS INTO lives next door in
+[Agent Sub-Panels](agent_subpanels.md) since 2026-08-18 (audit R6 — the
+owner chose SPLIT over "irreducible", and the file's RATCHET entry is
+gone); this module keeps the panel itself.
 UI-SKETCH rework (owner 2026-07-29): the settings are THREE GROUPS,
 each switch that owns fine-tune carrying its own indented
 `ExpandableSwitch` sub-panel (turning ON auto-expands once, the caret
@@ -116,11 +120,9 @@ disagree.
   (every per-agent tunable: `SITES`, the background/style/new-chat/
   degrade/fixer-mode/helper choice lists, the BG mode/reach labels,
   the upscale/aspect defaults, `TIMING`)
-- [Aspect Ratio Canvas](aspect_canvas.md) — `AspectRatioCanvas` (the
-  Force Aspect Ratio block) + `apply_typed_wh` (the shared typed-W/H
-  reshape behind `_on_force_aspect_wh_typed`)
-- [Filter Editor](filter_editor.md) — `FilterEditor` (the upscale
-  gate's embedded condition stack)
+- [Agent Sub-Panels](agent_subpanels.md) — `AgentSubPanelsMixin`, the
+  five fine-tune builders each switch opens into (and the callbacks
+  only their widgets use) — mixed into `AgentPanel` itself
 - [Icons](icons.md) — `icon()` (the site-logo header images: this
   panel's own, plus one per OTHER site — `set_shared_header`
   packs them all while the both-sites shared editor is active, so

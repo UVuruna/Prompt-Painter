@@ -76,11 +76,12 @@ python ../../rules/tools/uv.py shot --all screenshots, every window x profile
   ALG-6 radius tiers, ALG-7 empty band, run by `tests/test_layout_zubi_tk.py`.
   Documented gaps (grader checklist): ALG-2 contrast, ALG-3 hover, ALG-8
   live profile, ALG-9 taxonomy.
-- RATCHET (files allowed over the structure wall, shrinking only — Rule #20
-  round DONE 2026-07-30 for the three worst + the guard; these five are the
-  next round's debt): `gui/app_jobs.py`, `painter/driver.py`,
-  `gui/agent_panel.py` + five test modules (see `tests/test_structure_law.py`
-  for the exact list) — a second god-file split session owes them.
+- RATCHET (files allowed over the structure wall, shrinking only):
+  `tests/structure_ratchet.json` is the machine-readable list (logic
+  lines, a ratcheted file may only shrink); `tests/test_structure_law.py`
+  holds the raw-line list that also covers `tests/`. `gui/agent_panel.py`
+  healed 2026-08-18 (R6). Remaining debt: `painter/driver.py`,
+  `gui/app_jobs.py` and two test modules.
 
 ## Enforcement
 
