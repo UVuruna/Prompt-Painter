@@ -105,6 +105,9 @@ only when a GUI file changed), the clone guard
   protocol, rendered (open in a browser)
 - [`UI-SKETCH.md`](UI-SKETCH.md) — setup-screen layout reference,
   implemented + verified 2026-07-30, kept until the owner formally closes it
+- [`docs/AUDIT-OOP-2026-08-18.md`](docs/AUDIT-OOP-2026-08-18.md) — one kind,
+  one class + structure audit, one-off per `rules/history/
+  one-kind-one-class.md`
 - `docs/history/` — landed design documents (PLAN, REWORK) kept for their
   reasoning, superseded by DECISIONS.md
 - Folder docs: `gui/___gui.md`, `painter/___painter.md`,
