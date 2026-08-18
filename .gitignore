@@ -41,5 +41,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# Claude Code working folder - never tracked (owner decree 2026-08-09)
-.claude/
+# Claude Code working folder - never tracked (owner decree 2026-08-09).
+# Covers .claude/sessions/ and .claude/evidence/ (rules/history/
+# 2026-08-18-rework-design.md) too — nothing under .claude/ is product
+# code. ONE exception: uv_windows.py is the `uv shot` window registry a
+# fresh clone needs (rules/howto/runner.md) — un-ignored below. (`.claude/*`,
+# not `.claude/` — git cannot un-ignore a file inside an already-ignored
+# DIRECTORY, only inside an ignored directory's CONTENTS.)
+.claude/*
+!.claude/uv_windows.py
