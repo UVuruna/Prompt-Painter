@@ -60,6 +60,7 @@ FLOW_REQUIRED_FILES: set[str] = {
     # gui/ — GUI windows/widgets and the PainterGui mixins
     "gui/app_build.py", "gui/app_views.py", "gui/app_jobs.py",
     "gui/app_checker_fixer.py", "gui/app_tools.py", "gui/app_settings.py",
+    "gui/app_api_image_job.py", "gui/app_dispatch.py",
     "gui/agent_panel.py", "gui/api_panel.py", "gui/widgets.py",
     "gui/icons.py", "gui/theme.py", "gui/scroll.py", "gui/switch.py",
     "gui/filter_editor.py", "gui/aspect_canvas.py", "gui/logic.py",

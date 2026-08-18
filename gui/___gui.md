@@ -93,7 +93,9 @@ into [Viewer Shared Rules](__about/viewer_shared.md),
 | `app.py` | Trivial | `PainterGui`'s MRO glue over the six mixins, plus `main()` — [script](app.py) |
 | `app_build.py` | Algorithmic | Build Mixin — constructor, widget construction, font-zoom/wheel bindings, maximize/restore cover — [about](__about/app_build.md) · [flow](__flow/app_build.md) |
 | `app_views.py` | Algorithmic | View Mixin — Main Menu/running-view state machine, tile router, Controls collapse — [about](__about/app_views.md) · [flow](__flow/app_views.md) |
-| `app_jobs.py` | Algorithmic | Site Jobs Mixin — site + API-image run loop, worker pump/dispatch, quota auto-restart — [about](__about/app_jobs.md) · [flow](__flow/app_jobs.md) |
+| `app_jobs.py` | Algorithmic | `SiteJobsMixin` — the browser-driven site run loop, Pause/Stop, the post-save pipeline composer and the quota auto-restart timers — [about](__about/app_jobs.md) · [flow](__flow/app_jobs.md) |
+| `app_api_image_job.py` | Algorithmic | `ApiImageJobMixin` — the paid-API image job (`_start_api_image`), the same `run_sheet` loop over an `ApiImageAdapter` — [about](__about/app_api_image_job.md) · [flow](__flow/app_api_image_job.md) |
+| `app_dispatch.py` | Algorithmic | `QueuePumpMixin` — the ONE worker-queue pump and its dispatch table (`_drain_queue`/`_dispatch`) — [about](__about/app_dispatch.md) · [flow](__flow/app_dispatch.md) |
 | `app_checker_fixer.py` | Algorithmic | Checker/Fixer Mixin — parallel Checker AI + Fixer AI (auto-dispatch and manual) — [about](__about/app_checker_fixer.md) · [flow](__flow/app_checker_fixer.md) |
 | `app_tools.py` | Algorithmic | Tool Jobs Mixin — the four standalone tools + the AI image checker job — [about](__about/app_tools.md) · [flow](__flow/app_tools.md) |
 | `app_settings.py` | Algorithmic | Settings Mixin — Collections queue, prerequisite actions, settings round-trip — [about](__about/app_settings.md) · [flow](__flow/app_settings.md) |

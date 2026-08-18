@@ -1,36 +1,38 @@
-"""SiteJobsMixin — Website GEN / API Image GEN run loop + dashboard glue.
+"""``SiteJobsMixin`` — the browser-driven site run loop.
 
-Godfile refactor step 8/8 (see gui/___gui.md): one of PainterGui's six
-mixins (see gui/app.py). Owns the two browser-driven SITE jobs plus the
-paid-API image job (``_start_site``/``_start_api_image``/``_drive_site``/
-``_stop_site``), the shared queue-message pump (``_drain_queue``/
-``_dispatch``), the per-job Pause toggle (``_toggle_pause_job``) and
-dashboard-panel close (``_close_panel``/``_tool_panel_key``), the quota
-auto-restart timers, and the post-save pipeline composer
-(``_compose_post_save``). No ``__init__`` here — every attribute it
-reads is set by ``BuildMixin.__init__``.
+One of ``PainterGui``'s responsibility slices (see ``gui/app.py``). Owns
+the two CDP-driven SITE jobs end to end: start (``_start_site`` /
+``_start_site_clicked``), the worker body that drives one site through
+``run_sheet`` (``_drive_site``), stop (``_stop_site``), the per-job Pause
+toggle (``_toggle_pause_job``), dashboard-panel close (``_close_panel`` /
+``_tool_panel_key``), the post-save pipeline composer
+(``_compose_post_save``), the F2 model-degradation question
+(``_ask_degrade_blocking``) and the quota auto-restart timers
+(``_handle_terminal`` / ``_refresh_cooldown_labels`` / ``_tick_restart`` /
+``_cancel_restart`` / ``_auto_restart``).
 
-The Checker AI and Fixer AI (auto-dispatch half plus the manual
-fix-worker builders) used to live in this file too — this module had
-grown past the ~1000-line Rule #20 budget, so they moved out to
-``gui/app_checker_fixer.py``'s ``CheckerFixerMixin`` (see that module's
-own docstring). ``_dispatch`` below still calls
-``self._maybe_spawn_checker``/``self._maybe_spawn_fixer`` exactly as
-before — both resolve through the shared ``PainterGui`` MRO onto that
-sibling mixin, so nothing here changed behaviorally.
+No ``__init__`` here — every attribute it reads is set by
+``BuildMixin.__init__``.
+
+**Three things used to live here too, and no longer do.** The Checker AI
+and Fixer AI moved to ``gui/app_checker_fixer.py`` (2026-08-01); the
+paid-API image job moved to ``gui/app_api_image_job.py`` and the
+worker-queue pump with its dispatch table to ``gui/app_dispatch.py``
+(2026-08-18, audit ``docs/AUDIT-OOP-2026-08-18.md`` -> R5, the exact
+three-way split the structure ratchet already named). Every cross-call
+between them resolves through the shared ``PainterGui`` MRO exactly as
+when they were one class, so nothing changed behaviorally.
 
 ``_compose_post_save``'s ``post_save`` closure reaches ``_gate_and_
 upscale`` (gui/logic.py) through a deferred ``import gui`` (the SAME
-late-binding idiom already used in gui/dash_panels.py, gui/viewers.py,
+late-binding idiom already used in gui/dash_panels.py, gui/doc_window.py,
 gui/tool_dash.py and gui/api_panel.py) so that
 tests/test_gui_pipeline.py's ``monkeypatch.setattr(gui,
 "_gate_and_upscale", ...)`` reaches the call actually made here, instead
 of a module-level copy frozen at import time.
 """
-
 from __future__ import annotations
 
-import queue
 import random
 import threading
 import time
@@ -42,23 +44,21 @@ from typing import Callable
 
 from painter import aspect, jobtemp
 from painter.config import (
-    AI_IMAGE_GATE_MESSAGE,
     CDP_URL,
     DEGRADE_ASK,
-    DEGRADE_CONTINUE,
     DEGRADE_WAIT,
     SITES,
     TIMING,
     prompt_suffix,
     tile_for_kind,
 )
-from .api_panel import ApiImageAdapter
+
 from .logic import _run_pipeline_steps
 
 
 class SiteJobsMixin:
-    """The site/API-image run loop, dashboard dispatch, quota
-    auto-restart, Checker AI and Fixer AI."""
+    """The browser-driven site run loop, its Pause/Stop controls, the
+    post-save pipeline composer and the quota auto-restart timers."""
 
     def _close_panel(self, kind: str) -> None:
         """A finished panel's CLOSE button: remove it from the grid and
@@ -514,169 +514,6 @@ class SiteJobsMixin:
         self._inline_kind = None
         self._sync_running_state()
 
-    def _start_api_image(self) -> None:
-        """Start on the API Image GEN panel (GUI rework Phase 19) — the
-        SAME queued .md sheets Website GEN drives, generated through
-        the paid Gemini image API instead of a browser tab. Reuses the
-        proven SITE machinery almost verbatim: ``_drive_site`` (widened
-        to accept an ``ApiImageAdapter`` in place of a ``SiteDriver``),
-        ``_stop_events``/``_pause_events``/``_running``/``_workers``
-        (the SAME dicts chatgpt/gemini use, keyed "api_image" — see
-        ``__init__``'s own comment on ``_stop_events`` and
-        ``_dispatch``'s ``__worker_done__`` guard for why nothing there
-        needed forking), ``_compose_post_save`` (called with THIS
-        panel, since it is not one of ``self.agents``). Only its OWN
-        validation lives here — no per-site "New chat" or action-delay
-        concept (the API has no DOM to hesitate on, no chat to open),
-        and a gating check ``_start_site`` has no equivalent of."""
-        if "api_image" in self._running:
-            return
-        if not self._sheets:
-            messagebox.showerror("PromptPainter", "Add sheet .md files first.")
-            return
-        sheets = self._parse_all()
-        if not sheets:
-            messagebox.showerror(
-                "PromptPainter", "No usable sheets in the queue."
-            )
-            return
-        out_base = self._out_base()
-        # NO containment check (owner decree 2026-08-14): the Output IS
-        # the consuming project's root and its sheets live INSIDE it
-        # (Watch Academy: shared/research/prompts/), so "the sheet is
-        # under the output folder" is the NORMAL, correct setup — it
-        # refused every real run. READ ONLY is guaranteed by what the
-        # tool writes, not by where the sheet sits: image dests,
-        # _state/, EXTRA/ and <stem>_report.txt. A .md is never a write
-        # target.
-        # NO rename demand (owner 2026-08-14) — same-named sheets are
-        # disambiguated per queue (unique_report_stems), never refused.
-
-        panel = self._tool_panels["api_image_gen"]
-        if panel.access_gated:
-            messagebox.showerror("PromptPainter", AI_IMAGE_GATE_MESSAGE)
-            return
-        if not self._ensure_ai_key():
-            return
-        pause_min, pause_max = panel.pace()  # the Polite pace switch
-        if panel.upscale_var.get():
-            try:
-                up = panel.upscale_params()
-            except ValueError:
-                messagebox.showerror(
-                    "PromptPainter",
-                    "API Image GEN: Upscale-gate min side must be a"
-                    " number, and every filter row must be a valid"
-                    " number (FROM <= TO).",
-                )
-                return
-            if up["min_width"] <= 0:
-                messagebox.showerror(
-                    "PromptPainter",
-                    "API Image GEN: Upscale-gate min side must be"
-                    " positive.",
-                )
-                return
-        if panel.force_aspect_var.get():
-            try:
-                force_w, force_h = panel.force_aspect_ratio()
-            except ValueError:
-                messagebox.showerror(
-                    "PromptPainter",
-                    "API Image GEN: Force Aspect Ratio W/H must be whole"
-                    " numbers.",
-                )
-                return
-            if force_w <= 0 or force_h <= 0:
-                messagebox.showerror(
-                    "PromptPainter",
-                    "API Image GEN: Force Aspect Ratio W/H must both be"
-                    " positive.",
-                )
-                return
-
-        timing = replace(TIMING, pause_min_s=pause_min, pause_max_s=pause_max)
-
-        # this job's per-step backup store (mirrors _start_site's own
-        # "clear the old slot first" rule)
-        old_temp = self._job_temps.pop("api_image", None)
-        if old_temp is not None:
-            old_temp.clear()
-        self._job_temps["api_image"] = jobtemp.JobTemp("api_image", out_base)
-
-        post_save = self._compose_post_save("api_image", panel=panel)
-        if isinstance(post_save, str):  # a deps problem, not a hook
-            messagebox.showerror(
-                "PromptPainter",
-                f"{post_save}\n\n(or turn the API Image GEN BG removal /"
-                " Crop / Upscale switches off)",
-            )
-            return
-
-        # no Select-images ticking for this job (SelectWindow is still
-        # per-SITE only — see gui.md) — every sheet resumes by FILE
-        # EXISTENCE, sheet-advised items sit out, exactly like a site
-        # whose Select window the owner never opened.
-        selection: dict[str, set[str] | None] = {
-            str(sheet.source): None for sheet in sheets
-        }
-
-        self._stop_events["api_image"].clear()
-        if "api_image" in self._paused:
-            self._toggle_pause_job("api_image")  # never start pre-paused
-        self._running.add("api_image")
-        panel.set_run_state(running=True)
-        total, themes = self._plan("api_image", sheets, selection)
-        dash = self.panels["api_image"]
-        dash.jobtemp = self._job_temps["api_image"]
-        dash.out_base = out_base
-        dash.begin_run(task_total=total, task_themes=themes)  # F3: appends
-        self._dashgrid.add("api_image")
-        self._update_status()
-        background = panel.background_var.get()
-        style = panel.style_var.get()
-        self._log(
-            f"=== START api_image | {len(sheets)} sheet(s) -> {out_base}"
-            f" | background: {background} | style: {style}"
-            f" | bg_removal={panel.bg_removal_var.get()}"
-            f" crop={panel.crop_var.get()}"
-            f" force_aspect={panel.force_aspect_var.get()}"
-            f" upscale={panel.upscale_var.get()} ==="
-        )
-        driver = ApiImageAdapter(
-            log=lambda msg: self._q.put(f"[api_image]     {msg}")
-        )
-        worker = threading.Thread(
-            target=self._drive_site,
-            args=(
-                "api_image",
-                list(sheets),
-                out_base,
-                timing,
-                driver,
-                post_save,
-                prompt_suffix("api_image", background, style=style),
-                None,  # extra_suffix — no AI-checker re-send wiring yet
-                panel.report_var.get(),
-                selection,
-                False,  # safer_retry — no ItemRefused path from this driver
-                False,  # continue_nudge — no NoImage path from this driver
-                "off",  # new_chat — no chat to open; NEW_CHAT_CHOICES value
-                self._stop_events["api_image"],
-                self._pause_events["api_image"],
-            ),
-            kwargs={
-                # PROMPT + IMAGE mode (faza 2): the API run honours the
-                # SAME section — one mode, every generator
-                "reference_dir": self._pi_section.reference_dir(),
-                "require_input_image": self._pi_section.enabled(),
-            },
-            daemon=True,
-        )
-        self._workers["api_image"] = worker
-        worker.start()
-        self._inline_kind = None
-        self._sync_running_state()
 
     def _drive_site(
         self, key, sheets, out_base, timing, driver, post_save, suffix,
@@ -947,164 +784,3 @@ class SiteJobsMixin:
         self.panels[key].state_var.set("")
         self._log(f"[{key}] quota window elapsed — auto-restarting")
         self._start_site(key)
-
-    # --- queue pump ----------------------------------------------------
-
-    def _drain_queue(self) -> None:
-        try:
-            while True:
-                msg = self._q.get_nowait()
-                if (
-                    self._resize_active
-                    and isinstance(msg, tuple)
-                    and msg[0] == "__event__"
-                ):
-                    # mid drag-resize: a dashboard event re-renders tree
-                    # rows / live labels per frame on top of the drag's
-                    # own relayout work — buffer it, flushed in order by
-                    # _resize_settled (owner 2026-07-20)
-                    self._pending_events.append(msg)
-                    continue
-                self._dispatch(msg)
-        except queue.Empty:
-            pass
-        self.root.after(120, self._drain_queue)
-
-    def _dispatch(self, msg) -> None:
-        """Apply ONE worker-queue message to the window (main thread)."""
-        if isinstance(msg, tuple):
-            if msg[0] == "__status__":
-                self.status_var.set(msg[1])
-            elif msg[0] == "__event__":
-                # .get is the defensive guard for a late event
-                # arriving after its panel was closed
-                panel = self.panels.get(msg[1])
-                if panel is not None:
-                    panel.handle(msg[2])
-                    # GUI rework Phase 16: the parallel Checker AI hangs
-                    # off the SAME item_progress event the dashboard row
-                    # was just built from — zero runner.py changes (see
-                    # _maybe_spawn_checker's own docstring)
-                    if msg[2].get("type") == "item_progress":
-                        self._maybe_spawn_checker(msg[1], msg[2])
-                        # F3 (owner 2026-07-29, the _vN landmine): the
-                        # selection is LIVE — a saved item unticks
-                        # itself, so a restart re-submits only the
-                        # REMAINDER and a leftover tick can never turn
-                        # into an unwanted redo version. A deliberate
-                        # redo is a NEW tick on a green (done) row in
-                        # Select — that one the owner makes himself.
-                        drop = msg[2].get("drop_path")
-                        for (site, _src, d), var in (
-                            self._select_vars.items()
-                        ):
-                            if site == msg[1] and d == drop and var.get():
-                                var.set(False)
-                    # GUI rework Phase 20: the Fixer AI hangs off the
-                    # checker's OWN item_checked result (posted by
-                    # _run_checker_one onto this SAME queue) — see
-                    # _maybe_spawn_fixer's own docstring
-                    elif msg[2].get("type") == "item_checked":
-                        self._maybe_spawn_fixer(msg[1], msg[2])
-            elif msg[0] == "__terminal__":
-                self._handle_terminal(msg[1], msg[2])
-            elif msg[0] == "__ask_degrade__":
-                # F2: the worker blocks on `done` while the owner picks
-                _tag, key, retry, holder, done = msg
-                mins = (
-                    f" (reset in ~{retry / 60:.0f} min)" if retry else ""
-                )
-                cont = messagebox.askyesno(
-                    "Model degraded",
-                    f"{key}: the site dropped to a weaker model —"
-                    f" image quota reached{mins}.\n\n"
-                    "YES — continue on the weaker model\n"
-                    "NO  — wait for the reset (auto-restart)",
-                    parent=self.root,
-                )
-                holder["choice"] = (
-                    DEGRADE_CONTINUE if cont else DEGRADE_WAIT
-                )
-                done.set()
-            elif msg[0] == "__tool_done__":
-                slot = msg[1]
-                # GUI rework Phase 14: was THIS finish caused by
-                # _stop_tool (still set — cleared only at the next
-                # Start, see _launch_tool_worker) or a natural
-                # completion? Read BEFORE popping _tool_workers below
-                # (harmless either order — _stop_events is independent
-                # — but keeps the "what happened" read next to the
-                # message that reports it).
-                stopped = self._stop_events[slot].is_set()
-                self._tool_workers.pop(slot, None)
-                # a job that finished its last image right as it was
-                # paused would otherwise leave a stale "paused" toggle
-                # on an idle panel (owner 2026-07-21)
-                if slot in self._paused:
-                    self._toggle_pause_job(slot)
-                panel_key = self._tool_panel_key(slot)
-                if panel_key is not None:
-                    # GUI rework Phase 13/15: re-enable the panel's own
-                    # Start button ("aicheck" resolves to its
-                    # "image_checker" ToolSettingsPanel via
-                    # _tool_panel_key since GUI rework Phase 15).
-                    self._tool_panels[panel_key].set_run_state(running=False)
-                if stopped:
-                    # the "smart" half of _stop_tool: the worker has
-                    # NOW actually halted (not merely requested to,
-                    # back on the Stop click — it may have still been
-                    # mid-image) — close the panel + clear its JobTemp
-                    # (existing _close_panel, same as a manual Close)
-                    # and leave "running" for the Main Menu if that was
-                    # the LAST active job (_request_menu — Phase 11's
-                    # own gate, unmodified: a no-op status hint, never
-                    # an auto-jump, while another job is still active).
-                    # A natural (unstopped) finish is UNCHANGED — reveal
-                    # CLOSE and let the owner review before dismissing.
-                    self._close_panel(slot)
-                    self._request_menu()
-                else:
-                    self.panels[slot].finish()  # reveal CLOSE
-                if not self._tool_workers and not self._running:
-                    self._update_status()
-                self._sync_running_state()  # GUI rework Phase 11
-            elif msg[0] == "__worker_done__":
-                key = msg[1]
-                self._log(f"[{key}] worker finished")
-                # the worker posts this from its finally block
-                # while its thread is still technically alive
-                self._running.discard(key)
-                self._workers.pop(key, None)
-                if key in self._paused:  # same stale-pause guard as above
-                    self._toggle_pause_job(key)
-                # GUI rework Phase 19: "api_image" also drives through
-                # _drive_site (hence __worker_done__) but is NOT one of
-                # self.agents (no SiteConfig, no AgentPanel — see
-                # _start_api_image) — chatgpt/gemini take the EXACT
-                # same branch as before; a key outside self.agents
-                # resolves its OWN settings panel via _tool_panel_key,
-                # the same bridge __tool_done__ below already uses, and
-                # has no pending-restart concept (this job's
-                # TerminalState always carries retry_after_s=None, so it
-                # never enters self._restart_jobs to begin with).
-                if key in self.agents:
-                    self.agents[key].set_run_state(
-                        running=False,
-                        pending_restart=key in self._restart_jobs,
-                    )
-                else:
-                    panel_key = self._tool_panel_key(key)
-                    if panel_key is not None:
-                        self._tool_panels[panel_key].set_run_state(
-                            running=False
-                        )
-                # a pending quota auto-restart keeps the panel
-                # alive (countdown, no CLOSE yet); otherwise the
-                # site is done — reveal its CLOSE button
-                if key not in self._restart_jobs:
-                    self.panels[key].finish()
-                self._update_status()
-                self._sync_running_state()  # GUI rework Phase 11
-        else:
-            self._log(str(msg))
-

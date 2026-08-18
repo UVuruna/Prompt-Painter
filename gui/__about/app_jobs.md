@@ -4,19 +4,19 @@
 **Flow:** [diagram](../__flow/app_jobs.md)
 
 ## Purpose
-`SiteJobsMixin` — the third of `PainterGui`'s six mixins (root Rule
-#20 god-file refactor, step 8/8; see [GUI (folder)](../___gui.md) and
-[App (composition)](../app.py)). Owns the two browser-driven SITE jobs
-(ChatGPT/Gemini) plus the paid-API image job — all three drive through
-the SAME generalized run loop (`_start_site`/`_start_api_image`/
-`_drive_site`/`_stop_site`), the shared worker-queue pump
-(`_drain_queue`/`_dispatch`), the per-job Pause toggle
-(`_toggle_pause_job`, shared by every `JOB_ORDER` kind, not only
-sites) and dashboard-panel close (`_close_panel`/`_tool_panel_key`),
-the quota auto-restart timers (`_handle_terminal`/`_tick_restart`/
-`_cancel_restart`/`_auto_restart`), and the per-site post-save pipeline
-composer (`_compose_post_save` — BG→Crop→Aspect→Upscale, shared by
-sites and the API-image job via its own panel).
+`SiteJobsMixin` — one of `PainterGui`'s responsibility slices (root
+Rule #20 god-file refactor, step 8/8; see [GUI (folder)](../___gui.md)
+and [App (composition)](../app.py)). Owns the two browser-driven SITE
+jobs (ChatGPT/Gemini) end to end: start (`_start_site` /
+`_start_site_clicked`), the worker body that drives one site through
+`run_sheet` (`_drive_site`), stop (`_stop_site`), the per-job Pause
+toggle (`_toggle_pause_job`, shared by every `JOB_ORDER` kind, not only
+sites), dashboard-panel close (`_close_panel`/`_tool_panel_key`), the
+F2 model-degradation question (`_ask_degrade_blocking`), the quota
+auto-restart timers (`_handle_terminal`/`_refresh_cooldown_labels`/
+`_tick_restart`/`_cancel_restart`/`_auto_restart`), and the per-site
+post-save pipeline composer (`_compose_post_save` — BG→Crop→Aspect→
+Upscale, shared by sites and the API-image job via its own panel).
 
 PROMPT + IMAGE mode (faza 2, owner 2026-08-03): every Start — the two
 sites AND the API job — reads the shared `_pi_section`
@@ -26,13 +26,18 @@ sites AND the API job — reads the shared `_pi_section`
 is ON) through `_drive_site` into `run_sheet` — one mode, every
 generator.
 
-The parallel Checker AI and the Fixer AI used to live here too — this
-module had grown past the ~1000-line Rule #20 budget, so step 8/8
-split them out into [Checker/Fixer Mixin](app_checker_fixer.md)'s own
-`CheckerFixerMixin`. `_dispatch` below still calls
-`self._maybe_spawn_checker`/`self._maybe_spawn_fixer` exactly as
-before — both resolve through the shared `PainterGui` MRO onto that
-sibling mixin.
+**Three things used to live here too, and no longer do.** The parallel
+Checker AI and the Fixer AI moved to
+[Checker/Fixer Mixin](app_checker_fixer.md) in step 8/8 (2026-08-01);
+then, on 2026-08-18 (audit
+[AUDIT-OOP-2026-08-18](../../docs/AUDIT-OOP-2026-08-18.md) → R5 — the
+exact three-way split the structure ratchet had already named), the
+paid-API image job moved to [API Image Job](app_api_image_job.md) and
+the worker-queue pump with its dispatch table to
+[Queue Pump](app_dispatch.md). Every cross-call between them resolves
+through the shared `PainterGui` MRO exactly as when they were one
+class, so nothing changed behaviorally — and the file dropped from
+1,110 to 779 lines, under the wall, its RATCHET entry gone.
 
 **`_drive_site` is GENERALIZED, not forked, to cover API Image GEN**
 (GUI rework Phase 19): its `driver` parameter is supplied ALREADY

@@ -63,12 +63,6 @@ SKIP_DIRS = {
 # remaining entries (two GUI mixins, the CDP driver, and their own test
 # suites) are UNCHANGED — out of this session's scope.
 RATCHET: dict[str, str] = {
-    "gui/app_jobs.py": (
-        "SiteJobsMixin — the site run loop, the API-image job and the"
-        " dashboard event dispatch in one mixin. Second-round split"
-        " (owner approved the three worst first, 2026-07-30):"
-        " app_jobs.py + an api-image job module + the dispatch table."
-    ),
     "tests/test_gui_fixer.py": (
         "The Fixer-AI suite (panel wiring, decision table, auto-"
         " dispatch, manual buttons). Second-round split by concern."

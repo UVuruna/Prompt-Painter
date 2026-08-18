@@ -181,7 +181,9 @@ Binding decisions not obvious from the diagram:
   "irreducible"), and `painter/driver.py` became the
   `painter/driver/` package of five responsibility mixins with
   `tests/test_driver.py` splitting alongside it into four suites (R4).
-  TWO entries remain — `gui/app_jobs.py` and `tests/test_gui_fixer.py`;
+  `gui/app_jobs.py` split into `gui/app_api_image_job.py` and
+  `gui/app_dispatch.py` (R5). ONE entry remains,
+  `tests/test_gui_fixer.py`;
   see the RATCHET list in `CLAUDE.md` → Project laws and the work order
   in [`AUDIT-OOP-2026-08-18.md`](AUDIT-OOP-2026-08-18.md).
 - **UI-SKETCH.md** is implemented and verified on a live window

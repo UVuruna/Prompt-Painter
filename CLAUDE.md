@@ -76,12 +76,12 @@ python ../../rules/tools/uv.py shot --all screenshots, every window x profile
   ALG-6 radius tiers, ALG-7 empty band, run by `tests/test_layout_zubi_tk.py`.
   Documented gaps (grader checklist): ALG-2 contrast, ALG-3 hover, ALG-8
   live profile, ALG-9 taxonomy.
-- RATCHET (files allowed over the structure wall, shrinking only):
-  `tests/structure_ratchet.json` is the machine-readable list (logic
-  lines, a ratcheted file may only shrink); `tests/test_structure_law.py`
-  holds the raw-line list that also covers `tests/`. `gui/agent_panel.py`
-  and `painter/driver.py` both healed 2026-08-18 (R6, R4). Remaining
-  debt: `gui/app_jobs.py` and `tests/test_gui_fixer.py`.
+- RATCHET (over the structure wall, shrinking only):
+  `tests/structure_ratchet.json` = the machine-readable list (logic
+  lines, may only shrink) — now EMPTY; `tests/test_structure_law.py` =
+  the raw-line list, which also covers `tests/` — one entry left,
+  `tests/test_gui_fixer.py`. The 2026-08-18 round healed
+  `gui/agent_panel.py`, `painter/driver.py` and `gui/app_jobs.py`.
 
 ## Enforcement
 
@@ -92,9 +92,8 @@ banned-API grep. Full pass (Stop, session end, only when the session
 changed something) additionally runs docs coverage, doc links, the runtime
 layout audit (`test_layout_audit_tk.py`), Zubi v2 (`test_layout_zubi_tk.py`,
 only when a GUI file changed), the clone guard
-(`tests/clone_ratchet.json`), the shared structure guard
-(`tests/structure_ratchet.json` — logic lines, shrink only) and the
-rules-size guard.
+(`tests/clone_ratchet.json`), the structure guard
+(`tests/structure_ratchet.json`) and the rules-size guard.
 
 ## Docs
 
