@@ -90,8 +90,11 @@ refactor, step 2/8).
 
 ## Classes
 This module has no classes — it is a set of module-level functions plus
-two module-level registries (`THEMED_TK`, `THEME_TOPLEVELS`) and two
-Treeview tag-name constants (`TOOL_CHANGED_TAG`, `TOOL_SKIP_TAG`). Key
+two module-level registries (`THEMED_TK`, `THEME_TOPLEVELS`), two
+Treeview tag-name constants (`TOOL_CHANGED_TAG`, `TOOL_SKIP_TAG`) and
+one widget accent, `PROMPT_IMAGE_ACCENT` (the Prompt+Image icon-bar
+button's indigo `(day, night)` pair — moved here from a hardcoded
+literal in `gui/app_build.py`, audit 2026-08-18 step 1.4). Key
 functions: `apply_theme`/`_apply_theme_now` (the coherent flip),
 `setup_style` (the ttk style patch), `skin_text`/`skin_listbox`/
 `skin_canvas`/`skin_toplevel`/`skin_tree` + `recolor_tk_registry` (the

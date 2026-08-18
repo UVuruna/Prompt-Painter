@@ -41,6 +41,13 @@ from .widgets import TREE_ROW_FACTOR, status, tk_font
 TOOL_CHANGED_TAG = "toolchanged"
 TOOL_SKIP_TAG = "skip"
 
+# the Prompt+Image icon-bar button's (day, night) accent — INDIGO,
+# because that mode belongs to the gen family, same as the website tile
+# that hosts it. The one hex pair that used to sit hardcoded in a
+# builder (gui/app_build.py) instead of here; every other colour in this
+# GUI already comes from this module or painter.config.THEMES.
+PROMPT_IMAGE_ACCENT = ("#4338ca", "#818cf8")
+
 
 
 def setup_style() -> None:

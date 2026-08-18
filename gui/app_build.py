@@ -55,6 +55,7 @@ from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
 from .sheetgen_panel import SheetGenPanel
 from .switch import DayNightSwitch
 from .theme import (
+    PROMPT_IMAGE_ACCENT,
     apply_theme,
     register_painter_day,
     skin_text,
@@ -877,10 +878,8 @@ class BuildMixin:
             column.set_section_visible(on)
             if on:
                 column.pi_section.refresh()
-            # the website tile's indigo accent — this mode belongs to
-            # the gen family, same as the tile that hosts it
             _style_icon_bar_button(
-                column.btn_prompt_image, ("#4338ca", "#818cf8"), active=on
+                column.btn_prompt_image, PROMPT_IMAGE_ACCENT, active=on
             )
         self._scroll.refresh()
 

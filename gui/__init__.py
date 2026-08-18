@@ -205,6 +205,7 @@ from .select_window import SelectWindow
 from .switch import DayNightSwitch
 from .worker_poll import poll_worker_queue
 from .theme import (
+    PROMPT_IMAGE_ACCENT,
     THEME_TOPLEVELS,
     THEMED_TK,
     TOOL_CHANGED_TAG,
