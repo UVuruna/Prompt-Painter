@@ -21,6 +21,15 @@ limit without an entry fails this test, loudly, naming the file.
 
 A RATCHET entry whose file has SINCE been split (or deleted) also
 fails — a stale allowance is exactly how a ratchet quietly loosens.
+
+**The second ratchet.** ``tests/structure_ratchet.json`` is the
+machine-readable half, read by the monorepo's shared
+``rules/tools/structure_guard.py`` from ``run_guards.py`` FULL. It counts
+LOGIC lines (non-blank, non-comment) and skips ``tests/``, so it is a
+narrower but STRICTER list than the ``RATCHET`` below: it also fails when
+a ratcheted file GREW, which this test cannot see. The two must be kept
+consistent by hand — a split removes the file from BOTH in the same
+commit.
 """
 
 from __future__ import annotations

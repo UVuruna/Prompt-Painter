@@ -91,7 +91,9 @@ banned-API grep. Full pass (Stop, session end, only when the session
 changed something) additionally runs docs coverage, doc links, the runtime
 layout audit (`test_layout_audit_tk.py`), Zubi v2 (`test_layout_zubi_tk.py`,
 only when a GUI file changed), the clone guard
-(`tests/clone_ratchet.json`) and the rules-size guard.
+(`tests/clone_ratchet.json`), the shared structure guard
+(`tests/structure_ratchet.json` — logic lines, shrink only) and the
+rules-size guard.
 
 ## Docs
 

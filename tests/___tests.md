@@ -44,9 +44,20 @@ behavior. Installed 2026-08-01 (MIGRATE-DOCS session) and wired into
   Zubi v2 (GUI files only), then — only when
   `changed_files.touched_anything()` says the session changed
   something — the clone guard (`tests/clone_ratchet.json`, AST-fingerprint
-  duplicate detector, ratchet shrinks only) and the rules-size guard
+  duplicate detector, ratchet shrinks only), the shared structure guard
+  (`rules/tools/structure_guard.py` against
+  `tests/structure_ratchet.json`) and the rules-size guard
   (byte limits on every `CLAUDE.md`/`rules/*.md`). Exits 2 on any
   failure — a session cannot end with a red guard.
+- **`structure_ratchet.json`** — the MACHINE-READABLE half of the
+  structure ratchet, read by the monorepo's shared
+  `rules/tools/structure_guard.py` (and by any other tool that wants to
+  know this project's structural debt). It counts LOGIC lines
+  (non-blank, non-comment) and skips `tests/`, so it is stricter about
+  growth and narrower in scope than `test_structure_law.py`'s in-code
+  `RATCHET` (raw lines, whole tree) — the two are kept consistent by
+  hand and BOTH must shrink. Its unique power: a ratcheted file that
+  GREW fails, so a file cannot fatten while it "waits for its split".
 
 ### `test_sheet_parser.py` — Golden Parser Tests
 Runs the parser against the REAL archetype sheets in Watch Academy

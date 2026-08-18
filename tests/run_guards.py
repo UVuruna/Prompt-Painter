@@ -7,7 +7,10 @@ Edit/Write) and Stop runs the full set (a session cannot end with a red
 guard). The full pass runs ONLY when `changed_files.touched_anything()`
 says this session changed something — "cannot tell" (import failure, no
 git) always means RUN, never skip. The full pass also runs the clone guard
-against this project's ratchet and the rules-size guard.
+against this project's ratchet, the machine-readable structure ratchet
+(`rules/tools/structure_guard.py` + `tests/structure_ratchet.json`, which
+records LOGIC lines and lets a ratcheted file only shrink) and the
+rules-size guard.
 
 Deterministic, no app suite. Exits 2 on failure (that is what makes the
 hook BLOCKING), 0 on success, prints pytest's own failure output to
@@ -102,6 +105,19 @@ def main(argv: list[str]) -> int:
             print("\nGUARD FAILURE (full pass) — clone_guard found an "
                   "un-ratcheted duplicate. Fix it or extend the ratchet.",
                   file=sys.stderr)
+            return 2
+
+    structure_guard = _load("rules/tools/structure_guard.py")
+    if structure_guard is not None:
+        ratchet = TESTS_DIR / "structure_ratchet.json"
+        problems = structure_guard.check(PROJECT_ROOT, ratchet, 1000)
+        if problems:
+            for line in problems:
+                print(line, file=sys.stderr)
+            print("\nGUARD FAILURE (full pass) — the machine-readable "
+                  "structure ratchet (tests/structure_ratchet.json) is out "
+                  "of date: a file went over the wall, a ratcheted file "
+                  "GREW, or an entry is stale.", file=sys.stderr)
             return 2
 
     size_guard = _load("rules/tools/rules_size_guard.py")
