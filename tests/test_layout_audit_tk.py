@@ -8,9 +8,14 @@ rollout), at the reference level of Vibe Coder's Qt audit, translated to Tk:
   B. ESCAPES   - a child's on-screen box leaves its parent's box (invisible
                  content no matter how big the screen is)
 
-plus the law's preconditions: the window's minsize is COMPUTED (the project
+plus the law's precondition: the window's minsize is COMPUTED (the project
 already derives it from the Main Menu grid - `_apply_min_size`, owner
-2026-08-03) and fits THE SCREEN FLOOR 1280x720.
+2026-08-03). The fixed 1280x720 screen floor was ABOLISHED by the owner
+2026-08-18 ("1280x720 is nobody's screen; a window is judged on the device
+profiles it is shot on; what is taller than a screen scrolls; the minimum
+is information, never a verdict") - the computed minimum is only reported
+beside the smallest mandatory profile screen (`rules/devices.json`
+pc-low), never failed on it.
 
 THE REGISTRY (expanded 2026-08-06, MIGRATE-LAYOUT.md step 2 - "every
 top-level window is a hole in the guard until it is registered"): every
@@ -34,8 +39,8 @@ registered) and ``_AiDialog`` has no other live subclass since
 
 AiKeyWizard is FIXED SIZE (``resizable(False, False)``) and sized to its
 own packed content - there is no larger state to reflow into, so it is
-audited at its one natural size only (CLIPPED/ESCAPES + the screen-floor
-check), never resized to +50%/screen like the others.
+audited at its one natural size only (CLIPPED/ESCAPES + the profile-screen
+report), never resized to +50%/screen like the others.
 
 Screenshots: every window is built OFF-SCREEN (x=+9000) and fully
 transparent - a dialog constructed WHILE off-screen never flashes across
@@ -79,7 +84,13 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
-FLOOR_WIDTH, FLOOR_HEIGHT = 1280, 720
+# INFORMATION only, never a verdict (owner decree 2026-08-18 - "1280x720
+# is nobody's screen; a window is judged on the device profiles it is
+# shot on; what is taller than a screen scrolls; the minimum is
+# information, never a verdict"). Kept as a reporting reference: the
+# smallest mandatory profile screen from rules/devices.json (pc-low,
+# which happens to be 1280x720 too - coincidence, not a re-instated law).
+PROFILE_SCREEN_WIDTH, PROFILE_SCREEN_HEIGHT = 1280, 720
 
 # a TOPIC subfolder, never the shots ROOT (owner 2026-08-11): the Stop
 # hook runs this full pass itself, so writing to the root re-dropped the
@@ -527,11 +538,15 @@ def run_dialog_audit(gui, tmp_path: Path, verbose: bool = False) -> list[str]:
             if min_w <= 0 or min_h <= 0:
                 problems.append(f"[{name}] no usable size - the law "
                                 "requires one, COMPUTED from real content")
-            if min_w > FLOOR_WIDTH or min_h > FLOOR_HEIGHT:
-                problems.append(
-                    f"[{name}] ABSURD MINIMUM {min_w}x{min_h} - it does "
-                    f"not fit the screen floor {FLOOR_WIDTH}x{FLOOR_HEIGHT}"
-                )
+            # INFORMATION, never a verdict (owner decree 2026-08-18 -
+            # 1280x720 is nobody's screen; a window is judged on the
+            # device profiles it is shot on. What is taller than a
+            # screen scrolls - the minimum is reported beside the
+            # smallest mandatory profile screen, never failed on it.
+            print(f"[{name}] minimum {min_w}x{min_h} vs PROFILE_SCREEN "
+                  f"{PROFILE_SCREEN_WIDTH}x{PROFILE_SCREEN_HEIGHT} "
+                  f"(pc-low) - "
+                  f"{'fits' if min_w <= PROFILE_SCREEN_WIDTH and min_h <= PROFILE_SCREEN_HEIGHT else 'taller/wider than the screen: scrolls'}")
 
             sizes = [("minimum", min_w, min_h)]
             if not fixed:
@@ -600,19 +615,19 @@ def run_audit(
 
         problems: list[str] = []
 
-        # THE SCREEN FLOOR on the COMPUTED minsize (computed by
-        # _apply_min_size from the menu grid - owner 2026-08-03)
+        # THE COMPUTED minsize (computed by _apply_min_size from the menu
+        # grid - owner 2026-08-03). INFORMATION, never a verdict (owner
+        # decree 2026-08-18 - 1280x720 is nobody's screen; a window is
+        # judged on the device profiles it is shot on, not a fixed floor.
+        # What is taller than a screen scrolls - the minimum is only
+        # reported beside the smallest mandatory profile screen.
         min_w, min_h = root.wm_minsize()
         if min_w <= 0 or min_h <= 0:
             problems.append("[PainterGui] no declared minsize - the law "
                             "requires one, COMPUTED from real content")
-        if min_w > FLOOR_WIDTH or min_h > FLOOR_HEIGHT:
-            problems.append(
-                f"[PainterGui] ABSURD MINIMUM {min_w}x{min_h} - it does not "
-                f"fit the screen floor {FLOOR_WIDTH}x{FLOOR_HEIGHT}: the "
-                "window demands a screen the user does not have. REFLOW "
-                "(ladder step 2) - widening your way out is the bug itself"
-            )
+        print(f"[PainterGui] minimum {min_w}x{min_h} vs PROFILE_SCREEN "
+              f"{PROFILE_SCREEN_WIDTH}x{PROFILE_SCREEN_HEIGHT} (pc-low) - "
+              f"{'fits' if min_w <= PROFILE_SCREEN_WIDTH and min_h <= PROFILE_SCREEN_HEIGHT else 'taller/wider than the screen: scrolls'}")
 
         screen_w, screen_h = 2560, 1400   # a fixed large size: deterministic,
         sizes = [                         # and off-screen anyway
