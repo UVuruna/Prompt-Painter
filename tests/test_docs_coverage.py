@@ -27,6 +27,10 @@ SKIP_DIRS = {
     # owner 2026-08-04) plus the pre-move locations
     "output", "out", "sheets",
     ".git", "UV", "venv", ".venv",
+    # harness state, not product code (test_doc_links.py skips it too) —
+    # .claude/uv_windows.py is the F3 `uv shot` window registry, governed
+    # by rules/howto/runner.md, not THE DOCS LAW's per-file tier system
+    ".claude",
 }
 
 # Every folder that holds governed source code and therefore needs its

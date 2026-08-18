@@ -36,10 +36,17 @@ behavior. Installed 2026-08-01 (MIGRATE-DOCS session) and wired into
   project resolves to a real file, and every project `.md` (except
   `tests/fixtures/*.md`, sheet-format test DATA, not documentation) is
   reachable from `README.md`.
-- **`run_guards.py`** — the fast wrapper both hooks call: `--fast` runs
-  structure + config-sections only (right after an Edit/Write); the
-  bare call runs all four (the Stop hook — a session cannot end with a
-  red guard). Exits 2 on failure.
+- **`run_guards.py`** — the wrapper both hooks call (rules/history/
+  2026-08-18-rework-design.md ch.8 item 2). `--fast` runs structure +
+  config-sections + the layout law's static grep (right after an
+  Edit/Write, GUI checks only when a GUI file changed). The bare call
+  (Stop hook) adds docs-coverage, doc-links, the runtime layout audit +
+  Zubi v2 (GUI files only), then — only when
+  `changed_files.touched_anything()` says the session changed
+  something — the clone guard (`tests/clone_ratchet.json`, AST-fingerprint
+  duplicate detector, ratchet shrinks only) and the rules-size guard
+  (byte limits on every `CLAUDE.md`/`rules/*.md`). Exits 2 on any
+  failure — a session cannot end with a red guard.
 
 ### `test_sheet_parser.py` — Golden Parser Tests
 Runs the parser against the REAL archetype sheets in Watch Academy

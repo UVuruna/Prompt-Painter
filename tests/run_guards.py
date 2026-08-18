@@ -1,12 +1,17 @@
-"""The four guard tests' fast wrapper (rules/CODE.md -> Enforcement).
+"""The guard tests' wrapper (rules/CODE.md -> Enforcement,
+rules/history/2026-08-18-rework-design.md ch.8 item 2).
 
-Wired into `.claude/settings.json`: PostToolUse runs `--fast` (structure
-+ config-sections only, right after every Edit/Write) and Stop runs the
-full set (all four guards — a session cannot end with a red guard).
+Wired into `.claude/settings.json`: PostToolUse runs `--fast` (structure +
+config-sections + the layout law's static grep, right after every
+Edit/Write) and Stop runs the full set (a session cannot end with a red
+guard). The full pass runs ONLY when `changed_files.touched_anything()`
+says this session changed something — "cannot tell" (import failure, no
+git) always means RUN, never skip. The full pass also runs the clone guard
+against this project's ratchet and the rules-size guard.
 
-Deterministic, no app suite, stays under ~2s so it never slows down a
-normal edit loop. Exits 2 on failure (that is what makes the hook
-BLOCKING), 0 on success, prints pytest's own failure output to stderr.
+Deterministic, no app suite. Exits 2 on failure (that is what makes the
+hook BLOCKING), 0 on success, prints pytest's own failure output to
+stderr.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = TESTS_DIR.parent
+REPO_ROOT = PROJECT_ROOT.parents[1]  # Gadgets/PromptPainter -> monorepo root
 
 CODE_FAST_GUARDS = [
     "test_structure_law.py",
@@ -47,27 +53,23 @@ GUI_FULL_GUARDS = [
 ]
 
 
-def _changed():
-    """The monorepo's one authority on what this session touched.
-
-    `rules/hooks/changed_files.py`, loaded by path so every project
-    answers the question identically. None when it cannot be loaded —
-    callers then run every guard: an unreachable helper never silently
-    disables a law.
-    """
-    helper = PROJECT_ROOT.parents[1] / "rules" / "hooks" / "changed_files.py"
+def _load(rel_path: str):
+    """Load a monorepo-root module by path; None if it cannot be reached
+    (an unreachable helper never silently disables a law — callers must
+    treat None as "assume the worst / run everything")."""
+    path = REPO_ROOT / rel_path
     try:
-        spec = importlib.util.spec_from_file_location("uv_changed", helper)
+        spec = importlib.util.spec_from_file_location(path.stem, path)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        return module
     except (OSError, AttributeError, ImportError, SyntaxError):
         return None
-    return module
 
 
 def main(argv: list[str]) -> int:
     fast = "--fast" in argv
-    changed = _changed()
+    changed = _load("rules/hooks/changed_files.py")
     if not fast and changed is not None and not changed.touched_anything(
         PROJECT_ROOT
     ):
@@ -87,13 +89,39 @@ def main(argv: list[str]) -> int:
 
     exit_code = pytest.main(["-q", "--no-header", *targets])
     if exit_code != 0:
-        print(
-            f"\nGUARD FAILURE ({'fast' if fast else 'full'} pass) —"
-            " fix the violation above before continuing.",
-            file=sys.stderr,
-        )
-        return 2
+        return _finish(exit_code, "fast" if fast else "full")
+
+    if fast:
+        return 0
+
+    clone_guard = _load("rules/tools/clone_guard.py")
+    if clone_guard is not None:
+        ratchet = TESTS_DIR / "clone_ratchet.json"
+        rc = clone_guard.run([str(PROJECT_ROOT), "--ratchet", str(ratchet)])
+        if rc != 0:
+            print("\nGUARD FAILURE (full pass) — clone_guard found an "
+                  "un-ratcheted duplicate. Fix it or extend the ratchet.",
+                  file=sys.stderr)
+            return 2
+
+    size_guard = _load("rules/tools/rules_size_guard.py")
+    if size_guard is not None:
+        rows = size_guard.check(project=PROJECT_ROOT)
+        if any(not ok for _, _, _, ok, _ in rows):
+            print("\nGUARD FAILURE (full pass) — a rulebook is over its "
+                  "byte limit (rules_size_guard).", file=sys.stderr)
+            return 2
+
     return 0
+
+
+def _finish(code: int, label: str) -> int:
+    print(
+        f"\nGUARD FAILURE ({label} pass) — fix the violation above "
+        "before continuing.",
+        file=sys.stderr,
+    )
+    return 2
 
 
 if __name__ == "__main__":

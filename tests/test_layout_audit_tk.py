@@ -45,9 +45,12 @@ a single widget at the window manager's default on-screen position; it
 also neutralises ``wait_window`` so a modal dialog's own nested event loop
 never blocks the audit). Win32 `PrintWindow(PW_RENDERFULLCONTENT)` renders
 each window into a bitmap regardless -
-`.claude/shots/layout-audit/<Window>.png`, the DESIGN REVIEW input the session must
-OPEN and grade >= 8/10 in `.claude/layout-proof.md`
-(rules/hooks/layout_guard.py verifies image, opening, and grade).
+`.claude/shots/layout-audit/<Window>.png`, one input for the design
+review. The GUI proof itself is now `uv shot` evidence (`.claude/uv_windows.py`
+registers the same windows; `python rules/tools/uv.py shot --all`) checked by
+`rules/hooks/gate.py` at session Stop — see rules/howto/runner.md and
+rules/howto/ledger.md (the session must OPEN the PNG and grade it >= 8/10
+in the ledger).
 
 Honesty note: Tk has no per-widget elide API and no scrollbar-range
 introspection as cheap as Qt's - the ELIDED and SCROLL+SLACK checks of the
@@ -80,11 +83,11 @@ FLOOR_WIDTH, FLOOR_HEIGHT = 1280, 720
 
 # a TOPIC subfolder, never the shots ROOT (owner 2026-08-11): the Stop
 # hook runs this full pass itself, so writing to the root re-dropped the
-# same nine files there every single session and rules/hooks/layout_guard
-# .py flagged them as an undated dump every single time. "layout-audit"
-# says what the folder holds: the automatic per-window audit renders,
-# refreshed each pass. Hand-curated proof sets keep their own named
-# folders (shots/dashboard-stop-pause/, shots/refused-view-legibility/).
+# same nine files there every single session and the (since deleted,
+# F3 2026-08-18) machine hook `layout_guard.py` flagged them as an
+# undated dump every single time. "layout-audit" says what the folder
+# holds: the automatic per-window audit renders, refreshed each pass —
+# distinct from a hand-curated proof set's own named folder.
 SHOT_DIR = PROJECT / ".claude" / "shots" / "layout-audit"
 
 #: px of tolerance before an allocation counts as clipping (Tk borders
@@ -546,8 +549,8 @@ def run_dialog_audit(gui, tmp_path: Path, verbose: bool = False) -> list[str]:
                     shot = capture(win, name)
                     if verbose:
                         print(f"SHOT {shot} - MIN {width}x{height} - OPEN "
-                              f"it and GRADE it (>= 8/10) in "
-                              f".claude/layout-proof.md")
+                              f"it and GRADE it (>= 8/10) in the session "
+                              f"ledger (rules/howto/ledger.md)")
 
             win.destroy()
     return problems
@@ -630,8 +633,8 @@ def run_audit(
                     shot = capture(root, f"PainterGui_{view}")
                     if verbose:
                         print(f"SHOT {shot} - MIN {width}x{height} - OPEN "
-                              f"it and GRADE it (>= 8/10) in "
-                              f".claude/layout-proof.md")
+                              f"it and GRADE it (>= 8/10) in the session "
+                              f"ledger (rules/howto/ledger.md)")
 
         problems += run_dialog_audit(gui, tmp_path, verbose=verbose)
 
