@@ -12,7 +12,7 @@ the driver touches a browser.
 | `__init__.py` | Trivial | empty package marker — no logic |
 | `settings.py` | Standard | GUI's remembered-choices JSON, load/save — [about](__about/settings.md) |
 | `chrome.py` | Algorithmic | probe/launch/poll attach-point protocol for the automation Chrome — [about](__about/chrome.md) · [flow](__flow/chrome.md) |
-| `driver.py` | Algorithmic | CDP driver — the F1 turn-based per-item protocol (submit, await, extract, recovery) — [about](__about/driver.md) · [flow](__flow/driver.md) |
+| `driver/` | — | the CDP driver package — the F1 turn-based per-item protocol, five responsibility mixins — [driver/ (subfolder)](driver/___driver.md) |
 | `runner.py` | Algorithmic | the paced, resumable run loop over a sheet's pending items — [about](__about/runner.md) · [flow](__flow/runner.md) |
 | `run_report.py` | Standard | the per-sheet report txt writer (split out of runner.py, faza 2) — [about](__about/run_report.md) |
 | `recovery.py` | Algorithmic | the image-failure recovery ladder (split out of runner.py, 2026-08-11) — [about](__about/recovery.md) · [flow](__flow/recovery.md) |

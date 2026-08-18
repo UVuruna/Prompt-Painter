@@ -49,7 +49,7 @@ python ../../rules/tools/uv.py shot --all screenshots, every window x profile
 |------|------|
 | `main.py` | process entry — GUI or single-site CLI |
 | `painter/runner.py` | the run loop (parse -> submit -> await -> save) |
-| `painter/driver.py` | the CDP DOM driver (turn-based protocol) |
+| `painter/driver/` | the CDP DOM driver package (turn-based protocol) |
 | `gui/app.py` | `PainterGui`, the main window |
 | `.claude/uv_windows.py` | window registry for `uv shot` |
 
@@ -80,8 +80,8 @@ python ../../rules/tools/uv.py shot --all screenshots, every window x profile
   `tests/structure_ratchet.json` is the machine-readable list (logic
   lines, a ratcheted file may only shrink); `tests/test_structure_law.py`
   holds the raw-line list that also covers `tests/`. `gui/agent_panel.py`
-  healed 2026-08-18 (R6). Remaining debt: `painter/driver.py`,
-  `gui/app_jobs.py` and two test modules.
+  and `painter/driver.py` both healed 2026-08-18 (R6, R4). Remaining
+  debt: `gui/app_jobs.py` and `tests/test_gui_fixer.py`.
 
 ## Enforcement
 

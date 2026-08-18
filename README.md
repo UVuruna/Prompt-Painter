@@ -43,7 +43,7 @@ First consumer: Watch Academy prompt sheets.
     📁 config/             ← every tunable, split by domain
     📁 ai/                 ← AI client, sheet flow, checks, flags
     🐍 sheet_parser.py
-    🐍 driver.py
+    📁 driver/
     🐍 runner.py
     🐍 chrome.py
     🐍 bg_remove.py
@@ -65,10 +65,10 @@ First consumer: Watch Academy prompt sheets.
 - [**Protokol razgovora sa sajtom**](PROTOCOL.html) — the whole
   per-item conversation protocol on ONE page (open it in a browser):
   the main loop and its three exits, phases 0–6, every branch
-  `painter/driver.py` and `painter/runner.py` recognise with its exact
+  `painter/driver/` and `painter/runner.py` recognise with its exact
   action and outcome (Done / Oporavak / Skip stavke / Stop sajta), the
   invariants, and the incident that put each rule there. The
-  module-level detail lives in [CDP Driver](painter/__about/driver.md)
+  module-level detail lives in [CDP Driver](painter/driver/___driver.md)
   and [Run Loop](painter/__about/runner.md)
 - [Sheet-authoring instructions](instructions.md) — the contract a
   sheet author (person or agent) follows; also behind the GUI's

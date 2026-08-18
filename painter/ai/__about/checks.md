@@ -51,7 +51,7 @@ flagged image to the site that made it. Split out of the single-file
   (`AI_FIX_NOTE`, "; "-joined defects).
 - `build_fix_prompt(defects, raw=None) -> str` (the Fixer AI) — the
   instruction sent ALONGSIDE a flagged image to `edit_image` (IMAGE
-  FIX / the API-mode auto-fixer) or [CDP Driver](../../__about/driver.md)'s
+  FIX / the API-mode auto-fixer) or [CDP Driver](../../driver/___driver.md)'s
   `submit_with_image` (WEBSITE FIX). PURE — no I/O, offline-testable.
   Named `defects` become a bulleted "fix ONLY these, keep everything
   else as it is" instruction (`AI_FIX_PROMPT_WITH_DEFECTS`); an EMPTY

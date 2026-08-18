@@ -175,10 +175,15 @@ Binding decisions not obvious from the diagram:
   `REFUSAL_COPYRIGHT` marker group is added.
 - **`no_empty_space` helper wording** ships DEFAULT OFF until the owner
   approves/retunes the text (`PROMPT_HELPERS`, pure data).
-- **God-file debt (Rule #20, root round DONE 2026-07-30):** the remaining
-  documented RATCHET entries (`gui/app_jobs.py`, `painter/driver.py`,
-  `gui/agent_panel.py` + five test modules) are owed a second split round —
-  see the RATCHET list in `CLAUDE.md` → Project laws.
+- **God-file debt (Rule #20, root round DONE 2026-07-30; second round
+  2026-08-18):** `gui/agent_panel.py` split into
+  `gui/agent_subpanels.py` (R6, the owner chose SPLIT over
+  "irreducible"), and `painter/driver.py` became the
+  `painter/driver/` package of five responsibility mixins with
+  `tests/test_driver.py` splitting alongside it into four suites (R4).
+  TWO entries remain — `gui/app_jobs.py` and `tests/test_gui_fixer.py`;
+  see the RATCHET list in `CLAUDE.md` → Project laws and the work order
+  in [`AUDIT-OOP-2026-08-18.md`](AUDIT-OOP-2026-08-18.md).
 - **UI-SKETCH.md** is implemented and verified on a live window
   (2026-07-30) but stays as a reference file — the owner has not signed off
   closing it out.

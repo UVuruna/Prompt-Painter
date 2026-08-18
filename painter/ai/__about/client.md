@@ -80,7 +80,7 @@ rate-limit 429.
   `image_path` given (one path or a LIST — MULTI faza 2 2026-08-03):
   each saved image rides along as an `inlineData` part BEFORE the
   prompt text, in list order (`_payload_reference_and_prompt` —
-  mirrors [CDP Driver](../../__about/driver.md)'s own
+  mirrors [CDP Driver](../../driver/___driver.md)'s own
   `submit_with_image` order, picture(s) attached before the prompt is
   sent, "the FIRST attached image" = the first ← line) — closes the
   gap where an API-mode sheet item carrying a "← ref" input image had

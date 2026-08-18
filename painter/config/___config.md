@@ -41,7 +41,7 @@ UNCHANGED across the split.
 ### Used by
 - [Sheet Parser](../__about/sheet_parser.md) — `IMAGE_EXTENSIONS`,
   `SKIP_MARKER_PATTERN`
-- [CDP Driver](../__about/driver.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
+- [CDP Driver](../driver/___driver.md) — `SiteConfig`, `Timing`, `MIN_IMAGE_PX`
 - [Run Loop](../__about/runner.md) — `Timing`, `STATE_DIRNAME`,
   `REPORT_SUFFIX`, `RETRY_PREAMBLES`, `dest_for`, `PAUSE_POLL_INTERVAL_S`
 - [Chrome Launcher](../__about/chrome.md) — `CDP_PORT`, `CHROME_CANDIDATES`,

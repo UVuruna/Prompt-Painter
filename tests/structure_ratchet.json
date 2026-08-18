@@ -1,7 +1,1 @@
-{
-  "painter/driver.py": {
-    "lines": 1316,
-    "why": "SiteDriver — Chrome attach/launch, the composer protocol, the turn-based done edge, image extraction and the image-failed recovery ladder in one class.",
-    "owes": "R4 of docs/AUDIT-OOP-2026-08-18.md — split into 5 responsibility mixins (lifecycle / protocol / wait / recovery / classify) composed into SiteDriver, mirroring gui/app.py."
-  }
-}
+{}

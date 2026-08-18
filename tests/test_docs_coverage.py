@@ -70,8 +70,12 @@ FLOW_REQUIRED_FILES: set[str] = {
     "gui/tool_panels/base.py", "gui/tool_panels/bg.py",
     "gui/tool_panels/geometry.py", "gui/tool_panels/image_checker.py",
     # painter/ — the engine's real algorithms/protocols
-    "painter/chrome.py", "painter/driver.py", "painter/runner.py",
+    "painter/chrome.py", "painter/runner.py",
     "painter/recovery.py",
+    # painter/driver/ — the CDP protocol's own algorithmic halves
+    # (lifecycle/errors/values are Standard: plumbing and vocabulary)
+    "painter/driver/protocol.py", "painter/driver/wait.py",
+    "painter/driver/recovery.py", "painter/driver/classify.py",
     "painter/sheet_parser.py", "painter/bg_remove.py",
     "painter/postprocess.py", "painter/upscale.py", "painter/aspect.py",
     "painter/filters.py", "painter/jobtemp.py",

@@ -69,16 +69,6 @@ RATCHET: dict[str, str] = {
         " (owner approved the three worst first, 2026-07-30):"
         " app_jobs.py + an api-image job module + the dispatch table."
     ),
-    "painter/driver.py": (
-        "SiteDriver — Chrome attach/launch, the composer protocol, the"
-        " turn-based done edge, image extraction and the image-failed"
-        " recovery ladder. Second-round split (owner approved the three"
-        " worst first, 2026-07-30)."
-    ),
-    "tests/test_driver.py": (
-        "The CDP-driver suite. Splits WITH painter/driver.py in the"
-        " second round."
-    ),
     "tests/test_gui_fixer.py": (
         "The Fixer-AI suite (panel wiring, decision table, auto-"
         " dispatch, manual buttons). Second-round split by concern."

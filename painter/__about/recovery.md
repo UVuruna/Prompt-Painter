@@ -16,7 +16,7 @@ public names changed (`recover_image_failed`, `interruptible_sleep`).
 - [Config (subfolder)](../config/___config.md) — the ladder's knobs
   (`IMAGE_FAILED_RETRY_MAX`, `IMAGE_FAILED_RETRY_DELAY_RANGE_S`,
   `IMAGE_FAILED_ESCALATION_DELAYS_S`, `IMAGE_RETRY_NUDGE`)
-- [CDP Driver](driver.md) — `ImageGenFailed`, and the driver instance
+- [CDP Driver](../driver/___driver.md) — `ImageGenFailed`, and the driver instance
   it drives (`click_error_retry`, `await_done`, `extract_image`,
   `refresh`, `new_chat`)
 

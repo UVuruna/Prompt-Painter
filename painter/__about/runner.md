@@ -44,7 +44,7 @@ STRUCTURE LAW split, faza 2) — behavior unchanged, see
 
 ### Uses
 - [Sheet Parser](sheet_parser.md) — consumes `Sheet`
-- [CDP Driver](driver.md) — the per-item protocol, `sniff_format`,
+- [CDP Driver](../driver/___driver.md) — the per-item protocol, `sniff_format`,
   the `NoImage` exception (`had_text` decides loud-skip vs the one
   allowed nudge), the `SendVanished` exception (the site dropped our
   confirmed message — re-send the item's own prompt, F1b),

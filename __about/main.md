@@ -58,7 +58,7 @@ report) before the next starts, so a quota stop costs nothing.
 ### Uses
 - [Sheet Parser](../painter/__about/sheet_parser.md)
 - [Chrome Launcher](../painter/__about/chrome.md),
-  [CDP Driver](../painter/__about/driver.md),
+  [CDP Driver](../painter/driver/___driver.md),
   [Postprocess](../painter/__about/postprocess.md),
   [Upscale](../painter/__about/upscale.md) — imported lazily, so
   `--dry-run` works without playwright

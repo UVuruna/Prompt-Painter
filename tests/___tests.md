@@ -19,10 +19,11 @@ behavior. Installed 2026-08-01 (MIGRATE-DOCS session) and wired into
   documented, owner-approved `RATCHET` entry naming why and who owes
   the split. The three TEST god-files the owner pre-approved this
   session (`test_gui_tool_panels.py`, `test_runner.py`, `test_ai.py`)
-  were split and their entries removed; five entries remain
-  (`gui/app_jobs.py`, `painter/driver.py`, `gui/agent_panel.py`,
-  `tests/test_driver.py`, `tests/test_gui_fixer.py` — out of this
-  session's scope).
+  were split and their entries removed. The 2026-08-18 refactor round
+  healed three more — `gui/agent_panel.py` (R6),
+  `painter/driver.py` -> the `painter/driver/` package and
+  `tests/test_driver.py` -> four suites (R4). TWO entries remain:
+  `gui/app_jobs.py` and `tests/test_gui_fixer.py`.
 - **`test_config_sections.py`** — every `painter/config/*.py` data file
   (seeded in `CONFIG_FILES`) has no module-level post-definition
   patching (`TABLE["x"] = ...` / `.update(...)` after the table's own
@@ -127,7 +128,17 @@ plus the LONG-refusal ImageViewer fixture (the content class the old
 short fixtures missed), with a planted-violation self-test. In the
 Stop full guard pass via run_guards.py.
 
-### `test_driver.py` — CDP Driver, F1/F2 Protocol
+### `test_driver_*.py` + `driver_fakes.py` — CDP Driver, F1/F2 Protocol
+Four suites, one per half of the `painter/driver/` package —
+`test_driver_protocol.py` (submit/attach/confirm/ensure-ready),
+`test_driver_wait.py` (the done edge, the anchor, extraction),
+`test_driver_classify.py` (markers, degrade banner) and
+`test_driver_recovery.py` (the Retry button, refresh) — over ONE shared
+fake Playwright surface, `driver_fakes.py`. They split from the former
+`test_driver.py` in the same commit as the package itself (audit
+`docs/AUDIT-OOP-2026-08-18.md` -> R4), with the same 64 tests and the
+same totals before and after.
+
 Duck-typed Locator/Page fakes over `SiteDriver` (no browser — see the
 module's own docstring for the exact fakes). The F1 turn-based
 protocol (owner 2026-07-29): a submit is not "sent" until CONFIRMED

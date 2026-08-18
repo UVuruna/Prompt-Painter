@@ -18,7 +18,7 @@ FAILS LOUDLY (root Rule #1) instead of guessing.
 Nothing at module scope — a leaf module.
 
 ### Used by
-- [CDP Driver](../../__about/driver.md) — `SiteConfig`, `Timing`,
+- [CDP Driver](../../driver/___driver.md) — `SiteConfig`, `Timing`,
   `MIN_IMAGE_PX`, `SEND_RELOAD_RECOVERY`
 - [Run Loop](../../__about/runner.md) — `TIMING`,
   `PAUSE_POLL_INTERVAL_S`
