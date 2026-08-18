@@ -33,6 +33,8 @@ override this row writes.
   `painter.settings` (the override round-trip)
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`/
   `rounded_combo`
+- [Model Discovery](model_discovery.md) — `ModelDiscovery`, the
+  shared "Refresh models" job behind `_refresh`/`_apply_result`
 
 ### Used by
 - [GUI (folder)](../___gui.md) — `__init__.py` re-exports

@@ -24,13 +24,13 @@ before any discovery.
 from __future__ import annotations
 
 import queue
-import threading
 import tkinter as tk
 from functools import partial
 from tkinter import ttk
 
 import customtkinter as ctk
 
+from .model_discovery import ModelDiscovery
 from .widgets import rounded_button, rounded_combo
 
 MODEL_PICKER_POLL_MS = 150   # worker-queue poll cadence (ms)
@@ -75,47 +75,28 @@ class ModelPickerRow(ttk.Frame):
         ).pack(anchor="w")
         self._update_hint(self._current_model())
 
+        self._discovery = ModelDiscovery(
+            self, self._q,
+            button=self._refresh_btn,
+            status_var=self._status_var,
+            on_models=self._on_models_discovered,
+            after_attr="_poll_job",
+            found_text="{n} model(s).",
+        )
+
     # --- discovery ------------------------------------------------------
 
     def _refresh(self) -> None:
-        self._refresh_btn.configure(state="disabled")
-        self._status_var.set("Discovering models …")
-
-        def work() -> None:
-            from painter import ai
-
-            try:
-                models = ai.list_models()
-            except ai.AiError as exc:
-                self._q.put(("error", str(exc)))
-            else:
-                self._q.put(("ok", models))
-
-        threading.Thread(target=work, daemon=True).start()
-        self._arm_poll()
-
-    def _arm_poll(self) -> None:
-        self._poll_job = self.after(MODEL_PICKER_POLL_MS, self._poll)
-
-    def _poll(self) -> None:
-        self._poll_job = None
-        if not self.winfo_exists():
-            return  # host closed mid-discovery
-        try:
-            msg = self._q.get_nowait()
-        except queue.Empty:
-            self._arm_poll()
-            return
-        self._apply_result(msg)
+        """The Refresh-models button — the shared ``ModelDiscovery``
+        job (``gui/model_discovery.py``) does the thread, the queue
+        poll and the button/status choreography."""
+        self._discovery.start(MODEL_PICKER_POLL_MS)
 
     def _apply_result(self, msg: tuple) -> None:
-        self._refresh_btn.configure(state="normal")
-        kind, payload = msg
-        if kind == "error":
-            self._status_var.set(payload)
-            return
-        self._discovered = payload
-        self._status_var.set(f"{len(payload)} model(s).")
+        self._discovery.apply(msg)
+
+    def _on_models_discovered(self, models: list[dict]) -> None:
+        self._discovered = models
         self._populate()
 
     def _populate(self) -> None:

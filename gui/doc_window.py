@@ -45,6 +45,7 @@ from .viewer_shared import (
     _readonly_text_keys,
 )
 from .widgets import rounded_button, status, tk_font, wrap_bar_label
+from .worker_poll import poll_worker_queue
 
 
 class DocWindow(tk.Toplevel):
@@ -366,19 +367,10 @@ class DocWindow(tk.Toplevel):
         # from this module) — see the module docstring.
         import gui
 
-        self._fix_poll_job = self.after(gui.AI_POLL_MS, self._poll_fix)
-
-    def _poll_fix(self) -> None:
-        self._fix_poll_job = None
-        if not self.winfo_exists():
-            return  # closed mid-fix — the worker's message is moot
-        try:
-            msg = self._fix_q.get_nowait()
-        except queue.Empty:
-            self._arm_fix_poll()
-            return
-        which, result = msg
-        self._apply_fix_result(which, result)
+        poll_worker_queue(
+            self, self._fix_q, lambda msg: self._apply_fix_result(*msg),
+            poll_ms=gui.AI_POLL_MS, after_attr="_fix_poll_job",
+        )
 
     def _apply_fix_result(self, which: str, result: tuple[str, str]) -> None:
         """Apply ``_fix_result_ui``'s PURE decision (module-level, Tk-

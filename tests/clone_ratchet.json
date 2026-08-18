@@ -1,17 +1,1 @@
-[
-  [
-    "gui/api_panel.py::ApiImageGenPanel._poll_models",
-    "gui/api_panel.py::ApiImageGenPanel._poll_probe",
-    "gui/dialogs.py::_AiDialog._poll",
-    "gui/model_picker.py::ModelPickerRow._poll",
-    "gui/sheetgen_panel.py::SheetGenPanel._poll"
-  ],
-  [
-    "gui/api_panel.py::ApiImageGenPanel._refresh_models",
-    "gui/model_picker.py::ModelPickerRow._refresh"
-  ],
-  [
-    "gui/api_panel.py::ApiImageGenPanel._apply_models_result",
-    "gui/model_picker.py::ModelPickerRow._apply_result"
-  ]
-]
+[]

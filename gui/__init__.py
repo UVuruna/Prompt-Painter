@@ -196,12 +196,14 @@ from .logic import (
     _visible_agent_slots,
 )
 from .menu import IconBar, MainMenu
+from .model_discovery import ModelDiscovery
 from .model_picker import ModelPickerRow
 from .prompt_image import PromptImageSection
 from .scroll import WHEEL_DELTA_UNIT, ScrollFrame
 from .sheetgen_panel import SheetGenPanel
 from .select_window import SelectWindow
 from .switch import DayNightSwitch
+from .worker_poll import poll_worker_queue
 from .theme import (
     THEME_TOPLEVELS,
     THEMED_TK,

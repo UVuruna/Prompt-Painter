@@ -56,9 +56,11 @@ from painter.config import (
 )
 from .aspect_canvas import AspectRatioCanvas, apply_typed_wh
 from .filter_editor import FilterEditor
+from .model_discovery import ModelDiscovery
 from .icons import icon
 from .logic import _upscale_params_from_side_and_filter
 from .theme import THEME_TOPLEVELS
+from .worker_poll import poll_worker_queue
 from .tool_panels import ASPECT_DIALOG_ENTRY_W, DENSE_COL_GAP_PX, DENSE_COL_WRAP_PX
 from .widgets import (
     ExpandableSwitch,
@@ -208,6 +210,14 @@ class ApiImageGenPanel(ttk.Frame):
         self._models_q: queue.Queue = queue.Queue()
         self._models_poll_job: str | None = None
         self._discovered_models: list[dict] = []  # cached for the session
+        self._model_discovery = ModelDiscovery(
+            self, self._models_q,
+            button=self._models_btn,
+            status_var=self._models_status_var,
+            on_models=self._on_models_discovered,
+            after_attr="_models_poll_job",
+            found_text="{n} model(s) discovered.",
+        )
 
         picks_row = ttk.Frame(left)
         picks_row.pack(fill="x", pady=2)
@@ -539,21 +549,12 @@ class ApiImageGenPanel(ttk.Frame):
         # callback that must reach back into a sibling module without a
         # module-level import (a real-path import from gui.api_panel
         # straight to gui.dialogs would work, but the deferred form
-        # keeps this call site identical to gui.viewers.DocWindow's own
-        # AI_POLL_MS read, which IS circular against gui.dialogs).
+        # keeps this call site identical to gui.doc_window.DocWindow's
+        # own AI_POLL_MS read, which IS circular against gui.dialogs).
         import gui
-        self._probe_poll_job = self.after(gui.AI_POLL_MS, self._poll_probe)
-
-    def _poll_probe(self) -> None:
-        self._probe_poll_job = None
-        if not self.winfo_exists():
-            return  # closed mid-check — the worker's message is moot
-        try:
-            msg = self._probe_q.get_nowait()
-        except queue.Empty:
-            self._arm_probe_poll()
-            return
-        self._apply_probe_result(msg)
+        poll_worker_queue(self, self._probe_q, self._apply_probe_result,
+                          poll_ms=gui.AI_POLL_MS,
+                          after_attr="_probe_poll_job")
 
     def _apply_probe_result(self, msg: tuple) -> None:
         kind, text = msg
@@ -571,53 +572,19 @@ class ApiImageGenPanel(ttk.Frame):
     # --- Model discovery + per-purpose picks (F5, owner D1/D2) ---------
 
     def _refresh_models(self) -> None:
-        """One ``ai.list_models`` call on a background thread — mirrors
-        ``_probe_access``'s own private queue+poll above (this panel is
-        a ``ttk.Frame``, not the ``_AiDialog`` Toplevel that owns ITS
-        poll loop)."""
-        self._models_btn.configure(state="disabled")
-        self._models_status_var.set("Discovering models …")
-
-        def work() -> None:
-            from painter import ai
-
-            try:
-                models = ai.list_models()
-            except ai.AiError as exc:
-                # a NoKey (or any other AiError) message IS the
-                # existing key-gate text (spec item 4) — shown
-                # verbatim, no separate copy to keep in sync
-                self._models_q.put(("error", str(exc)))
-            else:
-                self._models_q.put(("ok", models))
-
-        threading.Thread(target=work, daemon=True).start()
-        self._arm_models_poll()
-
-    def _arm_models_poll(self) -> None:
-        # same late-binding AI_POLL_MS read as _arm_probe_poll above
+        """The Refresh-models button — the shared ``ModelDiscovery``
+        job (``gui/model_discovery.py``) does the thread, the queue
+        poll and the button/status choreography. The cadence is read
+        LATE here, same deferred ``import gui`` as ``_arm_probe_poll``
+        above explains."""
         import gui
-        self._models_poll_job = self.after(gui.AI_POLL_MS, self._poll_models)
-
-    def _poll_models(self) -> None:
-        self._models_poll_job = None
-        if not self.winfo_exists():
-            return  # closed mid-discovery — the worker's message is moot
-        try:
-            msg = self._models_q.get_nowait()
-        except queue.Empty:
-            self._arm_models_poll()
-            return
-        self._apply_models_result(msg)
+        self._model_discovery.start(gui.AI_POLL_MS)
 
     def _apply_models_result(self, msg: tuple) -> None:
-        self._models_btn.configure(state="normal")
-        kind, payload = msg
-        if kind == "error":
-            self._models_status_var.set(payload)
-            return
-        self._discovered_models = payload
-        self._models_status_var.set(f"{len(payload)} model(s) discovered.")
+        self._model_discovery.apply(msg)
+
+    def _on_models_discovered(self, models: list[dict]) -> None:
+        self._discovered_models = models
         self._populate_model_dropdowns()
 
     def _populate_model_dropdowns(self) -> None:

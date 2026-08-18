@@ -47,6 +47,9 @@ god-file refactor):
   the Test-key worker closure — `generate_text`/`AiError` — mirrors
   the rest of this codebase's lazy-import convention for `ai`)
 - [Theme](theme.md) — `skin_toplevel`
+- [Worker Queue Poll](worker_poll.md) — `poll_worker_queue`, the
+  shared loop behind `_AiDialog._arm_poll` (this class used to own
+  the only copy of it)
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`,
   `rounded_entry`, `status`
 

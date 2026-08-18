@@ -47,6 +47,7 @@ from .icons import icon
 from .model_picker import ModelPickerRow
 from .theme import skin_text
 from .widgets import rounded_button, rounded_entry, tk_font
+from .worker_poll import poll_worker_queue
 
 SHEETGEN_POLL_MS = 150     # worker-queue poll cadence (ms)
 SHEETGEN_WRAP_PX = 430     # status/question wraplength
@@ -215,18 +216,8 @@ class SheetGenPanel(ttk.Frame):
         self._status_var.set(text)
 
     def _arm_poll(self) -> None:
-        self._poll_job = self.after(SHEETGEN_POLL_MS, self._poll)
-
-    def _poll(self) -> None:
-        self._poll_job = None
-        if not self.winfo_exists():
-            return
-        try:
-            msg = self._q.get_nowait()
-        except queue.Empty:
-            self._arm_poll()
-            return
-        self._on_message(msg)
+        poll_worker_queue(self, self._q, self._on_message,
+                          poll_ms=SHEETGEN_POLL_MS, after_attr="_poll_job")
 
     # --- step ①: the request → the clarifying questions -----------------
 

@@ -43,6 +43,8 @@ the [flow diagram](../__flow/doc_window.md).
   ritual), `THEME_TOPLEVELS` (unregister on `<Destroy>`), `skin_text`
 - [Themed Widget Toolkit](widgets.md) — `rounded_button`, `status`,
   `tk_font`
+- [Worker Queue Poll](worker_poll.md) — `poll_worker_queue`, the
+  shared loop behind `_arm_fix_poll`
 - `gui.dialogs.AI_POLL_MS` — `_arm_fix_poll`'s OWN Fixer poll
   (unrelated to any AI dialog) reads the same cadence constant. A
   real-path `from .dialogs import AI_POLL_MS` would be circular

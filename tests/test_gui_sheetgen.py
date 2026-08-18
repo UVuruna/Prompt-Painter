@@ -174,7 +174,9 @@ FAKE_MODELS = [
 def test_model_picker_populates_capable_and_hints(root, monkeypatch):
     from painter import settings as settings_module
 
-    monkeypatch.setattr(gui.model_picker.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(
+        gui.model_discovery.threading, "Thread", _ImmediateThread,
+    )
     monkeypatch.setattr(ai_module, "list_models", lambda **k: FAKE_MODELS)
     monkeypatch.setattr(settings_module, "load_settings", lambda: {})
     row = gui.ModelPickerRow(root, "text", "Text")

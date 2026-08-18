@@ -26,6 +26,7 @@ import ttkbootstrap as tb
 
 from painter.config import AI_STUDIO_URL, AI_TEST_PROMPT
 from .theme import skin_toplevel
+from .worker_poll import poll_worker_queue
 from .widgets import rounded_button, rounded_entry, status
 
 # --- Aspect-ratio prompt (the standalone 'Aspect ratio…' tool) -------
@@ -68,18 +69,8 @@ class _AiDialog(_ModalToolDialog):
         self._poll_job: str | None = None
 
     def _arm_poll(self) -> None:
-        self._poll_job = self.after(AI_POLL_MS, self._poll)
-
-    def _poll(self) -> None:
-        self._poll_job = None
-        if not self.winfo_exists():
-            return  # closed mid-work — the worker's message is moot
-        try:
-            msg = self._q.get_nowait()
-        except queue.Empty:
-            self._arm_poll()
-            return
-        self._on_message(msg)
+        poll_worker_queue(self, self._q, self._on_message,
+                          poll_ms=AI_POLL_MS, after_attr="_poll_job")
 
     def _on_message(self, msg: tuple) -> None:
         raise NotImplementedError  # each dialog applies its own messages

@@ -115,6 +115,8 @@ into [Viewer Shared Rules](__about/viewer_shared.md),
 | `collections_column.py` | Standard | `CollectionsColumn` — the shared right column (queue + output + Select + Prompt+Image), one component for the website setup AND the API panel (faza 3) — [about](__about/collections_column.md) |
 | `sheetgen_panel.py` | Algorithmic | `SheetGenPanel` — New Collection (AI) as a wizard setup panel (①Zahtev→②Pitanja→③Draft&Save, faza 4) — [about](__about/sheetgen_panel.md) |
 | `model_picker.py` | Standard | `ModelPickerRow` — one purpose's model picker (capable list + curated hint + persisted pick), hosted by the checker/sheet-gen panels (faza 4) — [about](__about/model_picker.md) |
+| `model_discovery.py` | Standard | `ModelDiscovery` — the shared "Refresh models" job (one `ai.list_models()` call on a worker thread) run by both the API panel and the picker row — [about](__about/model_discovery.md) |
+| `worker_poll.py` | Standard | `poll_worker_queue` — the ONE worker-thread → tk main-loop handoff every AI panel and dialog uses — [about](__about/worker_poll.md) |
 | `select_window.py` | Algorithmic | `SelectWindow` — the per-site tick-list Toplevel over the queued Collections — [about](__about/select_window.md) · [flow](__flow/select_window.md) |
 | `viewer_shared.py` | Standard | `DOC_*` window-sizing family + tiny shared viewer helpers — [about](__about/viewer_shared.md) |
 | `doc_window.py` | Algorithmic | `DocWindow` — the Markdown/prompt/image viewer + Fixer-AI manual buttons — [about](__about/doc_window.md) · [flow](__flow/doc_window.md) |

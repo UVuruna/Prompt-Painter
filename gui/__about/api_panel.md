@@ -56,10 +56,9 @@ this panel.
 
 **GATING.** The owner's key has ZERO free-tier quota for the paid
 model today — a "Check API access" button makes ONE cheap REAL probe
-call on a background thread (its own small private queue + a
-`self.after(AI_POLL_MS, ...)` poll, mirroring `_AiDialog`'s pattern —
-duplicated rather than shared via a mixin since this panel's base
-class differs). A gated result sets `panel.access_gated = True`, shows
+call on a background thread (its own small private queue, drained by
+the shared [`poll_worker_queue`](worker_poll.md) at the `AI_POLL_MS`
+cadence). A gated result sets `panel.access_gated = True`, shows
 the gate message (`AI_IMAGE_GATE_MESSAGE`), and disables the Start
 button; a clean probe clears the gate and re-enables Start; any OTHER
 `ai.AiError` is shown but changes NEITHER state (inconclusive, never
@@ -68,8 +67,8 @@ falsely claiming OK or wrongly gating). The Start handler
 itself before spawning a worker — defense in depth, not the only guard.
 
 **F5 — model discovery; faza 3 — Image ONLY, hinted.** "Refresh
-models" makes its own probe (same private queue+poll pattern) and
-fills ONE dropdown — the Image-generation model (owner 2026-08-03:
+models" runs the shared [`ModelDiscovery`](model_discovery.md) job
+(the same one `ModelPickerRow` runs) and fills ONE dropdown — the Image-generation model (owner 2026-08-03:
 "podešavanja treba da budu samo za modele koje OVAJ job koristi";
 the Vision pick moves to AI Check and the Text pick to New Collection
 in faza 4 — their settings.json overrides stay untouched meanwhile).
@@ -150,15 +149,27 @@ a plain prompt; the actual call still happens in `extract_image`.
 ### ApiImageGenPanel
 See the Purpose section above — the paid-API job's settings panel,
 including the "Check API access" gating probe (`_probe_access`/
-`_arm_probe_poll`/`_poll_probe`/`_apply_probe_result`, its own private
-queue+poll mirroring `_AiDialog`'s established pattern since this is a
-`ttk.Frame`, not a `Toplevel`) and the F5 model-discovery row
-(`_refresh_models`/`_arm_models_poll`/`_poll_models`/
-`_apply_models_result`/`_populate_model_dropdowns`/`_on_model_pick`).
-Both polls reach `AI_POLL_MS` through a deferred `import gui` — that
+`_arm_probe_poll`/`_apply_probe_result`, its own private queue drained
+by the shared [`poll_worker_queue`](worker_poll.md)) and the F5
+model-discovery row (`_refresh_models`/`_apply_models_result`/
+`_on_models_discovered`/`_populate_model_dropdowns`/`_on_model_pick`,
+the shared [`ModelDiscovery`](model_discovery.md) job driving this
+panel's own button, status var and queue).
+
+Both reach `AI_POLL_MS` through a deferred `import gui` — that
 constant lives in [Modal Dialogs](dialogs.md) (`_AiDialog` owns the
 poll loop it paces); see the module docstring and `gui.theme._pkg()`
-for the same established late-binding idiom.
+for the same established late-binding idiom. That deferred read is why
+`ModelDiscovery.start()` takes the cadence as an ARGUMENT rather than
+storing it.
+
+**The "duplicated on purpose" note is REVERSED (owner 2026-08-18).**
+This document used to defend the copied poll loop — "duplicated rather
+than shared via a mixin since this panel's base class differs". The
+objection was true of a MIXIN and false of a free function: the audit
+(`docs/AUDIT-OOP-2026-08-18.md` → R3) proposed `poll_worker_queue`,
+which needs no shared base at all, and the owner accepted it. Six
+copies of the loop across five classes are now one function.
 
 ### ApiImageAdapter
 A `SiteDriver`-shaped stand-in — `attach`/`close`/`await_done` are
